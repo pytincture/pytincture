@@ -1,13 +1,12 @@
 """
-Appkit-Python stacked widget implementation
+stacked widget implementation
 """
 from __future__ import annotations
 
 from uuid import uuid4
 from typing import TypeVar
 
-from .raw_widgets.appkit_stackedwidget import StackedWidget as AppkitStackedWidget
-from pdd.decorators import buffer_for_init
+StackedWidget = object
 
 
 class StackedWidget:
@@ -19,7 +18,7 @@ class StackedWidget:
         self.name = stackedwidget_id
         self.initialized = False
 
-        self._base_stackedwidget = AppkitStackedWidget(
+        self._base_stackedwidget = StackedWidget(
             stackedwidget_id, session_id=self.session_id, parent=parent
         )
 
@@ -47,7 +46,6 @@ class StackedWidget:
         self.widget_config = self._base_stackedwidget.config
         self.initialized = True
 
-    @buffer_for_init
     def attach_widget(self, index, widget):
         """Attach a widget to the layout on a specific panel"""
         uid = widget.raw_widget._unique_id
@@ -76,12 +74,10 @@ class StackedWidget:
     def pages(self, pages):
         self._base_stackedwidget.pages = pages
 
-    @buffer_for_init
     def set_index(self, index, target=""):
         """Set the index of the stacked widget"""
         self._base_stackedwidget.set_index(index, target)
 
-    @buffer_for_init
     def on_index_change(self, event_callable, ret_widget_values=None, block_signal=False):
         """Handle on click event for grid widget"""
         # TODO implement block_signal if possible or remove
@@ -92,7 +88,6 @@ class StackedWidget:
         """Stackedwidget index change event return"""
         self.on_index_change_callable(index)
 
-    @buffer_for_init
     def on_render(self, event_callable, ret_widget_values=None, block_signal=False):
         """Handle on click event for grid widget"""
         # TODO implement block_signal if possible or remove

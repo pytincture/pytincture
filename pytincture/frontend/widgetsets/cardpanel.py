@@ -1,10 +1,8 @@
 """
-Appkit-Python appkit card_panel implementation
+Card panel implementation
 """
 
-from .raw_widgets.appkit_cardpanel import CardPanel as AppkitCardPanel
-from pdd.decorators import buffer_for_init
-
+CardPanel = object
 
 class CardPanel:
     """CardPanel widget implementation"""
@@ -17,7 +15,7 @@ class CardPanel:
         self.name = card_panel_id
         self.initialized = False
 
-        self._base_card_panel = AppkitCardPanel(
+        self._base_card_panel = CardPanel(
             card_panel_id, session_id=self.session_id, parent=parent
         )
 
@@ -36,7 +34,6 @@ class CardPanel:
         self.widget_config = self._base_card_panel.config
         self.initialized = True
 
-    @buffer_for_init
     def on_card_click(self, event_callable, ret_widget_values=[], block_signal=False):
         """Handle on click event for grid widget"""
         # TODO implement block_signal if possible or remove

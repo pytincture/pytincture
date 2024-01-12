@@ -1,14 +1,13 @@
 """
-Appkit-Python appkit table implementation
+Grid implementation
 """
 from uuid import uuid4
 
-from .raw_widgets.appkit_table import Table as AppkitTable
-from pdd.decorators import buffer_for_init
+Table = object
 
 
 class Table:
-    """Appkit Table widget implementation"""
+    """ Table widget implementation"""
 
 
     def __init__(self, table_id, parent=None, toolbar=False, footer=False, session_id=""):
@@ -20,7 +19,7 @@ class Table:
         self.footer = footer
         self.session_id = session_id or self.parent.session_id
 
-        self._base_table = AppkitTable(
+        self._base_table = Table(
             table_id=self.name,
             parent=self.parent,
             session_id=self.session_id,

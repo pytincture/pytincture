@@ -1,12 +1,11 @@
 """
-Appkit-Python header implementation
+header implementation
 """
 from __future__ import annotations
 
 from typing import TypeVar
 
-from .raw_widgets.appkit_header import Header as AppkitHeader
-from pdd.decorators import buffer_for_init
+Header = object
 
 
 def header_menu(menu={}):
@@ -74,7 +73,7 @@ class Header:
         self.name = header_id
         self.initialized = False
 
-        self._base_header = AppkitHeader(
+        self._base_header = Header(
             header_id, session_id=self.session_id, parent=parent
         )
 
@@ -118,7 +117,6 @@ class Header:
         """Change header text based on id"""
         self._base_header.change_header_text(text_id, new_text)
 
-    @buffer_for_init
     def set_active(self, item_id):
         """Set a nav bar button as active"""
         self._base_header.set_active(item_id)
@@ -127,7 +125,6 @@ class Header:
         """Set a nav bar button as active"""
         self._base_header.set_enabled(item_id, true_or_false)
 
-    @buffer_for_init
     def attach_widget(self, widget):
         """Attach a widget to the layout on a specific panel"""
         uid = widget.raw_widget._unique_id
@@ -136,7 +133,6 @@ class Header:
             widget.init_widget()
         self.raw_widget.attach_widget(uid)
 
-    @buffer_for_init
     def on_nav_click(self, event_callable, ret_widget_values=[], block_signal=False):
         """Handle on click event for grid widget"""
         # TODO implement block_signal if possible or remove
@@ -149,7 +145,6 @@ class Header:
         """Header navigation on click event return"""
         self.on_nav_click_callable(button_id)
 
-    @buffer_for_init
     def on_menu_click(self, event_callable, ret_widget_values=None, block_signal=False):
         """Handle on click event for grid widget"""
         # TODO implement block_signal if possible or remove
@@ -162,7 +157,6 @@ class Header:
         """Header navigation on click event return"""
         self.on_nav_click_callable(button_id)
 
-    @buffer_for_init
     def on_action_click(
         self, event_callable, ret_widget_values=None, block_signal=False
     ):

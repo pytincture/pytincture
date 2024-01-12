@@ -1,5 +1,5 @@
 """
-BriskJS uvicorn launcher
+pyTincture uvicorn launcher
 """
 import atexit
 from multiprocessing import Process, Manager
