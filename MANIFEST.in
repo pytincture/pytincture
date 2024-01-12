@@ -1,0 +1,3 @@
+recursive-include pytincture/frontend/widgetsets/dhxsrc/ *
+recursive-include pytincture/frontend/ *.html
+recursive-include pytincture/frontend/ *.js
