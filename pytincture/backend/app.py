@@ -1,3 +1,5 @@
+import os
+
 import uvicorn
 from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
@@ -18,13 +20,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+STATIC_PATH = os.path.join(os.path.dirname(__file__), "../frontend/")
+MODULE_PATH = os.environ.get("MODULES_PATH")
+
 #Static files endpoint
-app.mount("/frontend", StaticFiles(directory="frontend"), name="static")
+app.mount("/frontend", StaticFiles(directory=STATIC_PATH), name="static")
+
+#Static files endpoint
+app.mount("/appcode", StaticFiles(directory=MODULE_PATH), name="static")
 
 #Application endpoint
 @app.get("/{application}", response_class=HTMLResponse)
 async def main(response: Response, application):
-    index = open("frontend/index.html").read().replace("***APPLICATION***", application)
+    index = open(f"{STATIC_PATH}/index.html").read().replace("***APPLICATION***", application)
     return index
 
 if __name__ == "__main__":

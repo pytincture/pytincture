@@ -1,18 +1,16 @@
 """
 pyTincture uvicorn launcher
 """
-import atexit
 from multiprocessing import Process, Manager
 import os
 import signal
-import subprocess
 
 import uvicorn
 
 
 def main(port, mdict, ssl_keyfile=None, ssl_certfile=None):
     uvicorn.run(
-        "backend.app:app",
+        "pytincture.backend.app:app",
         host="0.0.0.0",
         port=port,
         log_level="debug",
@@ -25,11 +23,11 @@ def main(port, mdict, ssl_keyfile=None, ssl_certfile=None):
 def cleanup():
     print("cleanup process running")
 
-def server_run(modules_folder=".", port=8090, ssl_keyfile=None, ssl_certfile=None):
+def launch_service(modules_folder=os.getcwd(), port=8070, ssl_keyfile=None, ssl_certfile=None):
     manager = Manager()
     mdict = manager.dict()
 
-    os.environ["MODULES_PATH"] = os.path.join(os.path.dirname(__file__), modules_folder)
+    os.environ["MODULES_PATH"] = modules_folder
         
     main_application = Process(target=main, args=(port, mdict, ssl_keyfile, ssl_certfile,))
     # launch data and main applications
@@ -45,4 +43,4 @@ def server_run(modules_folder=".", port=8090, ssl_keyfile=None, ssl_certfile=Non
     main_application.join()
 
 if __name__ == "__main__":
-    server_run(modules_folder="./modules")
+    launch_service(modules_folder=os.getcwd())
