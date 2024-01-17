@@ -1,14 +1,36 @@
 """
 pyTincture uvicorn launcher
 """
-from multiprocessing import Process, Manager
+from multiprocessing import Process, freeze_support
 import os
 import signal
+import shutil
+import zipfile
 
 import uvicorn
 
 
-def main(port, mdict, ssl_keyfile=None, ssl_certfile=None):
+def create_zip():
+    pytincture_folder = os.path.join(os.path.dirname(__file__), "../pytincture")
+    zip_path = os.path.join(os.environ["MODULES_PATH"], "pytincture.zip")
+
+    # File to be replaced with an empty file
+    file_to_replace = "pytincture/__init__.py"
+
+    # Create a zip file
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        for root, dirs, files in os.walk(pytincture_folder):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, os.path.join(pytincture_folder, '..'))
+                # Check if this is the file to replace
+                if arcname == file_to_replace:
+                    zipf.writestr(arcname, '')  # Add an empty file
+                else:
+                    zipf.write(file_path, arcname)
+
+def main(port, ssl_keyfile=None, ssl_certfile=None):
+    create_zip()
     uvicorn.run(
         "pytincture.backend.app:app",
         host="0.0.0.0",
@@ -24,12 +46,9 @@ def cleanup():
     print("cleanup process running")
 
 def launch_service(modules_folder=os.getcwd(), port=8070, ssl_keyfile=None, ssl_certfile=None):
-    manager = Manager()
-    mdict = manager.dict()
-
     os.environ["MODULES_PATH"] = modules_folder
         
-    main_application = Process(target=main, args=(port, mdict, ssl_keyfile, ssl_certfile,))
+    main_application = Process(target=main, args=(port, ssl_keyfile, ssl_certfile,))
     # launch data and main applications
     main_application.start()
     
@@ -43,4 +62,5 @@ def launch_service(modules_folder=os.getcwd(), port=8070, ssl_keyfile=None, ssl_
     main_application.join()
 
 if __name__ == "__main__":
-    launch_service(modules_folder=os.getcwd())
+    freeze_support()
+    #launch_service(modules_folder=os.getcwd())
