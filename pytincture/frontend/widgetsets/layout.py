@@ -39,10 +39,6 @@ class Layout:
     def destructor(self):
         """ removes a Layout instance and releases occupied resources """
         self.layout.destructor()
-
-    def get_cell(self, id: str):
-        """ returns the config object of a cell """
-        return self.layout.getCell(id)
     
     def progress_hide(self):
         """ hides the progress bar in the Layout container """
@@ -54,7 +50,7 @@ class Layout:
 
     def remove_cell(self, id: str):
         """ removes a specified cell """
-        self.layout.removeCell(id)
+        self.layout.getCell(id).removeCell()
 
     """ Layout events """
 
