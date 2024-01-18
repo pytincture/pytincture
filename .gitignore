@@ -11,5 +11,4 @@ pytincture.egg-info/PKG-INFO
 pytincture.egg-info/SOURCES.txt
 pytincture.egg-info/top_level.txt
 .vscode/launch.json
-dist/*.*
-dist/pytincture-0.1.0-py3-none-any.whl
+dist/*.whl

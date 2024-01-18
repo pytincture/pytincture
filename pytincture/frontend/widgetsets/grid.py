@@ -1,6 +1,7 @@
 """
 pyTincture grid widget implementation
 """
+from typing import Any, Callable, Dict, List, Optional, Union
 import js
 import json
 from enum import Enum
@@ -32,17 +33,24 @@ class Alignment:
     right = "right"
 
 class FilterConfig:
-
-    def __init__(self, filter=None, multiselection=False, readonly=True, placeholder="", virtual=False, template=None) -> None:
-        self.filter = create_proxy(filter)
-        self.multiselection = multiselection
-        self.readonly = readonly
-        self.placeholder = placeholder
-        self.virtual= virtual
-        self.template = template
+    def __init__(
+        self, 
+        filter: Optional[Callable] = None, 
+        multiselection: bool = False, 
+        readonly: bool = True, 
+        placeholder: str = "", 
+        virtual: bool = False, 
+        template: Optional[str] = None
+    ) -> None:
+        self.filter: create_proxy = create_proxy(filter) if filter else None
+        self.multiselection: bool = multiselection
+        self.readonly: bool = readonly
+        self.placeholder: str = placeholder
+        self.virtual: bool = virtual
+        self.template: Optional[str] = template
     
     @property
-    def config(self):
+    def config(self) -> Dict[str, Any]:
         return {
             "filter": self.filter,
             "multiselection": self.multiselection,
@@ -64,39 +72,57 @@ class ContentType:
     count = "count"
 
 class Header:
-    def __init__(
+    def __init__(self):
+        self.text = ""
+        self.tooltip = None
+        self.tooltip_template = None
+        self.align = "left"
+        self.colspan = None
+        self.rowspan = None
+        self.css = ""
+        self.content = None
+        self.filter = None
+        self.filter_config = None
+        self.custom_filter = None
+        self.header_sort = False
+        self.sort_as = None
+        self.html_enable = False
+            
+    def append(
         self,
-        text = "text",
-        tooltip = None,
-        tooltip_template = None,
-        align = Alignment.left,
-        colspan = None,
-        rowspan = None,
-        css = "",
-        content = None,
-        filter = None,
-        filter_config = None,
-        custom_filter = None,
-        header_sort = False,
-        sort_as = None,
-        html_enable = False
-    ) -> None:       
+        text: str = "text",
+        tooltip: Optional[str] = None,
+        tooltip_template: Optional[str] = None,
+        align: str = Alignment.left,
+        colspan: Optional[int] = None,
+        rowspan: Optional[int] = None,
+        css: str = "",
+        content: Optional[str] = None,
+        filter: Optional[Callable] = None,
+        filter_config: Optional[FilterConfig] = None,
+        custom_filter: Optional[Callable] = None,
+        header_sort: bool = False,
+        sort_as: Optional[str] = None,
+        html_enable: bool = False
+    ) -> None:
         self.text = text
         self.tooltip = tooltip
+        self.tooltip_template = tooltip_template
         self.align = align
         self.colspan = colspan
         self.rowspan = rowspan
         self.css = css
         self.content = content
-        self.filter = filter
-        self.filter_config = filter_config
-        self.custom_filter = custom_filter
+        self.filter = create_proxy(filter) if filter else None
+        self.filter_config = filter_config.config if filter_config else None
+        self.custom_filter = create_proxy(custom_filter) if custom_filter else None
         self.header_sort = header_sort
         self.sort_as = sort_as
         self.html_enable = html_enable
-
-    def config(self):
-        return {
+        
+    @property
+    def config(self) -> Dict[str, Any]:
+        return [{
             "text": self.text,
             "tooltip": self.tooltip,
             "tooltipTemplate": self.tooltip_template,
@@ -111,35 +137,83 @@ class Header:
             "headerSort": self.header_sort,
             "sortAs": self.sort_as,
             "htmlEnable": self.html_enable
-        }
-
+        }]
 
 class Footer:
-    def __init__(self) -> None:
-        self.text_type = "text"
+    def __init__(self):
+        self.text = ""
+        self.tooltip = None
+        self.tooltip_template = None
+        self.align = "left"
+        self.colspan = None
+        self.rowspan = None
+        self.css = ""
+        self.content = None
+        self.sort_as = None
+        self.html_enable = False
+
+    def append(
+        self,
+        text: str = "text",
+        tooltip: Optional[str] = None,
+        tooltip_template: Optional[str] = None,
+        align: str = Alignment.left,
+        colspan: Optional[int] = None,
+        rowspan: Optional[int] = None,
+        css: str = "",
+        content: Optional[str] = None,
+        sort_as: Optional[str] = None,
+        html_enable: bool = False
+    ) -> None:
+        self.text = text
+        self.tooltip = tooltip
+        self.tooltip_template = tooltip_template
+        self.align = align
+        self.colspan = colspan
+        self.rowspan = rowspan
+        self.css = css
+        self.content = content
+        self.sort_as = sort_as
+        self.html_enable = html_enable
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return [{
+            "text": self.text,
+            "tooltip": self.tooltip,
+            "tooltipTemplate": self.tooltip_template,
+            "align": self.align,
+            "colspan": self.colspan,
+            "rowspan": self.rowspan,
+            "css": self.css,
+            "content": self.content,
+            "sortAs": self.sort_as,
+            "htmlEnable": self.html_enable
+        }]
 
 class Column:
-    def __init__(self,
-        id,
-        header = Header(),
-        footer = Footer(),
-        width = 100,
-        min_width = 20,
-        max_width = None,
-        auto_width = False,
-        type = ColumnType.string,
-        editor_type = EditorType.input,
-        format = "",
-        adjust = AdjustType.data,
-        align = Alignment.left,
-        html_enable = False,
-        hidden = False,
-        draggable = False,
-        editable = False,
-        resizable = False,
-        sortable = True,
-        tooltip = False,
-        tooltip_template = None
+    def __init__(
+        self,
+        id: Any,
+        header: Header = Header(),
+        footer: Footer = Footer(),
+        width: int = 100,
+        min_width: int = 20,
+        max_width: Optional[int] = None,
+        auto_width: bool = False,
+        type: str = ColumnType.string,
+        editor_type: str = EditorType.input,
+        format: str = "",
+        adjust: str = AdjustType.data,
+        align: str = Alignment.left,
+        html_enable: bool = False,
+        hidden: bool = False,
+        draggable: bool = False,
+        editable: bool = False,
+        resizable: bool = False,
+        sortable: bool = True,
+        tooltip: bool = False,
+        tooltip_template: Optional[str] = None
     ) -> None:
         self.id = id
         self.header = header
@@ -161,21 +235,21 @@ class Column:
         self.sortable = sortable
         self.tooltip = tooltip
         self.tooltip_template = tooltip_template
-    
+
     @property
-    def config(self):
+    def config(self) -> Dict[str, Any]:
         return {
             "id": self.id,
-            "header": self.header,
-            "footer": self.footer,
+            "header": self.header.config if self.header else None,
+            #"footer": self.footer.config if self.footer else None,
             "width": self.width,
             "minWidth": self.min_width,
-            "maxWidth": self.max_width,
+            #"maxWidth": self.max_width,
             "autoWidth": self.auto_width,
             "type": self.type,
             "editorType": self.editor_type,
-            "format": self.format,
-            "adjust": self.adjust,
+            #"format": self.format,
+            #"adjust": self.adjust,
             "align": self.align,
             "htmlEnable": self.html_enable,
             "hidden": self.hidden,
@@ -186,12 +260,21 @@ class Column:
             "tooltip": self.tooltip,
             "tooltipTemplate": self.tooltip_template
         }
-    
+
 class Grid:
     "Grid widget implemenataion"
-    def __init__(self):
+    def __init__(self, widget_config: Dict[str, Any], columns: List[Dict[str, Any]], data_url: str, **kwargs) -> None:
         self.grid = js.dhx.Grid
-        self.grid.new(js.JSON.parse(json.dumps(self.widget_config)))
+        self.widget_config = widget_config
+        col_data = []
+        for col in columns:
+            col_data.append(Column(**col).config)
+        self.widget_config["columns"] = col_data
+        #self.widget_config["data"] = data_url
+        self.grid = self.grid.new(None, js.JSON.parse(json.dumps(self.widget_config))) 
+        #dataset = js.dhx.DataCollection.new()
+        #dataset.load(data_url)
+        self.grid.data.load(data_url)
         self.initialized = False
 
         """ Grid methods """
@@ -621,8 +704,10 @@ class Grid:
             return self.grid.data
         
         @data.setter
-        def data(self, value):
-            self.grid.data = value
+        def data(self, data_url: str):
+            dataset = js.Librarydhx.DataCollection.new()
+            dataset.load(data_url)
+            self.grid.data = dataset
 
         @property
         def drag_copy(self):
