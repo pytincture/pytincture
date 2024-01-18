@@ -6,9 +6,11 @@
 build/*
 build/*.*
 dist/pytincture-0.0.1-py3.7.egg
+pytincture.egg-info
 pytincture.egg-info/dependency_links.txt
 pytincture.egg-info/PKG-INFO
 pytincture.egg-info/SOURCES.txt
 pytincture.egg-info/top_level.txt
 .vscode/launch.json
+dist
 dist/*.whl
