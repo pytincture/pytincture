@@ -10,20 +10,19 @@ import js
 import json
 
 from .grid import Grid, Column, Header, Footer
+from .toolbar import Toolbar
+from .sidebar import Sidebar
 
 from pyodide.ffi import create_proxy
 
-from pytincture.frontend.widgetsets import grid
-
 TLayout = TypeVar("TLayout", bound="Layout")
-
 
 import js
 import json
 
 
 class Layout:
-    def __init__(self, mainwindow: bool =False, widget_config: Dict[str, Any] = {}) -> None:
+    def __init__(self, mainwindow=False, widget_config: Dict[str, Any] = {}, widget_parent: Any = None):
         """ similar to grid.py implementation implement layout api"""
         self.layout = js.dhx.Layout
         if mainwindow:
@@ -31,7 +30,7 @@ class Layout:
                 widget_config = {"css":"dhx_layout-cell--bordered", "type":"line", "rows" :[{"header":None,"height":"98vh", "id": "mainwindow"}]}
             self.layout = self.layout.new("maindiv", js.JSON.parse(json.dumps(widget_config)))
         else:
-            self.layout = self.layout.new(None, js.JSON.parse(json.dumps(widget_config)))
+            self.layout = self.layout.new(widget_parent, js.JSON.parse(json.dumps(widget_config)))
             self.initialized = False
 
     """ Layout methods """
@@ -172,16 +171,32 @@ class Layout:
                 for foot in column["footer"]:
                     newfooter.append(**foot)
                 column["footer"] = newfooter
+            else:
+                column["footer"] = None
 
         grid_widget = Grid(grid_config, columns, data_url)
         self.layout.getCell(id).attach(grid_widget.grid)
         return grid_widget
 
-    def add_layout(self, id: str, layout_config: Dict[str, Any]) -> TLayout:
+    def add_layout(self, id: str = "mainwindow", layout_config: Dict[str, Any] = {}) -> TLayout:
         """ adds a Layout into a Layout cell """
-        layout_widget = Layout(layout_config)
+        layout_widget = Layout(
+            widget_config=layout_config
+        )
         self.layout.getCell(id).attach(layout_widget.layout)
         return layout_widget
+    
+    def add_toolbar(self, id: str = "mainwindow", toolbar_config: Dict[str, Any] = {}, data: Dict[str, Any] = None) -> Toolbar:
+        """ adds a Toolbar into a Layout cell """
+        toolbar_widget = Toolbar(widget_config=toolbar_config)
+        self.layout.getCell(id).attach(toolbar_widget.toolbar)
+        return toolbar_widget
+                    
+    def add_sidebar(self, id: str = "mainwindow", sidebar_config: Dict[str, Any] = {}) -> Sidebar:
+        """ adds a Sidebar into a Layout cell """
+        sidebar_widget = Sidebar(widget_config=sidebar_config)
+        self.layout.getCell(id).attach(sidebar_widget.sidebar)
+        return sidebar_widget
 
     def attach_html(self, id: str, html: str) -> None:
         """ adds an HTML content into a Layout cell """
