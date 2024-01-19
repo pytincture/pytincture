@@ -241,15 +241,15 @@ class Column:
         return {
             "id": self.id,
             "header": self.header.config if self.header else None,
-            #"footer": self.footer.config if self.footer else None,
+            "footer": self.footer.config if self.footer else None,
             "width": self.width,
             "minWidth": self.min_width,
             #"maxWidth": self.max_width,
             "autoWidth": self.auto_width,
             "type": self.type,
             "editorType": self.editor_type,
-            #"format": self.format,
-            #"adjust": self.adjust,
+            "format": self.format,
+            "adjust": self.adjust,
             "align": self.align,
             "htmlEnable": self.html_enable,
             "hidden": self.hidden,
@@ -270,10 +270,7 @@ class Grid:
         for col in columns:
             col_data.append(Column(**col).config)
         self.widget_config["columns"] = col_data
-        #self.widget_config["data"] = data_url
         self.grid = self.grid.new(None, js.JSON.parse(json.dumps(self.widget_config))) 
-        #dataset = js.dhx.DataCollection.new()
-        #dataset.load(data_url)
         self.grid.data.load(data_url)
         self.initialized = False
 
