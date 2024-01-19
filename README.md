@@ -16,13 +16,13 @@
 ## Installation
 To install `pyTincture`, run the following command in your terminal:
 \`\`\`
-pip install pyTincture
+pip install pytincture
 \`\`\`
 
 ## Quick Start
 Here's a simple example to get you started with `pyTincture`:
 \`\`\`python
-import pyTincture
+import pytincture
 
 # Code to create and manage your GUI components
 \`\`\`
