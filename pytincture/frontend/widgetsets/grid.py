@@ -299,9 +299,9 @@ class Grid:
             """removes a Grid instance and releases occupied resources"""
             self.grid.destructor()
 
-        def edit_cell(self, row_id: Union[str, int], col_id: Union[str, int], preserve: bool, preserve_value: Union[str, int]) -> None:
+        def edit_cell(self, row_id: Union[str, int], col_id: Union[str, int], editor_type: str) -> None:
             """enables editing of a Grid cell"""
-            self.grid.editCell(row_id, col_id, preserve, preserve_value)
+            self.grid.editCell(row_id, col_id, editor_type)
 
         def edit_end(self, preserve: bool, preserve_value: Union[str, int]) -> None:
             """finishes editing in a cell"""
