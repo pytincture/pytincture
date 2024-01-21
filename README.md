@@ -34,7 +34,7 @@ For detailed documentation and advanced usage, please refer to [pyTincture Docum
 Contributions to `pyTincture` are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for more information on how to get involved.
 
 ## License
-`pyTincture` is licensed under the [GPL License].
+`pyTincture` is licensed under the GPL 2.0 License.
 
 ## Contact
 For any queries or suggestions, feel free to contact us at [pyTincture Support](mailto:support@pytincture.com).
