@@ -190,12 +190,18 @@ class Layout:
         """ adds a Toolbar into a Layout cell """
         toolbar_widget = Toolbar(widget_config=toolbar_config)
         self.layout.getCell(id).attach(toolbar_widget.toolbar)
+        if data:
+            dparse = js.JSON.parse(json.dumps(data))
+            toolbar_widget.data.parse(dparse)
         return toolbar_widget
                     
-    def add_sidebar(self, id: str = "mainwindow", sidebar_config: Dict[str, Any] = {}) -> Sidebar:
+    def add_sidebar(self, id: str = "mainwindow", sidebar_config: Dict[str, Any] = {}, data: Dict[str, Any] = None) -> Sidebar:
         """ adds a Sidebar into a Layout cell """
         sidebar_widget = Sidebar(widget_config=sidebar_config)
         self.layout.getCell(id).attach(sidebar_widget.sidebar)
+        if data:
+            dparse = js.JSON.parse(json.dumps(data))
+            sidebar_widget.data.parse(dparse)
         return sidebar_widget
 
     def attach_html(self, id: str, html: str) -> None:
@@ -454,4 +460,8 @@ class MainWindow(Layout):
     def __init__(self) -> None:
         super().__init__(True)
         self.initialized = True
+
+    def set_theme(self, theme: str) -> None:
+        """ sets the layout theme """
+        js.dhx.setTheme(theme)
 

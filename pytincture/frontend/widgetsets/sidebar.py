@@ -262,11 +262,11 @@ class Sidebar:
         """
         Specifies an array of data objects to set into the Sidebar
         """
-        return self.sidebar.config.data
+        return self.sidebar.data
 
     @data.setter
     def data(self, value: Optional[List[Dict[str, Any]]]) -> None:
-        self.sidebar.config.data = value
+        self.sidebar.data = value
 
     @property
     def menuCss(self) -> Optional[str]:

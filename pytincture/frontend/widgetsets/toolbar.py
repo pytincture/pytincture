@@ -34,13 +34,13 @@ class Toolbar:
         """
         self.toolbar.enable(item_ids)
 
-    def getSelected(self) -> List[str]:
+    def get_selected(self) -> List[str]:
         """
         Returns an array with IDs of selected items
         """
         return self.toolbar.getSelected()
 
-    def getState(self) -> Dict[str, Any]:
+    def get_state(self) -> Dict[str, Any]:
         """
         Gets current values/states of controls
         """
@@ -52,13 +52,13 @@ class Toolbar:
         """
         self.toolbar.hide(item_id)
 
-    def isDisabled(self, item_id: str) -> bool:
+    def is_disabled(self, item_id: str) -> bool:
         """
         Checks whether an item of Toolbar is disabled
         """
         return self.toolbar.isDisabled(item_id)
 
-    def isSelected(self, item_id: str) -> bool:
+    def is_selected(self, item_id: str) -> bool:
         """
         Checks whether a specified Toolbar item is selected
         """
@@ -76,13 +76,13 @@ class Toolbar:
         """
         self.toolbar.select(item_id)
 
-    def setFocus(self, input_id: str) -> None:
+    def set_focus(self, input_id: str) -> None:
         """
         Sets focus on an Input control by its ID
         """
         self.toolbar.setFocus(input_id)
 
-    def setState(self, state: Dict[str, Any]) -> None:
+    def set_state(self, state: Dict[str, Any]) -> None:
         """
         Sets values/states of controls
         """
@@ -101,65 +101,65 @@ class Toolbar:
         self.toolbar.unselect(item_id)
 
     # Events
-    def afterHide(self, callback: Callable) -> None:
+    def after_hide(self, callback: Callable) -> None:
         """
         Fires after hiding a sub-item of Toolbar
         """
-        self.toolbar.attachEvent("afterHide", callback)
+        self.toolbar.events.on("afterHide", create_proxy(callback))
 
-    def beforeHide(self, callback: Callable) -> None:
+    def before_hide(self, callback: Callable) -> None:
         """
         Fires before hiding a sub-item of Toolbar
         """
-        self.toolbar.attachEvent("beforeHide", callback)
+        sself.toolbar.events.on("beforeHide", create_proxy(callback))
 
     def click(self, callback: Callable) -> None:
         """
         Fires after a click on a control
         """
-        self.toolbar.attachEvent("click", callback)
+        self.toolbar.events.on("click", create_proxy(callback))
 
     def input(self, callback: Callable) -> None:
         """
         Fires on entering a text into the input field
         """
-        self.toolbar.attachEvent("input", callback)
+        sself.toolbar.events.on("input", create_proxy(callback))
 
-    def inputBlur(self, callback: Callable) -> None:
+    def input_blur(self, callback: Callable) -> None:
         """
         Fires when a control is blurred
         """
-        self.toolbar.attachEvent("inputBlur", callback)
+        sself.toolbar.events.on("inputBlur", create_proxy(callback))
 
-    def inputChange(self, callback: Callable) -> None:
+    def input_change(self, callback: Callable) -> None:
         """
         Fires on changing the value in the Input control of Toolbar
         """
-        self.toolbar.attachEvent("inputChange", callback)
+        sself.toolbar.events.on("inputChange", create_proxy(callback))
 
-    def inputCreated(self, callback: Callable) -> None:
+    def input_created(self, callback: Callable) -> None:
         """
         Fires when a new input is added
         """
-        self.toolbar.attachEvent("inputCreated", callback)
+        sself.toolbar.events.on("inputCreated", create_proxy(callback))
 
-    def inputFocus(self, callback: Callable) -> None:
+    def input_focus(self, callback: Callable) -> None:
         """
         Fires when a control is focused
         """
-        self.toolbar.attachEvent("inputFocus", callback)
+        sself.toolbar.events.on("inputFocus", create_proxy(callback))
 
     def keydown(self, callback: Callable) -> None:
         """
         Fires when any key is pressed and a control of Toolbar is in focus
         """
-        self.toolbar.attachEvent("keydown", callback)
+        sself.toolbar.events.on("keydown", create_proxy(callback))
 
-    def openMenu(self, callback: Callable) -> None:
+    def open_menu(self, callback: Callable) -> None:
         """
         Fires on expanding a menu control
         """
-        self.toolbar.attachEvent("openMenu", callback)
+        sself.toolbar.events.on("openMenu", create_proxy(callback))
 
     # Properties
     @property
@@ -185,13 +185,13 @@ class Toolbar:
         self.toolbar.data = value
 
     @property
-    def menuCss(self) -> Optional[str]:
+    def menu_css(self) -> Optional[str]:
         """
         Optional. Adds style classes to all containers of Toolbar controls with nested items
         """
         return self.toolbar.menuCss
 
-    @menuCss.setter
-    def menuCss(self, value: Optional[str]) -> None:
+    @menu_css.setter
+    def menu_css(self, value: Optional[str]) -> None:
         self.toolbar.menuCss = value
 
