@@ -8,6 +8,55 @@
     <script src="frontend/widgetsets/dhxsrc/suite.js"></script>
     <link href="frontend/widgetsets/dhxsrc/suite.css" rel="stylesheet" />
     <script src="frontend/pytincture.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/MaterialDesign-Webfont/4.4.95/css/materialdesignicons.css?v=6.4.2" media="all" rel="stylesheet" type="text/css">
+    <style>
+        [data-dhx-theme='custom-theme-dark'] {
+            /* font */
+            --dhx-font-color-primary: var(--dhx-color-gray-200);
+            --dhx-font-color-secondary: var(--dhx-color-gray-500);
+            --dhx-font-color-additional: var(--dhx-color-gray-500);
+            --dhx-font-color-disabled: var(--dhx-color-gray-800);
+            --dhx-font-color-contrast: var(--dhx-color-black);
+            /* end font */
+    
+            /* border */
+            --dhx-border-color: #007a99;
+            /* end border */
+    
+            /* color scheme */
+            --dhx-h-primary: 45;
+            --dhx-s-primary: 100%;
+            --dhx-l-primary: 35%;
+            --dhx-h-secondary: 185;
+            --dhx-s-secondary: 5%;
+            --dhx-l-secondary: 50%;
+            --dhx-h-danger: 330;
+            --dhx-s-danger: 65%;
+            --dhx-l-danger: 50%;
+            --dhx-h-success: 175;
+            --dhx-s-success: 60%;
+            --dhx-l-success: 40%;
+            --dhx-h-background: 190;
+            --dhx-s-background: 100%;
+            --dhx-l-background: 10%;
+            /* end color scheme */
+    
+            /* theme colors */
+            --dhx-background-primary: hsl(var(--dhx-h-background), var(--dhx-s-background), var(--dhx-l-background));
+            --dhx-background-secondary: hsl(var(--dhx-h-background), var(--dhx-s-background), calc(var(--dhx-l-background) + 8%));
+            --dhx-background-additional: hsl(var(--dhx-h-background), var(--dhx-s-background), calc(var(--dhx-l-background) + 12%));
+            /* end theme colors */
+    
+            /* DHTMLX Grid service variables */
+            --dhx-s-grid-header-background: #002229;
+            --dhx-s-grid-selection-background: var(--dhx-color-gray-100);
+            /* end DHTMLX Grid service variables */
+    
+            /* DHTMLX Toolbar service variables */
+            --dhx-s-toolbar-background: #002229;
+            /* end DHTMLX Toolbar service variables */
+        }
+    </style>
 </head>
 <body>
     <script>runTinctureApp("***APPLICATION***");</script>
