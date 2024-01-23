@@ -9,6 +9,5 @@ async function runTinctureApp(application, widgetlib){
     let appResponse = await fetch("appcode/appcode.pyt");
     let appBinary = await appResponse.arrayBuffer();
     pyodide.unpackArchive(appBinary, "zip");
-    let pyApp = (await fetch("appcode/"+application+".py")).text();
-    pyodide.runPython((await pyApp).toString()+"\n"+application+"()");
+    pyodide.runPython("from " + application + " import " + application + " as app\napp()");
 }
