@@ -26,9 +26,13 @@ import pytincture
 
 ## Docker Quick Start
 Docker command to build this example is:
-```docker build . -t pytexample -f Dockerfile-example```
+~~~
+docker build . -t pytexample -f Dockerfile-example
+~~~
 Then the docker command to run it is:
-```docker run -p8070:8070 -i pytexample```
+~~~
+docker run -p8070:8070 -i pytexample
+~~~
 
 # Code to create and manage your GUI components
 \`\`\`
