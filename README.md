@@ -27,12 +27,6 @@ import pytincture
 # Code to create and manage your GUI components
 \`\`\`
 
-## Documentation
-For detailed documentation and advanced usage, please refer to [pyTincture Documentation](#).
-
-## Contributing
-Contributions to `pyTincture` are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for more information on how to get involved.
-
 ## License
 `pyTincture` is licensed under the GPL 2.0 License.
 
