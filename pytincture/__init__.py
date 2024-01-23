@@ -10,7 +10,8 @@ import zipfile
 import uvicorn
 
 
-def create_zip():
+def create_pytincture_pkg():
+    """ Generate a pytincture widgetset package for the browser to pull for the frontend"""
     pytincture_folder = os.path.join(os.path.dirname(__file__), "../pytincture")
     zip_path = os.path.join(os.environ["MODULES_PATH"], "pytincture.zip")
 
@@ -29,8 +30,25 @@ def create_zip():
                 else:
                     zipf.write(file_path, arcname)
 
+def create_appcode_pkg():
+    """ Generate an appcode package for the browser to pull for the frontend."""
+    appcode_folder = os.environ["MODULES_PATH"]
+    zip_path = os.path.join(appcode_folder, "appcode.pyt")
+
+    # Create a zip file
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        for root, dirs, files in os.walk(appcode_folder):
+            for file in files:
+                file_path = os.path.join(root, file)
+                # Calculate arcname to be relative to appcode_folder
+                arcname = os.path.relpath(file_path, appcode_folder)
+                # Exclude the zip file itself
+                if not ".zip" in file:
+                    zipf.write(file_path, arcname)
+
 def main(port, ssl_keyfile=None, ssl_certfile=None):
-    create_zip()
+    create_appcode_pkg()
+    create_pytincture_pkg()
     uvicorn.run(
         "pytincture.backend.app:app",
         host="0.0.0.0",

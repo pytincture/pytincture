@@ -1,16 +1,36 @@
 
-import json
+"""
+ Example application
+"""
 import sys
 from pytincture.frontend.widgetsets.layout import MainWindow
 import copy
+
+import form_window
+
 
 class py_ui(MainWindow):
     def __init__(self):
         super().__init__()
         self.set_theme("custom-theme-dark")
+        self.fwin = form_window.FormExample()
         self.load_ui()
 
     def load_ui(self):
+
+        # Create a column based layout and add it to the mainwindow
+        #  left column will be for a sidebar
+        #  right column will be for a toolbar and a grid
+        self.base_layout = self.add_layout(
+            layout_config= {
+                "css":"dhx_toolbar--text_color_white",
+                "cols" :[
+                    {"header":None,"width":"auto", "id": "left"},
+                    {"header":None,"width":"100%", "id": "right"}
+                ]
+            }
+        )
+
 
         sidebar_data = [
             {"id": "dashboard", "value": "Dashboard", "icon": "mdi mdi-view-dashboard"},
@@ -42,39 +62,22 @@ class py_ui(MainWindow):
             ]}
         ]
 
-        self.base_layout = self.add_layout(
-            layout_config= {
-                "css":"dhx_toolbar--text_color_white",
-                "cols" :[
-                    {"header":None,"width":"auto", "id": "left"},
-                    {"header":None,"width":"100%", "id": "right"}
-                ]
-            }
-        )
-
+        # Create a sidebar and add it to the left column
         self.sbmain = self.base_layout.add_sidebar(id="left",sidebar_config={}, data=sidebar_data)
+        # Have the sidebar start off in collapsed mode
         self.sbmain.collapse()
 
-        columns = [
-            { "width": 300, "id": "title", "header": [{ "text": "Title" }] },
-            { "width": 200, "id": "authors", "header": [{ "text": "Authors" }] },
-            { "width": 80, "id": "average_rating", "header": [{ "text": "Rating" }] },
-            { "width": 150, "id": "publication_date", "header": [{ "text": "Publication date" }] },
-            { "width": 150, "id": "isbn13", "header": [{ "text": "isbn" }] },
-            { "width": 90, "id": "language_code", "header": [{ "text": "Language" }] },
-            { "width": 90, "id": "num_pages", "header": [{ "text": "Pages" }] },
-            { "width": 120, "id": "ratings_count", "header": [{ "text": "Raiting count" }] },
-            { "width": 100, "id": "text_reviews_count", "header": [{ "text": "Text reviews count" }] },
-            { "width": 200, "id": "publisher", "header": [{ "text": "Publisher" }] }
-        ]
-
+    
+        # Create a layout for the right column
+        #  top row will be for a toolbar
+        #  bottom row will be for a grid
         self.sub_layout = self.base_layout.add_layout(
             id="right",
             layout_config = {
             "css":"dhx_layout-cell--bordered", "type":"line", 
                 "rows" :[
-                    {"header":None,"height":"auto", "id": "one"},
-                    {"header":None,"height":"100%", "id": "two"}
+                    {"header":None,"height":"auto", "id": "top"},
+                    {"header":None,"height":"100%", "id": "bottom"}
                 ]
         })
 
@@ -94,24 +97,45 @@ class py_ui(MainWindow):
             }
         ]
 
+        # Create a toolbar and add it to the top row
         self.maintb = self.sub_layout.add_toolbar(
-            id="one",
+            id="top",
             toolbar_config = {"css":"dhx_toolbar--text_color_white"},
             data = toolbar_data
         )
 
+        # Attach a signal to the main toolbar to handle clicks
         self.maintb.click(self.menu_clicked)
 
+        columns = [
+            { "width": 300, "id": "title", "header": [{ "text": "Title" }] },
+            { "width": 200, "id": "authors", "header": [{ "text": "Authors" }] },
+            { "width": 80, "id": "average_rating", "header": [{ "text": "Rating" }] },
+            { "width": 150, "id": "publication_date", "header": [{ "text": "Publication date" }] },
+            { "width": 150, "id": "isbn13", "header": [{ "text": "isbn" }] },
+            { "width": 90, "id": "language_code", "header": [{ "text": "Language" }] },
+            { "width": 90, "id": "num_pages", "header": [{ "text": "Pages" }] },
+            { "width": 120, "id": "ratings_count", "header": [{ "text": "Raiting count" }] },
+            { "width": 100, "id": "text_reviews_count", "header": [{ "text": "Text reviews count" }] },
+            { "width": 200, "id": "publisher", "header": [{ "text": "Publisher" }] }
+        ]
+
+        # Create a grid and add it to the bottom row
         self.sub_layout.add_grid(
-            id="two",
+            id="bottom",
             grid_config={"height": "100%", "width": "100%", "selection": "row", "multiselection": True},
             columns = copy.deepcopy(columns),
             data_url = "http://localhost:8070/appcode/dataset.json"
         )
 
     def menu_clicked(self, id, e):
+        # Handle clicks on the main toolbar
+        # if the id is "other" then toggle the sidebar
+        # if the id is "add" then show the form window
         if id ==  "other":
             self.sbmain.toggle()
+        elif id == "add":
+            self.fwin.show()
 
 if __name__ == "__main__" and sys.platform != "emscripten":
     from pytincture import launch_service

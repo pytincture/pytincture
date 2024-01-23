@@ -18,7 +18,7 @@ class Window:
     def __init__(self, widget_config: Dict[str, Any]) -> None:
         self.toolbar = js.dhx.Window
         self.widget_config = widget_config
-        self.window = self.toolbar.new(None, js.JSON.parse(json.dumps(widget_config)))
+        self.window = self.toolbar.new(js.JSON.parse(json.dumps(widget_config)))
     
     def attach(self, name: str, config: Optional[Dict[str, Any]] = None) -> None:
         """
@@ -46,7 +46,7 @@ class Window:
         self.window.attach(grid_widget.grid)
         return grid_widget
 
-    def add_layout(self, layout_config: Dict[str, Any] = {}) -> TLayout:
+    def add_layout(self, layout_config: Dict[str, Any] = {}) -> Layout:
         """ adds a Layout into a Layout cell """
         layout_widget = Layout(
             widget_config=layout_config

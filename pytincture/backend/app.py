@@ -29,6 +29,10 @@ app.mount("/frontend", StaticFiles(directory=STATIC_PATH), name="static")
 #Static files endpoint
 app.mount("/appcode", StaticFiles(directory=MODULE_PATH), name="static")
 
+@app.get("/appdata", response_class=HTMLResponse)
+async def main(function_name, data_module):
+    pass
+
 #Application endpoint
 @app.get("/{application}", response_class=HTMLResponse)
 async def main(response: Response, application):
