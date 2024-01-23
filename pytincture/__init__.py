@@ -43,8 +43,9 @@ def create_appcode_pkg():
                 # Calculate arcname to be relative to appcode_folder
                 arcname = os.path.relpath(file_path, appcode_folder)
                 # Exclude the zip file itself
-                if not ".zip" in file:
-                    zipf.write(file_path, arcname)
+                if not ".zip" in file and not ".pyt" in file and not ".pyc" in file:
+                    if not "__pycache__" in file:
+                        zipf.write(file_path, arcname)
 
 def main(port, ssl_keyfile=None, ssl_certfile=None):
     create_appcode_pkg()
