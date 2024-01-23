@@ -19,11 +19,6 @@ To install `pyTincture`, run the following command in your terminal:
 pip install pytincture
 \`\`\`
 
-## Quick Start
-Here's a simple example to get you started with `pyTincture`:
-\`\`\`python
-import pytincture
-
 ## Docker Quick Start
 Docker command to build this example is:
 ~~~
