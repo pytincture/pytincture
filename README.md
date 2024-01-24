@@ -13,12 +13,6 @@
 - Python 3.x
 - Pyodide
 
-## Installation
-To install `pyTincture`, run the following command in your terminal:
-\`\`\`
-pip install pytincture
-\`\`\`
-
 ## Docker Quick Start
 Docker command to build this example is:
 ~~~
@@ -29,12 +23,8 @@ Then the docker command to run it is:
 docker run -p8070:8070 -i pytexample
 ~~~
 
-# Code to create and manage your GUI components
-\`\`\`
 
 ## License
 `pyTincture` is licensed under the GPL 2.0 License.
 
-## Contact
-For any queries or suggestions, feel free to contact us at [pyTincture Support](mailto:support@pytincture.com).
 
