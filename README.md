@@ -22,6 +22,10 @@ Then the docker command to run it is:
 ~~~
 docker run -p8070:8070 -i pytexample
 ~~~
+Load url in browser
+~~~
+http://localhost:8070
+~~~
 
 
 ## License
