@@ -24,7 +24,7 @@ docker run -p8070:8070 -i pytexample
 ~~~
 Load url in browser
 ~~~
-http://localhost:8070
+http://localhost:8070/py_ui
 ~~~
 
 
