@@ -9,7 +9,11 @@
 name: Publish to PyPI
 
 on:
-  push:
+  workflow_dispatch:
+  release:
+    types: [created]
+    branches:
+      - main
     tags:
       - '*'
 
