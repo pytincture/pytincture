@@ -59,3 +59,97 @@ grid_column_data = [
             { "width": 100, "id": "text_reviews_count", "header": [{ "text": "Text reviews count" }] },
             { "width": 200, "id": "publisher", "header": [{ "text": "Publisher" }] }
         ]
+
+form_data = [
+    {
+        "type": "fieldset",
+        "name": "bookInfo",
+        "label": "Book Information",
+        "rows": [
+            {
+                "type": "input",
+                "name": "title",
+                "required": True,
+                "label": "Title",
+                "placeholder": "Enter book title",
+            },
+            {
+                "type": "input",
+                "name": "authors",
+                "required": True,
+                "label": "Authors",
+                "placeholder": "Enter authors",
+            },
+            {
+                "type": "input",
+                "inputType": "number",
+                "name": "average_rating",
+                "label": "Average Rating",
+                "placeholder": "Enter average rating",
+            },
+            {
+                "type": "datepicker",
+                "name": "publication_date",
+                "label": "Publication Date",
+                "placeholder": "Select publication date",
+            },
+            {
+                "type": "input",
+                "name": "isbn13",
+                "label": "ISBN-13",
+                "placeholder": "Enter ISBN-13",
+            },
+            {
+                "type": "input",
+                "name": "language_code",
+                "label": "Language Code",
+                "placeholder": "Enter language code",
+            },
+            {
+                "type": "input",
+                "inputType": "number",
+                "name": "num_pages",
+                "label": "Number of Pages",
+                "placeholder": "Enter number of pages",
+            },
+            {
+                "type": "input",
+                "inputType": "number",
+                "name": "ratings_count",
+                "label": "Ratings Count",
+                "placeholder": "Enter ratings count",
+            },
+            {
+                "type": "input",
+                "inputType": "number",
+                "name": "text_reviews_count",
+                "label": "Text Reviews Count",
+                "placeholder": "Enter text reviews count",
+            },
+            {
+                "type": "input",
+                "name": "publisher",
+                "label": "Publisher",
+                "placeholder": "Enter publisher",
+            },
+        ]
+    },
+    {
+        "align": "end",
+        "cols": [
+            {
+                "type": "button",
+                "name": "cancel",
+                "view": "link",
+                "text": "Cancel",
+            },
+            {
+                "type": "button",
+                "name": "submit",
+                "view": "flat",
+                "text": "Submit",
+                "submit": True,
+            },
+        ]
+    }
+]

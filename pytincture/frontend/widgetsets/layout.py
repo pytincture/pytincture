@@ -12,6 +12,7 @@ import json
 from .grid import Grid, Column, Header, Footer
 from .toolbar import Toolbar
 from .sidebar import Sidebar
+from .form import Form
 
 from pyodide.ffi import create_proxy
 
@@ -203,6 +204,15 @@ class Layout:
             dparse = js.JSON.parse(json.dumps(data))
             sidebar_widget.data.parse(dparse)
         return sidebar_widget
+    
+    def add_form(self, id: str = "mainwindow", form_config: Dict[str, Any] = {}, data: Dict[str, Any] = None) -> Form:
+        """ adds a Form into a Layout cell """
+        form_widget = Form(widget_config=form_config)
+        self.layout.getCell(id).attach(form_widget.form)
+        if data:
+            dparse = js.JSON.parse(json.dumps(data))
+            form_widget.data.parse(dparse)
+        return form_widget
 
     def attach_html(self, id: str, html: str) -> None:
         """ adds an HTML content into a Layout cell """

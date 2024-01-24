@@ -35,7 +35,7 @@ class py_ui(MainWindow):
         )
 
         # Create a sidebar and add it to the left column
-        self.sbmain = self.base_layout.add_sidebar(id="left",sidebar_config={}, data=sidebar_data)
+        self.sbmain = self.base_layout.add_sidebar(id="left", data=sidebar_data)
         # Have the sidebar start off in collapsed mode
         self.sbmain.collapse()
 

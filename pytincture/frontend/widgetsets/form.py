@@ -1643,12 +1643,38 @@ class Combo:
 class Container:
     def __init__(self, name: Optional[str] = None, id: Optional[str] = None,
                  hidden: Optional[bool] = False, disabled: Optional[bool] = False,
-                 children: Optional[List[Dict[str, Any]]] = None) -> None:
+                 children: Optional[List[Dict[str, Any]]] = None,
+                 width: Optional[Union[str, int]] = "content",
+                 height: Optional[Union[str, int]] = "content",
+                 padding: Optional[Union[str, int]] = "8px",
+                 label: Optional[str] = None,
+                 labelWidth: Optional[Union[str, int]] = None,
+                 labelPosition: Optional[str] = "top",
+                 hiddenLabel: Optional[bool] = False,
+                 helpMessage: Optional[str] = None,
+                 required: Optional[bool] = False,
+                 preMessage: Optional[str] = None,
+                 successMessage: Optional[str] = None,
+                 errorMessage: Optional[str] = None,
+                 validation: Optional[Callable[[object], bool]] = None) -> None:
         self.name = name
         self.id = id
         self.hidden = hidden
         self.disabled = disabled
         self.children = children
+        self.width = width
+        self.height = height
+        self.padding = padding
+        self.label = label
+        self.labelWidth = labelWidth
+        self.labelPosition = labelPosition
+        self.hiddenLabel = hiddenLabel
+        self.helpMessage = helpMessage
+        self.required = required
+        self.preMessage = preMessage
+        self.successMessage = successMessage
+        self.errorMessage = errorMessage
+        self.validation = validation
 
     @property
     def config(self) -> Dict[str, Any]:
@@ -1657,19 +1683,51 @@ class Container:
             "id": self.id,
             "hidden": self.hidden,
             "disabled": self.disabled,
-            "children": self.children
+            "children": self.children,
+            "width": self.width,
+            "height": self.height,
+            "padding": self.padding,
+            "label": self.label,
+            "labelWidth": self.labelWidth,
+            "labelPosition": self.labelPosition,
+            "hiddenLabel": self.hiddenLabel,
+            "helpMessage": self.helpMessage,
+            "required": self.required,
+            "preMessage": self.preMessage,
+            "successMessage": self.successMessage,
+            "errorMessage": self.errorMessage,
+            "validation": self.validation
         }
 
 
 class Datepicker:
     def __init__(self, name: Optional[str] = None, id: Optional[str] = None,
                  hidden: Optional[bool] = False, disabled: Optional[bool] = False,
-                 value: Optional[str] = None) -> None:
+                 value: Optional[str] = None, width: Optional[Union[str, int]] = "content",
+                 height: Optional[Union[str, int]] = "content", padding: Optional[Union[str, int]] = "8px",
+                 label: Optional[str] = None, labelWidth: Optional[Union[str, int]] = None,
+                 labelPosition: Optional[str] = "top", hiddenLabel: Optional[bool] = False,
+                 helpMessage: Optional[str] = None, required: Optional[bool] = False,
+                 preMessage: Optional[str] = None, successMessage: Optional[str] = None,
+                 errorMessage: Optional[str] = None, validation: Optional[Callable[[object], bool]] = None) -> None:
         self.name = name
         self.id = id
         self.hidden = hidden
         self.disabled = disabled
         self.value = value
+        self.width = width
+        self.height = height
+        self.padding = padding
+        self.label = label
+        self.labelWidth = labelWidth
+        self.labelPosition = labelPosition
+        self.hiddenLabel = hiddenLabel
+        self.helpMessage = helpMessage
+        self.required = required
+        self.preMessage = preMessage
+        self.successMessage = successMessage
+        self.errorMessage = errorMessage
+        self.validation = validation
 
     @property
     def config(self) -> Dict[str, Any]:
@@ -1678,7 +1736,20 @@ class Datepicker:
             "id": self.id,
             "hidden": self.hidden,
             "disabled": self.disabled,
-            "value": self.value
+            "value": self.value,
+            "width": self.width,
+            "height": self.height,
+            "padding": self.padding,
+            "label": self.label,
+            "labelWidth": self.labelWidth,
+            "labelPosition": self.labelPosition,
+            "hiddenLabel": self.hiddenLabel,
+            "helpMessage": self.helpMessage,
+            "required": self.required,
+            "preMessage": self.preMessage,
+            "successMessage": self.successMessage,
+            "errorMessage": self.errorMessage,
+            "validation": self.validation
         }
 
 
