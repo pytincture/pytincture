@@ -20,10 +20,12 @@ jobs:
       - name: Extract version from setup.py
         id: get_version
         run: |
-          VERSION=$(python -c "import re; \
-            file = open('setup.py', 'r').read(); \
-            version = re.search(r\"version=['\"]([^'\"]*)['\"]\", file).group(1); \
-            print(version.replace('.', ''))")
+          VERSION=$(python -c "\
+          import re; \
+          with open('setup.py', 'r') as file: \
+            content = file.read(); \
+            version = re.search(r\"version=['\\\"]([^'\\\"]+)['\\\"]\", content); \
+            print(version.group(1).replace('.', '')) if version else exit(1)")
           echo "::set-output name=version::${VERSION}"
 
       - name: Log in to Docker Hub
