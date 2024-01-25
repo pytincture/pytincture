@@ -1,4 +1,4 @@
-name: Publish Docker image
+name: Publish Docker image eample to Docker Hub
 
 on:
   workflow_dispatch:
@@ -20,12 +20,7 @@ jobs:
       - name: Extract version from setup.py
         id: get_version
         run: |
-          VERSION=$(python -c "\
-          import re; \
-          with open('setup.py', 'r') as file: \
-            content = file.read(); \
-            version = re.search(r\"version=['\\\"]([^'\\\"]+)['\\\"]\", content); \
-            print(version.group(1).replace('.', '')) if version else exit(1)")
+          VERSION=$(python extract_version.py)
           echo "::set-output name=version::${VERSION}"
 
       - name: Log in to Docker Hub
