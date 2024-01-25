@@ -14,13 +14,23 @@
 - Pyodide
 
 ## Docker Quick Start
+Run the docker image directly from Dockerhub
+~~~
+docker run -p8070:8070 -i schapman1974/pytincture:example010
+~~~
+Load url in browser
+~~~
+http://localhost:8070/py_ui
+~~~
+
+## Docker build from repo
 Docker command to build this example is:
 ~~~
-docker build . -t pytexample -f Dockerfile-example
+docker build . -t pytincture:example -f Dockerfile-example
 ~~~
 Then the docker command to run it is:
 ~~~
-docker run -p8070:8070 -i pytexample
+docker run -p8070:8070 -i pytincture:example
 ~~~
 Load url in browser
 ~~~
