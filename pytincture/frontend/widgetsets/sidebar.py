@@ -10,57 +10,6 @@ from enum import Enum
 from pyodide.ffi import create_proxy
 
 
-"""
-Sidebar methods
-Name	Description
-collapse()	collapses a sidebar
-destructor()	removes a Sidebar instance and releases occupied resources
-disable()	disables and dims items of Sidebar
-enable()	enables disabled items of Sidebar
-expand()	expands a sidebar
-getSelected()	returns an array of IDs of selected items
-hide()	hides items of Sidebar
-isCollapsed()	checks whether Sidebar is collapsed
-isDisabled()	checks whether an item of Ribbon is disabled
-isSelected()	checks whether a specified Sidebar item is selected
-paint()	repaints Sidebar on a page
-select()	selects a specified Sidebar item
-show()	shows items of Sidebar
-toggle()	expands/collapses Sidebar
-unselect()	unselects a selected Sidebar item
- 
-IMPORTANT
-Use TreeCollection methods to work with data.
-
-Sidebar events
-Name	Description
-afterCollapse	fires after collapsing a sidebar
-afterExpand	fires after expanding a sidebar
-afterHide	fires after hiding a sub-item of Sidebar
-beforeCollapse	fires before collapsing a sidebar
-beforeExpand	fires before expanding a sidebar
-beforeHide	fires before hiding a sub-item of Sidebar
-click	fires after a click on a control
-inputBlur	fires when a control is blurred
-inputCreated	fires when a new input is added
-inputFocus	fires when a control is focused
-keydown	fires when any key is pressed and a Sidebar option is in focus
-openMenu	fires on expanding a menu control
- 
-IMPORTANT
-Use TreeCollection events to work with data.
-
-Sidebar properties
-Name	Description
-collapsed	Optional. Defines that a sidebar is initialized in the collapsed state
-css	Optional. Adds style classes to Sidebar
-data	Optional. Specifies an array of data objects to set into Sidebar
-menuCss	Optional. Adds style classes to all containers of Sidebar controls with nested items
-minWidth	Optional. Sets the minimal width of a sidebar in the collapsed state
-width	Optional. Sets the width of a sidebar
-"""
-
-
 class Sidebar:
     """
     Sidebar widget

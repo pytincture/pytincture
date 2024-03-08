@@ -2,7 +2,7 @@
 
 from pytincture.frontend.widgetsets.form import FormTypes
 from pytincture.frontend.widgetsets.window import Window
-from py_ui_data import form_data
+from py_ui_data import py_ui_data as pud
 
 
 class FormExample(Window):
@@ -21,8 +21,9 @@ class FormExample(Window):
             "closeable": True
         }
         super().__init__(widget_config=widget_config)
+        self.pud = pud()
         self.load_ui()
 
     def load_ui(self):
-        #self.add_form(form_data, form_type=FormTy
+        #self.add_form(self.pud.form_data, form_type=FormTy
         pass
