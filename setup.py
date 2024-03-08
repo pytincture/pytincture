@@ -13,7 +13,7 @@ with open('requirements.txt') as reqs:
 
 setup(
     name='pytincture',
-    version='0.2.0',
+    version='0.3.0',
     description=(
         'UI Builder'
     ),
