@@ -1,18 +1,21 @@
+from operator import call
 import os
 
 import uvicorn
 import zipfile
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from pytincture.dataclass import get_parsed_output
+import imp
 import io
 
 
 app = FastAPI()
 
-def create_appcode_pkg_in_memory():
+def create_appcode_pkg_in_memory(host, protocol):
     """ Generate an appcode package in memory for the browser to pull for the frontend."""
     appcode_folder = os.environ["MODULES_PATH"]
 
@@ -29,7 +32,13 @@ def create_appcode_pkg_in_memory():
                 # Exclude the zip file itself, .pyt files, and .pyc files
                 if not (file.endswith('.zip') or file.endswith('.pyt') or file.endswith('.pyc')):
                     if "__pycache__" not in root:
-                        zipf.write(file_path, arcname)
+                        if file.endswith('.py'):
+                            # Get the parsed output of the file
+                            file_contents = get_parsed_output(file_path, host, protocol)
+                            # Write the modified contents to the ZIP archive
+                            zipf.writestr(arcname, file_contents)
+                        else:
+                            zipf.write(file_path, arcname)
 
     # Set the cursor to the beginning of the stream
     in_memory_zip.seek(0)
@@ -88,10 +97,25 @@ def download_pytincture():
 
 #Pytincture package endpoint
 @app.get("/appcode/appcode.pyt")
-def download_appcode():
-    file_like = create_appcode_pkg_in_memory()
+def download_appcode(request: Request):
+    protocol = request.url.scheme
+    host = request.headers["host"]
+    file_like = create_appcode_pkg_in_memory(host, protocol)
     return StreamingResponse(file_like, media_type="application/zip", headers={"Content-Disposition": "attachment; filename=appcode.pyt"})
 
+#Class call endpoint
+@app.get("/classcall/{file_name}/{class_name}/{function_name}")
+async def class_call(file_name, class_name, function_name, request: Request):
+    appcode_folder = os.environ["MODULES_PATH"]
+    file_path = os.path.join(appcode_folder, file_name)
+    lib = imp.load_source(class_name, file_path)
+    cls = getattr(lib, class_name)
+    instance = cls()
+    func = getattr(instance, function_name)
+    if callable(func):
+        return func()
+    else:
+        return func
 
 
 #Static files endpoint

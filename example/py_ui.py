@@ -4,10 +4,10 @@
 """
 import sys
 from pytincture.frontend.widgetsets.layout import MainWindow
+from pytincture.frontend.widgetsets.accordion import PTAccordion
 import copy
 
-from py_ui_data import sidebar_data, toolbar_data, grid_column_data
-
+from py_ui_data import py_ui_data as pud, showmeoff
 
 import form_window
 
@@ -17,6 +17,7 @@ class py_ui(MainWindow):
         super().__init__()
         self.set_theme("custom-theme-dark")
         self.fwin = form_window.FormExample()
+        self.pud = pud()
         self.load_ui()
 
     def load_ui(self):
@@ -35,7 +36,7 @@ class py_ui(MainWindow):
         )
 
         # Create a sidebar and add it to the left column
-        self.sbmain = self.base_layout.add_sidebar(id="left", data=sidebar_data)
+        self.sbmain = self.base_layout.add_sidebar(id="left", data=self.pud.sidebar_data)
         # Have the sidebar start off in collapsed mode
         self.sbmain.collapse()
 
@@ -57,7 +58,7 @@ class py_ui(MainWindow):
         self.maintb = self.sub_layout.add_toolbar(
             id="top",
             toolbar_config = {"css":"dhx_toolbar--text_color_white"},
-            data = toolbar_data
+            data = self.pud.toolbar_data
         )
 
         # Attach a signal to the main toolbar to handle clicks
@@ -67,7 +68,7 @@ class py_ui(MainWindow):
         self.sub_layout.add_grid(
             id="bottom",
             grid_config={"height": "100%", "width": "100%", "selection": "row", "multiselection": True},
-            columns = copy.deepcopy(grid_column_data),
+            columns = copy.deepcopy(self.pud.grid_column_data),
             data_url = "http://localhost:8070/appcode/dataset.json"
         )
 

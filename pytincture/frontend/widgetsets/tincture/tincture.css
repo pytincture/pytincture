@@ -1,0 +1,31 @@
+/* Base styles */
+.pt-accordion-item {
+    border-bottom: 1px solid #ccc;
+  }
+  
+  .pt-accordion-header {
+    background-color: #f4f4f4;
+    padding: 10px;
+    cursor: pointer;
+  }
+  
+  .pt-accordion-content {
+    padding: 10px;
+    display: none;
+  }
+  
+  /* Active state */
+  .active .pt-accordion-content {
+    display: block;
+  }
+  
+  /* Responsive adjustments */
+  @media only screen and (max-width: 600px) {
+    .pt-accordion-header {
+      font-size: 16px; /* Decrease font size for smaller screens */
+    }
+  
+    .pt-accordion-content {
+      padding: 5px; /* Reduce padding for content */
+    }
+  }
