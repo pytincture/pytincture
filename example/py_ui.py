@@ -7,7 +7,7 @@ from pytincture.frontend.widgetsets.layout import MainWindow
 from pytincture.frontend.widgetsets.accordion import PTAccordion
 import copy
 
-from py_ui_data import py_ui_data as pud, showmeoff
+from py_ui_data import py_ui_data as pud
 
 import form_window
 
@@ -65,11 +65,11 @@ class py_ui(MainWindow):
         self.maintb.click(self.menu_clicked)
 
         # Create a grid and add it to the bottom row
-        self.sub_layout.add_grid(
+        self.grid = self.sub_layout.add_grid(
             id="bottom",
             grid_config={"height": "100%", "width": "100%", "selection": "row", "multiselection": True},
             columns = copy.deepcopy(self.pud.grid_column_data),
-            data_url = "http://localhost:8070/appcode/dataset.json"
+            data_url = "/appcode/dataset.json"
         )
 
     def menu_clicked(self, id, e):
