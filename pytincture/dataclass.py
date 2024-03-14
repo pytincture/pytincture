@@ -70,10 +70,14 @@ def generate_stub_classes(file_path, return_url, return_protocol):
 
             class_imports.update(used_imports)
             stub_class_code += f"\nclass {class_name}:\n"
-            stub_class_code += f"    def fetch(self, url, payload, method='GET'):\n"
+            stub_class_code += f"    def fetch(self, url, payload=None, method='GET'):\n"
             stub_class_code += f"        req = XMLHttpRequest.new()\n"
             stub_class_code += f"        req.open(method, url, False)\n"
-            stub_class_code += f"        req.send(JSON.stringify(payload))\n"
+            stub_class_code += f"        req.setRequestHeader('Content-Type', 'application/json')\n"
+            stub_class_code += f"        if payload:\n"
+            stub_class_code += f"            req.send(JSON.stringify(json.dumps(payload)))\n"
+            stub_class_code += f"        else:\n"
+            stub_class_code += f"            req.send()\n"
             stub_class_code += f"        return StringIO(req.response).getvalue()\n"            
             for node in class_node.body:
                 if isinstance(node, ast.FunctionDef) and not node.name.startswith('_'):
@@ -84,12 +88,12 @@ def generate_stub_classes(file_path, return_url, return_protocol):
                     stub_class_code +=  "        return json.loads(response)\n"
                 elif isinstance(node, ast.Assign):
                     for target in node.targets:
-                        if isinstance(target, ast.Name) and isinstance(node.value, ast.List):
+                        if isinstance(target, ast.Name):
                             property_name = target.id
                             stub_class_code +=  "    @property\n"
                             stub_class_code += f"    def {property_name}(self):\n"
                             stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_name}/{class_name}/{property_name}'\n"
-                            stub_class_code +=  "        response = self.fetch(url,{}, 'GET')\n"
+                            stub_class_code +=  "        response = self.fetch(url)\n"
                             stub_class_code +=  "        return json.loads(response)\n"
         else:
             # If the class is not decorated with 'backend_for_frontend', simply write the original class code

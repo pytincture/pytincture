@@ -52,7 +52,8 @@ class py_ui(MainWindow):
                     {"height":"auto", "id": "top"},
                     {"height":"100%", "id": "bottom"}
                 ]
-        })
+            }
+        )
 
         # Create a toolbar and add it to the top row
         self.maintb = self.sub_layout.add_toolbar(
@@ -68,9 +69,11 @@ class py_ui(MainWindow):
         self.grid = self.sub_layout.add_grid(
             id="bottom",
             grid_config={"height": "100%", "width": "100%", "selection": "row", "multiselection": True},
-            columns = copy.deepcopy(self.pud.grid_column_data),
-            data_url = "/appcode/dataset.json"
+            columns = copy.deepcopy(self.pud.grid_column_data)
         )
+
+        self.grid.parse(self.pud.dataset())
+        print(self.pud.printme())
 
     def menu_clicked(self, id, e):
         # Handle clicks on the main toolbar

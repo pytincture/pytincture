@@ -155,7 +155,11 @@ class py_ui_data:
         }
     ]
 
-
+    def dataset(self):
+        return open("dataset.json", "r").read()
+    
+    def printme(self):
+        return "hello how are you"
 
 class showmeoff():
     def __init__(self):
