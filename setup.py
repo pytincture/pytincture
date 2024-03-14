@@ -16,7 +16,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name='pytincture',
-    version='0.4.0',
+    version='0.4.1',
     description=(
         'UI Builder'
     ),
