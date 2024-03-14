@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pytincture.dataclass import get_parsed_output
 import imp
+import json
 import io
 
 
@@ -105,6 +106,7 @@ def download_appcode(request: Request):
 
 #Class call endpoint
 @app.get("/classcall/{file_name}/{class_name}/{function_name}")
+@app.post("/classcall/{file_name}/{class_name}/{function_name}")
 async def class_call(file_name, class_name, function_name, request: Request):
     appcode_folder = os.environ["MODULES_PATH"]
     file_path = os.path.join(appcode_folder, file_name)
@@ -113,7 +115,9 @@ async def class_call(file_name, class_name, function_name, request: Request):
     instance = cls()
     func = getattr(instance, function_name)
     if callable(func):
-        return func()
+        data = await request.json()
+        data = json.loads(data)
+        return func(*data["args"], **data["kwargs"])
     else:
         return func
 
