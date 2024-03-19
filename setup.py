@@ -11,12 +11,17 @@ version = {}
 with open('requirements.txt') as reqs:
     install_requires = reqs.read().splitlines()
 
+with open("README.md", "r", encoding="utf-8") as fh:
+    long_description = fh.read()
+
 setup(
     name='pytincture',
-    version='0.4.0',
+    version='0.4.1',
     description=(
         'UI Builder'
     ),
+    long_description=long_description,
+    long_description_content_type="text/markdown",
     packages = find_packages(),
     install_requires=install_requires,
     include_package_data=True
