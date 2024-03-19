@@ -33,7 +33,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
         with:
-          images: schapman1974/pytincture
+          images: pytincture/pytincture
       
       - name: Build and push Docker image
         uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
@@ -41,5 +41,5 @@ jobs:
           context: .
           file: ./Dockerfile-example
           push: true
-          tags: schapman1974/pytincture:example${{ steps.get_version.outputs.version }}
+          tags: pytincture/pytincture:example${{ steps.get_version.outputs.version }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -16,7 +16,7 @@
 ## Docker Quick Start
 Run the docker image directly from Dockerhub
 ~~~
-docker run -p8070:8070 -i schapman1974/pytincture:example041
+docker run -p8070:8070 -i pytincture/pytincture:example041
 ~~~
 Load url in browser
 ~~~
