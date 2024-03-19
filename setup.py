@@ -20,6 +20,7 @@ setup(
     description=(
         'UI Builder'
     ),
+    url="https://github.com/pytincture/pytincture",
     long_description=long_description,
     long_description_content_type="text/markdown",
     packages = find_packages(),
