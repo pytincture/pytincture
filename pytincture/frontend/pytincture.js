@@ -5,6 +5,7 @@ async function runTinctureApp(application, widgetlib) {
     let pyodide = await loadPyodide({ indexURL: PYODIDE_BASE_URL });
 
     // Install and load dhxpyt package
+    await pyodide.loadPackage("micropip");
     await installAndLoadDhxpyt(pyodide);
 
     // let ptResponse = await fetch("appcode/pytincture.zip");
@@ -29,7 +30,7 @@ async function installAndLoadDhxpyt(pyodide) {
             sysconfig.get_paths()['purelib']
         `);
 
-        const directoryPath = 'path/in/package'; // Adjust this path according to the structure of your package
+        const directoryPath = '/'; // Adjust this path according to the structure of your package
 
         const registerFilesCode = `
             import os

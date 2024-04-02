@@ -9,7 +9,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pytincture.dataclass import get_parsed_output
-import importlib
+from importlib.machinery import SourceFileLoader
+from typing import Callable
 import json
 import io
 
@@ -111,11 +112,10 @@ async def class_call(file_name: str, class_name: str, function_name: str, reques
     appcode_folder = os.environ["MODULES_PATH"]
     file_path = os.path.join(appcode_folder, file_name)
     
-    spec = importlib.util.spec_from_file_location(class_name, file_path)
-    lib = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(lib)
+    loader = SourceFileLoader(class_name, file_path)
+    spec = loader.load_module()
     
-    cls = getattr(lib, class_name)
+    cls = getattr(spec, class_name)
     instance = cls()
     func = getattr(instance, function_name)
     
