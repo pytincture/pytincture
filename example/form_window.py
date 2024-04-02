@@ -1,7 +1,7 @@
 
 
-from pytincture.frontend.widgetsets.form import FormTypes
-from pytincture.frontend.widgetsets.window import Window
+from dhxpyt.form import FormTypes
+from dhxpyt.window import Window
 from py_ui_data import py_ui_data as pud
 
 

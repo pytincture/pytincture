@@ -7,3 +7,4 @@ uvicorn==0.29.0
 wheel==0.43.0
 js==1.0
 pyodide-py==0.25.0
+dhxpyt==0.4.2
