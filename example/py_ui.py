@@ -3,8 +3,8 @@
  Example application
 """
 import sys
-from pytincture.frontend.widgetsets.layout import MainWindow
-from pytincture.frontend.widgetsets.accordion import PTAccordion
+from dhxpyt.layout import MainWindow
+from dhxpyt.accordion import PTAccordion
 import copy
 
 from py_ui_data import py_ui_data as pud
