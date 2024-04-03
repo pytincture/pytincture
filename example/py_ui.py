@@ -5,6 +5,7 @@
 import sys
 from dhxpyt.layout import MainWindow
 from dhxpyt.accordion import PTAccordion
+import json
 import copy
 
 from py_ui_data import py_ui_data as pud
@@ -15,7 +16,7 @@ import form_window
 class py_ui(MainWindow):
     def __init__(self):
         super().__init__()
-        self.set_theme("custom-theme-dark")
+        self.set_theme("dark") 
         self.fwin = form_window.FormExample()
         self.pud = pud()
         self.load_ui()
