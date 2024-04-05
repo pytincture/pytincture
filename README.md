@@ -39,6 +39,6 @@ http://localhost:8070/py_ui
 
 
 ## License
-`pyTincture` is licensed under the GPL 2.0 License.
+`pyTincture` is licensed under the MIT License.
 
 
