@@ -4,13 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pytincture"
-version = "0.5.0"
+version = "0.4.5"
 description = "UI Builder"
 readme = "README.md"
-readme-content-type = "text/markdown"
 license = { text = "Specify your license here" }
 authors = [
-    { name = "Your Name", email = "your.email@example.com" }
+    { name = "Your Name", email = "schapman1974@gmail.com" }
 ]
 dependencies = [
     "aiofiles==23.2.1",
@@ -24,8 +23,9 @@ dependencies = [
     "pyodide-py==0.26.1",
     "dhxpyt==0.4.6"
 ]
-homepage = "https://github.com/pytincture/pytincture"
-include = ["*.md", "*.txt", "LICENSE", "path/to/include/*"]
 
 [project.urls]
 Homepage = "https://github.com/pytincture/pytincture"
+
+[tool.setuptools.packages]
+find = {}
