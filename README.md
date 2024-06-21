@@ -1,5 +1,9 @@
 # pyTincture
 
+## pyTincture GPT
+Ask pyTincture chatGPT anything
+https://chatgpt.com/g/g-qi9TyLKdn-pytincture-gpt
+
 ## Overview
 `pyTincture` is a Python framework designed to leverage the capabilities of Pyodide, enabling developers to create sophisticated and user-friendly GUI libraries. This project aims to bridge the gap between Python's powerful backend and intuitive, interactive frontend interfaces.
 
