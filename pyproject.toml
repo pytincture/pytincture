@@ -21,7 +21,7 @@ dependencies = [
     "wheel==0.43.0",
     "js==1.0",
     "pyodide-py==0.26.1",
-    "dhxpyt==0.4.6"
+    "dhxpyt==0.4.7"
 ]
 
 [project.urls]
