@@ -1,4 +1,4 @@
-FROM python:3.11
+FROM python:3.12
 
 RUN pip install --upgrade pip
 
@@ -6,11 +6,7 @@ ADD . /pyTincture/
 
 WORKDIR /pyTincture
 
-RUN ["pip", "install", "-r", "requirements.txt"]
-
-RUN python setup.py bdist_wheel
-
-RUN pip install dist/pytincture-0.5.0-py3-none-any.whl
+RUN ["pip", "install", "pytincture==0.5.1"]
 
 WORKDIR /pyTincture/example
 
