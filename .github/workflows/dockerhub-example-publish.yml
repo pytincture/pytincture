@@ -22,7 +22,7 @@ jobs:
         run: |
           VERSION=$(grep -Po '(?<=version = ")[^"]*' pyproject.toml)
           VERSION_NO_DOTS=${VERSION//./}
-          echo "::set-output name=version::${VERSION}"
+          echo "::set-output name=version::${VERSION_NO_DOTS}"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a
