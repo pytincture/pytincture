@@ -6,7 +6,7 @@ ADD . /pyTincture/
 
 WORKDIR /pyTincture
 
-RUN ["pip", "install", "pytincture==0.5.2"]
+RUN ["pip", "install", "pytincture==0.5.3"]
 
 WORKDIR /pyTincture/example
 
