@@ -18,7 +18,7 @@ dependencies = [
     "pyyaml==6.0.1",
     "requests==2.32.3",
     "uvicorn==0.30.3",
-    "wheel==0.43.0",
+    "wheel==0.44.0",
     "js==1.0",
     "pyodide-py==0.26.2",
     "dhxpyt==0.4.7"
