@@ -6,7 +6,7 @@ async function runTinctureApp(application, widgetlib) {
 
     // Install and load widget package
     await pyodide.loadPackage("micropip");
-    await installAndLoadWidgetset(pyodide, 'dhxpyt');
+    await installAndLoadWidgetset(pyodide, widgetlib);
 
     let appResponse = await fetch("appcode/appcode.pyt");
     let appBinary = await appResponse.arrayBuffer();
