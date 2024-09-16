@@ -17,24 +17,10 @@ https://chatgpt.com/g/g-hBARPTRn2-pytincture-gpt
 - Python 3.x
 - Pyodide
 
-## Docker Quick Start
+## Docker Quick Start Example built from https://github.com/pytincture/pytincture_example
 Run the docker image directly from Dockerhub
 ~~~
-docker run -p8070:8070 -i pytincture/pytincture:example053
-~~~
-Load url in browser
-~~~
-http://localhost:8070/py_ui
-~~~
-
-## Docker build from repo
-Docker command to build this example is:
-~~~
-docker build . -t pytincture:example -f Dockerfile-example
-~~~
-Then the docker command to run it is:
-~~~
-docker run -p8070:8070 -i pytincture:example
+docker run -p8070:8070 -i pytincture/pytincture:latest
 ~~~
 Load url in browser
 ~~~
