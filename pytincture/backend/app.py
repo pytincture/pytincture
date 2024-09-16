@@ -47,6 +47,40 @@ def create_appcode_pkg_in_memory(host, protocol):
     
     return in_memory_zip
 
+def get_widgetset(application, static_path):
+    """
+    Scan the application file and its imports to find the widgetset.
+    """
+    app_file_path = f"{static_path}/{application}.py"
+    imports = []
+    widgetset = None
+
+    # Check if the application file exists
+    if os.path.exists(app_file_path):
+        with open(app_file_path, 'r') as app_file:
+            # Regex to capture both "import" and "from ... import ..." statements
+            import_pattern = re.compile(r'^\s*(import|from)\s+([a-zA-Z0-9_]+)')
+            
+            # Scan each line of the file
+            for line in app_file:
+                match = import_pattern.match(line)
+                if match:
+                    module_name = match.group(2)  # Extract the module name
+                    imports.append(module_name)
+
+    # Try importing each module and check for `__widgetset__`
+    for module_name in imports:
+        try:
+            module = importlib.import_module(module_name)
+            if hasattr(module, '__widgetset__'):
+                widgetset = getattr(module, '__widgetset__')  # Use the widgetset from the module
+                break  # Stop once we find the widgetset
+        except ModuleNotFoundError:
+            continue  # Skip if the module is not found
+
+    # If no widgetset is found, return a default one
+    return widgetset if widgetset else ""
+
 def create_pytincture_pkg_in_memory():
     """ Generate a pytincture widgetset package in memory """
     pytincture_folder = os.path.join(os.path.dirname(__file__), "../../pytincture")
@@ -136,7 +170,12 @@ async def main(function_name, data_module):
 #Application endpoint
 @app.get("/{application}", response_class=HTMLResponse)
 async def main(response: Response, application):
-    index = open(f"{STATIC_PATH}/index.html").read().replace("***APPLICATION***", application)
+    appcode_folder = os.environ["MODULES_PATH"]
+    widgetset = get_widgetset(application, appcode_folder)
+
+    index = open(f"{STATIC_PATH}/index.html").read()
+    index = index.replace("***APPLICATION***", application)
+    index = index.replace("***WIDGETSET***", widgetset)  # Use the detected widgetset
     return index
 
 if __name__ == "__main__":
