@@ -111,6 +111,8 @@ def create_pytincture_pkg_in_memory():
 
 origins = (
     "https://pypi.org",
+    "http://0.0.0.0:8070",
+    "http://localhost:8070",
 )
 
 app.add_middleware(

@@ -7,6 +7,7 @@ async function runTinctureApp(application, widgetlib) {
     // Install and load widget package
     await pyodide.loadPackage("micropip");
     await installAndLoadWidgetset(pyodide, widgetlib);
+    await installAndLoadWidgetset(pyodide, "http://0.0.0.0:8070/appcode/dhxpyt-0.6.0-py3-none-any.whl");
 
     let appResponse = await fetch("appcode/appcode.pyt");
     let appBinary = await appResponse.arrayBuffer();
@@ -37,21 +38,30 @@ async function installAndLoadWidgetset(pyodide, widgetlib) {
             
             # Function to replace font URLs with base64 data URLs in CSS content
             def replace_font_urls(css_content, font_folder_path):
-                # Find all font file names in the folder
+                # Find all font files in the folder (e.g., .woff, .woff2)
                 font_files = [f for f in os.listdir(font_folder_path) if os.path.isfile(os.path.join(font_folder_path, f))]
 
                 # Replace URLs in CSS content
                 for font_file in font_files:
-                    font_file_path = os.path.join(font_folder_path, font_file)
-                    with open(font_file_path, "rb") as f:
-                        # Read font file content and encode it in base64
-                        font_data = base64.b64encode(f.read()).decode("utf-8")
+                    print("replacing font file:", font_file)
+                    font_extension = font_file.split('.')[-1].lower()
+                    if font_extension in ['woff', 'woff2']:  # Ensure we're dealing with font files
+                        font_file_path = os.path.join(font_folder_path, font_file)
+                        with open(font_file_path, "rb") as f:
+                            # Read font file content and encode it in base64
+                            font_data = base64.b64encode(f.read()).decode("utf-8")
 
-                    # Replace font file URLs in CSS content
-                    css_content = re.sub(r"""url\(['\"]?(\.\./)*([^'\"].*?)['\"]?\)""", 
-                                        f"url(data:font/{font_file.split('.')[-1]};charset=utf-8;base64,{font_data})", 
-                                        css_content)
+                        # Construct the MIME type based on the font extension
+                        mime_type = f"font/{font_extension}"
 
+                        # Replace font file URLs in CSS content with base64 encoded font data
+                        # Match URL formats like url('./fonts/font.woff') or url('./fonts/font.woff2')
+                        css_content = re.sub(
+                            rf"""url\(['"]?\.\/fonts\/{re.escape(font_file)}['"]?\)""", 
+                            f"url(data:{mime_type};charset=utf-8;base64,{font_data})", 
+                            css_content
+                        )
+                
                 return css_content
             
             # Package path
