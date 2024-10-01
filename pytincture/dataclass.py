@@ -1,5 +1,5 @@
-import re
 import ast
+from os import sep
 
 def backend_for_frontend(cls):
     class BackendForFrontendWrapper:
@@ -49,7 +49,7 @@ def generate_stub_classes(file_path, return_url, return_protocol):
     with open(file_path, 'r') as file:
         code = file.read()
     
-    file_name = file_path.split("/")[-1]
+    file_name = file_path.split(sep)[-1]
 
     if not "@backend_for_frontend" in code:
         return code
