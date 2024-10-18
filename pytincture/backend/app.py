@@ -35,13 +35,16 @@ def create_appcode_pkg_in_memory(host, protocol):
                 # Calculate arcname to be relative to appcode_folder
                 arcname = os.path.relpath(file_path, appcode_folder)
                 # Exclude the zip file itself, .pyt files, and .pyc files
-                if not (file.endswith('.zip') or file.endswith('.pyt') or file.endswith('.pyc')):
+                if not (file.endswith('.zip') or file.endswith('.pyt') or file.endswith('.pyc') or file.endswith('.whl')):
                     if "__pycache__" not in root:
                         if file.endswith('.py'):
                             # Get the parsed output of the file
                             file_contents = get_parsed_output(file_path, host, protocol)
                             # Write the modified contents to the ZIP archive
-                            zipf.writestr(arcname, file_contents)
+                            if not os.path.getsize(file_path) == 0:
+                                zipf.writestr(arcname, file_contents)
+                            else:
+                                zipf.write(file_path, arcname)
                         else:
                             zipf.write(file_path, arcname)
 
