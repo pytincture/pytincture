@@ -1,4 +1,5 @@
 import ast
+from decimal import Subnormal
 from os import sep
 
 def backend_for_frontend(cls):
@@ -37,11 +38,11 @@ def get_imports_used_in_class(file_path, class_name):
         if isinstance(node, ast.ClassDef) and node.name == class_name:
             for subnode in ast.walk(node):
                 if isinstance(subnode, ast.Name) and subnode.id in imports:
-                    imports_used.add(f"import {subnode.id}")
-                elif isinstance(subnode, ast.Attribute) and isinstance(subnode.value, ast.Name):
-                    full_name = f"import {subnode.attr}"
-                    if full_name in imports:
-                        imports_used.add(full_name)
+                    imports_used.add(subnode.id)
+                #elif isinstance(subnode, ast.Attribute) and isinstance(subnode.value, ast.Name):
+                #    full_name = f"import {subnode.attr}"
+                #    if full_name in imports:
+                #        imports_used.add(full_name)
 
     return import_lines, imports_used
 
@@ -67,7 +68,7 @@ def generate_stub_classes(file_path, return_url, return_protocol):
 
         if any(isinstance(decorator, ast.Name) and decorator.id == 'backend_for_frontend' for decorator in class_node.decorator_list):
             _, used_imports = get_imports_used_in_class(file_path, class_name)
-
+            #print(used_imports)
             class_imports.update(used_imports)
             stub_class_code += f"\nclass {class_name}:\n"
             stub_class_code += f"    def fetch(self, url, payload=None, method='GET'):\n"
@@ -104,7 +105,8 @@ def generate_stub_classes(file_path, return_url, return_protocol):
     all_imports.add("from io import StringIO")
     # Write imports
     for imp in all_imports:
-        if not imp in class_imports and not "backend_for_frontend" in imp:
+        if not any(c_import in imp for c_import in class_imports) and not "backend_for_frontend" in imp:
+        #if not imp in class_imports and not "backend_for_frontend" in imp:
             stub_class_code = f"{imp}\n" + stub_class_code
 
     return stub_class_code
@@ -113,3 +115,8 @@ def get_parsed_output(file_path, return_url, return_protocol="http"):
     stub_code = generate_stub_classes(file_path, return_url, return_protocol)
     if stub_code:
         return stub_code
+
+
+if __name__ == "__main__":
+    import sys
+    print(generate_stub_classes(sys.argv[1],"test","http"))
