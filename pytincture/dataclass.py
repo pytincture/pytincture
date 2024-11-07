@@ -64,7 +64,7 @@ def generate_stub_classes(file_path, return_url, return_protocol):
     used_imports = set()
     for class_node in class_nodes:
         class_name = class_node.name
-        all_imports, _ = get_imports_used_in_class(file_path, class_name)
+        #all_imports, _ = get_imports_used_in_class(file_path, class_name)
 
         if any(isinstance(decorator, ast.Name) and decorator.id == 'backend_for_frontend' for decorator in class_node.decorator_list):
             _, used_imports = get_imports_used_in_class(file_path, class_name)
