@@ -20,7 +20,7 @@ dependencies = [
     "uvicorn==0.32.0",
     "wheel==0.44.0",
     "js==1.0",
-    "pyodide-py==0.26.3"
+    "pyodide-py==0.26.4"
 ]
 
 [project.urls]
