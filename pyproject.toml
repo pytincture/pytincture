@@ -17,7 +17,7 @@ dependencies = [
     "pymemcache==4.0.0",
     "pyyaml==6.0.2",
     "requests==2.32.3",
-    "uvicorn==0.32.0",
+    "uvicorn==0.32.1",
     "wheel==0.44.0",
     "js==1.0",
     "pyodide-py==0.26.3"
