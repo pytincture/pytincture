@@ -6,8 +6,9 @@ import sys
 import uvicorn
 import zipfile
 from fastapi import FastAPI, Response, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pytincture.dataclass import get_parsed_output
@@ -52,6 +53,13 @@ def create_appcode_pkg_in_memory(host, protocol):
     in_memory_zip.seek(0)
     
     return in_memory_zip
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": exc.body},
+    )
 
 def get_widgetset(application, static_path):
     """
@@ -167,6 +175,11 @@ async def class_call(file_name: str, class_name: str, function_name: str, reques
         return func(*data["args"], **data["kwargs"])
     else:
         return func
+
+@app.post("/logs")
+async def main(request: Request):
+    data = await request.json()
+    print(data)
 
 #Static files endpoint
 app.mount("/appcode", StaticFiles(directory=MODULE_PATH), name="static")

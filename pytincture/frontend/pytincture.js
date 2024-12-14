@@ -1,4 +1,32 @@
 
+
+// Function to send logs to the backend
+function sendToBackend(level, message) {
+    fetch("/logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ level: level, message: message, timestamp: new Date().toISOString() }),
+    }).catch(err => {
+        // Only log the failure to send, don't interfere with the original log
+        console.error("Failed to send log to backend:", err);
+    });
+}
+
+// Override console methods
+["log", "warn", "error", "info", "debug"].forEach(level => {
+    const originalMethod = console[level]; // Keep the original console method
+    console[level] = function (...args) {
+        const message = args.map(arg => (typeof arg === "object" ? JSON.stringify(arg) : arg)).join(" ");
+
+        // Send the log to the backend
+        sendToBackend(level, message);
+
+        // Call the original console method to display logs in the browser console
+        originalMethod.apply(console, args);
+    };
+});
+
+
 const PYODIDE_BASE_URL = "https://cdn.jsdelivr.net/pyodide/v0.26.3/full/";
 
 async function runTinctureApp(application, widgetlib) {
@@ -7,7 +35,7 @@ async function runTinctureApp(application, widgetlib) {
     // Install and load widget package
     await pyodide.loadPackage("micropip");
     await installAndLoadWidgetset(pyodide, widgetlib);
-    //await installAndLoadWidgetset(pyodide, "http://0.0.0.0:8070/appcode/dhxpyt-0.6.4-py3-none-any.whl");
+    await installAndLoadWidgetset(pyodide, "http://0.0.0.0:8070/appcode/dhxpyt-0.6.4-py3-none-any.whl");
 
     let appResponse = await fetch("appcode/appcode.pyt");
     let appBinary = await appResponse.arrayBuffer();
