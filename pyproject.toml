@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pytincture"
-version = "0.6.7"
+version = "0.6.8"
 description = "UI Builder"
 readme = "README.md"
 license = { text = "MIT" }
@@ -23,8 +23,7 @@ dependencies = [
     "pyodide-py==0.27.0",
     "authlib==1.3.0",
     "python-dotenv==1.0.0",
-    "aioredis==2.0.0",
-    "fastapi-redis-session==0.4.1"
+    "aioredis==2.0.0"
 ]
 
 [project.urls]
