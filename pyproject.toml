@@ -20,7 +20,7 @@ dependencies = [
     "uvicorn==0.32.1",
     "wheel==0.45.1",
     "js==1.0",
-    "pyodide-py==0.26.4",
+    "pyodide-py==0.27.0",
     "authlib==1.3.0",
     "python-dotenv==1.0.0",
     "aioredis==2.0.0",
