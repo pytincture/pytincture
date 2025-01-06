@@ -11,10 +11,20 @@
 <body>
     <script>runTinctureApp("***APPLICATION***", "***WIDGETSET***");</script>
     <div id="maindiv" style="width: 100%; height: 100vh;"></div>
-    <div id="cookie-banner" style="display:none;">
-        <p>This site uses cookies to enhance your experience.</p>
-        <button id="accept-btn">Accept</button>
-        <button id="reject-btn">Reject</button>
-    </div>
+    <div id="cookie-banner" style="
+        display: none; 
+        position: fixed; 
+        bottom: 0; 
+        left: 0; 
+        width: 100%; 
+        background-color: #fff; 
+        padding: 1rem; 
+        z-index: 9999;
+        box-shadow: 0 -2px 5px rgba(0,0,0,0.2);
+    ">
+    <p>This site uses cookies to enhance your experience.</p>
+    <button id="accept-btn">Accept</button>
+    <button id="reject-btn">Reject</button>
+  </div>
 </body>
 </html>
