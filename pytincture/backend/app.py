@@ -87,7 +87,10 @@ def get_widgetset(application, static_path):
         try:
             module = importlib.import_module(module_name)
             if hasattr(module, '__widgetset__'):
-                widgetset = getattr(module, '__widgetset__')  # Use the widgetset from the module
+                version = ""
+                if hasattr(module, '__version__'):
+                    version = "==" + getattr(module, '__version__')
+                widgetset = getattr(module, '__widgetset__')+version  # Use the widgetset from the module
                 break  # Stop once we find the widgetset
         except ModuleNotFoundError:
             continue  # Skip if the module is not found
