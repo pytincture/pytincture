@@ -44,10 +44,10 @@ async function runTinctureApp(application, widgetlib) {
 }
 
 async function installAndLoadWidgetset(pyodide, widgetlib) {
-    //try {
+    try {
         await pyodide.runPythonAsync(`
             import micropip
-            await micropip.install('dhxpyt');
+            await micropip.install('${widgetlib}');
         `);
 
         const loadFilesCode = `
@@ -100,7 +100,6 @@ async function installAndLoadWidgetset(pyodide, widgetlib) {
                 for file in files:
                     file_path = os.path.join(root, file)
                     file_extension = os.path.splitext(file_path)[1].lower()
-                    print(file_path)
                     if file_extension == '.js':
                         with open(file_path) as f:
                             script_content = f.read()
@@ -117,7 +116,7 @@ async function installAndLoadWidgetset(pyodide, widgetlib) {
         
             `;
         await pyodide.runPythonAsync(loadFilesCode);
-    //} catch (error) {
-    //    console.error("Error installing and loading" + widgetlib, error);
-    //}
+    } catch (error) {
+        console.error('Error installing and loading ${widgetlib}:', error);
+    }
 }
