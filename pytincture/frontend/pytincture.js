@@ -32,15 +32,36 @@ const PYODIDE_BASE_URL = "https://cdn.jsdelivr.net/pyodide/v0.27.0/full/";
 async function runTinctureApp(application, widgetlib) {
     let pyodide = await loadPyodide({ indexURL: PYODIDE_BASE_URL });
 
-    // Install and load widget package
+    // Install and load the widget package
     await pyodide.loadPackage("micropip");
-    await installAndLoadWidgetset(pyodide, widgetlib);
-    //await installAndLoadWidgetset(pyodide, "http://0.0.0.0:8070/appcode/dhxpyt-0.6.4-py3-none-any.whl");
 
+    // Function to check if the URL exists
+    async function urlExists(url) {
+        try {
+            let response = await fetch(url, { method: "HEAD" });
+            return response.ok;
+        } catch (err) {
+            console.warn(`Failed to check URL: ${url}`, err);
+            return false;
+        }
+    }
+
+    let widgetUrl = "http://0.0.0.0:8070/appcode/dhxpyt-99.99.99-py3-none-any.whl";
+    if (await urlExists(widgetUrl)) {
+        // If the URL exists, install and load the widget package from the URL
+        await installAndLoadWidgetset(pyodide, widgetUrl);
+    } else {
+        // Otherwise, fallback to loading the provided widgetlib
+        await installAndLoadWidgetset(pyodide, widgetlib);
+    }
+
+    // Load and execute the application code
     let appResponse = await fetch("appcode/appcode.pyt");
     let appBinary = await appResponse.arrayBuffer();
     pyodide.unpackArchive(appBinary, "zip");
-    pyodide.runPython("from " + application + " import " + application + " as app\napp()");
+    pyodide.runPython(
+        `from ${application} import ${application} as app\napp()`
+    );
 }
 
 async function installAndLoadWidgetset(pyodide, widgetlib) {
