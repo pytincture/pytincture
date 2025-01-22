@@ -1,6 +1,9 @@
 """
 pyTincture uvicorn launcher
 """
+
+__version__ = "0.7.5"
+
 from multiprocessing import Process, freeze_support
 import os
 import signal
@@ -23,9 +26,12 @@ def main(port, ssl_keyfile=None, ssl_certfile=None):
     )
 
 
-def launch_service(modules_folder=os.getcwd(), port=8070, ssl_keyfile=None, ssl_certfile=None):
+def launch_service(modules_folder=os.getcwd(), port=8070, ssl_keyfile=None, ssl_certfile=None, env_vars: dict = {}):
     os.environ["MODULES_PATH"] = modules_folder
         
+    for akey, value in env_vars.items():
+        os.environ[akey] = value
+
     main_application = Process(target=main, args=(port, ssl_keyfile, ssl_certfile,))
     # launch data and main applications
     main_application.start()

@@ -247,9 +247,15 @@ async def auth_google_callback(request: Request):
         token = await oauth.google.authorize_access_token(request)
     except OAuthError as e:
         return JSONResponse({"error": str(e)}, status_code=401)
+    
+    user_info = token.get("userinfo")
 
     # You can optionally grab user info from token["userinfo"]
-    user_info = token.get("userinfo")
+    if os.getenv("ALLOWED_EMAILS", "") != "":
+        print("ALLOWED_EMAILS", os.getenv("ALLOWED_EMAILS"))
+        if not user_info.get("email", "z@z") in os.getenv("ALLOWED_EMAILS"):
+            return JSONResponse({"error": "Not authorized"}, status_code=401)
+
     request.session["user"] = user_info  # store in session
 
     # See if we stored a "return_to" path earlier; default to "/"
