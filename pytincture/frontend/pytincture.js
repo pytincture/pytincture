@@ -27,7 +27,7 @@ function sendToBackend(level, message) {
 });
 
 
-const PYODIDE_BASE_URL = "https://cdn.jsdelivr.net/pyodide/v0.27.0/full/";
+const PYODIDE_BASE_URL = "https://cdn.jsdelivr.net/pyodide/v0.27.1/full/";
 
 async function runTinctureApp(application, widgetlib) {
     let pyodide = await loadPyodide({ indexURL: PYODIDE_BASE_URL });
@@ -68,6 +68,7 @@ async function installAndLoadWidgetset(pyodide, widgetlib) {
     try {
         await pyodide.runPythonAsync(`
             import micropip
+            await micropip.install("python-dotenv")
             await micropip.install('${widgetlib}');
         `);
 

@@ -3,11 +3,26 @@ from decimal import Subnormal
 from os import sep
 
 def backend_for_frontend(cls):
+    """
+    A decorator that wraps `cls` in a proxy/wrapper class.
+    The wrapper intercepts __init__, so we can capture `_user`
+    (or any other special arguments) and store them on the
+    real instance automatically.
+    """
     class BackendForFrontendWrapper:
         def __init__(self, *args, **kwargs):
+            # Extract special `_user` kwarg if present
+            self._user = kwargs.pop('_user', None)
+
+            # Instantiate the real class
             self._real_instance = cls(*args, **kwargs)
 
+            # Optionally store the user info on the real instance
+            if self._user is not None:
+                setattr(self._real_instance, '_user', self._user)
+
         def __getattr__(self, item):
+            # Forward attribute/method lookups to the real instance
             return getattr(self._real_instance, item)
 
     return BackendForFrontendWrapper

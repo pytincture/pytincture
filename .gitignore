@@ -17,3 +17,4 @@ dist/*.whl
 *.zip
 *.pyt
 .DS_Store
+pytincture/backend/.env
