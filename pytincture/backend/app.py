@@ -51,6 +51,15 @@ def create_appcode_pkg_in_memory(host, protocol):
     in_memory_zip.seek(0)
     return in_memory_zip
 
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    """
+    Serves the favicon.ico file.
+    """
+    pass
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
     return JSONResponse(
@@ -121,20 +130,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount the frontend static files
 STATIC_PATH = os.path.join(os.path.dirname(__file__), "../frontend/")
 MODULE_PATH = os.environ.get("MODULES_PATH")
 
 app.mount("/frontend", StaticFiles(directory=STATIC_PATH), name="static")
 
 def require_auth(request: Request):
-    user_session = request.session.get("user")
-    if not user_session:
-        raise HTTPException(status_code=401, detail="Not authenticated.")
-    # Optionally return user info if you need it in the endpoint
-    return user_session
+    if ENABLE_GOOGLE_AUTH or ENABLE_USER_LOGIN:
+        user_session = request.session.get("user")
+        if not user_session:
+            raise HTTPException(status_code=401, detail="Not authenticated.")
+        # Optionally return user info if you need it in the endpoint
+        return user_session
+    else:
+        return {
+            "email": "",
+            "password": "",
+            "picture": "appcode/profile.png"
+        }
 
-
-# 2) Protect the endpoints using `Depends(require_auth)`
 
 @app.get("/appcode/pytincture.zip")
 def download_pytincture(user=Depends(require_auth)):
@@ -207,6 +222,8 @@ async def main(function_name, data_module):
 # GOOGLE OAUTH2 SETUP
 # ================
 
+ENABLE_GOOGLE_AUTH = os.getenv("ENABLE_GOOGLE_AUTH", "false").lower() == "true"
+ENABLE_USER_LOGIN = os.getenv("ENABLE_USER_LOGIN", "false").lower() == "true"
 
 config_data = {
     "GOOGLE_CLIENT_ID": os.getenv("GOOGLE_CLIENT_ID", ""),
@@ -216,15 +233,18 @@ config_data = {
 config = Config(environ=config_data)
 
 # Create an OAuth object and register the Google provider
-oauth = OAuth(config)
-oauth.register(
-    name="google",
-    client_id=config.get("GOOGLE_CLIENT_ID"),
-    client_secret=config.get("GOOGLE_CLIENT_SECRET"),
-    # Use the well-known OIDC discovery document
-    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile"},
-)
+if ENABLE_GOOGLE_AUTH:
+    oauth = OAuth(config)
+    oauth.register(
+        name="google",
+        client_id=config.get("GOOGLE_CLIENT_ID"),
+        client_secret=config.get("GOOGLE_CLIENT_SECRET"),
+        # Use the well-known OIDC discovery document
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+    )
+else:
+    oauth = None
 
 # Add session middleware (needed to store "return_to" and user info)
 app.add_middleware(SessionMiddleware, secret_key=config.get("SECRET_KEY"))
@@ -253,13 +273,14 @@ async def auth_google_callback(request: Request):
     # You can optionally grab user info from token["userinfo"]
     if os.getenv("ALLOWED_EMAILS", "") != "":
         print("ALLOWED_EMAILS", os.getenv("ALLOWED_EMAILS"))
-        if not user_info.get("email", "z@z") in os.getenv("ALLOWED_EMAILS"):
+        allowed_emails = os.getenv("ALLOWED_EMAILS").split(",")  # Assuming comma-separated
+        if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
             return JSONResponse({"error": "Not authorized"}, status_code=401)
 
     request.session["user"] = user_info  # store in session
 
     # See if we stored a "return_to" path earlier; default to "/"
-    return_to = request.session.pop("return_to", "/")
+    return_to = request.session.get("return_to", "/")
     return RedirectResponse(url=return_to)
 
 @app.get("/auth/logout")
@@ -273,7 +294,178 @@ def logout(request: Request):
     # request.session.pop("token", None)
 
     # 3) Redirect anywhere in *your* app after local logout
-    return RedirectResponse(url="/")
+    return RedirectResponse(url="/login", status_code=302)
+
+# ======================
+# LOGIN PAGE
+# ======================
+
+@app.get("/login", response_class=HTMLResponse)
+async def login(request: Request):
+    """
+    Serves the login page with options to login via Google and/or Email/Password based on configuration.
+    """
+    # Retrieve configuration flags from environment variables
+    ENABLE_GOOGLE_AUTH = os.environ.get("ENABLE_GOOGLE_AUTH", "false").lower() == "true"
+    ENABLE_USER_LOGIN = os.environ.get("ENABLE_USER_LOGIN", "false").lower() == "true"
+
+    # Start building the HTML content
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Login</title>
+        <style>
+            body { 
+                display: flex; 
+                justify-content: center; 
+                align-items: center; 
+                height: 100vh; 
+                background-color: #f0f2f5; 
+                font-family: Arial, sans-serif;
+            }
+            .login-container {
+                background: white;
+                padding: 40px;
+                border-radius: 8px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                text-align: center;
+                width: 25vw;
+            }
+            .login-button {
+                background-color: #4285F4;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 4px;
+                font-size: 16px;
+                cursor: pointer;
+                text-decoration: none;
+                display: inline-block;
+                margin: 10px 0;
+                width: 80%;
+            }
+            .submit-button {
+                background-color: #4285F4;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 4px;
+                font-size: 16px;
+                cursor: pointer;
+                text-decoration: none;
+                display: inline-block;
+                margin: 10px 0;
+                width: 80%;
+            }
+            .login-button:hover, .submit-button:hover {
+                background-color: #357ae8;
+            }
+            .input-field {
+                width: 100%;
+                padding: 10px;
+                margin: 10px 0;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                box-sizing: border-box;
+            }
+            .divider {
+                margin: 20px 0;
+                border-bottom: 1px solid #ccc;
+                position: relative;
+            }
+            .divider span {
+                background: white;
+                padding: 0 10px;
+                position: absolute;
+                top: -10px;
+                left: 50%;
+                transform: translateX(-50%);
+                color: #777;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="login-container">
+            <h2>Welcome</h2>
+            <p>Please log in to continue</p>
+    """
+
+    # Conditionally add Google login button
+    if ENABLE_GOOGLE_AUTH:
+        html_content += '''
+            <a href="/auth/google" class="login-button">Login with Google</a>
+        '''
+
+    # Conditionally add Email/Password login form
+    if ENABLE_USER_LOGIN:
+        if ENABLE_GOOGLE_AUTH:
+            # Add a divider if both login methods are available
+            html_content += '''
+                <div class="divider"><span>OR</span></div>
+            '''
+        html_content += '''
+            <form method="post" action="auth/user">
+                <input type="email" name="email" class="input-field" placeholder="Email" required>
+                <input type="password" name="password" class="input-field" placeholder="Password" required>
+                <input type="submit" class="submit-button" value="Login with Email"></input>
+            </form>
+        '''
+
+    # Handle case where no login methods are enabled
+    if not ENABLE_GOOGLE_AUTH and not ENABLE_USER_LOGIN:
+        html_content += '''
+            <p>No login methods are currently available. Please contact support.</p>
+        '''
+
+    # Close the HTML tags
+    html_content += """
+        </div>
+    </body>
+    </html>
+    """
+
+    return HTMLResponse(content=html_content, status_code=200)
+
+@app.post("/auth/user")
+async def auth_google_callback(request: Request):
+    """
+    User logs in via Email/Password.
+    """
+
+    form = await request.form()
+    email = form.get('email')
+    password = form.get('password')
+
+    user_info = {
+        "email": email,
+        "password": password,
+        "picture": "appcode/profile.png"
+    }
+
+    # You can optionally grab user info from token["userinfo"]
+    if os.getenv("ALLOWED_EMAILS", "") != "":
+        print("ALLOWED_EMAILS", os.getenv("ALLOWED_EMAILS"))
+        allowed_emails = os.getenv("ALLOWED_EMAILS").split(",")  # Assuming comma-separated
+        if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
+            return JSONResponse({"error": "Not authorized"}, status_code=401)
+
+    request.session["user"] = user_info  # store in session
+
+    # See if we stored a "return_to" path earlier; default to "/"
+    return_to = request.session.get("return_to", "/")
+    return RedirectResponse(url=return_to, status_code=303)
+
+# ======================
+# ROOT REDIRECT TO LOGIN
+# ======================
+
+@app.get("/", response_class=RedirectResponse)
+async def root():
+    """
+    Redirect root URL to the login page.
+    """
+    return RedirectResponse(url="/login")
 
 # ======================
 # The /{application} route
@@ -282,16 +474,19 @@ def logout(request: Request):
 async def main_app_route(response: Response, application: str, request: Request):
     """
     1) Check if user is in session.
-    2) If not, store this path in session, redirect to /auth/google.
+    2) If not, store this path in session, redirect to /login.
     3) If yes, serve the index.html with the relevant widgetset replaced.
     """
     # Check session
     user_session = request.session.get("user")
-    if not user_session:
+    if (ENABLE_USER_LOGIN or ENABLE_GOOGLE_AUTH) and not user_session:
         # Not logged in, so remember where they wanted to go:
         request.session["return_to"] = f"/{application}"
-        # Then send them to Google:
-        return RedirectResponse(url="/auth/google")
+        # Then send them to Login page:
+        return RedirectResponse(url="/login")
+    else:
+        request.session["user"] = require_auth(request)
+        user_session = request.session.get("user")
 
     # Already logged in, proceed normally
     appcode_folder = os.environ["MODULES_PATH"]
