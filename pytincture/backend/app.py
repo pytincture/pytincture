@@ -141,6 +141,7 @@ except json.JSONDecodeError as e:
 
 app.mount("/frontend", StaticFiles(directory=STATIC_PATH), name="static")
 
+
 def is_noauth_allowed(file_name: str, class_name: str, function_name: str) -> bool:
     """
     Check if the given file, class, and function is allowed to be called without auth.
