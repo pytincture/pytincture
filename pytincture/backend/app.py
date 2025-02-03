@@ -133,8 +133,25 @@ app.add_middleware(
 # Mount the frontend static files
 STATIC_PATH = os.path.join(os.path.dirname(__file__), "../frontend/")
 MODULE_PATH = os.environ.get("MODULES_PATH")
+try:
+    ALLOWED_NOAUTH_CLASSCALLS = json.loads(os.environ.get("ALLOWED_NOAUTH_CLASSCALLS", "[]"))
+except json.JSONDecodeError as e:
+    raise RuntimeError("Invalid JSON in ALLOWED_NOAUTH_CLASSCALLS environment variable") from e
+
 
 app.mount("/frontend", StaticFiles(directory=STATIC_PATH), name="static")
+
+
+def is_noauth_allowed(file_name: str, class_name: str, function_name: str) -> bool:
+    """
+    Check if the given file, class, and function is allowed to be called without auth.
+    """
+    for entry in ALLOWED_NOAUTH_CLASSCALLS:
+        if (entry.get("file") == file_name and
+            entry.get("class") == class_name and
+            entry.get("function") == function_name):
+            return True
+    return False
 
 def require_auth(request: Request):
     if ENABLE_GOOGLE_AUTH or ENABLE_USER_LOGIN:
@@ -179,9 +196,16 @@ async def class_call(
     file_name: str,
     class_name: str,
     function_name: str,
-    request: Request,
-    user=Depends(require_auth)  # ensure the caller is logged in
+    request: Request
 ):
+    
+    # Determine if this call is allowed without auth.
+    if is_noauth_allowed(file_name, class_name, function_name):
+        user = None
+    else:
+        # Perform authentication check for calls not whitelisted for no-auth.
+        user = require_auth(request)
+
     # 1) Dynamically load the file_name
     appcode_folder = os.environ["MODULES_PATH"]
     file_path = os.path.join(appcode_folder, file_name)
@@ -201,7 +225,13 @@ async def class_call(
     if request.method == "POST":
         data = await request.json()
         print(data)
-        #data = json.loads(str(data))
+    
+    if type(data) == str:
+        try:
+            data = json.loads(str(data))
+        except Exception as e:
+            print("could not convert data to json")
+
 
     # 5) Call the function with *args / **kwargs if needed
     if callable(func):
