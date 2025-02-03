@@ -162,8 +162,10 @@ def download_pytincture(user=Depends(require_auth)):
 
 @app.get("/appcode/appcode.pyt")
 def download_appcode(request: Request, user=Depends(require_auth)):
-    protocol = request.url.scheme
     host = request.headers["host"]
+    # Get the protocol from X-Forwarded-Proto header (if set)
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    protocol = forwarded_proto or request.url.scheme
     file_like = create_appcode_pkg_in_memory(host, protocol)
     return StreamingResponse(
         file_like,
@@ -198,7 +200,8 @@ async def class_call(
     data = {}
     if request.method == "POST":
         data = await request.json()
-        data = json.loads(data)
+        print(data)
+        #data = json.loads(str(data))
 
     # 5) Call the function with *args / **kwargs if needed
     if callable(func):
@@ -428,7 +431,7 @@ async def login(request: Request):
     return HTMLResponse(content=html_content, status_code=200)
 
 @app.post("/auth/user")
-async def auth_google_callback(request: Request):
+async def auth_user_callback(request: Request):
     """
     User logs in via Email/Password.
     """
@@ -445,7 +448,6 @@ async def auth_google_callback(request: Request):
 
     # You can optionally grab user info from token["userinfo"]
     if os.getenv("ALLOWED_EMAILS", "") != "":
-        print("ALLOWED_EMAILS", os.getenv("ALLOWED_EMAILS"))
         allowed_emails = os.getenv("ALLOWED_EMAILS").split(",")  # Assuming comma-separated
         if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
             return JSONResponse({"error": "Not authorized"}, status_code=401)
