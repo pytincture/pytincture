@@ -280,11 +280,12 @@ async def auth_google(request: Request, application: str):
     """
     Redirect the user to Google's OAuth2 screen.
     """
-    redirect_uri = str(request.url_for("auth_google_callback", application=application))
+
     forwarded_proto = request.headers.get("x-forwarded-proto")
+    host = request.headers["host"]
     protocol = forwarded_proto or request.url.scheme
-    if "http:" in redirect_uri:
-        redirect_uri.replace("http:", protocol+":")
+    redirect_uri = f"{protocol}://{host}/auth/google/callback"
+    
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 @app.get("/{application}/auth/google/callback", name="auth_google_callback")
