@@ -94,7 +94,14 @@ def generate_stub_classes(file_path, return_url, return_protocol):
             stub_class_code += f"            req.send(JSON.stringify(json.dumps(payload)))\n"
             stub_class_code += f"        else:\n"
             stub_class_code += f"            req.send()\n"
-            stub_class_code += f"        return StringIO(req.response).getvalue()\n"            
+            stub_class_code += f"        if req.status == 401:\n"
+            stub_class_code += f"            from js import window\n"
+            stub_class_code += f"            current_url = window.location.href.rstrip('/')\n"
+            stub_class_code += f"            redirect_url = current_url + '/login'\n"
+            stub_class_code += f"            window.location.href = redirect_url\n"
+            stub_class_code += f"            return ''\n"
+            stub_class_code += f"        return StringIO(req.response).getvalue()\n"
+    
             for node in class_node.body:
                 if isinstance(node, ast.FunctionDef) and not node.name.startswith('_'):
                     stub_class_code += f"    def {node.name}(self, *args, **kwargs):\n"

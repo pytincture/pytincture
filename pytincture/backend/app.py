@@ -1,6 +1,7 @@
 from operator import call
 import os
 import re
+from signal import raise_signal
 import sys
 import json
 import io
@@ -50,7 +51,6 @@ def create_appcode_pkg_in_memory(host, protocol):
                             zipf.write(file_path, arcname)
     in_memory_zip.seek(0)
     return in_memory_zip
-
 
 
 @app.get("/favicon.ico")
@@ -132,6 +132,7 @@ app.add_middleware(
 
 # Mount the frontend static files
 STATIC_PATH = os.path.join(os.path.dirname(__file__), "../frontend/")
+USER_SESSION_DICT = {}  # should eventually be redis storage
 MODULE_PATH = os.environ.get("MODULES_PATH")
 try:
     ALLOWED_NOAUTH_CLASSCALLS = json.loads(os.environ.get("ALLOWED_NOAUTH_CLASSCALLS", "[]"))
@@ -139,7 +140,7 @@ except json.JSONDecodeError as e:
     raise RuntimeError("Invalid JSON in ALLOWED_NOAUTH_CLASSCALLS environment variable") from e
 
 
-app.mount("/frontend", StaticFiles(directory=STATIC_PATH), name="static")
+app.mount("/{application}/frontend", StaticFiles(directory=STATIC_PATH), name="static")
 
 
 def is_noauth_allowed(file_name: str, class_name: str, function_name: str) -> bool:
@@ -156,10 +157,12 @@ def is_noauth_allowed(file_name: str, class_name: str, function_name: str) -> bo
 def require_auth(request: Request):
     if ENABLE_GOOGLE_AUTH or ENABLE_USER_LOGIN:
         user_session = request.session.get("user")
-        if not user_session:
-            raise HTTPException(status_code=401, detail="Not authenticated.")
-        # Optionally return user info if you need it in the endpoint
-        return user_session
+        if user_session.get("email", None) in USER_SESSION_DICT:
+            if user_session != USER_SESSION_DICT[user_session["email"]]:
+                raise HTTPException(status_code=401, detail="Error with authentication")
+            return user_session
+        else:
+            return None
     else:
         return {
             "email": "",
@@ -167,17 +170,7 @@ def require_auth(request: Request):
             "picture": "appcode/profile.png"
         }
 
-
-@app.get("/appcode/pytincture.zip")
-def download_pytincture(user=Depends(require_auth)):
-    file_like = create_pytincture_pkg_in_memory()
-    return StreamingResponse(
-        file_like,
-        media_type="application/zip",
-        headers={"Content-Disposition": "attachment; filename=pytincture.zip"}
-    )
-
-@app.get("/appcode/appcode.pyt")
+@app.get("/{application}/appcode/appcode.pyt")
 def download_appcode(request: Request, user=Depends(require_auth)):
     host = request.headers["host"]
     # Get the protocol from X-Forwarded-Proto header (if set)
@@ -201,10 +194,13 @@ async def class_call(
     
     # Determine if this call is allowed without auth.
     if is_noauth_allowed(file_name, class_name, function_name):
-        user = None
+        user = "noauth"
     else:
         # Perform authentication check for calls not whitelisted for no-auth.
         user = require_auth(request)
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Call not authorized")
 
     # 1) Dynamically load the file_name
     appcode_folder = os.environ["MODULES_PATH"]
@@ -245,11 +241,6 @@ async def logs_endpoint(request: Request, user=Depends(require_auth)):
     print(data)
     return {"status": "ok"}
 
-app.mount("/appcode", StaticFiles(directory=MODULE_PATH), name="static")
-
-@app.get("/appdata", response_class=HTMLResponse)
-async def main(function_name, data_module):
-    pass
 
 # ================
 # GOOGLE OAUTH2 SETUP
@@ -282,16 +273,16 @@ else:
 # Add session middleware (needed to store "return_to" and user info)
 app.add_middleware(SessionMiddleware, secret_key=config.get("SECRET_KEY"))
 
-@app.get("/auth/google")
-async def auth_google(request: Request):
+@app.get("/{application}/auth/google")
+async def auth_google(request: Request, application: str):
     """
     Redirect the user to Google's OAuth2 screen.
     """
-    redirect_uri = request.url_for("auth_google_callback")
+    redirect_uri = request.url_for("auth_google_callback", application=application)
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
-@app.get("/auth/google/callback")
-async def auth_google_callback(request: Request):
+@app.get("/{application}/auth/google/callback", name="auth_google_callback")
+async def auth_google_callback(request: Request, application: str):
     """
     Google redirects here after login. Authlib will exchange code for token.
     We'll store user info in the session, then redirect back to original app path.
@@ -310,14 +301,15 @@ async def auth_google_callback(request: Request):
         if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
             return JSONResponse({"error": "Not authorized"}, status_code=401)
 
+    USER_SESSION_DICT[user_info["email"]] = user_info
     request.session["user"] = user_info  # store in session
 
     # See if we stored a "return_to" path earlier; default to "/"
     return_to = request.session.get("return_to", "/")
     return RedirectResponse(url=return_to)
 
-@app.get("/auth/logout")
-def logout(request: Request):
+@app.get("/{application}/auth/logout")
+def logout(request: Request,  application: str):
     """
     Logs the user out of *your app only*.
     """
@@ -327,14 +319,14 @@ def logout(request: Request):
     # request.session.pop("token", None)
 
     # 3) Redirect anywhere in *your* app after local logout
-    return RedirectResponse(url="/login", status_code=302)
+    return RedirectResponse(url=f"/{application}/login", status_code=302)
 
 # ======================
 # LOGIN PAGE
 # ======================
 
-@app.get("/login", response_class=HTMLResponse)
-async def login(request: Request):
+@app.get("/{application}/login", response_class=HTMLResponse)
+async def login(request: Request, application: str):
     """
     Serves the login page with options to login via Google and/or Email/Password based on configuration.
     """
@@ -426,8 +418,8 @@ async def login(request: Request):
 
     # Conditionally add Google login button
     if ENABLE_GOOGLE_AUTH:
-        html_content += '''
-            <a href="/auth/google" class="login-button">Login with Google</a>
+        html_content += f'''
+            <a href="/{application}/auth/google" class="login-button">Login with Google</a>
         '''
 
     # Conditionally add Email/Password login form
@@ -460,7 +452,7 @@ async def login(request: Request):
 
     return HTMLResponse(content=html_content, status_code=200)
 
-@app.post("/auth/user")
+@app.post("/{application}/auth/user")
 async def auth_user_callback(request: Request):
     """
     User logs in via Email/Password.
@@ -482,22 +474,12 @@ async def auth_user_callback(request: Request):
         if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
             return JSONResponse({"error": "Not authorized"}, status_code=401)
 
+    USER_SESSION_DICT[user_info["email"]] = user_info
     request.session["user"] = user_info  # store in session
 
     # See if we stored a "return_to" path earlier; default to "/"
     return_to = request.session.get("return_to", "/")
     return RedirectResponse(url=return_to, status_code=303)
-
-# ======================
-# ROOT REDIRECT TO LOGIN
-# ======================
-
-@app.get("/", response_class=RedirectResponse)
-async def root():
-    """
-    Redirect root URL to the login page.
-    """
-    return RedirectResponse(url="/login")
 
 # ======================
 # The /{application} route
@@ -510,12 +492,14 @@ async def main_app_route(response: Response, application: str, request: Request)
     3) If yes, serve the index.html with the relevant widgetset replaced.
     """
     # Check session
-    user_session = request.session.get("user")
-    if (ENABLE_USER_LOGIN or ENABLE_GOOGLE_AUTH) and not user_session:
+    user_session = require_auth(request)
+    user_entry = user_session.get("email", "") if user_session else "noauth"
+    
+    if (ENABLE_USER_LOGIN or ENABLE_GOOGLE_AUTH) and not USER_SESSION_DICT.get(user_entry, None):
         # Not logged in, so remember where they wanted to go:
         request.session["return_to"] = f"/{application}"
         # Then send them to Login page:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url=f"/{application}/login")
     else:
         request.session["user"] = require_auth(request)
         user_session = request.session.get("user")
