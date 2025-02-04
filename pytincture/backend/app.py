@@ -280,7 +280,7 @@ async def auth_google(request: Request, application: str):
     """
     Redirect the user to Google's OAuth2 screen.
     """
-    redirect_uri = request.url_for("auth_google_callback", application=application)
+    redirect_uri = str(request.url_for("auth_google_callback", application=application))
     forwarded_proto = request.headers.get("x-forwarded-proto")
     protocol = forwarded_proto or request.url.scheme
     if "http:" in redirect_uri:
@@ -425,7 +425,7 @@ async def login(request: Request, application: str):
     # Conditionally add Google login button
     if ENABLE_GOOGLE_AUTH:
         html_content += f'''
-            <a href="{application}/auth/google" class="login-button">Login with Google</a>
+            <a href="auth/google" class="login-button">Login with Google</a>
         '''
 
     # Conditionally add Email/Password login form
