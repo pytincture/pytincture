@@ -156,7 +156,7 @@ def is_noauth_allowed(file_name: str, class_name: str, function_name: str) -> bo
 
 def require_auth(request: Request):
     if ENABLE_GOOGLE_AUTH or ENABLE_USER_LOGIN:
-        user_session = request.session.get("user")
+        user_session = request.session.get("user") or {}
         if user_session.get("email", None) in USER_SESSION_DICT:
             if user_session != USER_SESSION_DICT[user_session["email"]]:
                 raise HTTPException(status_code=401, detail="Error with authentication")
@@ -182,6 +182,8 @@ def download_appcode(request: Request, user=Depends(require_auth)):
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=appcode.pyt"}
     )
+
+app.mount("/{application}/appcode", StaticFiles(directory=MODULE_PATH), name="static")
 
 @app.get("/classcall/{file_name}/{class_name}/{function_name}")
 @app.post("/classcall/{file_name}/{class_name}/{function_name}")
@@ -453,7 +455,7 @@ async def login(request: Request, application: str):
     return HTMLResponse(content=html_content, status_code=200)
 
 @app.post("/{application}/auth/user")
-async def auth_user_callback(request: Request):
+async def auth_user_callback(request: Request, application: str):
     """
     User logs in via Email/Password.
     """
@@ -465,7 +467,7 @@ async def auth_user_callback(request: Request):
     user_info = {
         "email": email,
         "password": password,
-        "picture": "appcode/profile.png"
+        "picture": f"{application}/appcode/profile.png"
     }
 
     # You can optionally grab user info from token["userinfo"]
