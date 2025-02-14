@@ -145,10 +145,10 @@ class RedisDict:
         """Gets the item from Redis by key. Raises KeyError if missing."""
         full_key = self._prefix + key
         value = self._redis.get(full_key)
+        if not value:
+            return None
         if value.startswith("{") and value.endswith("}"):
             value = json.loads(value)
-        if value is None:
-            raise KeyError(key)
         return value
 
     def __setitem__(self, key, value):
@@ -218,6 +218,8 @@ class RedisDict:
     def get(self, key, default=None):
         try:
             value = self._redis.get(key)
+            if not value:
+                return value
             if value.startswith("{") and value.endswith("}"):
                 value = json.loads(value)
             return value
