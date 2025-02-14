@@ -210,6 +210,12 @@ class RedisDict:
         """Return a generator of all values."""
         for k in self:
             yield self[k]
+            
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
 
 
 # Mount the frontend static files
