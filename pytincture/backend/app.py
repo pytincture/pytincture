@@ -145,6 +145,8 @@ class RedisDict:
         """Gets the item from Redis by key. Raises KeyError if missing."""
         full_key = self._prefix + key
         value = self._redis.get(full_key)
+        if value.startswith("{") and value.endswith("}"):
+            value = json.loads(value)
         if value is None:
             raise KeyError(key)
         return value
@@ -152,6 +154,8 @@ class RedisDict:
     def __setitem__(self, key, value):
         """Sets the item in Redis by key."""
         full_key = self._prefix + key
+        if value is dict:
+            value = json.dumps(value)
         self._redis.set(full_key, value)
 
     def __delitem__(self, key):
@@ -210,10 +214,13 @@ class RedisDict:
         """Return a generator of all values."""
         for k in self:
             yield self[k]
-            
+
     def get(self, key, default=None):
         try:
-            return self[key]
+            value = self._redis.get(key)
+            if value.startswith("{") and value.endswith("}"):
+                value = json.loads(value)
+            return value
         except KeyError:
             return default
 
