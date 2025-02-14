@@ -46,7 +46,7 @@ async function runTinctureApp(application, widgetlib) {
         }
     }
 
-    let widgetUrl = "http://0.0.0.0:8070/appcode/dhxpyt-99.99.99-py3-none-any.whl";
+    let widgetUrl = `http://0.0.0.0:8070/${application}/appcode/dhxpyt-99.99.99-py3-none-any.whl`;
     if (await urlExists(widgetUrl)) {
         // If the URL exists, install and load the widget package from the URL
         await installAndLoadWidgetset(pyodide, widgetUrl);

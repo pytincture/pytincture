@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pytincture"
-version = "0.8.4"
+version = "0.8.5"
 description = "UI Builder"
 readme = "README.md"
 license = { text = "MIT" }
@@ -14,7 +14,7 @@ authors = [
 dependencies = [
     "aiofiles==24.1.0",
     "fastapi==0.115.8",
-    "pymemcache==4.0.0",
+    "upstash-redis>=1.2.0",
     "pyyaml==6.0.2",
     "requests==2.32.3",
     "uvicorn==0.34.0",

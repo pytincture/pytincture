@@ -130,10 +130,105 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from upstash_redis import Redis
+
+class RedisDict:
+    """
+    A dict-like interface backed by a Redis database (via Upstash).
+    """
+
+    def __init__(self, redis_url: str, redis_token: str, key_prefix: str = ""):
+        self._redis = Redis(url=redis_url, token=redis_token)
+        self._prefix = key_prefix  # Optional prefix to avoid key collisions
+
+    def __getitem__(self, key):
+        """Gets the item from Redis by key. Raises KeyError if missing."""
+        full_key = self._prefix + key
+        value = self._redis.get(full_key)
+        if value is None:
+            raise KeyError(key)
+        return value
+
+    def __setitem__(self, key, value):
+        """Sets the item in Redis by key."""
+        full_key = self._prefix + key
+        self._redis.set(full_key, value)
+
+    def __delitem__(self, key):
+        """Deletes the item from Redis. Raises KeyError if missing."""
+        full_key = self._prefix + key
+        deleted = self._redis.delete(full_key)
+        if deleted == 0:
+            # Upstash returns 0 if key does not exist
+            raise KeyError(key)
+
+    def __contains__(self, key):
+        """Checks if a key exists in Redis."""
+        full_key = self._prefix + key
+        # `exists` returns 1 or 0 in standard Redis, 
+        # check upstash_redis docs as they might return bool directly.
+        return self._redis.exists(full_key) == 1
+
+    def __len__(self):
+        """
+        The tricky part: Redis doesn't natively track 'length' of a prefix.
+        Typically you'd need to SCAN or KEYS. 
+        For large sets, SCAN is recommended. This is a naive approach.
+        """
+        # NOTE: Upstash has `scan` and `scankeys` methods,
+        # but be mindful of potential overhead or timeouts with large data sets.
+        # For demonstration, we'll do something naive:
+        cursor = "0"
+        count = 0
+        while True:
+            cursor, keys = self._redis.scan(cursor=cursor, match=self._prefix + "*", count=100)
+            count += len(keys)
+            if cursor == "0":
+                break
+        return count
+
+    def __iter__(self):
+        """Iterate over the keys (also naive, uses SCAN)."""
+        cursor = "0"
+        while True:
+            cursor, keys = self._redis.scan(cursor=cursor, match=self._prefix + "*", count=100)
+            for k in keys:
+                yield k[len(self._prefix) :]  # Strip prefix
+            if cursor == "0":
+                break
+
+    def keys(self):
+        """Return a generator of all keys (dict-like)."""
+        return self.__iter__()
+
+    def items(self):
+        """Return a generator of (key, value) pairs."""
+        for k in self:
+            yield (k, self[k])
+
+    def values(self):
+        """Return a generator of all values."""
+        for k in self:
+            yield self[k]
+
+
 # Mount the frontend static files
 STATIC_PATH = os.path.join(os.path.dirname(__file__), "../frontend/")
-USER_SESSION_DICT = {}  # should eventually be redis storage
+USE_REDIS_INSTANCE = os.environ.get("USE_REDIS_INSTANCE", "false").lower()
+if  USE_REDIS_INSTANCE == "true":
+    print("USING REDIS")
+    REDIS_UPSTASH_INSTANCE_URL = os.environ.get("REDIS_UPSTASH_INSTANCE_URL", "")
+    REDIS_UPSTASH_INSTANCE_TOKEN =  os.environ.get("REDIS_UPSTASH_INSTANCE_TOKEN", "")
+    USER_SESSION_DICT = RedisDict(
+        redis_url=REDIS_UPSTASH_INSTANCE_URL,
+        redis_token=REDIS_UPSTASH_INSTANCE_TOKEN,
+        key_prefix="session"
+    )
+else:
+    USER_SESSION_DICT = {}
+
 MODULE_PATH = os.environ.get("MODULES_PATH")
+
 try:
     ALLOWED_NOAUTH_CLASSCALLS = json.loads(os.environ.get("ALLOWED_NOAUTH_CLASSCALLS", "[]"))
 except json.JSONDecodeError as e:
