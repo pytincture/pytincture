@@ -134,54 +134,79 @@ from upstash_redis import Redis
 
 class RedisDict:
     """
-    A dict-like interface backed by a Redis database (via Upstash).
+    A dict-like interface backed by a Redis database (via Upstash), with
+    a local in-memory cache to reduce the number of Redis lookups.
     """
 
     def __init__(self, redis_url: str, redis_token: str, key_prefix: str = ""):
         self._redis = Redis(url=redis_url, token=redis_token)
-        self._prefix = key_prefix  # Optional prefix to avoid key collisions
+        self._prefix = key_prefix  # Optional prefix to avoid collisions
+        self._cache = {}           # Local in-memory cache: { key: decoded_value }
 
     def __getitem__(self, key):
-        """Gets the item from Redis by key. Raises KeyError if missing."""
+        """
+        Gets the item from the local cache if present; otherwise fetch from Redis.
+        Returns None if the key is missing in Redis, following your original logic.
+        """
+        if key in self._cache:
+            return self._cache[key]
+
         full_key = self._prefix + key
         value = self._redis.get(full_key)
+
         if not value:
+            # Key doesn't exist in Redis, store None in cache and return None
+            self._cache[key] = None
             return None
+
+        # If it looks like JSON, decode it
         if value.startswith("{") and value.endswith("}"):
             value = json.loads(value)
+
+        self._cache[key] = value
         return value
 
     def __setitem__(self, key, value):
-        """Sets the item in Redis by key."""
+        """Sets the item in Redis and updates the local cache."""
         full_key = self._prefix + key
-        if value is dict:
-            value = json.dumps(value)
-        self._redis.set(full_key, value)
+
+        # If it's a dict, store as JSON
+        if isinstance(value, dict):
+            serialized = json.dumps(value)
+        else:
+            serialized = str(value)  # Ensure string if not dict
+
+        # Write to Redis
+        self._redis.set(full_key, serialized)
+        # Update local cache with the *decoded* form (which might be a dict)
+        self._cache[key] = value
 
     def __delitem__(self, key):
-        """Deletes the item from Redis. Raises KeyError if missing."""
+        """Deletes the item from Redis and the local cache. Raises KeyError if missing."""
         full_key = self._prefix + key
         deleted = self._redis.delete(full_key)
         if deleted == 0:
-            # Upstash returns 0 if key does not exist
             raise KeyError(key)
 
+        # Also remove from local cache if present
+        if key in self._cache:
+            del self._cache[key]
+
     def __contains__(self, key):
-        """Checks if a key exists in Redis."""
+        # If key is None, just return False
+        if key is None:
+            return False
+
         full_key = self._prefix + key
-        # `exists` returns 1 or 0 in standard Redis, 
-        # check upstash_redis docs as they might return bool directly.
+        # then do the Redis `exists` check or local cache check here
         return self._redis.exists(full_key) == 1
 
     def __len__(self):
         """
-        The tricky part: Redis doesn't natively track 'length' of a prefix.
-        Typically you'd need to SCAN or KEYS. 
-        For large sets, SCAN is recommended. This is a naive approach.
+        Counting items requires scanning Redis for keys matching the prefix.
+        Also doesn't necessarily match the local cache if some keys are only
+        in Redis, or if external processes created/deleted keys.
         """
-        # NOTE: Upstash has `scan` and `scankeys` methods,
-        # but be mindful of potential overhead or timeouts with large data sets.
-        # For demonstration, we'll do something naive:
         cursor = "0"
         count = 0
         while True:
@@ -192,12 +217,13 @@ class RedisDict:
         return count
 
     def __iter__(self):
-        """Iterate over the keys (also naive, uses SCAN)."""
+        """Iterate over keys in Redis. (Ignores local cache to avoid partial mismatch.)"""
         cursor = "0"
         while True:
             cursor, keys = self._redis.scan(cursor=cursor, match=self._prefix + "*", count=100)
             for k in keys:
-                yield k[len(self._prefix) :]  # Strip prefix
+                # Strip the prefix from the Redis key
+                yield k[len(self._prefix):]
             if cursor == "0":
                 break
 
@@ -216,15 +242,14 @@ class RedisDict:
             yield self[k]
 
     def get(self, key, default=None):
-        try:
-            value = self._redis.get(key)
-            if not value:
-                return value
-            if value.startswith("{") and value.endswith("}"):
-                value = json.loads(value)
-            return value
-        except KeyError:
+        """
+        Returns the value if present, otherwise `default`.
+        Uses the local cache or fetches from Redis.
+        """
+        val = self.__getitem__(key)
+        if val is None:
             return default
+        return val
 
 
 # Mount the frontend static files
