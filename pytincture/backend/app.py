@@ -132,6 +132,9 @@ app.add_middleware(
 
 from upstash_redis import Redis
 
+import json
+from upstash_redis import Redis  # or whatever your actual import is
+
 class RedisDict:
     """
     A dict-like interface backed by a Redis database (via Upstash), with
@@ -146,7 +149,7 @@ class RedisDict:
     def __getitem__(self, key):
         """
         Gets the item from the local cache if present; otherwise fetch from Redis.
-        Returns None if the key is missing in Redis, following your original logic.
+        Returns None if the key is missing in Redis.
         """
         if key in self._cache:
             return self._cache[key]
@@ -155,7 +158,7 @@ class RedisDict:
         value = self._redis.get(full_key)
 
         if not value:
-            # Key doesn't exist in Redis, store None in cache and return None
+            # Key doesn't exist in Redis (or empty string?), store None in cache
             self._cache[key] = None
             return None
 
@@ -174,11 +177,11 @@ class RedisDict:
         if isinstance(value, dict):
             serialized = json.dumps(value)
         else:
-            serialized = str(value)  # Ensure string if not dict
+            serialized = str(value)  # Ensure it's a string
 
         # Write to Redis
         self._redis.set(full_key, serialized)
-        # Update local cache with the *decoded* form (which might be a dict)
+        # Update local cache with the *decoded* form
         self._cache[key] = value
 
     def __delitem__(self, key):
@@ -193,31 +196,59 @@ class RedisDict:
             del self._cache[key]
 
     def __contains__(self, key):
-        # If key is None, just return False
+        """
+        Return True if `key` is in Redis (or in the cache), otherwise False.
+
+        This version uses the local cache first to avoid extra round-trips.
+        If we have the key cached as None, that means we already checked
+        Redis and it did not exist.
+        """
         if key is None:
             return False
 
+        # If we've already cached a value (even if it's None), return based on cache
+        if key in self._cache:
+            # If cache says None, that means Redis didn't have it
+            return self._cache[key] is not None
+
+        # Otherwise, check Redis
         full_key = self._prefix + key
-        # then do the Redis `exists` check or local cache check here
-        return self._redis.exists(full_key) == 1
+        exists_in_redis = (self._redis.exists(full_key) == 1)
+
+        # If it does not exist, also store None so we won't check again
+        if not exists_in_redis:
+            self._cache[key] = None
+
+        return exists_in_redis
 
     def __len__(self):
         """
-        Counting items requires scanning Redis for keys matching the prefix.
-        Also doesn't necessarily match the local cache if some keys are only
-        in Redis, or if external processes created/deleted keys.
+        Return the number of *cached* keys that are not None.
+        This does NOT scan Redis, so it won't show items that never hit the cache
+        or that changed in Redis outside this instance.
+        
+        If you want a fully accurate count from Redis every time,
+        you'd need to revert to scanning (expensive) or do something like:
+        
+            count = 0
+            cursor = "0"
+            while True:
+                cursor, keys = self._redis.scan(cursor=cursor, match=self._prefix + "*", count=100)
+                count += len(keys)
+                if cursor == "0":
+                    break
+            return count
         """
-        cursor = "0"
-        count = 0
-        while True:
-            cursor, keys = self._redis.scan(cursor=cursor, match=self._prefix + "*", count=100)
-            count += len(keys)
-            if cursor == "0":
-                break
-        return count
+        # Count how many cached items are not None
+        return sum(1 for val in self._cache.values() if val is not None)
 
     def __iter__(self):
-        """Iterate over keys in Redis. (Ignores local cache to avoid partial mismatch.)"""
+        """
+        Iterate over keys in Redis. 
+        NOTE: This does a SCAN, so each iteration can trigger extra calls if repeated.
+        If you need a local-only iteration (no new keys from Redis), you'd have to 
+        iterate self._cache. But that may skip keys not yet read from Redis.
+        """
         cursor = "0"
         while True:
             cursor, keys = self._redis.scan(cursor=cursor, match=self._prefix + "*", count=100)
@@ -228,16 +259,26 @@ class RedisDict:
                 break
 
     def keys(self):
-        """Return a generator of all keys (dict-like)."""
+        """Return a generator of all keys in Redis matching our prefix."""
         return self.__iter__()
 
     def items(self):
-        """Return a generator of (key, value) pairs."""
+        """
+        Return a generator of (key, value) pairs.
+
+        NOTE: This will still scan Redis for keys. Values will be fetched from cache if present,
+        otherwise from Redis. 
+        """
         for k in self:
             yield (k, self[k])
 
     def values(self):
-        """Return a generator of all values."""
+        """
+        Return a generator of all values.
+
+        NOTE: Still scans Redis for the keys, then fetches each value 
+        (from cache or Redis).
+        """
         for k in self:
             yield self[k]
 
@@ -250,7 +291,7 @@ class RedisDict:
         if val is None:
             return default
         return val
-
+    
 
 # Mount the frontend static files
 STATIC_PATH = os.path.join(os.path.dirname(__file__), "../frontend/")
