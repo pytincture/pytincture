@@ -23,7 +23,8 @@ dependencies = [
     "pyodide-py==0.27.2",
     "authlib==1.4.1",
     "python-dotenv==1.0.1",
-    "aioredis==2.0.1"
+    "aioredis==2.0.1",
+    "pytest==8.3.4"
 ]
 
 [project.urls]

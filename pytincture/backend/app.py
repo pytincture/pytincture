@@ -297,7 +297,6 @@ class RedisDict:
 STATIC_PATH = os.path.join(os.path.dirname(__file__), "../frontend/")
 USE_REDIS_INSTANCE = os.environ.get("USE_REDIS_INSTANCE", "false").lower()
 if  USE_REDIS_INSTANCE == "true":
-    print("USING REDIS")
     REDIS_UPSTASH_INSTANCE_URL = os.environ.get("REDIS_UPSTASH_INSTANCE_URL", "")
     REDIS_UPSTASH_INSTANCE_TOKEN =  os.environ.get("REDIS_UPSTASH_INSTANCE_TOKEN", "")
     USER_SESSION_DICT = RedisDict(
@@ -385,11 +384,11 @@ async def class_call(
     file_path = os.path.join(appcode_folder, file_name)
     
     loader = SourceFileLoader(class_name, file_path)
-    spec = loader.load_module()
-    
-    # 2) Get the class and create an instance
-    cls = getattr(spec, class_name)
-    instance = cls(_user=user)  # <--- pass user to constructor
+    spec = importlib.util.spec_from_loader(class_name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    cls = getattr(module, class_name)
+    instance = cls(_user=user)
 
     # 3) Get the function
     func = getattr(instance, function_name)
@@ -398,7 +397,6 @@ async def class_call(
     data = {}
     if request.method == "POST":
         data = await request.json()
-        print(data)
     
     if type(data) == str:
         try:
@@ -479,7 +477,6 @@ async def auth_google_callback(request: Request, application: str):
 
     # You can optionally grab user info from token["userinfo"]
     if os.getenv("ALLOWED_EMAILS", "") != "":
-        print("ALLOWED_EMAILS", os.getenv("ALLOWED_EMAILS"))
         allowed_emails = os.getenv("ALLOWED_EMAILS").split(",")  # Assuming comma-separated
         if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
             return JSONResponse({"error": "Not authorized"}, status_code=401)
@@ -661,7 +658,7 @@ async def auth_user_callback(request: Request, application: str):
     request.session["user"] = user_info  # store in session
 
     # See if we stored a "return_to" path earlier; default to "/"
-    return_to = request.session.get("return_to", "/")
+    return_to = request.session.get("return_to", f"/{application}")
     return RedirectResponse(url=return_to, status_code=303)
 
 # ======================

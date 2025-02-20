@@ -3,6 +3,7 @@
 *.wsgic
 *.exe
 .vscode/settings.json
+build
 build/*
 build/*.*
 dist/pytincture-0.0.1-py3.7.egg
