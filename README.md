@@ -64,8 +64,9 @@ Development Mode:
 if __name__=="__main__":
     from pytincture import launch_service
     launch_service(env_vars={
-      "ALLOWED_EMAILS": []})
-      "": 
+      "ALLOWED_EMAILS": []
+      "MODULES_PATH": "."  # current path
+    })
 ~~~
 
 ## Testing
