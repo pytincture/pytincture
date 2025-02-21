@@ -38,25 +38,26 @@ pip install .
 ## Running the Service
 -------------------
 Development Mode:
-  Start the FastAPI application with Uvicorn:
+  ** Start the FastAPI application with Uvicorn:
 ~~~
 uvicorn pytincture.backend.app:app --host 0.0.0.0 --port 8070
 ~~~
 
 ## Production Launcher:
-  Run the included launcher:
+  ** Run the included launcher:
 ~~~
 python -m pytincture
 ~~~
   (This launcher in pytincture/__init__.py sets up necessary environment variables such as MODULES_PATH and starts uvicorn with your service.)
 
-
-## Requirements
-- Python 3.x
-- Pyodide
+## Environment Variables
+- ** MODULES_PATH: Directory containing module files used for dynamic packaging.
+- ** USE_REDIS_INSTANCE: Set to "true" to enable Redis-backed session storage.
+- ** ENABLE_GOOGLE_AUTH / ENABLE_USER_LOGIN: Enable the respective authentication mechanisms.
+- ** ALLOWED_EMAILS: A comma-separated list of authorized email addresses.
 
 ## Docker Quick Start Example built from https://github.com/pytincture/pytincture_example
-Run the docker image directly from Dockerhub
+  ** Run the docker image directly from Dockerhub
 ~~~
 docker run -p8070:8070 -i pytincture/pytincture:latest
 ~~~
