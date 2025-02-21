@@ -17,23 +17,39 @@
 
 ##Installation
 
-###From PyPI:
+From PyPI:
 ~~~
   pip install pyTincture
 ~~~
 
-###From Source:
+From Source:
   1. Clone the repository:
 ~~~
        git clone https://github.com/yourusername/pyTincture.git
        cd pyTincture
 ~~~
 
-###2. Install dependencies:
+  2. Install dependencies:
 ~~~
      pip install .
 ~~~
    (Alternatively, follow the instructions in pyproject.toml.)
+
+##Running the Service
+-------------------
+Development Mode:
+  Start the FastAPI application with Uvicorn:
+~~~
+     uvicorn pytincture.backend.app:app --host 0.0.0.0 --port 8070
+~~~
+
+Production Launcher:
+  Run the included launcher:
+~~~
+     python -m pytincture
+~~~
+  (This launcher in pytincture/__init__.py sets up necessary environment variables such as MODULES_PATH and starts uvicorn with your service.)
+
 
 ## Requirements
 - Python 3.x
