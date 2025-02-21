@@ -4,7 +4,7 @@
 `pyTincture` is a Python framework designed to leverage the capabilities of Pyodide, enabling developers to create sophisticated and user-friendly GUI libraries. This project aims to bridge the gap between Python's powerful backend and intuitive, interactive frontend interfaces.
 
 ## Features
-- ** Pyodide Integration: Seamlessly bring Python to the web via Pyodide.
+- Pyodide Integration: Seamlessly bring Python to the web via Pyodide.
 - GUI Library Support: Simplify the creation and management of GUI components in Python.
 - Dynamic Code Packaging: Generate in-memory ZIP packages for frontend consumption.
 - Widgetset Stub Generation: Automatically generate frontend stub classes using the @backend_for_frontend decorator.
@@ -38,26 +38,42 @@ pip install .
 ## Running the Service
 -------------------
 Development Mode:
-  ** Start the FastAPI application with Uvicorn:
+
+  Start the FastAPI application with Uvicorn:
 ~~~
 uvicorn pytincture.backend.app:app --host 0.0.0.0 --port 8070
 ~~~
 
 ## Production Launcher:
-  ** Run the included launcher:
+
+  Run the included launcher
 ~~~
 python -m pytincture
 ~~~
   (This launcher in pytincture/__init__.py sets up necessary environment variables such as MODULES_PATH and starts uvicorn with your service.)
 
 ## Environment Variables
-- ** MODULES_PATH: Directory containing module files used for dynamic packaging.
-- ** USE_REDIS_INSTANCE: Set to "true" to enable Redis-backed session storage.
-- ** ENABLE_GOOGLE_AUTH / ENABLE_USER_LOGIN: Enable the respective authentication mechanisms.
-- ** ALLOWED_EMAILS: A comma-separated list of authorized email addresses.
+- MODULES_PATH: Directory containing module files used for dynamic packaging.
+- USE_REDIS_INSTANCE: Set to "true" to enable Redis-backed session storage.
+- ENABLE_GOOGLE_AUTH / ENABLE_USER_LOGIN: Enable the respective authentication mechanisms.
+- ALLOWED_EMAILS: A comma-separated list of authorized email addresses.
+
+## Testing
+
+Tests are written using pytest and cover endpoints, helper functions, and the launcher.
+Run all tests with:
+~~~
+python -m pytest
+~~~
+
+Tests include:
+  • tests/test_app.py: Endpoint tests and service logic.
+  • tests/test_dataclass.py: Tests for stub generation, decorators, and helper functions.
+  • tests/test_launcher.py: Tests for the uvicorn launcher and process management.
+
 
 ## Docker Quick Start Example built from https://github.com/pytincture/pytincture_example
-  ** Run the docker image directly from Dockerhub
+  Run the docker image directly from Dockerhub
 ~~~
 docker run -p8070:8070 -i pytincture/pytincture:latest
 ~~~
