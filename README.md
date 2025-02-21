@@ -35,28 +35,38 @@ pip install .
 ~~~
    (Alternatively, follow the instructions in pyproject.toml.)
 
-## Running the Service
--------------------
-Development Mode:
-
-  Start the FastAPI application with Uvicorn:
-~~~
-uvicorn pytincture.backend.app:app --host 0.0.0.0 --port 8070
-~~~
-
-## Production Launcher:
-
-  Run the included launcher
-~~~
-python -m pytincture
-~~~
-  (This launcher in pytincture/__init__.py sets up necessary environment variables such as MODULES_PATH and starts uvicorn with your service.)
-
 ## Environment Variables
 - MODULES_PATH: Directory containing module files used for dynamic packaging.
 - USE_REDIS_INSTANCE: Set to "true" to enable Redis-backed session storage.
-- ENABLE_GOOGLE_AUTH / ENABLE_USER_LOGIN: Enable the respective authentication mechanisms.
 - ALLOWED_EMAILS: A comma-separated list of authorized email addresses.
+   example: "some@email.com,joe@email.com"
+- ENABLE_GOOGLE_AUTH: Enable the respective authentication mechanisms.
+   example: "true"
+- ALLOWED_NOAUTH_CLASSCALLS
+   example: [{"file": "somefile.py", "class": "SomeClass", "function": "somefunction"}]
+- GOOGLE_CLIENT_ID
+- GOOGLE_CLIENT_SECRET
+- SECRET_KEY: Secret key for google auth
+- USE_REDIS_INSTANCE: Enable the redis upstash for sessions
+   example: "true"
+- REDIS_UPSTASH_INSTANCE_URL: Url for upstash redis instance
+   example: "http://127.0.0.1:16379"
+- REDIS_UPSTASH_INSTANCE_TOKEN: Redis Upstash token
+- DATABASE_URL: Database connection string
+   example: "sqlite:////absolute/path/to/database.db"
+
+## Running the Service with your application
+-------------------
+Development Mode:
+
+  Use the service from your application:
+~~~
+if __name__=="__main__":
+    from pytincture import launch_service
+    launch_service(env_vars={
+      "ALLOWED_EMAILS": []})
+      "": 
+~~~
 
 ## Testing
 
