@@ -67,9 +67,10 @@ python -m pytest
 ~~~
 
 Tests include:
-  • tests/test_app.py: Endpoint tests and service logic.
-  • tests/test_dataclass.py: Tests for stub generation, decorators, and helper functions.
-  • tests/test_launcher.py: Tests for the uvicorn launcher and process management.
+
+  - tests/test_app.py: Endpoint tests and service logic.
+  - tests/test_dataclass.py: Tests for stub generation, decorators, and helper functions.
+  - tests/test_launcher.py: Tests for the uvicorn launcher and process management.
 
 
 ## Docker Quick Start Example built from https://github.com/pytincture/pytincture_example
