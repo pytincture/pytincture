@@ -24,7 +24,7 @@ dependencies = [
     "authlib==1.4.1",
     "python-dotenv==1.0.1",
     "aioredis==2.0.1",
-    "pytest==8.3.4"
+    "pytest==8.3.5"
 ]
 
 [project.urls]
