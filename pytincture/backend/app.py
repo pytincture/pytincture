@@ -4,6 +4,7 @@ import re
 from signal import raise_signal
 import sys
 import json
+import inspect
 import io
 import zipfile
 import importlib
@@ -16,7 +17,7 @@ from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse, Red
 from fastapi.middleware.cors import CORSMiddleware
 
 # Pytincture
-from pytincture.dataclass import get_parsed_output
+from pytincture.dataclass import get_parsed_output, add_bff_docs_to_app
 from importlib.machinery import SourceFileLoader
 
 # Google OAuth via Authlib
@@ -28,7 +29,9 @@ from starlette.config import Config
 #  FASTAPI SETUP
 # ========================
 
-app = FastAPI()
+app = FastAPI(title="pyTincture API")
+
+add_bff_docs_to_app(app)
 
 def create_appcode_pkg_in_memory(host, protocol):
     """Generate an appcode package in memory for the browser to pull for the frontend."""
@@ -381,6 +384,12 @@ async def class_call(
 
     # 1) Dynamically load the file_name
     appcode_folder = os.environ["MODULES_PATH"]
+    if not file_name.endswith(".py"):
+        file_name += ".py"
+    if not os.path.exists(os.path.join(appcode_folder, file_name)):
+        raise HTTPException(status_code=404, detail=f"File {file_name} not found in appcode folder")
+    
+    # 2) Dynamically load the class_name
     file_path = os.path.join(appcode_folder, file_name)
     
     loader = SourceFileLoader(class_name, file_path)
@@ -404,10 +413,24 @@ async def class_call(
         except Exception as e:
             print("could not convert data to json")
 
-
     # 5) Call the function with *args / **kwargs if needed
     if callable(func):
-        return func(*data.get("args", []), **data.get("kwargs", {}))
+        args = data.get("args", [])
+        kwargs = data.get("kwargs", {})
+        
+        # Handle structured args format if present
+        if args and isinstance(args[0], dict) and 'value' in args[0]:
+            args = [arg['value'] for arg in args]
+        
+        # Check if the function is async
+        if inspect.iscoroutinefunction(func):
+            # Handle async function
+            result = await func(*args, **kwargs)
+        else:
+            # Handle sync function
+            result = func(*args, **kwargs)
+        
+        return result
     
     return func
 
