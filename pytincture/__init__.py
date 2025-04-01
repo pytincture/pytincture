@@ -2,7 +2,7 @@
 pyTincture uvicorn launcher
 """
 
-__version__ = "0.9.3"
+__version__ = "0.9.4"
 
 from multiprocessing import Process, freeze_support
 import os
@@ -26,8 +26,20 @@ def main(port, ssl_keyfile=None, ssl_certfile=None):
     )
 
 
-def launch_service(modules_folder=os.getcwd(), port=8070, ssl_keyfile=None, ssl_certfile=None, env_vars: dict = {}):
+def launch_service(
+    modules_folder=os.getcwd(), 
+    port=8070, 
+    ssl_keyfile=None, 
+    ssl_certfile=None, 
+    env_vars: dict = {},
+    bff_docs_path: str = "/bff-docs",
+    bff_docs_title: str = "pyTincture BFF API"
+):
     os.environ["MODULES_PATH"] = modules_folder
+    
+    # Add BFF configuration to environment variables
+    os.environ["BFF_DOCS_PATH"] = bff_docs_path.lstrip('/')  # Remove leading slash if present
+    os.environ["BFF_DOCS_TITLE"] = bff_docs_title
         
     for akey, value in env_vars.items():
         os.environ[akey] = value
@@ -44,7 +56,3 @@ def launch_service(modules_folder=os.getcwd(), port=8070, ssl_keyfile=None, ssl_
 
     # wait for main application death
     main_application.join()
-
-if __name__ == "__main__":
-    freeze_support()
-    #launch_service(modules_folder=os.getcwd())
