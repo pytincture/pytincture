@@ -711,10 +711,52 @@ async def main_app_route(response: Response, application: str, request: Request)
     appcode_folder = os.environ["MODULES_PATH"]
     widgetset = get_widgetset(application, appcode_folder)
 
+    # Modify the index.html to include the application name and widgetset
     index_html = open(f"{STATIC_PATH}/index.html").read()
     index_html = index_html.replace("***APPLICATION***", application)
+    
+    # Find the proper entrypoint class (MainWindow subclass)
+    app_file_path = f"{appcode_folder}/{application}.py"
+    if os.path.exists(app_file_path):
+        main_window_class = find_main_window_subclass(app_file_path)
+        if main_window_class:
+            # Use the discovered MainWindow subclass name as the entrypoint
+            index_html = index_html.replace("***ENTRYPOINT***", main_window_class)
+        else:
+            # If no MainWindow subclass is found, fallback to using application name
+            index_html = index_html.replace("***ENTRYPOINT***", application)
+    else:
+        # If file doesn't exist, just use the application name as-is
+        index_html = index_html.replace("***ENTRYPOINT***", application)
+    
     index_html = index_html.replace("***WIDGETSET***", widgetset)
     return HTMLResponse(content=index_html)
+
+def find_main_window_subclass(file_path):
+    """
+    Scans a Python file for a class that subclasses MainWindow.
+    Returns the name of the first such class found, or None if no match.
+    """
+    try:
+        # Load the module
+        module_name = os.path.basename(file_path).replace('.py', '')
+        loader = SourceFileLoader(module_name, file_path)
+        spec = importlib.util.spec_from_loader(module_name, loader)
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        
+        # Inspect all classes in the module
+        for name, obj in inspect.getmembers(module):
+            # Check if it's a class and if it's a subclass of MainWindow
+            if inspect.isclass(obj) and hasattr(obj, '__bases__'):
+                for base in obj.__bases__:
+                    if base.__name__ == 'MainWindow':
+                        return name  # Return the name of the MainWindow subclass
+        
+        return None  # No MainWindow subclass found
+    except Exception as e:
+        print(f"Error finding MainWindow subclass: {e}")
+        return None
 
 # =================
 # RUN THE APP
