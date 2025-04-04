@@ -22,7 +22,7 @@ dependencies = [
     "js==1.0",
     "pyodide-py==0.27.3",
     "authlib==1.5.1",
-    "python-dotenv==1.0.1",
+    "python-dotenv==1.1.0",
     "aioredis==2.0.1",
     "pytest==8.3.5"
 ]
