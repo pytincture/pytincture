@@ -29,7 +29,7 @@ function sendToBackend(level, message) {
 
 const PYODIDE_BASE_URL = "https://cdn.jsdelivr.net/pyodide/v0.27.3/full/";
 
-async function runTinctureApp(application, widgetlib) {
+async function runTinctureApp(application, widgetlib, entrypoint) {
     let pyodide = await loadPyodide({ indexURL: PYODIDE_BASE_URL });
 
     // Install and load the widget package
@@ -59,8 +59,10 @@ async function runTinctureApp(application, widgetlib) {
     let appResponse = await fetch(application + "/appcode/appcode.pyt");
     let appBinary = await appResponse.arrayBuffer();
     pyodide.unpackArchive(appBinary, "zip");
+    
+    // Use the entrypoint class name instead of assuming it's the same as the application name
     pyodide.runPython(
-        `from ${application} import ${application} as app\napp()`
+        `from ${application} import ${entrypoint} as app\napp()`
     );
 }
 
