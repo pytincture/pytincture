@@ -498,11 +498,19 @@ async def auth_google_callback(request: Request, application: str):
     
     user_info = token.get("userinfo")
 
-    # You can optionally grab user info from token["userinfo"]
+    # Validate and check if the user's email is allowed
     if os.getenv("ALLOWED_EMAILS", "") != "":
         allowed_emails = os.getenv("ALLOWED_EMAILS").split(",")  # Assuming comma-separated
-        if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
-            return JSONResponse({"error": "Not authorized"}, status_code=401)
+        user_email = user_info.get("email", "").lower()
+        if not user_email:
+            print(f"Authentication failed: No email provided in user info")
+            return JSONResponse({"error": "Authentication failed: No email provided"}, status_code=401)
+        if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", user_email):
+            print(f"Authentication failed: Invalid email format for {user_email}")
+            return JSONResponse({"error": "Authentication failed: Invalid email format"}, status_code=401)
+        if user_email not in [email.strip().lower() for email in allowed_emails]:
+            print(f"Authentication failed: Unauthorized email {user_email}")
+            return JSONResponse({"error": f"Authentication failed: Email {user_email} is not authorized"}, status_code=401)
 
     USER_SESSION_DICT[user_info["email"]] = user_info
     request.session["user"] = user_info  # store in session
