@@ -21,7 +21,7 @@ dependencies = [
     "wheel==0.45.1",
     "js==1.0",
     "pyodide-py==0.27.3",
-    "authlib==1.5.2",
+    "authlib==1.6.0",
     "python-dotenv==1.1.0",
     "aioredis==2.0.1",
     "pytest==8.4.0"
