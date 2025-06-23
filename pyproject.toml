@@ -16,7 +16,7 @@ dependencies = [
     "fastapi==0.115.12",
     "upstash-redis>=1.2.0",
     "pyyaml==6.0.2",
-    "requests==2.32.3",
+    "requests==2.32.4",
     "uvicorn==0.34.3",
     "wheel==0.45.1",
     "js==1.0",
