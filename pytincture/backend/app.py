@@ -15,6 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastmcp import FastMCP
 
 # Pytincture
 from pytincture.dataclass import get_parsed_output, add_bff_docs_to_app
@@ -757,6 +758,27 @@ def find_main_window_subclass(file_path):
     except Exception as e:
         print(f"Error finding MainWindow subclass: {e}")
         return None
+
+def reload_mcp_tools():
+    global mcp, sse_mcp_app  # Use globals or pass as needed if in a class/module
+    
+    # Step 1: Remove existing MCP-mounted routes to avoid duplicates
+    # Filter out routes starting with "/sse-mcp" (adjust prefix if needed)
+    app.router.routes = [
+        route for route in app.router.routes
+        if not route.path.startswith("/sse-mcp")
+    ]
+    
+    # Step 2: Recreate FastMCP instance (rescans app for new endpoints/tools)
+    mcp = FastMCP.from_fastapi(app=app)  # Optionally pass route_maps=[...] for custom mapping
+    
+    # Step 3: Recreate SSE app
+    sse_mcp_app = mcp.sse_app(path='/')
+    
+    # Step 4: Remount the updated SSE app
+    app.mount("/sse-mcp", sse_mcp_app)
+
+reload_mcp_tools()
 
 # =================
 # RUN THE APP
