@@ -84,6 +84,7 @@ def backend_for_frontend(cls):
             # Create OpenAPI operation spec
             operation_spec = {
                 'summary': method.__doc__ or f"Call {method_name} on {cls.__name__}",
+                'operationId': f"call_{cls.__name__}_{method_name}",  # Add this: useful, unique, and short (adjust if needed, e.g., truncate to 50 chars max)
                 'tags': [module_name],
                 'parameters': [],
                 'requestBody': {
@@ -192,24 +193,23 @@ def add_bff_docs_to_app(app: FastAPI):
     def custom_openapi():
         if not app.openapi_schema:
             openapi_schema = get_openapi(
-                title=docs_title,
-                version="1.0.0",
-                description="Backend for Frontend API specification",
+                title=app.title,
+                version=app.version or "1.0.0",
+                description=app.description or "pyTincture API with Backend for Frontend specification",
                 routes=app.routes
             )
             
-            # Add paths from bff_routes
-            paths = {}
-            # Collect unique tags
-            tags = set()
+            # Merge BFF paths into existing paths
+            paths = openapi_schema.get("paths", {}).copy()
+            # Collect unique tags from BFF
+            new_tags = set()
             for route_path, operation_spec in bff_routes.items():
-                paths[route_path] = {
-                    'post': operation_spec
-                }
+                if route_path not in paths:
+                    paths[route_path] = {}
+                paths[route_path]['post'] = operation_spec
                 if 'tags' in operation_spec:
-                    tags.update(operation_spec['tags'])
+                    new_tags.update(operation_spec['tags'])
             
-            # Update the schema
             openapi_schema["paths"] = paths
             
             # Add components section if needed
@@ -220,14 +220,17 @@ def add_bff_docs_to_app(app: FastAPI):
             if 'schemas' not in openapi_schema['components']:
                 openapi_schema['components']['schemas'] = {}
             
-            # Add tags description
-            openapi_schema['tags'] = [
-                {
+            # Merge tags: get existing tag names
+            existing_tags = openapi_schema.get('tags', [])
+            existing_tag_names = set(tag['name'] for tag in existing_tags)
+            
+            # Add new BFF tags if not already present
+            for tag in sorted(new_tags - existing_tag_names):
+                existing_tags.append({
                     'name': tag,
                     'description': f'Endpoints from {tag}'
-                }
-                for tag in sorted(tags)
-            ]
+                })
+            openapi_schema['tags'] = existing_tags
             
             app.openapi_schema = openapi_schema
         

@@ -26,13 +26,14 @@ from authlib.integrations.starlette_client import OAuth, OAuthError
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.config import Config
 
+from typing import Any, Union, Dict, List
+
 # ========================
 #  FASTAPI SETUP
 # ========================
 
 app = FastAPI(title="pyTincture API")
 
-add_bff_docs_to_app(app)
 
 def reload_mcp_tools():
     global mcp, sse_mcp_app  # Use globals or pass as needed if in a class/module
@@ -54,7 +55,6 @@ def reload_mcp_tools():
     # Step 4: Remount the updated SSE app
     app.mount("/sse-mcp", sse_mcp_app)
 
-reload_mcp_tools()
 
 def create_appcode_pkg_in_memory(host, protocol):
     """Generate an appcode package in memory for the browser to pull for the frontend."""
@@ -79,7 +79,7 @@ def create_appcode_pkg_in_memory(host, protocol):
     return in_memory_zip
 
 
-@app.get("/favicon.ico")
+@app.get("/favicon.ico", operation_id="getFavicon", responses={200: {"description": "Response (binary content for favicon.ico, or empty if not implemented)"}, 404: {"description": "JSONResponse (if file not found, but currently not handled)"}})
 async def favicon():
     """
     Serves the favicon.ico file.
@@ -371,7 +371,7 @@ def require_auth(request: Request):
             "picture": "appcode/profile.png"
         }
 
-@app.get("/{application}/appcode/appcode.pyt")
+@app.get("/{application}/appcode/appcode.pyt", operation_id="downloadAppcodePackage", responses={200: {"description": "StreamingResponse (ZIP file stream, media_type=\"application/zip\")"}, 401: {"description": "HTTPException (if authentication fails when required)"}})
 def download_appcode(request: Request, user=Depends(require_auth)):
     host = request.headers["host"]
     # Get the protocol from X-Forwarded-Proto header (if set)
@@ -386,8 +386,8 @@ def download_appcode(request: Request, user=Depends(require_auth)):
 
 app.mount("/{application}/appcode", StaticFiles(directory=MODULE_PATH), name="static")
 
-@app.get("/classcall/{file_name}/{class_name}/{function_name}")
-@app.post("/classcall/{file_name}/{class_name}/{function_name}")
+@app.get("/classcall/{file_name}/{class_name}/{function_name}", operation_id="getClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float])"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
+@app.post("/classcall/{file_name}/{class_name}/{function_name}", operation_id="postClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float])"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
 async def class_call(
     file_name: str,
     class_name: str,
@@ -457,7 +457,7 @@ async def class_call(
     
     return func
 
-@app.post("/logs")
+@app.post("/logs", operation_id="postLogs", responses={200: {"description": "JSONResponse ({\"status\": \"ok\"})"}, 401: {"description": "HTTPException (if authentication fails)"}})
 async def logs_endpoint(request: Request, user=Depends(require_auth)):
     data = await request.json()
     print(data)
@@ -495,7 +495,7 @@ else:
 # Add session middleware (needed to store "return_to" and user info)
 app.add_middleware(SessionMiddleware, secret_key=config.get("SECRET_KEY"))
 
-@app.get("/{application}/auth/google")
+@app.get("/{application}/auth/google", operation_id="initiateGoogleAuth", response_class=RedirectResponse, responses={302: {"description": "RedirectResponse (to Google OAuth URL)"}})
 async def auth_google(request: Request, application: str):
     """
     Redirect the user to Google's OAuth2 screen.
@@ -508,7 +508,7 @@ async def auth_google(request: Request, application: str):
 
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
-@app.get("/{application}/auth/google/callback", name="auth_google_callback")
+@app.get("/{application}/auth/google/callback", name="auth_google_callback", operation_id="handleGoogleAuthCallback", response_class=RedirectResponse, responses={302: {"description": "RedirectResponse (to original path after login)"}, 401: {"description": "JSONResponse (if OAuth error or not authorized)"}})
 async def auth_google_callback(request: Request, application: str):
     """
     Google redirects here after login. Authlib will exchange code for token.
@@ -534,7 +534,7 @@ async def auth_google_callback(request: Request, application: str):
     return_to = request.session.get("return_to", "/")
     return RedirectResponse(url=return_to)
 
-@app.get("/{application}/auth/logout")
+@app.get("/{application}/auth/logout", operation_id="logoutUser", response_class=RedirectResponse, responses={302: {"description": "RedirectResponse (to login page)"}})
 def logout(request: Request,  application: str):
     """
     Logs the user out of *your app only*.
@@ -551,7 +551,7 @@ def logout(request: Request,  application: str):
 # LOGIN PAGE
 # ======================
 
-@app.get("/{application}/login", response_class=HTMLResponse)
+@app.get("/{application}/login", response_class=HTMLResponse, operation_id="getLoginPage", responses={200: {"description": "HTMLResponse (login page content)"}})
 async def login(request: Request, application: str):
     """
     Serves the login page with options to login via Google and/or Email/Password based on configuration.
@@ -678,7 +678,7 @@ async def login(request: Request, application: str):
 
     return HTMLResponse(content=html_content, status_code=200)
 
-@app.post("/{application}/auth/user")
+@app.post("/{application}/auth/user", operation_id="handleUserAuth", response_class=RedirectResponse, responses={303: {"description": "RedirectResponse (to original path after login)"}, 401: {"description": "JSONResponse (if not authorized)"}})
 async def auth_user_callback(request: Request, application: str):
     """
     User logs in via Email/Password.
@@ -710,7 +710,7 @@ async def auth_user_callback(request: Request, application: str):
 # ======================
 # The /{application} route
 # ======================
-@app.get("/{application}", response_class=HTMLResponse)
+@app.get("/{application}", response_class=HTMLResponse, operation_id="getMainApp", responses={200: {"description": "HTMLResponse (modified index.html with widgetset)"}, 302: {"description": "RedirectResponse (to login if not authenticated)"}})
 async def main_app_route(response: Response, application: str, request: Request):
     """
     1) Check if user is in session.
@@ -781,6 +781,9 @@ def find_main_window_subclass(file_path):
         print(f"Error finding MainWindow subclass: {e}")
         return None
 
+
+add_bff_docs_to_app(app)
+reload_mcp_tools()
 
 # =================
 # RUN THE APP
