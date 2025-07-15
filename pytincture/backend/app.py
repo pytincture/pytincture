@@ -13,7 +13,7 @@ import nest_asyncio
 nest_asyncio.apply()
 
 # FastAPI / Starlette
-from fastapi import Depends, FastAPI, Request, Response, HTTPException
+from fastapi import Depends, FastAPI, Request, Response, HTTPException, Body
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse, RedirectResponse
@@ -31,12 +31,14 @@ from starlette.config import Config
 
 from typing import Any, Union, Dict, List
 
+# Pydantic for JSON validation
+from pydantic import BaseModel
+
 # ========================
 #  FASTAPI SETUP
 # ========================
 
 app = FastAPI(title="pyTincture API")
-
 
 def reload_mcp_tools():
     global mcp, sse_mcp_app  # Use globals or pass as needed if in a class/module
@@ -49,7 +51,7 @@ def reload_mcp_tools():
     ]
     
     # Step 2: Recreate FastMCP instance (rescans app for new endpoints/tools)
-    mcp = FastMCP.from_fastapi(app=app, name="short")  # Add name="short" to potentially reduce any prefixed/suffixed lengths
+    mcp = FastMCP.from_fastapi(app=app, name="short")  # Add name="short" to reduce prefixed/suffixed lengths
     print("MCP Tools reloaded successfully.")
     
     # Test tool name lengths
@@ -66,7 +68,6 @@ def reload_mcp_tools():
     
     # Step 4: Remount the updated SSE app
     app.mount("/sse-mcp", sse_mcp_app)
-
 
 def create_appcode_pkg_in_memory(host, protocol):
     """Generate an appcode package in memory for the browser to pull for the frontend."""
@@ -718,6 +719,35 @@ async def auth_user_callback(request: Request, application: str):
     # See if we stored a "return_to" path earlier; default to "/"
     return_to = request.session.get("return_to", f"/{application}")
     return RedirectResponse(url=return_to, status_code=303)
+
+# Pydantic model for MCP auth input
+class MCPAuthInput(BaseModel):
+    email: str
+    password: str
+
+@app.post("/{application}/auth/mcp", operation_id="mcpAuth", responses={200: {"description": "JSONResponse with status and session cookie"}, 401: {"description": "HTTPException if not authorized"}, 403: {"description": "HTTPException if user login not enabled"}})
+async def mcp_auth(request: Request, application: str, auth_input: MCPAuthInput = Body(...)):
+    """
+    MCP-specific authentication endpoint. Authenticates with email and password via JSON, sets session, and returns status. The response includes Set-Cookie header for session, which can be used in subsequent calls.
+    """
+    if not ENABLE_USER_LOGIN:
+        raise HTTPException(status_code=403, detail="User login not enabled")
+
+    user_info = {
+        "email": auth_input.email,
+        "password": auth_input.password,
+        "picture": f"{application}/appcode/profile.png"
+    }
+
+    if os.getenv("ALLOWED_EMAILS", "") != "":
+        allowed_emails = os.getenv("ALLOWED_EMAILS").split(",")  # Assuming comma-separated
+        if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
+            raise HTTPException(status_code=401, detail="Not authorized")
+
+    USER_SESSION_DICT[user_info["email"]] = user_info
+    request.session["user"] = user_info  # store in session
+
+    return {"status": "authenticated"}
 
 # ======================
 # The /{application} route
