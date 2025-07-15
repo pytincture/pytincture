@@ -38,7 +38,7 @@ def get_method_info_from_node(class_node: ast.ClassDef) -> Dict[str, Any]:
                 
                 methods_info[node.name] = {
                     'parameters': params,
-                    'docstring': ast.get_docstring(node) or f"Call {node.name}",
+                    'docstring': ast.get_docstring(node)[0:50] or f"Call {node.name[0:50]}",
                     'return_type': 'any'  # Default return type
                 }
                 
