@@ -49,10 +49,10 @@ def reload_mcp_tools():
     ]
     
     # Step 2: Recreate FastMCP instance (rescans app for new endpoints/tools)
-    mcp = FastMCP.from_fastapi(app=app)  # Optionally pass route_maps=[...] for custom mapping
+    mcp = FastMCP.from_fastapi(app=app, name="short")  # Add name="short" to potentially reduce any prefixed/suffixed lengths
     print("MCP Tools reloaded successfully.")
-
-    # Add this block to test tool name lengths
+    
+    # Test tool name lengths
     print("\nTesting MCP Tool Name Lengths:")
     tools = asyncio.run(mcp.get_tools())
     for tool in tools.values():

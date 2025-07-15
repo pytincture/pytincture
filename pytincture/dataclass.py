@@ -83,7 +83,7 @@ def backend_for_frontend(cls):
 
             # Create OpenAPI operation spec
             operation_id_full = f"call_{cls.__name__}_{method_name}"
-            operation_id = operation_id_full[:63] if len(operation_id_full) > 63 else operation_id_full  # Truncate to ensure <64 chars
+            operation_id = operation_id_full[:50] if len(operation_id_full) > 50 else operation_id_full  # Truncate to ensure <64 chars
             operation_spec = {
                 'summary': method.__doc__ or f"Call {method_name} on {cls.__name__}",
                 'operationId': operation_id,  # Useful, unique, short, and now truncated if needed
