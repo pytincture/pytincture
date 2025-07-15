@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pytincture"
-version = "0.9.12"
+version = "0.9.13"
 description = "UI Builder"
 readme = "README.md"
 license = { text = "MIT" }
@@ -25,7 +25,8 @@ dependencies = [
     "authlib==1.6.0",
     "python-dotenv==1.1.0",
     "aioredis==2.0.1",
-    "pytest==8.4.1"
+    "pytest==8.4.1",
+    "nest-asyncio==1.6.0"
 ]
 
 [project.urls]

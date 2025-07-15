@@ -8,6 +8,9 @@ import inspect
 import io
 import zipfile
 import importlib
+import asyncio
+import nest_asyncio
+nest_asyncio.apply()
 
 # FastAPI / Starlette
 from fastapi import Depends, FastAPI, Request, Response, HTTPException
@@ -48,6 +51,15 @@ def reload_mcp_tools():
     # Step 2: Recreate FastMCP instance (rescans app for new endpoints/tools)
     mcp = FastMCP.from_fastapi(app=app)  # Optionally pass route_maps=[...] for custom mapping
     print("MCP Tools reloaded successfully.")
+
+    # Add this block to test tool name lengths
+    print("\nTesting MCP Tool Name Lengths:")
+    tools = asyncio.run(mcp.get_tools())
+    for tool in tools.values():
+        name_length = len(tool.name)
+        print(f"Tool: {tool.name} | Length: {name_length} chars | Over Limit: {name_length > 64}")
+        if name_length > 64:
+            print(f"  WARNING: Exceeds 64-char limit! Suggested truncate: {tool.name[:61]}...")
     
     # Step 3: Recreate SSE app
     sse_mcp_app = mcp.sse_app(path='/')
