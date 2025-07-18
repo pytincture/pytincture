@@ -23,7 +23,7 @@ dependencies = [
     "js==1.0",
     "pyodide-py==0.27.3",
     "authlib==1.6.0",
-    "python-dotenv==1.1.0",
+    "python-dotenv==1.1.1",
     "aioredis==2.0.1",
     "pytest==8.4.1",
     "nest-asyncio==1.6.0"
