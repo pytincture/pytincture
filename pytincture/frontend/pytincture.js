@@ -27,7 +27,7 @@ function sendToBackend(level, message) {
 });
 
 
-const PYODIDE_BASE_URL = "https://cdn.jsdelivr.net/pyodide/v0.27.3/full/";
+const PYODIDE_BASE_URL = "https://cdn.jsdelivr.net/pyodide/v0.28.0/full/";
 
 async function runTinctureApp(application, widgetlib, entrypoint) {
     let pyodide = await loadPyodide({ indexURL: PYODIDE_BASE_URL });

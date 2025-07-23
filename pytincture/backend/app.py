@@ -457,13 +457,17 @@ async def class_call(
         # Handle structured args format if present
         if args and isinstance(args[0], dict) and 'value' in args[0]:
             args = [arg['value'] for arg in args]
-        
+        # Handle if args and kwargs do not exist in data
+        elif "args" not in data and "kwargs" not in data:
+            kwargs = data
+
         # Check if the function is async
         if inspect.iscoroutinefunction(func):
             # Handle async function
             result = await func(*args, **kwargs)
         else:
             # Handle sync function
+            print(args, kwargs)
             result = func(*args, **kwargs)
         
         return result
