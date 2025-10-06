@@ -14,7 +14,7 @@ authors = [
 dependencies = [
     "aiofiles==24.1.0",
     "fastapi==0.118.0",
-    "fastmcp==2.10.5",
+    "fastmcp==2.12.4",
     "upstash-redis>=1.2.0",
     "pyyaml==6.0.3",
     "requests==2.32.5",
