@@ -12,7 +12,7 @@ authors = [
     { name = "Your Name", email = "schapman1974@gmail.com" }
 ]
 dependencies = [
-    "aiofiles==24.1.0",
+    "aiofiles==25.1.0",
     "fastapi==0.119.0",
     "fastmcp==2.12.4",
     "upstash-redis>=1.2.0",
