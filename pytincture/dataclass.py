@@ -62,10 +62,16 @@ def backend_for_frontend(cls):
     #if not module_name.endswith('.py'):
     #    module_name += '.py'
 
+    # Compute the folder path relative to MODULES_PATH
+    module_file = inspect.getfile(cls)
+    appcode_folder = os.environ["MODULES_PATH"]
+    rel_path = os.path.relpath(module_file, appcode_folder)
+    folder = os.path.dirname(rel_path) if os.path.dirname(rel_path) != '.' else ''
+
     # Register all methods
     for method_name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
         if not method_name.startswith('_'):
-            route_path = f"/classcall/{module_name}/{cls.__name__}/{method_name}"
+            route_path = f"/classcall/{folder}/{module_name}/{cls.__name__}/{method_name}" if folder else f"/classcall/{module_name}/{cls.__name__}/{method_name}"
   
             # Get method signature
             sig = inspect.signature(method)
@@ -179,7 +185,7 @@ def backend_for_frontend(cls):
             return getattr(self._real_instance, item)
 
     return BackendForFrontendWrapper
-
+    
 def add_bff_docs_to_app(app: FastAPI):
     """
     Adds BFF-specific OpenAPI documentation to a FastAPI application

@@ -29,10 +29,15 @@ from authlib.integrations.starlette_client import OAuth, OAuthError
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.config import Config
 
-from typing import Any, Union, Dict, List
+from typing import Any, Union, Dict, List, Optional
 
 # Pydantic for JSON validation
 from pydantic import BaseModel
+
+# SAML Toolkit (OneLogin)
+from onelogin.saml2.auth import OneLogin_Saml2_Auth
+from onelogin.saml2.settings import OneLogin_Saml2_Settings
+from urllib.parse import urlparse
 
 # ========================
 #  FASTAPI SETUP
@@ -79,7 +84,7 @@ def create_appcode_pkg_in_memory(host, protocol):
                 file_path = os.path.join(root, file)
                 arcname = os.path.relpath(file_path, appcode_folder)
                 if not (file.endswith('.zip') or file.endswith('.pyt') or file.endswith('.pyc') or file.endswith('.whl') or file.startswith('.')):
-                    if "__pycache__" not in root:
+                    if "__pycache__" not in root and ".venv" not in root:
                         if file.endswith('.py'):
                             file_contents = get_parsed_output(file_path, host, protocol)
                             if os.path.getsize(file_path) != 0:
@@ -111,7 +116,10 @@ def get_widgetset(application, static_path):
     Scan the application file and its imports to find the widgetset.
     """
     import_pattern = re.compile(r'^\s*(import|from)\s+([a-zA-Z0-9_]+)')
-    app_file_path = f"{static_path}/{application}.py"
+    sanitized_application = os.path.basename(application.replace("\\", "/"))
+    if sanitized_application in ("", ".", ".."):
+        return ""
+    app_file_path = os.path.join(static_path, f"{sanitized_application}.py")
     imports = []
     widgetset = None
 
@@ -155,24 +163,27 @@ def create_pytincture_pkg_in_memory():
     in_memory_zip.seek(0)
     return in_memory_zip
 
-origins = (
-    "https://pypi.org",
-    "http://0.0.0.0:8070",
-    "http://localhost:8070",
-)
+allowed_origins_env = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+allow_all_methods = ["*"]
+allow_all_headers = ["*"]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if allowed_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=allow_all_methods,
+        allow_headers=allow_all_headers,
+    )
+else:
+    print("CORS middleware disabled: set CORS_ALLOWED_ORIGINS to enable cross-origin requests.")
 
 from upstash_redis import Redis
 
 import json
 from upstash_redis import Redis  # or whatever your actual import is
+from markupsafe import escape
 
 class RedisDict:
     """
@@ -369,7 +380,7 @@ def is_noauth_allowed(file_name: str, class_name: str, function_name: str) -> bo
     return False
 
 def require_auth(request: Request):
-    if ENABLE_GOOGLE_AUTH or ENABLE_USER_LOGIN:
+    if ENABLE_GOOGLE_AUTH or ENABLE_USER_LOGIN or ENABLE_SAML_AUTH:
         user_session = request.session.get("user") or {}
         if user_session.get("email", None) in USER_SESSION_DICT:
             if user_session != USER_SESSION_DICT[user_session["email"]]:
@@ -420,13 +431,16 @@ async def class_call(
 
     # 1) Dynamically load the file_name
     appcode_folder = os.environ["MODULES_PATH"]
-    if not file_name.endswith(".py"):
-        file_name += ".py"
-    if not os.path.exists(os.path.join(appcode_folder, file_name)):
-        raise HTTPException(status_code=404, detail=f"File {file_name} not found in appcode folder")
-    
-    # 2) Dynamically load the class_name
-    file_path = os.path.join(appcode_folder, file_name)
+    base_dir = os.path.abspath(appcode_folder)
+    requested_name = file_name
+    if not requested_name.endswith(".py"):
+        requested_name += ".py"
+    sanitized_name = os.path.basename(requested_name)
+    if sanitized_name.startswith("."):
+        raise HTTPException(status_code=400, detail="Invalid file name")
+    file_path = os.path.abspath(os.path.join(base_dir, sanitized_name))
+    if not file_path.startswith(f"{base_dir}{os.sep}") or not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail=f"File {sanitized_name} not found in appcode folder")
     
     loader = SourceFileLoader(class_name, file_path)
     spec = importlib.util.spec_from_loader(class_name, loader)
@@ -487,6 +501,7 @@ async def logs_endpoint(request: Request, user=Depends(require_auth)):
 
 ENABLE_GOOGLE_AUTH = os.getenv("ENABLE_GOOGLE_AUTH", "false").lower() == "true"
 ENABLE_USER_LOGIN = os.getenv("ENABLE_USER_LOGIN", "false").lower() == "true"
+ENABLE_SAML_AUTH = os.getenv("ENABLE_SAML_AUTH", "false").lower() == "true"
 
 config_data = {
     "GOOGLE_CLIENT_ID": os.getenv("GOOGLE_CLIENT_ID", ""),
@@ -494,6 +509,223 @@ config_data = {
     "SECRET_KEY": os.getenv("SECRET_KEY", "verysecretkey"),
 }
 config = Config(environ=config_data)
+
+SAML_EMAIL_ATTRIBUTE = os.getenv("SAML_EMAIL_ATTRIBUTE", "email")
+SAML_NAME_ATTRIBUTE = os.getenv("SAML_NAME_ATTRIBUTE", "givenName")
+SAML_DEFAULT_REDIRECT = os.getenv("SAML_DEFAULT_REDIRECT", "")
+SAML_SP_ENTITY_ID = os.getenv("SAML_SP_ENTITY_ID", "")
+SAML_SP_ASSERTION_URL = os.getenv("SAML_SP_ASSERTION_CONSUMER_SERVICE_URL", "")
+SAML_SP_X509_CERT = os.getenv("SAML_SP_X509_CERT", "")
+SAML_SP_PRIVATE_KEY = os.getenv("SAML_SP_PRIVATE_KEY", "")
+SAML_IDP_ENTITY_ID = os.getenv("SAML_IDP_ENTITY_ID", "")
+SAML_IDP_SSO_URL = os.getenv("SAML_IDP_SSO_URL", "")
+SAML_IDP_SLO_URL = os.getenv("SAML_IDP_SLO_URL", "")
+SAML_IDP_X509_CERT = os.getenv("SAML_IDP_X509_CERT", "")
+
+
+def _normalize_certificate(value: str) -> str:
+    """
+    Ensure certificate/key values pulled from environment variables are newline-normalized.
+    """
+    if not value:
+        return value
+    return value.replace("\\n", "\n").strip()
+
+
+def _extract_request_origin(request: Request) -> Dict[str, Any]:
+    """
+    Resolve protocol, host, and port taking reverse proxy headers into account.
+    """
+    protocol = request.headers.get("x-forwarded-proto") or request.url.scheme
+    forwarded_host = request.headers.get("x-forwarded-host")
+    host_header = forwarded_host or request.headers.get("host")
+    hostname = request.url.hostname or "localhost"
+    host = hostname
+
+    port = request.url.port
+    if port is None:
+        port = 443 if protocol == "https" else 80
+
+    if host_header:
+        if ":" in host_header:
+            potential_host, potential_port = host_header.split(":", 1)
+            host = potential_host.strip() or hostname
+            try:
+                port = int(potential_port)
+            except ValueError:
+                port = port
+        else:
+            host = host_header.strip() or hostname
+
+    forwarded_port = request.headers.get("x-forwarded-port")
+    if forwarded_port:
+        try:
+            port = int(forwarded_port)
+        except ValueError:
+            pass
+
+    default_port = 443 if protocol == "https" else 80
+    if host_header:
+        host_with_port = host_header
+    else:
+        host_with_port = host if port == default_port else f"{host}:{port}"
+
+    base_url = f"{protocol}://{host_with_port}"
+    return {
+        "protocol": protocol,
+        "host": host,
+        "host_with_port": host_with_port,
+        "port": port,
+        "base_url": base_url,
+    }
+
+
+def _apply_saml_template(value: str, application: str, origin: Dict[str, Any]) -> str:
+    """
+    Replace supported placeholders in configuration strings.
+    """
+    if not value:
+        return value
+    return (
+        value
+        .replace("{application}", application)
+        .replace("{base_url}", origin["base_url"])
+        .replace("{host}", origin["host"])
+        .replace("{host_with_port}", origin["host_with_port"])
+        .replace("{protocol}", origin["protocol"])
+    )
+
+
+def _build_saml_settings(request: Request, application: str) -> Dict[str, Any]:
+    """
+    Construct the settings dict consumed by python3-saml using runtime request data.
+    """
+    origin = _extract_request_origin(request)
+    default_entity = f"{origin['base_url']}/{application}/auth/saml/metadata"
+    entity_id = _apply_saml_template(SAML_SP_ENTITY_ID or default_entity, application, origin)
+
+    default_acs = f"{origin['base_url']}/{application}/auth/saml/acs"
+    acs_url = _apply_saml_template(SAML_SP_ASSERTION_URL or default_acs, application, origin)
+
+    idp_entity = _apply_saml_template(SAML_IDP_ENTITY_ID, application, origin)
+    idp_sso = _apply_saml_template(SAML_IDP_SSO_URL, application, origin)
+    idp_slo = _apply_saml_template(SAML_IDP_SLO_URL, application, origin) if SAML_IDP_SLO_URL else ""
+    idp_cert = _normalize_certificate(SAML_IDP_X509_CERT)
+
+    if not idp_entity or not idp_sso or not idp_cert:
+        raise RuntimeError("SAML IdP configuration is incomplete. Ensure SAML_IDP_ENTITY_ID, SAML_IDP_SSO_URL, and SAML_IDP_X509_CERT are set.")
+
+    sp_settings: Dict[str, Any] = {
+        "entityId": entity_id,
+        "assertionConsumerService": {
+            "url": acs_url,
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
+        },
+        "NameIDFormat": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+    }
+
+    sp_cert = _normalize_certificate(SAML_SP_X509_CERT)
+    sp_key = _normalize_certificate(SAML_SP_PRIVATE_KEY)
+    if sp_cert:
+        sp_settings["x509cert"] = sp_cert
+    if sp_key:
+        sp_settings["privateKey"] = sp_key
+
+    idp_settings: Dict[str, Any] = {
+        "entityId": idp_entity,
+        "singleSignOnService": {
+            "url": idp_sso,
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
+        },
+        "x509cert": idp_cert,
+    }
+
+    if idp_slo:
+        idp_settings["singleLogoutService"] = {
+            "url": idp_slo,
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
+        }
+
+    debug_enabled = os.getenv("SAML_DEBUG", "false").lower() == "true"
+    return {
+        "strict": True,
+        "debug": debug_enabled,
+        "sp": sp_settings,
+        "idp": idp_settings,
+    }
+
+
+def _build_saml_request_data(request: Request, post_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Translate a FastAPI Request into the structure expected by python3-saml.
+    """
+    origin = _extract_request_origin(request)
+    return {
+        "https": "on" if origin["protocol"] == "https" else "off",
+        "http_host": origin["host_with_port"],
+        "server_port": str(origin["port"]),
+        "script_name": request.url.path,
+        "get_data": dict(request.query_params),
+        "post_data": post_data or {},
+    }
+
+
+def _init_saml_auth(request: Request, application: str, post_data: Optional[Dict[str, Any]] = None) -> OneLogin_Saml2_Auth:
+    """
+    Convenience wrapper to instantiate a SAML Auth client.
+    """
+    request_data = _build_saml_request_data(request, post_data=post_data)
+    settings = _build_saml_settings(request, application)
+    return OneLogin_Saml2_Auth(request_data, old_settings=settings)
+
+
+def _get_saml_default_redirect(application: str, request: Request) -> str:
+    """
+    Produce the default redirect target using optional templates.
+    """
+    origin = _extract_request_origin(request)
+    default_target = f"/{application}"
+    configured_target = _apply_saml_template(SAML_DEFAULT_REDIRECT, application, origin) if SAML_DEFAULT_REDIRECT else ""
+    return configured_target or default_target
+
+
+def _get_saml_attribute(attributes: Dict[str, List[str]], attribute_name: str) -> Optional[str]:
+    """
+    Helper to fetch the first attribute value, returning None if missing.
+    """
+    values = attributes.get(attribute_name)
+    if not values:
+        return None
+    if isinstance(values, list):
+        return values[0]
+    return values
+
+
+def _sanitize_return_to(value: Optional[str]) -> Optional[str]:
+    """
+    Ensure return_to targets remain on the same origin by allowing only relative URLs.
+    """
+    if not value:
+        return None
+
+    candidate = value.strip()
+    if not candidate:
+        return None
+
+    parsed = urlparse(candidate)
+    if parsed.scheme or parsed.netloc:
+        return None
+
+    path = parsed.path or ""
+    if not path.startswith("/") or path.startswith("//"):
+        return None
+
+    sanitized = path
+    if parsed.query:
+        sanitized += f"?{parsed.query}"
+    if parsed.fragment:
+        sanitized += f"#{parsed.fragment}"
+    return sanitized
 
 # Create an OAuth object and register the Google provider
 if ENABLE_GOOGLE_AUTH:
@@ -511,6 +743,150 @@ else:
 
 # Add session middleware (needed to store "return_to" and user info)
 app.add_middleware(SessionMiddleware, secret_key=config.get("SECRET_KEY"))
+
+# ================
+# SAML SSO SETUP
+# ================
+
+@app.get(
+    "/{application}/auth/saml/login",
+    operation_id="initiateSamlAuth",
+    response_class=RedirectResponse,
+    responses={
+        302: {"description": "RedirectResponse (to IdP login)"},
+        404: {"description": "HTTPException (if SAML disabled)"},
+        500: {"description": "HTTPException (if configuration error)"},
+    },
+)
+async def saml_login(request: Request, application: str):
+    """
+    Redirect the user to the configured SAML Identity Provider.
+    """
+    if not ENABLE_SAML_AUTH:
+        raise HTTPException(status_code=404, detail="SAML authentication not enabled")
+
+    return_to = request.query_params.get("return_to")
+    safe_return_to = _sanitize_return_to(return_to)
+    if safe_return_to:
+        request.session["return_to"] = safe_return_to
+
+    try:
+        saml_auth = _init_saml_auth(request, application)
+    except RuntimeError as config_error:
+        raise HTTPException(status_code=500, detail=str(config_error)) from config_error
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"SAML initialization failed: {exc}") from exc
+
+    auth_url = saml_auth.login()
+    request.session["saml_request_id"] = saml_auth.get_last_request_id()
+    return RedirectResponse(url=auth_url)
+
+
+@app.post(
+    "/{application}/auth/saml/acs",
+    operation_id="handleSamlAuthCallback",
+    response_class=RedirectResponse,
+    responses={
+        302: {"description": "RedirectResponse (to original path after login)"},
+        400: {"description": "HTTPException (if SAML response invalid)"},
+        401: {"description": "HTTPException (if user not authorized)"},
+        404: {"description": "HTTPException (if SAML disabled)"},
+    },
+)
+async def saml_assertion_consumer(request: Request, application: str):
+    """
+    Handle the assertion consumer service (ACS) endpoint invoked by the IdP.
+    """
+    if not ENABLE_SAML_AUTH:
+        raise HTTPException(status_code=404, detail="SAML authentication not enabled")
+
+    form_data = await request.form()
+    post_data = dict(form_data.multi_items())
+
+    try:
+        saml_auth = _init_saml_auth(request, application, post_data=post_data)
+        request_id = request.session.pop("saml_request_id", None)
+        saml_auth.process_response(request_id=request_id)
+    except RuntimeError as config_error:
+        raise HTTPException(status_code=500, detail=str(config_error)) from config_error
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Failed to process SAML response: {exc}") from exc
+
+    errors = saml_auth.get_errors()
+    if errors:
+        raise HTTPException(status_code=400, detail=f"SAML response contained errors: {errors}")
+
+    if not saml_auth.is_authenticated():
+        raise HTTPException(status_code=401, detail="SAML authentication failed")
+
+    attributes = saml_auth.get_attributes()
+    email_attr = _get_saml_attribute(attributes, SAML_EMAIL_ATTRIBUTE) or saml_auth.get_nameid()
+    if not email_attr:
+        raise HTTPException(status_code=400, detail="SAML response missing required email attribute")
+
+    name_attr = _get_saml_attribute(attributes, SAML_NAME_ATTRIBUTE) if SAML_NAME_ATTRIBUTE else None
+
+    # Normalize attributes so they are JSON serializable for session storage.
+    normalized_attributes: Dict[str, List[str]] = {
+        key: list(values) if isinstance(values, (list, tuple)) else [values]
+        for key, values in attributes.items()
+    }
+
+    user_info = {
+        "email": email_attr,
+        "name": name_attr or "",
+        "picture": f"{application}/appcode/profile.png",
+        "saml": {
+            "name_id": saml_auth.get_nameid(),
+            "session_index": saml_auth.get_session_index(),
+            "attributes": normalized_attributes,
+        },
+    }
+
+    if os.getenv("ALLOWED_EMAILS", "") != "":
+        allowed_emails = [email.strip().lower() for email in os.getenv("ALLOWED_EMAILS", "").split(",") if email.strip()]
+        if email_attr.lower() not in allowed_emails:
+            raise HTTPException(status_code=401, detail="Not authorized")
+
+    USER_SESSION_DICT[email_attr] = user_info
+    request.session["user"] = user_info
+    request.session["saml_name_id"] = saml_auth.get_nameid()
+    request.session["saml_session_index"] = saml_auth.get_session_index()
+
+    redirect_target = _sanitize_return_to(request.session.pop("return_to", None))
+    if not redirect_target:
+        redirect_target = _get_saml_default_redirect(application, request)
+    return RedirectResponse(url=redirect_target, status_code=302)
+
+
+@app.get(
+    "/{application}/auth/saml/metadata",
+    operation_id="getSamlMetadata",
+    responses={
+        200: {"description": "Response (SAML metadata XML)"},
+        404: {"description": "HTTPException (if SAML disabled)"},
+        500: {"description": "HTTPException (if metadata generation fails)"},
+    },
+)
+async def saml_metadata(request: Request, application: str):
+    """
+    Provide SP metadata for the configured SAML settings.
+    """
+    if not ENABLE_SAML_AUTH:
+        raise HTTPException(status_code=404, detail="SAML authentication not enabled")
+
+    try:
+        settings = OneLogin_Saml2_Settings(settings=_build_saml_settings(request, application), sp_validation_only=True)
+        metadata_xml = settings.get_sp_metadata()
+        errors = settings.validate_metadata(metadata_xml)
+        if errors:
+            raise HTTPException(status_code=500, detail=f"SAML metadata validation errors: {errors}")
+    except RuntimeError as config_error:
+        raise HTTPException(status_code=500, detail=str(config_error)) from config_error
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Failed to generate SAML metadata: {exc}") from exc
+
+    return Response(content=metadata_xml, media_type="application/xml")
 
 @app.get("/{application}/auth/google", operation_id="initiateGoogleAuth", response_class=RedirectResponse, responses={302: {"description": "RedirectResponse (to Google OAuth URL)"}})
 async def auth_google(request: Request, application: str):
@@ -548,7 +924,7 @@ async def auth_google_callback(request: Request, application: str):
     request.session["user"] = user_info  # store in session
 
     # See if we stored a "return_to" path earlier; default to "/"
-    return_to = request.session.get("return_to", "/")
+    return_to = _sanitize_return_to(request.session.pop("return_to", None)) or "/"
     return RedirectResponse(url=return_to)
 
 @app.get("/{application}/auth/logout", operation_id="logoutUser", response_class=RedirectResponse, responses={302: {"description": "RedirectResponse (to login page)"}})
@@ -558,6 +934,8 @@ def logout(request: Request,  application: str):
     """
     # 1) Clear user info from session
     request.session.pop("user", None)
+    request.session.pop("saml_name_id", None)
+    request.session.pop("saml_session_index", None)
     # 2) If stored tokens in session, remove them
     # request.session.pop("token", None)
 
@@ -659,15 +1037,24 @@ async def login(request: Request, application: str):
             <p>Please log in to continue</p>
     """
 
-    # Conditionally add Google login button
+    social_buttons = []
+
     if ENABLE_GOOGLE_AUTH:
-        html_content += f'''
-            <a href="auth/google" class="login-button">Login with Google</a>
-        '''
+        social_buttons.append(
+            '<a href="auth/google" class="login-button">Login with Google</a>'
+        )
+
+    if ENABLE_SAML_AUTH:
+        social_buttons.append(
+            '<a href="auth/saml/login" class="login-button">Login with SAML</a>'
+        )
+
+    if social_buttons:
+        html_content += "\n".join(social_buttons)
 
     # Conditionally add Email/Password login form
     if ENABLE_USER_LOGIN:
-        if ENABLE_GOOGLE_AUTH:
+        if social_buttons:
             # Add a divider if both login methods are available
             html_content += '''
                 <div class="divider"><span>OR</span></div>
@@ -681,7 +1068,7 @@ async def login(request: Request, application: str):
         '''
 
     # Handle case where no login methods are enabled
-    if not ENABLE_GOOGLE_AUTH and not ENABLE_USER_LOGIN:
+    if not (ENABLE_GOOGLE_AUTH or ENABLE_USER_LOGIN or ENABLE_SAML_AUTH):
         html_content += '''
             <p>No login methods are currently available. Please contact support.</p>
         '''
@@ -720,8 +1107,8 @@ async def auth_user_callback(request: Request, application: str):
     USER_SESSION_DICT[user_info["email"]] = user_info
     request.session["user"] = user_info  # store in session
 
-    # See if we stored a "return_to" path earlier; default to "/"
-    return_to = request.session.get("return_to", f"/{application}")
+    # See if we stored a "return_to" path earlier; default to "/{application}"
+    return_to = _sanitize_return_to(request.session.pop("return_to", None)) or f"/{application}"
     return RedirectResponse(url=return_to, status_code=303)
 
 # Pydantic model for MCP auth input
@@ -767,7 +1154,7 @@ async def main_app_route(response: Response, application: str, request: Request)
     user_session = require_auth(request)
     user_entry = user_session.get("email", "") if user_session else "noauth"
     
-    if (ENABLE_USER_LOGIN or ENABLE_GOOGLE_AUTH) and not USER_SESSION_DICT.get(user_entry, None):
+    if (ENABLE_USER_LOGIN or ENABLE_GOOGLE_AUTH or ENABLE_SAML_AUTH) and not USER_SESSION_DICT.get(user_entry, None):
         # Not logged in, so remember where they wanted to go:
         request.session["return_to"] = f"/{application}"
         # Then send them to Login page:
@@ -779,10 +1166,11 @@ async def main_app_route(response: Response, application: str, request: Request)
     # Already logged in, proceed normally
     appcode_folder = os.environ["MODULES_PATH"]
     widgetset = get_widgetset(application, appcode_folder)
+    safe_application = escape(application)
 
     # Modify the index.html to include the application name and widgetset
     index_html = open(f"{STATIC_PATH}/index.html").read()
-    index_html = index_html.replace("***APPLICATION***", application)
+    index_html = index_html.replace("***APPLICATION***", safe_application)
     
     # Find the proper entrypoint class (MainWindow subclass)
     app_file_path = f"{appcode_folder}/{application}.py"
@@ -793,10 +1181,10 @@ async def main_app_route(response: Response, application: str, request: Request)
             index_html = index_html.replace("***ENTRYPOINT***", main_window_class)
         else:
             # If no MainWindow subclass is found, fallback to using application name
-            index_html = index_html.replace("***ENTRYPOINT***", application)
+            index_html = index_html.replace("***ENTRYPOINT***", safe_application)
     else:
         # If file doesn't exist, just use the application name as-is
-        index_html = index_html.replace("***ENTRYPOINT***", application)
+        index_html = index_html.replace("***ENTRYPOINT***", safe_application)
     
     index_html = index_html.replace("***WIDGETSET***", widgetset)
     return HTMLResponse(content=index_html)

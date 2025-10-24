@@ -8,7 +8,7 @@
 - GUI Library Support: Simplify the creation and management of GUI components in Python.
 - Dynamic Code Packaging: Generate in-memory ZIP packages for frontend consumption.
 - Widgetset Stub Generation: Automatically generate frontend stub classes using the @backend_for_frontend decorator.
-- Authentication & Sessions: Supports Google OAuth2 and email/password authentication with session management.
+- Authentication & Sessions: Supports Google OAuth2, SAML 2.0 SSO, and email/password authentication with session management.
 - Redis Integration: Optionally use a Redis-backed session store via Upstash.
 - Cross-Platform Compatibility: Works on any platform where Pyodide is supported.
 - Easy to Use: Provides a user-friendly API to streamline GUI development.
@@ -42,6 +42,23 @@ pip install .
    example: "some@email.com,joe@email.com"
 - ENABLE_GOOGLE_AUTH: Enable the respective authentication mechanisms.
    example: "true"
+- ENABLE_SAML_AUTH: Enable SAML 2.0 authentication.
+   example: "true"
+- SAML_EMAIL_ATTRIBUTE: Attribute name used to extract the user email from the SAML assertion.
+   example: "email"
+- SAML_NAME_ATTRIBUTE: Optional attribute for the display name.
+   example: "givenName"
+- SAML_DEFAULT_REDIRECT: Optional redirect path or URL template after SAML login (defaults to `/{application}` when unset).
+   example: "/{application}"
+- SAML_SP_ENTITY_ID: Optional template for the SP entity ID (supports {application}, {base_url}, {host}); defaults to `/{application}/auth/saml/metadata`.
+- SAML_SP_ASSERTION_CONSUMER_SERVICE_URL: Optional template for the ACS endpoint (supports placeholders like {application}).
+- SAML_SP_X509_CERT: Service Provider certificate in PEM format if signing/encryption is required.
+- SAML_SP_PRIVATE_KEY: Service Provider private key in PEM format matching the SP certificate.
+- SAML_IDP_ENTITY_ID: Identity Provider entity ID.
+- SAML_IDP_SSO_URL: Identity Provider SSO URL.
+- SAML_IDP_SLO_URL: Optional Identity Provider SLO URL.
+- SAML_IDP_X509_CERT: Identity Provider certificate in PEM format.
+- SAML_DEBUG: Enable verbose SAML logging.
 - ALLOWED_NOAUTH_CLASSCALLS
    example: [{"file": "somefile.py", "class": "SomeClass", "function": "somefunction"}]
 - GOOGLE_CLIENT_ID
@@ -97,5 +114,3 @@ http://localhost:8070/py_ui
 
 ## License
 `pyTincture` is licensed under the MIT License.
-
-

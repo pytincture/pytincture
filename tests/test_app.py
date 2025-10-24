@@ -8,8 +8,8 @@ import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
 
-# Import the app instance and ALLOWED_NOAUTH_CLASSCALLS from the module.
-from pytincture.backend.app import app, ALLOWED_NOAUTH_CLASSCALLS
+# Import the app instance and helpers from the module.
+from pytincture.backend.app import app, ALLOWED_NOAUTH_CLASSCALLS, _sanitize_return_to
 
 @pytest.fixture(autouse=True)
 def override_env(monkeypatch):
@@ -25,6 +25,7 @@ def override_env(monkeypatch):
     import pytincture.backend.app as backend_app
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {})
     ALLOWED_NOAUTH_CLASSCALLS.clear()
     yield
@@ -72,6 +73,7 @@ def test_main_route_with_auth_enabled_no_user_session(fresh_client, monkeypatch)
     import pytincture.backend.app as backend_app
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {})
 
     # Override require_auth so that it always returns None (simulating no valid session).
@@ -92,6 +94,7 @@ def test_main_route_no_auth_when_disabled(fresh_client, monkeypatch):
     import pytincture.backend.app as backend_app
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
     application_name = "demoapp"
     response = fresh_client.get(f"/{application_name}")
     assert response.status_code == 200
@@ -284,3 +287,80 @@ def test_main_app_route_logged_in(fresh_client, monkeypatch, tmp_path):
     assert "***APPLICATION***" not in html
     assert "widgetset_val==3.0" in html
     del sys.modules["dummywidget"]
+
+
+def test_sanitize_return_to_allows_relative_paths():
+    """
+    Relative, same-origin paths should be preserved.
+    """
+    assert _sanitize_return_to("/demoapp") == "/demoapp"
+    assert _sanitize_return_to("/demoapp?next=home") == "/demoapp?next=home"
+
+
+def test_sanitize_return_to_rejects_external_urls():
+    """
+    Absolute or protocol-relative URLs must be rejected to avoid open redirects.
+    """
+    assert _sanitize_return_to("https://evil.com") is None
+    assert _sanitize_return_to("//evil.com") is None
+    assert _sanitize_return_to("   http://evil.com/path  ") is None
+    assert _sanitize_return_to("login") is None
+
+
+def test_login_endpoint_includes_saml_button_when_enabled(fresh_client, monkeypatch, tmp_path):
+    """
+    Ensure the login page surfaces the SAML option when enabled.
+    """
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
+
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+
+    response = fresh_client.get("/demoapp/login")
+    assert response.status_code == 200
+    assert "Login with SAML" in response.text
+
+
+def test_saml_metadata_route_returns_metadata(fresh_client, monkeypatch, tmp_path):
+    """
+    Verify that the SAML metadata endpoint returns valid XML when configured.
+    """
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
+
+    dummy_modules = tmp_path / "modules"
+    dummy_modules.mkdir()
+    monkeypatch.setenv("MODULES_PATH", str(dummy_modules))
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_SP_ENTITY_ID", "https://example.com/{application}/auth/saml/metadata")
+    monkeypatch.setattr(backend_app, "SAML_IDP_ENTITY_ID", "https://idp.example.com/metadata")
+    monkeypatch.setattr(backend_app, "SAML_IDP_SSO_URL", "https://idp.example.com/sso")
+    dummy_cert = (
+        "-----BEGIN CERTIFICATE-----\n"
+        "MIIBszCCAVmgAwIBAgIUO3VsbHlDZXJ0Q29kZXgxEzARBgNVBAMMCkxvY2FsIElE\n"
+        "UDEPMA0GA1UECgwGQXBwQ28wHhcNMjQwMTAxMDAwMDAwWhcNMzQwMTAxMDAwMDAw\n"
+        "WjATMREwDwYDVQQDDAhVbml0VGVzdDCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkC\n"
+        "gYEAy1atZ0mFsrl5FTvhYGfEpDj6rVdlHPff0T3hj5VYiC7P+60F2/diFr9GY29s\n"
+        "F1tXsEBuFQzL85zzBdNxcQvTxlyvq9Y6lBJ8K8w9Y4mGe/7y6QSyp4i0b36W3YLv\n"
+        "oH4p64a1PgVno6Pwx1yk3B9uJJl63/tVspEP1JuxlTCbeu0CAwEAATANBgkqhkiG\n"
+        "9w0BAQsFAAOBgQBSAdwLY7z9mVJgE+B76MpxGg7Trz4Y32faVYblaRHmbZt3FvX6\n"
+        "6R0tPLfrE38AyFQBtcyqH68v9d5dTU8l2zl4OPcnBHdUMf56XI5clJ8zJqVU6M/p\n"
+        "jdJp4bYaXMtOmvw5FXX0HP7h+G5aD3JBt+1w0FSf1V/Iv9ldnYNoG9/HYg==\n"
+        "-----END CERTIFICATE-----"
+    )
+    monkeypatch.setattr(backend_app, "SAML_IDP_X509_CERT", dummy_cert)
+
+    response = fresh_client.get("/demoapp/auth/saml/metadata")
+    assert response.status_code == 200
+    assert "EntityDescriptor" in response.text
