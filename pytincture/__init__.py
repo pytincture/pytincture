@@ -12,8 +12,34 @@ import zipfile
 
 import uvicorn
 
+MODULES_PATH = os.environ.get("MODULES_PATH")
 
-def main(port, ssl_keyfile=None, ssl_certfile=None):
+
+def set_modules_path(path=None):
+    """
+    Store the active modules path in-process and keep the environment in sync.
+    """
+    global MODULES_PATH
+    MODULES_PATH = path
+    if path is None:
+        os.environ.pop("MODULES_PATH", None)
+    else:
+        os.environ["MODULES_PATH"] = path
+
+
+def get_modules_path():
+    """
+    Retrieve the active modules path, falling back to the environment or CWD.
+    """
+    if MODULES_PATH is not None:
+        return MODULES_PATH
+    return os.environ.get("MODULES_PATH") or os.getcwd()
+
+
+def main(port, ssl_keyfile=None, ssl_certfile=None, modules_folder=None):
+    if modules_folder is not None:
+        set_modules_path(os.fspath(modules_folder))
+
     uvicorn.run(
         "pytincture.backend.app:app",
         host="0.0.0.0",
@@ -35,16 +61,19 @@ def launch_service(
     bff_docs_path: str = "/bff-docs",
     bff_docs_title: str = "pyTincture BFF API"
 ):
-    os.environ["MODULES_PATH"] = modules_folder
+    modules_folder = os.fspath(modules_folder)
+    set_modules_path(modules_folder)
     
     # Add BFF configuration to environment variables
     os.environ["BFF_DOCS_PATH"] = bff_docs_path.lstrip('/')  # Remove leading slash if present
     os.environ["BFF_DOCS_TITLE"] = bff_docs_title
         
     for akey, value in env_vars.items():
+        if akey == "MODULES_PATH":
+            continue
         os.environ[akey] = value
 
-    main_application = Process(target=main, args=(port, ssl_keyfile, ssl_certfile,))
+    main_application = Process(target=main, args=(port, ssl_keyfile, ssl_certfile, modules_folder))
     # launch data and main applications
     main_application.start()
     

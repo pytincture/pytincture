@@ -1,4 +1,3 @@
-from operator import call
 import os
 import re
 from signal import raise_signal
@@ -21,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastmcp import FastMCP
 
 # Pytincture
+from pytincture import get_modules_path
 from pytincture.dataclass import get_parsed_output, add_bff_docs_to_app
 from importlib.machinery import SourceFileLoader
 
@@ -76,7 +76,7 @@ def reload_mcp_tools():
 
 def create_appcode_pkg_in_memory(host, protocol):
     """Generate an appcode package in memory for the browser to pull for the frontend."""
-    appcode_folder = os.environ["MODULES_PATH"]
+    appcode_folder = get_modules_path()
     in_memory_zip = io.BytesIO()
     with zipfile.ZipFile(in_memory_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(appcode_folder):
@@ -357,7 +357,7 @@ if  USE_REDIS_INSTANCE == "true":
 else:
     USER_SESSION_DICT = {}
 
-MODULE_PATH = os.environ.get("MODULES_PATH")
+MODULE_PATH = get_modules_path()
 
 try:
     ALLOWED_NOAUTH_CLASSCALLS = json.loads(os.environ.get("ALLOWED_NOAUTH_CLASSCALLS", "[]"))
@@ -430,7 +430,7 @@ async def class_call(
         raise HTTPException(status_code=401, detail="Call not authorized")
 
     # 1) Dynamically load the file_name
-    appcode_folder = os.environ["MODULES_PATH"]
+    appcode_folder = get_modules_path()
     base_dir = os.path.abspath(appcode_folder)
     requested_name = file_name
     if not requested_name.endswith(".py"):
@@ -605,6 +605,10 @@ def _build_saml_settings(request: Request, application: str) -> Dict[str, Any]:
     entity_id = _apply_saml_template(SAML_SP_ENTITY_ID or default_entity, application, origin)
 
     default_acs = f"{origin['base_url']}/{application}/auth/saml/acs"
+    if not SAML_SP_ASSERTION_URL and entity_id:
+        parsed_entity = urlparse(entity_id)
+        if parsed_entity.scheme and parsed_entity.netloc:
+            default_acs = f"{parsed_entity.scheme}://{parsed_entity.netloc}/{application}/auth/saml/acs"
     acs_url = _apply_saml_template(SAML_SP_ASSERTION_URL or default_acs, application, origin)
 
     idp_entity = _apply_saml_template(SAML_IDP_ENTITY_ID, application, origin)
@@ -880,7 +884,10 @@ async def saml_metadata(request: Request, application: str):
         metadata_xml = settings.get_sp_metadata()
         errors = settings.validate_metadata(metadata_xml)
         if errors:
-            raise HTTPException(status_code=500, detail=f"SAML metadata validation errors: {errors}")
+            allowed_errors = {"sp_acs_url_invalid", "sp_entity_id_invalid"}
+            remaining_errors = [err for err in errors if err not in allowed_errors]
+            if remaining_errors:
+                raise HTTPException(status_code=500, detail=f"SAML metadata validation errors: {remaining_errors}")
     except RuntimeError as config_error:
         raise HTTPException(status_code=500, detail=str(config_error)) from config_error
     except Exception as exc:  # noqa: BLE001
@@ -1164,7 +1171,7 @@ async def main_app_route(response: Response, application: str, request: Request)
         user_session = request.session.get("user")
 
     # Already logged in, proceed normally
-    appcode_folder = os.environ["MODULES_PATH"]
+    appcode_folder = get_modules_path()
     widgetset = get_widgetset(application, appcode_folder)
     safe_application = escape(application)
 

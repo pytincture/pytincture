@@ -36,7 +36,7 @@ pip install .
    (Alternatively, follow the instructions in pyproject.toml.)
 
 ## Environment Variables
-- MODULES_PATH: Directory containing module files used for dynamic packaging.
+- MODULES_PATH: Directory containing module files used for dynamic packaging. This is set automatically from `modules_folder` when `launch_service` starts; overriding it via env vars is usually unnecessary.
 - USE_REDIS_INSTANCE: Set to "true" to enable Redis-backed session storage.
 - ALLOWED_EMAILS: A comma-separated list of authorized email addresses.
    example: "some@email.com,joe@email.com"
@@ -80,10 +80,12 @@ Development Mode:
 ~~~
 if __name__=="__main__":
     from pytincture import launch_service
-    launch_service(env_vars={
-      "ALLOWED_EMAILS": []
-      "MODULES_PATH": "."  # current path
-    })
+    launch_service(
+        modules_folder=".",  # point to your modules directly
+        env_vars={
+            "ALLOWED_EMAILS": []
+        }
+    )
 ~~~
 
 ## Testing

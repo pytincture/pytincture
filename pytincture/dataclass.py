@@ -9,6 +9,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.openapi.docs import get_swagger_ui_html
 import inspect
 from typing import Dict, Any
+from pytincture import get_modules_path
 
 # Global set to track BFF endpoints
 bff_routes: Dict[str, Dict] = {}
@@ -64,7 +65,7 @@ def backend_for_frontend(cls):
 
     # Compute the folder path relative to MODULES_PATH
     module_file = inspect.getfile(cls)
-    appcode_folder = os.environ["MODULES_PATH"]
+    appcode_folder = get_modules_path()
     rel_path = os.path.relpath(module_file, appcode_folder)
     folder = os.path.dirname(rel_path) if os.path.dirname(rel_path) != '.' else ''
 

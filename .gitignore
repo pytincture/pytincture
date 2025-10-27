@@ -19,3 +19,4 @@ dist/*.whl
 *.pyt
 .DS_Store
 pytincture/backend/.env
+fastmcp_stub/*

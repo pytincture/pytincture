@@ -8,13 +8,14 @@ from multiprocessing import freeze_support
 from fastapi.testclient import TestClient
 
 # Import the launcher functions from pytincture/__init__.py.
-from pytincture import main, launch_service
+from pytincture import main, launch_service, get_modules_path, set_modules_path
 
 # --------------------------
 # Test for the main() function
 # --------------------------
 def test_main(monkeypatch):
     calls = []
+    set_modules_path(None)
 
     def fake_run(app_str, host, port, log_level, access_log, reload, ssl_keyfile, ssl_certfile):
         calls.append({
@@ -48,6 +49,8 @@ def test_main(monkeypatch):
     assert call["reload"] is False
     assert call["ssl_keyfile"] == test_ssl_keyfile
     assert call["ssl_certfile"] == test_ssl_certfile
+    set_modules_path(None)
+    os.environ.pop("MODULES_PATH", None)
 
 # --------------------------
 # Test for the launch_service() function
@@ -55,6 +58,7 @@ def test_main(monkeypatch):
 def test_launch_service(monkeypatch, tmp_path):
     # Create a FakeProcess class that records calls.
     process_calls = []
+    set_modules_path(None)
 
     class FakeProcess:
         def __init__(self, target, args):
@@ -90,10 +94,64 @@ def test_launch_service(monkeypatch, tmp_path):
     from pytincture.__init__ import launch_service
     launch_service(modules_folder=test_folder, port=test_port, env_vars=env_vars)
 
-    # Verify that environment variables were set.
+    # Verify that the module path was stored and env vars applied.
+    assert get_modules_path() == test_folder
     assert os.environ["MODULES_PATH"] == test_folder
     assert os.environ["TEST_VAR"] == "value"
 
     # Check that our FakeProcess methods were called.
     assert "start" in process_calls
     assert "join" in process_calls
+    set_modules_path(None)
+    os.environ.pop("MODULES_PATH", None)
+    os.environ.pop("TEST_VAR", None)
+
+
+def test_launch_service_ignores_env_var_override(monkeypatch, tmp_path):
+    process_calls = []
+    set_modules_path(None)
+
+    class FakeProcess:
+        def __init__(self, target, args):
+            self.target = target
+            self.args = args
+            self.started = False
+            self.joined = False
+
+        def start(self):
+            self.started = True
+            process_calls.append("start")
+
+        def terminate(self):
+            process_calls.append("terminate")
+
+        def join(self):
+            self.joined = True
+            process_calls.append("join")
+
+    import pytincture.__init__ as launcher_mod
+    monkeypatch.setattr(launcher_mod, "Process", FakeProcess)
+
+    modules_folder = tmp_path / "modules"
+    modules_folder.mkdir()
+
+    env_vars = {
+        "MODULES_PATH": "should_be_ignored",
+        "TEST_VAR": "value",
+    }
+
+    os.environ.pop("MODULES_PATH", None)
+    os.environ.pop("TEST_VAR", None)
+
+    from pytincture.__init__ import launch_service
+    launch_service(modules_folder=str(modules_folder), port=8070, env_vars=env_vars)
+
+    assert get_modules_path() == str(modules_folder)
+    assert os.environ["MODULES_PATH"] == str(modules_folder)
+    assert os.environ["TEST_VAR"] == "value"
+    assert "start" in process_calls
+    assert "join" in process_calls
+
+    set_modules_path(None)
+    os.environ.pop("MODULES_PATH", None)
+    os.environ.pop("TEST_VAR", None)
