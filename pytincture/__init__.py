@@ -2,13 +2,19 @@
 pyTincture uvicorn launcher
 """
 
-__version__ = "0.9.16"
+__version__ = "0.9.18"
 
 from multiprocessing import Process, freeze_support
 import os
 import signal
 import shutil
 import zipfile
+import asyncio
+
+try:
+    import uvloop  # type: ignore
+except ImportError:  # pragma: no cover - depends on installation
+    uvloop = None
 
 import uvicorn
 
@@ -40,15 +46,26 @@ def main(port, ssl_keyfile=None, ssl_certfile=None, modules_folder=None):
     if modules_folder is not None:
         set_modules_path(os.fspath(modules_folder))
 
-    uvicorn.run(
-        "pytincture.backend.app:app",
+    run_kwargs = dict(
         host="0.0.0.0",
         port=port,
         log_level="debug",
         access_log="access.log",
         reload=False,
         ssl_keyfile=ssl_keyfile,
-        ssl_certfile=ssl_certfile, 
+        ssl_certfile=ssl_certfile,
+    )
+
+    if uvloop is not None:
+        try:
+            asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+            run_kwargs["loop"] = "uvloop"
+        except Exception:  # pragma: no cover - uvloop unsupported platform
+            run_kwargs["loop"] = "asyncio"
+
+    uvicorn.run(
+        "pytincture.backend.app:app",
+        **run_kwargs,
     )
 
 

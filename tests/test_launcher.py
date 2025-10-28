@@ -17,17 +17,10 @@ def test_main(monkeypatch):
     calls = []
     set_modules_path(None)
 
-    def fake_run(app_str, host, port, log_level, access_log, reload, ssl_keyfile, ssl_certfile):
-        calls.append({
-            "app_str": app_str,
-            "host": host,
-            "port": port,
-            "log_level": log_level,
-            "access_log": access_log,
-            "reload": reload,
-            "ssl_keyfile": ssl_keyfile,
-            "ssl_certfile": ssl_certfile,
-        })
+    def fake_run(app_str, **kwargs):
+        call = {"app_str": app_str}
+        call.update(kwargs)
+        calls.append(call)
 
     # Patch uvicorn.run in the launcher module.
     import pytincture.__init__ as launcher_mod
@@ -49,6 +42,8 @@ def test_main(monkeypatch):
     assert call["reload"] is False
     assert call["ssl_keyfile"] == test_ssl_keyfile
     assert call["ssl_certfile"] == test_ssl_certfile
+    loop_value = call.get("loop", "asyncio")
+    assert loop_value in {"asyncio", "uvloop"}
     set_modules_path(None)
     os.environ.pop("MODULES_PATH", None)
 
