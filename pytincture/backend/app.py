@@ -29,7 +29,7 @@ from authlib.integrations.starlette_client import OAuth, OAuthError
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.config import Config
 
-from typing import Any, Union, Dict, List, Optional
+from typing import Any, Union, Dict, List, Optional, Iterable, AsyncIterable
 
 # Pydantic for JSON validation
 from pydantic import BaseModel
@@ -410,8 +410,8 @@ def download_appcode(request: Request, user=Depends(require_auth)):
 
 app.mount("/{application}/appcode", StaticFiles(directory=MODULE_PATH), name="static")
 
-@app.get("/classcall/{file_name}/{class_name}/{function_name}", operation_id="getClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float])"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
-@app.post("/classcall/{file_name}/{class_name}/{function_name}", operation_id="postClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float])"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
+@app.get("/classcall/{file_name}/{class_name}/{function_name}", operation_id="getClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float]) or StreamingResponse for streaming methods"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
+@app.post("/classcall/{file_name}/{class_name}/{function_name}", operation_id="postClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float]) or StreamingResponse for streaming methods"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
 async def class_call(
     file_name: str,
     class_name: str,
@@ -451,6 +451,12 @@ async def class_call(
 
     # 3) Get the function
     func = getattr(instance, function_name)
+    function_obj = getattr(func, "__func__", func)
+    is_streaming = getattr(function_obj, "_bff_streaming", False)
+    streaming_raw = getattr(function_obj, "_bff_streaming_raw", False)
+    streaming_media_type = getattr(function_obj, "_bff_streaming_media_type", "text/event-stream")
+    is_async_gen_function = inspect.isasyncgenfunction(function_obj)
+    is_coroutine_function = inspect.iscoroutinefunction(function_obj)
 
     # 4) If it's a POST, parse JSON body
     data = {}
@@ -467,7 +473,7 @@ async def class_call(
     if callable(func):
         args = data.get("args", [])
         kwargs = data.get("kwargs", {})
-        
+
         # Handle structured args format if present
         if args and isinstance(args[0], dict) and 'value' in args[0]:
             args = [arg['value'] for arg in args]
@@ -475,17 +481,71 @@ async def class_call(
         elif "args" not in data and "kwargs" not in data:
             kwargs = data
 
-        # Check if the function is async
-        if inspect.iscoroutinefunction(func):
-            # Handle async function
+        def _serialize_stream_item(item, raw: bool = False):
+            # Ensure each streamed chunk is JSON encoded and newline-delimited unless raw passthrough is requested.
+            if isinstance(item, (bytes, bytearray)):
+                data_bytes = bytes(item)
+                if not raw and not data_bytes.endswith(b"\n"):
+                    data_bytes += b"\n"
+                return data_bytes
+            if isinstance(item, str):
+                data_text = item
+            else:
+                data_text = json.dumps(item)
+            if not raw and not data_text.endswith("\n"):
+                data_text += "\n"
+            return data_text
+
+        def _sync_iterable(iterable: Iterable, raw: bool = False):
+            for item in iterable:
+                yield _serialize_stream_item(item, raw)
+
+        async def _async_iterable(iterable: AsyncIterable, raw: bool = False):
+            async for item in iterable:
+                yield _serialize_stream_item(item, raw)
+
+        def _as_streaming_response(result_obj):
+            if isinstance(result_obj, StreamingResponse):
+                return result_obj
+
+            if inspect.isasyncgen(result_obj) or hasattr(result_obj, "__aiter__"):
+                async_iter = result_obj if inspect.isasyncgen(result_obj) else result_obj
+                return StreamingResponse(_async_iterable(async_iter, streaming_raw), media_type=streaming_media_type)
+
+            if isinstance(result_obj, (str, bytes, bytearray)):
+                return StreamingResponse(_sync_iterable([result_obj], streaming_raw), media_type=streaming_media_type)
+
+            if isinstance(result_obj, dict):
+                return StreamingResponse(_sync_iterable([result_obj], streaming_raw), media_type=streaming_media_type)
+
+            if inspect.isgenerator(result_obj) or isinstance(result_obj, Iterable):
+                iterable_obj = result_obj if inspect.isgenerator(result_obj) else result_obj
+                return StreamingResponse(_sync_iterable(iterable_obj, streaming_raw), media_type=streaming_media_type)
+
+            # Fallback: stream single value
+            return StreamingResponse(_sync_iterable([result_obj], streaming_raw), media_type=streaming_media_type)
+
+        # Execute the target callable
+        if is_async_gen_function:
+            result = func(*args, **kwargs)
+            if is_streaming:
+                return _as_streaming_response(result)
+            collected_items = []
+            async for item in result:
+                collected_items.append(item)
+            return collected_items
+
+        if is_coroutine_function:
             result = await func(*args, **kwargs)
         else:
-            # Handle sync function
             print(args, kwargs)
             result = func(*args, **kwargs)
-        
+
+        if is_streaming:
+            return _as_streaming_response(result)
+
         return result
-    
+
     return func
 
 @app.post("/logs", operation_id="postLogs", responses={200: {"description": "JSONResponse ({\"status\": \"ok\"})"}, 401: {"description": "HTTPException (if authentication fails)"}})

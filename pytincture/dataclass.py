@@ -14,6 +14,27 @@ from pytincture import get_modules_path
 # Global set to track BFF endpoints
 bff_routes: Dict[str, Dict] = {}
 
+
+def bff_stream(func=None, *, raw: bool = False, media_type: str = "text/event-stream"):
+    """
+    Mark a backend_for_frontend method as streaming.
+
+    Args:
+        raw: When False (default), streamed Python values will be JSON-encoded and newline-delimited.
+             When True, values are forwarded as-is (strings/bytes recommended).
+        media_type: Content type to advertise for the stream response.
+    """
+
+    def _apply(target):
+        setattr(target, "_bff_streaming", True)
+        setattr(target, "_bff_streaming_raw", raw)
+        setattr(target, "_bff_streaming_media_type", media_type)
+        return target
+
+    if func is None:
+        return _apply
+    return _apply(func)
+
 def get_method_info_from_node(class_node: ast.ClassDef) -> Dict[str, Any]:
     """Extract method information from a class AST node"""
     methods_info = {}
@@ -73,10 +94,13 @@ def backend_for_frontend(cls):
     for method_name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
         if not method_name.startswith('_'):
             route_path = f"/classcall/{folder}/{module_name}/{cls.__name__}/{method_name}" if folder else f"/classcall/{module_name}/{cls.__name__}/{method_name}"
-  
+
             # Get method signature
             sig = inspect.signature(method)
-            
+            streaming_enabled = getattr(method, "_bff_streaming", False)
+            streaming_raw = getattr(method, "_bff_streaming_raw", False)
+            streaming_media_type = getattr(method, "_bff_streaming_media_type", "text/event-stream")
+
             # Create list of parameters in order (excluding self)
             param_list = [
                 {
@@ -91,6 +115,19 @@ def backend_for_frontend(cls):
             # Create OpenAPI operation spec
             operation_id_full = f"call_{cls.__name__}_{method_name}"
             operation_id = operation_id_full[:50] if len(operation_id_full) > 50 else operation_id_full  # Truncate to ensure <64 chars
+            responses_spec = {
+                '200': {
+                    'description': 'Streaming response' if streaming_enabled else 'Successful response',
+                    'content': {
+                        (streaming_media_type if streaming_enabled else 'application/json'): {
+                            'schema': {
+                                'type': 'string' if streaming_enabled else 'object'
+                            }
+                        }
+                    }
+                }
+            }
+
             operation_spec = {
                 'summary': method.__doc__ or f"Call {method_name} on {cls.__name__}",
                 'operationId': operation_id,  # Useful, unique, short, and now truncated if needed
@@ -132,19 +169,13 @@ def backend_for_frontend(cls):
                         }
                     }
                 },
-                'responses': {
-                    '200': {
-                        'description': 'Successful response',
-                        'content': {
-                            'application/json': {
-                                'schema': {
-                                    'type': 'object'
-                                }
-                            }
-                        }
-                    }
-                }
+                'responses': responses_spec
             }
+
+            if streaming_enabled:
+                operation_spec['x-bff-streaming'] = True
+                operation_spec['x-bff-streaming-raw'] = streaming_raw
+                operation_spec['x-bff-streaming-media-type'] = streaming_media_type
             
             # Add example if we have parameters
             if param_list:
@@ -313,6 +344,32 @@ def generate_stub_classes(file_path, return_url, return_protocol):
     class_imports = set()
     all_imports = set()
     used_imports = set()
+    def _is_bff_stream_decorator(decorator: ast.AST):
+        def _matches(node):
+            if isinstance(node, ast.Name):
+                return node.id == 'bff_stream'
+            if isinstance(node, ast.Attribute):
+                return node.attr == 'bff_stream'
+            return False
+
+        if isinstance(decorator, ast.Call):
+            return _matches(decorator.func), decorator
+        return _matches(decorator), decorator
+
+    def _extract_stream_config(decorator_call):
+        config = {
+            "raw": False,
+            "media_type": "text/event-stream"
+        }
+        if not isinstance(decorator_call, ast.Call):
+            return config
+        for keyword in decorator_call.keywords:
+            if keyword.arg == "raw" and isinstance(keyword.value, ast.Constant):
+                config["raw"] = bool(keyword.value.value)
+            if keyword.arg == "media_type" and isinstance(keyword.value, ast.Constant):
+                config["media_type"] = str(keyword.value.value)
+        return config
+
     for class_node in class_nodes:
         class_name = class_node.name
 
@@ -335,14 +392,76 @@ def generate_stub_classes(file_path, return_url, return_protocol):
             stub_class_code += f"            window.location.href = redirect_url\n"
             stub_class_code += f"            return ''\n"
             stub_class_code += f"        return StringIO(req.response).getvalue()\n"
-    
+
+            streaming_methods = {}
+            for node in class_node.body:
+                if isinstance(node, ast.FunctionDef):
+                    for decorator in node.decorator_list:
+                        matches, decorator_node = _is_bff_stream_decorator(decorator)
+                        if matches:
+                            streaming_methods[node.name] = _extract_stream_config(decorator_node)
+                            break
+
+            if streaming_methods:
+                stub_class_code += f"    async def fetch_stream(self, url, payload=None, method='GET'):\n"
+                stub_class_code += f"        from js import fetch, TextDecoder\n"
+                stub_class_code += f"        from pyodide.ffi import to_js\n"
+                stub_class_code += f"        options = {{'method': method, 'headers': {{'Content-Type': 'application/json'}}}}\n"
+                stub_class_code += f"        body_payload = payload if payload is not None else {{'args': [], 'kwargs': {{}}}}\n"
+                stub_class_code += f"        options['body'] = JSON.stringify(json.dumps(body_payload))\n"
+                stub_class_code += f"        response = await fetch(url, to_js(options))\n"
+                stub_class_code += f"        if response.status == 401:\n"
+                stub_class_code += f"            from js import window\n"
+                stub_class_code += f"            current_url = window.location.href.rstrip('/')\n"
+                stub_class_code += f"            redirect_url = current_url + '/login'\n"
+                stub_class_code += f"            window.location.href = redirect_url\n"
+                stub_class_code += f"            return\n"
+                stub_class_code += f"        reader = response.body.getReader()\n"
+                stub_class_code += f"        decoder = TextDecoder.new()\n"
+                stub_class_code += f"        while True:\n"
+                stub_class_code += f"            chunk = await reader.read()\n"
+                stub_class_code += f"            if chunk.done:\n"
+                stub_class_code += f"                break\n"
+                stub_class_code += f"            text = decoder.decode(chunk.value, to_js({{'stream': True}}))\n"
+                stub_class_code += f"            if text:\n"
+                stub_class_code += f"                yield text\n"
+                stub_class_code += f"        final_text = decoder.decode()\n"
+                stub_class_code += f"        if final_text:\n"
+                stub_class_code += f"            yield final_text\n"
+
             for node in class_node.body:
                 if isinstance(node, ast.FunctionDef) and not node.name.startswith('_'):
-                    stub_class_code += f"    def {node.name}(self, *args, **kwargs):\n"
-                    stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_name}/{class_name}/{node.name}'\n"
-                    stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
-                    stub_class_code +=  "        response = self.fetch(url, payload, 'POST')\n"
-                    stub_class_code +=  "        return json.loads(response)\n"
+                    is_streaming = node.name in streaming_methods
+                    stream_config = streaming_methods.get(node.name, {"raw": False})
+                    if is_streaming:
+                        stub_class_code += f"    async def {node.name}(self, *args, **kwargs):\n"
+                        stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_name}/{class_name}/{node.name}'\n"
+                        stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
+                        stub_class_code +=  "        stream_iter = self.fetch_stream(url, payload, 'POST')\n"
+                        if stream_config.get("raw"):
+                            stub_class_code +=  "        async for chunk in stream_iter:\n"
+                            stub_class_code +=  "            if chunk:\n"
+                            stub_class_code +=  "                yield chunk\n"
+                        else:
+                            stub_class_code +=  "        buffer = ''\n"
+                            stub_class_code +=  "        async for chunk in stream_iter:\n"
+                            stub_class_code +=  "            if not chunk:\n"
+                            stub_class_code +=  "                continue\n"
+                            stub_class_code +=  "            buffer += chunk\n"
+                            stub_class_code +=  "            while '\\n' in buffer:\n"
+                            stub_class_code +=  "                line, buffer = buffer.split('\\n', 1)\n"
+                            stub_class_code +=  "                line = line.strip()\n"
+                            stub_class_code +=  "                if not line:\n"
+                            stub_class_code +=  "                    continue\n"
+                            stub_class_code +=  "                yield json.loads(line)\n"
+                            stub_class_code +=  "        if buffer.strip():\n"
+                            stub_class_code +=  "            yield json.loads(buffer)\n"
+                    else:
+                        stub_class_code += f"    def {node.name}(self, *args, **kwargs):\n"
+                        stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_name}/{class_name}/{node.name}'\n"
+                        stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
+                        stub_class_code +=  "        response = self.fetch(url, payload, 'POST')\n"
+                        stub_class_code +=  "        return json.loads(response)\n"
                 elif isinstance(node, ast.Assign):
                     for target in node.targets:
                         if isinstance(target, ast.Name):

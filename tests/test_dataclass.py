@@ -8,9 +8,11 @@ from pathlib import Path
 # Import functions to test from dataclass.py
 from pytincture.dataclass import (
     backend_for_frontend,
+    bff_stream,
     get_imports_used_in_class,
     generate_stub_classes,
-    get_parsed_output
+    get_parsed_output,
+    bff_routes,
 )
 
 # --------------------------------------------
@@ -38,6 +40,28 @@ def test_backend_for_frontend_decorator():
     # Also, the real instance should have _user set.
     assert hasattr(instance._real_instance, "_user")
     assert instance._real_instance._user == "tester"
+
+
+def test_backend_for_frontend_stream_registration():
+    """Ensure streaming metadata is recorded for documentation."""
+    previous_routes = dict(bff_routes)
+    bff_routes.clear()
+    
+    @backend_for_frontend
+    class StreamDummy:
+        @bff_stream()
+        def stream(self):
+            yield {"value": 1}
+
+    try:
+        assert bff_routes, "Streaming route should be registered"
+        route_spec = next(iter(bff_routes.values()))
+        assert route_spec.get("x-bff-streaming") is True
+        responses = route_spec.get("responses", {})
+        assert "text/event-stream" in responses.get("200", {}).get("content", {})
+    finally:
+        bff_routes.clear()
+        bff_routes.update(previous_routes)
 
 # --------------------------------------------
 # Tests for get_imports_used_in_class
@@ -114,6 +138,28 @@ def test_generate_stub_classes_returns_stub(tmp_path):
     assert "import json" in stub
     assert "from js import XMLHttpRequest, JSON" in stub
     assert "from io import StringIO" in stub
+
+
+def test_generate_stub_classes_streaming(tmp_path):
+    """
+    Streaming methods should generate async stub methods that iterate over the stream.
+    """
+    dummy_code = textwrap.dedent("""
+        @backend_for_frontend
+        class StreamService:
+            @bff_stream()
+            async def ticker(self):
+                yield {"value": 1}
+    """)
+    file_path = tmp_path / "stream_service.py"
+    file_path.write_text(dummy_code)
+
+    stub = generate_stub_classes(str(file_path), "example.com", "https")
+    assert "class StreamService:" in stub
+    assert "async def fetch_stream" in stub
+    assert "async def ticker" in stub
+    assert "async for chunk in stream_iter" in stub
+    assert "yield json.loads(line)" in stub
 
 def test_get_parsed_output_returns_stub(tmp_path):
     """

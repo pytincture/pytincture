@@ -136,6 +136,43 @@ def test_class_call_with_auth(dummy_module, monkeypatch, fresh_client):
     )
     assert response.status_code == 401
 
+
+def test_class_call_streaming(monkeypatch, fresh_client, tmp_path):
+    """
+    Streaming-enabled methods should return a streaming response.
+    """
+    import pytincture.backend.app as backend_app
+
+    modules_dir = tmp_path / "stream_modules"
+    modules_dir.mkdir()
+    module_code = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_stream
+
+        @backend_for_frontend
+        class StreamWidget:
+            @bff_stream()
+            async def ticker(self, count):
+                for idx in range(count):
+                    yield {"value": idx}
+    """)
+    (modules_dir / "stream_widget.py").write_text(module_code)
+
+    monkeypatch.setenv("MODULES_PATH", str(modules_dir))
+    monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {"tester@example.com": {"email": "tester@example.com"}})
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "tester@example.com"})
+
+    response = fresh_client.post(
+        "/classcall/stream_widget.py/StreamWidget/ticker",
+        json={"kwargs": {"count": 3}}
+    )
+
+    assert response.status_code == 200
+    assert response.headers.get("content-type", "").startswith("text/event-stream")
+    chunks = list(response.iter_text())
+    combined = "".join(chunks)
+    assert '"value": 0' in combined
+    assert '"value": 1' in combined
+
 # ---------------------------------------------------------------------
 # Additional Tests for Increased Coverage
 # ---------------------------------------------------------------------

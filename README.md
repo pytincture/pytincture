@@ -8,6 +8,7 @@
 - GUI Library Support: Simplify the creation and management of GUI components in Python.
 - Dynamic Code Packaging: Generate in-memory ZIP packages for frontend consumption.
 - Widgetset Stub Generation: Automatically generate frontend stub classes using the @backend_for_frontend decorator.
+- Streaming BFF Calls: Enable true streaming responses with the @bff_stream decorator.
 - Authentication & Sessions: Supports Google OAuth2, SAML 2.0 SSO, and email/password authentication with session management.
 - Redis Integration: Optionally use a Redis-backed session store via Upstash.
 - Cross-Platform Compatibility: Works on any platform where Pyodide is supported.
