@@ -1,146 +1,343 @@
+const DEFAULT_CONFIG = {
+    application: null,
+    entrypoint: null,
+    widgetlib: "dhxpyt",
+    widgetSource: null,
+    mode: "auto", // 'package', 'inline', or 'auto'
+    pyodideBaseUrl: "https://cdn.jsdelivr.net/pyodide/v0.28.0/full/",
+    loadMaterialIcons: true,
+    materialIconsUrl: "https://cdnjs.cloudflare.com/ajax/libs/MaterialDesign-Webfont/7.4.47/css/materialdesignicons.css",
+    enableBackendLogging: true,
+    logEndpoint: "/logs",
+    inlineSelector: 'script[type="text/python"]',
+    libsSelector: '#micropip-libs',
+    devWidgetHost: "http://0.0.0.0:8070",
+    devWheelVersion: "99.99.99",
+};
 
+let loggingInstalled = false;
+const originalConsoleMethods = {};
 
-// Function to send logs to the backend
-function sendToBackend(level, message) {
-    fetch("/logs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ level: level, message: message, timestamp: new Date().toISOString() }),
-    }).catch(err => {
-        // Only log the failure to send, don't interfere with the original log
-        console.error("Failed to send log to backend:", err);
+function ensureTrailingSlash(value) {
+    if (!value) {
+        return "/";
+    }
+    return value.endsWith("/") ? value : `${value}/`;
+}
+
+function normalizeConfig(arg1, widgetlib, entrypoint) {
+    if (typeof arg1 === "object" && arg1 !== null) {
+        const merged = { ...DEFAULT_CONFIG, ...arg1 };
+        merged.pyodideBaseUrl = ensureTrailingSlash(merged.pyodideBaseUrl);
+        merged.entrypoint = merged.entrypoint || merged.application;
+        return merged;
+    }
+
+    const config = {
+        ...DEFAULT_CONFIG,
+        application: arg1,
+        widgetlib: widgetlib || DEFAULT_CONFIG.widgetlib,
+        entrypoint: entrypoint || arg1,
+    };
+    config.pyodideBaseUrl = ensureTrailingSlash(config.pyodideBaseUrl);
+    return config;
+}
+
+function loadScript(url) {
+    return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = url;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
+        document.head.appendChild(script);
     });
 }
 
-// Override console methods
-["log", "warn", "error", "info", "debug"].forEach(level => {
-    const originalMethod = console[level]; // Keep the original console method
-    console[level] = function (...args) {
-        const message = args.map(arg => (typeof arg === "object" ? JSON.stringify(arg) : arg)).join(" ");
+function ensureMaterialIcons(url) {
+    if (!url) {
+        return;
+    }
+    const existing = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).some(link => link.href === url);
+    if (existing) {
+        return;
+    }
+    const link = document.createElement("link");
+    link.href = url;
+    link.rel = "stylesheet";
+    link.type = "text/css";
+    link.media = "all";
+    document.head.appendChild(link);
+}
 
-        // Send the log to the backend
-        sendToBackend(level, message);
+function enableBackendLogging(endpoint) {
+    if (loggingInstalled) {
+        return;
+    }
 
-        // Call the original console method to display logs in the browser console
-        originalMethod.apply(console, args);
-    };
-});
+    const logEndpoint = endpoint || "/logs";
 
+    function sendToBackend(level, message) {
+        fetch(logEndpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                level,
+                message,
+                timestamp: new Date().toISOString(),
+            }),
+        }).catch(err => {
+            console.error("Failed to send log to backend:", err);
+        });
+    }
 
-const PYODIDE_BASE_URL = "https://cdn.jsdelivr.net/pyodide/v0.28.0/full/";
+    ["log", "warn", "error", "info", "debug"].forEach(level => {
+        originalConsoleMethods[level] = console[level];
+        console[level] = function (...args) {
+            const message = args.map(arg => (typeof arg === "object" ? JSON.stringify(arg) : arg)).join(" ");
+            sendToBackend(level, message);
+            originalConsoleMethods[level].apply(console, args);
+        };
+    });
+    loggingInstalled = true;
+}
 
-async function runTinctureApp(application, widgetlib, entrypoint) {
-    let pyodide = await loadPyodide({ indexURL: PYODIDE_BASE_URL });
+async function ensurePyodideLoaded(config) {
+    if (typeof loadPyodide === "function") {
+        return;
+    }
+    window.languagePluginUrl = config.pyodideBaseUrl;
+    await loadScript(`${config.pyodideBaseUrl}pyodide.js`);
+}
 
-    // Install and load the widget package
-    await pyodide.loadPackage("micropip");
+async function installExtraMicropipLibs(pyodide, selector) {
+    if (!selector) {
+        return;
+    }
+    const script = document.querySelector(selector);
+    if (!script) {
+        return;
+    }
+    let libs = [];
+    try {
+        libs = JSON.parse(script.textContent || script.text || "[]");
+    } catch (err) {
+        console.warn("Failed to parse micropip-libs JSON:", err);
+        return;
+    }
 
-    // Function to check if the URL exists
-    async function urlExists(url) {
-        try {
-            let response = await fetch(url, { method: "HEAD" });
-            return response.ok;
-        } catch (err) {
-            console.warn(`Failed to check URL: ${url}`, err);
-            return false;
+    for (const lib of libs) {
+        const libLiteral = JSON.stringify(lib);
+        await pyodide.runPythonAsync(`
+import micropip
+await micropip.install(${libLiteral})
+        `);
+    }
+}
+
+async function urlExists(url) {
+    try {
+        const response = await fetch(url, { method: "HEAD" });
+        return response.ok;
+    } catch (err) {
+        console.warn(`Failed to check URL: ${url}`, err);
+        return false;
+    }
+}
+
+async function resolveWidgetSource(config) {
+    if (config.widgetSource) {
+        return config.widgetSource;
+    }
+    if (config.application) {
+        const match = (config.widgetlib || "").match(/^[A-Za-z0-9_\-]+/);
+        const widgetPackage = match ? match[0] : DEFAULT_CONFIG.widgetlib;
+        const widgetUrl = `${config.devWidgetHost}/${config.application}/appcode/${widgetPackage}-${config.devWheelVersion}-py3-none-any.whl`;
+        if (await urlExists(widgetUrl)) {
+            return widgetUrl;
         }
     }
+    return config.widgetlib;
+}
 
-    let widgetUrl = `http://0.0.0.0:8070/${application}/appcode/dhxpyt-99.99.99-py3-none-any.whl`;
-    if (await urlExists(widgetUrl)) {
-        // If the URL exists, install and load the widget package from the URL
-        await installAndLoadWidgetset(pyodide, widgetUrl);
-    } else {
-        // Otherwise, fallback to loading the provided widgetlib
-        await installAndLoadWidgetset(pyodide, widgetlib);
+async function runPackagedApp(pyodide, config) {
+    if (!config.application) {
+        throw new Error("No application supplied for packaged mode.");
+    }
+    const archiveUrl = `${config.application}/appcode/appcode.pyt`;
+    const response = await fetch(archiveUrl);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch packaged app from ${archiveUrl}`);
+    }
+    const appBinary = await response.arrayBuffer();
+    pyodide.unpackArchive(appBinary, "zip");
+    const entrypoint = config.entrypoint || config.application;
+    pyodide.runPython(`from ${config.application} import ${entrypoint} as app\napp()`);
+}
+
+async function runInlineApp(pyodide, config) {
+    const scripts = Array.from(document.querySelectorAll(config.inlineSelector));
+    if (!scripts.length) {
+        return false;
     }
 
-    // Load and execute the application code
-    let appResponse = await fetch(application + "/appcode/appcode.pyt");
-    let appBinary = await appResponse.arrayBuffer();
-    pyodide.unpackArchive(appBinary, "zip");
-    
-    // Use the entrypoint class name instead of assuming it's the same as the application name
-    pyodide.runPython(
-        `from ${application} import ${entrypoint} as app\napp()`
-    );
+    const appDir = "/appcode";
+    const dirInfo = pyodide.FS.analyzePath(appDir);
+    if (!dirInfo.exists) {
+        pyodide.FS.mkdir(appDir);
+    }
+
+    scripts.forEach((script, index) => {
+        const filename = script.getAttribute("data-filename") || (index === 0 ? "__init__.py" : `module_${index}.py`);
+        const content = script.textContent || script.text || "";
+        pyodide.FS.writeFile(`${appDir}/${filename}`, content);
+    });
+
+    const entrypointLiteral = config.entrypoint ? JSON.stringify(config.entrypoint) : "None";
+    const runner = `
+import sys
+import importlib
+import inspect
+import traceback
+
+sys.path.insert(0, '/')
+module_name = 'appcode'
+entrypoint_name = ${entrypointLiteral}
+
+def find_main_window(module):
+    for name, obj in inspect.getmembers(module):
+        if inspect.isclass(obj):
+            try:
+                bases = getattr(obj, '__bases__', ())
+            except Exception:
+                bases = ()
+            if any(base.__name__ == 'MainWindow' for base in bases):
+                return name
+    return None
+
+try:
+    module = importlib.import_module(module_name)
+    target_name = entrypoint_name or find_main_window(module)
+    if not target_name:
+        raise RuntimeError("No MainWindow subclass or entrypoint found in inline scripts.")
+    target = getattr(module, target_name)
+    if inspect.isclass(target):
+        target()
+    else:
+        target()
+except Exception as exc:
+    print("Error running inline application:", exc)
+    print("".join(traceback.format_exception(exc)))
+    raise
+    `;
+
+    await pyodide.runPythonAsync(runner);
+    return true;
 }
 
 async function installAndLoadWidgetset(pyodide, widgetlib) {
+    if (!widgetlib) {
+        return;
+    }
+    const escapedLib = widgetlib.replace(/'/g, "\\'");
     try {
         await pyodide.runPythonAsync(`
-            import micropip
-            await micropip.install("python-dotenv")
-            await micropip.install('${widgetlib}');
+import micropip
+await micropip.install("python-dotenv")
+await micropip.install('${escapedLib}')
         `);
 
         const loadFilesCode = `
-            import os
-            import pyodide
-            import js
-            import site
-            import base64
-            import re
-            
-            # Function to convert font file to base64 string
-            def font_to_base64(font_path):
-                with open(font_path, 'rb') as f:
-                    font_data = f.read()
-                return pyodide._module.btoa(pyodide._module.Uint8Array.new(font_data))
-            
-            # Function to replace font URLs with base64 data URLs in CSS content
-            def replace_font_urls(css_content, font_folder_path):
-                # Find all font files in the folder (e.g., .woff, .woff2)
-                font_files = [f for f in os.listdir(font_folder_path) if os.path.isfile(os.path.join(font_folder_path, f))]
+import os
+import pyodide
+import js
+import site
+import base64
+import re
 
-                # Replace URLs in CSS content
-                for font_file in font_files:
-                    print("replacing font file:", font_file)
-                    font_extension = font_file.split('.')[-1].lower()
-                    if font_extension in ['woff', 'woff2']:  # Ensure we're dealing with font files
-                        font_file_path = os.path.join(font_folder_path, font_file)
-                        with open(font_file_path, "rb") as f:
-                            # Read font file content and encode it in base64
-                            font_data = base64.b64encode(f.read()).decode("utf-8")
+def replace_font_urls(css_content, font_folder_path):
+    if not os.path.isdir(font_folder_path):
+        return css_content
 
-                        # Construct the MIME type based on the font extension
-                        mime_type = f"font/{font_extension}"
+    font_files = [f for f in os.listdir(font_folder_path) if os.path.isfile(os.path.join(font_folder_path, f))]
 
-                        # Replace font file URLs in CSS content with base64 encoded font data
-                        # Match URL formats like url('./fonts/font.woff') or url('./fonts/font.woff2')
-                        css_content = re.sub(
-                            rf"""url\(['"]?\.\/fonts\/{re.escape(font_file)}['"]?\)""", 
-                            f"url(data:{mime_type};charset=utf-8;base64,{font_data})", 
-                            css_content
-                        )
-                
-                return css_content
-            
-            # Package path
-            package_path = site.getsitepackages()[0]
-            
-            # Iterate through files in the specified directory
-            for root, dirs, files in os.walk(package_path):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    file_extension = os.path.splitext(file_path)[1].lower()
-                    if file_extension == '.js':
-                        with open(file_path) as f:
-                            script_content = f.read()
-                        js.eval(script_content)
-                    elif file_extension == '.css':
-                        with open(file_path) as f:
-                            style_content = f.read()
-                        # Replace font URLs with base64 data URLs directly in CSS content
-                        style_content = replace_font_urls(style_content, os.path.join(os.path.dirname(file_path), "fonts"))
-                        # Inject CSS into the document
-                        style = js.document.createElement('style')
-                        style.innerHTML = style_content
-                        js.document.head.appendChild(style)
-        
-            `;
+    for font_file in font_files:
+        font_extension = font_file.split('.')[-1].lower()
+        if font_extension not in ['woff', 'woff2']:
+            continue
+        font_file_path = os.path.join(font_folder_path, font_file)
+        with open(font_file_path, "rb") as f:
+            font_data = base64.b64encode(f.read()).decode("utf-8")
+        mime_type = f"font/{font_extension}"
+        css_content = re.sub(
+            rf"""url\\(['"]?\\./fonts/{re.escape(font_file)}['"]?\\)""",
+            f"url(data:{mime_type};charset=utf-8;base64,{font_data})",
+            css_content
+        )
+    return css_content
+
+package_path = site.getsitepackages()[0]
+
+for root, _, files in os.walk(package_path):
+    for file in files:
+        file_path = os.path.join(root, file)
+        file_extension = os.path.splitext(file_path)[1].lower()
+        if file_extension == '.js':
+            with open(file_path) as f:
+                js.eval(f.read())
+        elif file_extension == '.css':
+            with open(file_path) as f:
+                style_content = replace_font_urls(f.read(), os.path.join(os.path.dirname(file_path), "fonts"))
+            style = js.document.createElement('style')
+            style.innerHTML = style_content
+            js.document.head.appendChild(style)
+        `;
         await pyodide.runPythonAsync(loadFilesCode);
     } catch (error) {
-        console.error('Error installing and loading ${widgetlib}:', error);
+        console.error(`Error installing and loading ${widgetlib}:`, error);
     }
 }
+
+async function runTinctureApp(arg1, widgetlib, entrypoint) {
+    const config = normalizeConfig(arg1, widgetlib, entrypoint);
+
+    if (config.enableBackendLogging) {
+        enableBackendLogging(config.logEndpoint);
+    }
+    if (config.loadMaterialIcons) {
+        ensureMaterialIcons(config.materialIconsUrl);
+    }
+
+    await ensurePyodideLoaded(config);
+
+    const pyodide = await loadPyodide({ indexURL: config.pyodideBaseUrl });
+    await pyodide.loadPackage("micropip");
+    await installExtraMicropipLibs(pyodide, config.libsSelector);
+
+    const widgetSource = await resolveWidgetSource(config);
+    await installAndLoadWidgetset(pyodide, widgetSource);
+
+    if (config.mode === "inline") {
+        await runInlineApp(pyodide, config);
+        return;
+    }
+
+    if (config.mode === "package" || config.application) {
+        try {
+            await runPackagedApp(pyodide, config);
+            return;
+        } catch (err) {
+            console.error("Failed to run packaged app:", err);
+            if (config.mode === "package") {
+                throw err;
+            }
+            console.warn("Falling back to inline mode.");
+        }
+    }
+
+    const inlineStarted = await runInlineApp(pyodide, config);
+    if (!inlineStarted) {
+        throw new Error("No application could be started: packaged app missing and no inline scripts found.");
+    }
+}
+
+window.runTinctureApp = runTinctureApp;
