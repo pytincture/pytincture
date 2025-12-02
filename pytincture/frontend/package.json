@@ -1,0 +1,33 @@
+{
+  "name": "@pytincture/runtime",
+  "version": "0.9.21",
+  "description": "Standalone pytincture.js runtime with inline app auto-start support.",
+  "type": "module",
+  "main": "dist/pytincture.js",
+  "module": "dist/pytincture.esm.js",
+  "exports": {
+    ".": {
+      "import": "./dist/pytincture.esm.js",
+      "default": "./dist/pytincture.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "sync-version": "node sync-version.mjs",
+    "build": "npm run sync-version && node build.mjs",
+    "build:watch": "node build.mjs --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "pyodide",
+    "widgets",
+    "pytincture"
+  ],
+  "author": "schapman1974",
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.21.5"
+  }
+}

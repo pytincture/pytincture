@@ -114,6 +114,64 @@ Load url in browser
 http://localhost:8070/py_ui
 ~~~
 
+## Standalone pytincture.js / CDN Build
+The file under `pytincture/frontend/pytincture.js` can be bundled and published as a standalone runtime for demos that only need a `<script>` tag plus embedded Python.
+
+### Building the bundle
+1. Install the JS tooling once:
+   ```
+   cd pytincture/frontend
+   npm install
+   ```
+2. Produce distributable artifacts (this automatically syncs `package.json`'s version to the Python framework’s `pytincture/__init__.py`):
+   ```
+   npm run build
+   ```
+   The `dist/` folder will contain:
+   - `pytincture.js` (IIFE build for script tags)
+   - `pytincture.min.js` (minified IIFE)
+   - `pytincture.esm.js` (ES module build)
+
+You can run `npm run build:watch` while editing `pytincture/frontend/pytincture.js` to regenerate the bundles automatically.
+
+### Publishing to a CDN
+The frontend directory is wired like a normal npm package (`name: @pytincture/runtime`). After bumping the version in `pytincture/frontend/package.json`:
+```
+cd pytincture/frontend
+npm run build
+npm publish --access public
+```
+The publish script reuses the synchronized version, so npm releases always match the Python `__version__`.
+Alternatively, you can run the helper script from the repo root and let it handle version syncing, bundling, and publishing (it skips publishing if that version already exists on npm):
+```
+bash scripts/publish_runtime.sh
+```
+Once published to npm, CDNs such as jsDelivr and UNPKG will expose the runtime automatically, e.g.:
+```
+<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@0.1.0/dist/pytincture.min.js"></script>
+```
+You can also point jsDelivr at a Git tag (`https://cdn.jsdelivr.net/gh/<org>/<repo>@<tag>/pytincture/frontend/dist/pytincture.min.js`) if you prefer GitHub releases.
+
+### Using pytincture.js standalone
+With the CDN script on the page, pytincture auto-detects any `<script type="text/python">` blocks and runs them once Pyodide is ready. Optional helpers:
+
+- Add `window.pytinctureAutoStartConfig = { widgetlib: "dhxpyt", libsSelector: "#micropip-libs" }` before loading the script to override defaults.
+- Set `window.pytinctureAutoStartDisabled = true` if you prefer to call `runTinctureApp({...})` manually.
+- Extra Python wheels can be listed in `<script type="text/json" id="micropip-libs">["faker"]</script>`.
+
+Errors are rendered inside `#maindiv` (if present) and logged to the console, making it easy to host pure-static demos without the full framework.
+
+### CI/CD release flow
+Publishing a GitHub release (or manually triggering the `Publish to PyPI` workflow) now runs the following automatically:
+
+1. Build and upload the Python package to PyPI via `twine`.
+2. Build the frontend runtime bundles and publish them to npm (using the same version as `pytincture/__init__.__version__`).
+
+Required GitHub secrets:
+- `PYPI_PASSWORD`: a PyPI API token (formatted `pypi-***`) with publish rights to `pytincture`.
+- `NPM_TOKEN`: an npm access token with publish rights to `@pytincture/runtime`.
+
+Both secrets must be configured at the repo (or org) level for the workflow to succeed.
 
 ## License
 `pyTincture` is licensed under the MIT License.

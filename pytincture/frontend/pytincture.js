@@ -7,7 +7,7 @@ const DEFAULT_CONFIG = {
     pyodideBaseUrl: "https://cdn.jsdelivr.net/pyodide/v0.28.0/full/",
     loadMaterialIcons: true,
     materialIconsUrl: "https://cdnjs.cloudflare.com/ajax/libs/MaterialDesign-Webfont/7.4.47/css/materialdesignicons.css",
-    enableBackendLogging: true,
+    enableBackendLogging: false,
     logEndpoint: "/logs",
     inlineSelector: 'script[type="text/python"]',
     libsSelector: '#micropip-libs',
@@ -30,16 +30,21 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
         const merged = { ...DEFAULT_CONFIG, ...arg1 };
         merged.pyodideBaseUrl = ensureTrailingSlash(merged.pyodideBaseUrl);
         merged.entrypoint = merged.entrypoint || merged.application;
+        if (!("enableBackendLogging" in arg1)) {
+            merged.enableBackendLogging = !!merged.application;
+        }
         return merged;
     }
 
+    const application = arg1 || null;
     const config = {
         ...DEFAULT_CONFIG,
-        application: arg1,
+        application,
         widgetlib: widgetlib || DEFAULT_CONFIG.widgetlib,
-        entrypoint: entrypoint || arg1,
+        entrypoint: entrypoint || application,
     };
     config.pyodideBaseUrl = ensureTrailingSlash(config.pyodideBaseUrl);
+    config.enableBackendLogging = !!application;
     return config;
 }
 
@@ -75,6 +80,13 @@ function enableBackendLogging(endpoint) {
     }
 
     const logEndpoint = endpoint || "/logs";
+    const levels = ["log", "warn", "error", "info", "debug"];
+
+    levels.forEach(level => {
+        if (typeof console[level] === "function") {
+            originalConsoleMethods[level] = console[level].bind(console);
+        }
+    });
 
     function sendToBackend(level, message) {
         fetch(logEndpoint, {
@@ -86,18 +98,22 @@ function enableBackendLogging(endpoint) {
                 timestamp: new Date().toISOString(),
             }),
         }).catch(err => {
-            console.error("Failed to send log to backend:", err);
+            const fallbackError = originalConsoleMethods.error || console.error.bind(console);
+            fallbackError("Failed to send log to backend:", err);
         });
     }
 
-    ["log", "warn", "error", "info", "debug"].forEach(level => {
-        originalConsoleMethods[level] = console[level];
+    levels.forEach(level => {
+        if (typeof console[level] !== "function" || !originalConsoleMethods[level]) {
+            return;
+        }
         console[level] = function (...args) {
             const message = args.map(arg => (typeof arg === "object" ? JSON.stringify(arg) : arg)).join(" ");
             sendToBackend(level, message);
-            originalConsoleMethods[level].apply(console, args);
+            originalConsoleMethods[level](...args);
         };
     });
+
     loggingInstalled = true;
 }
 
@@ -341,3 +357,34 @@ async function runTinctureApp(arg1, widgetlib, entrypoint) {
 }
 
 window.runTinctureApp = runTinctureApp;
+
+function autoStartInlineApp() {
+    if (typeof window === "undefined") {
+        return;
+    }
+    if (window.pytinctureAutoStartDisabled) {
+        return;
+    }
+    const inlineScripts = document.querySelectorAll(DEFAULT_CONFIG.inlineSelector);
+    if (!inlineScripts.length) {
+        return;
+    }
+    const inlineConfig = {
+        mode: "inline",
+        enableBackendLogging: false,
+        ...(window.pytinctureAutoStartConfig || {}),
+    };
+    runTinctureApp(inlineConfig).catch(error => {
+        console.error("Auto-start inline app failed:", error);
+        const container = document.getElementById("maindiv");
+        if (container) {
+            container.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+        }
+    });
+}
+
+if (document.readyState === "complete" || document.readyState === "interactive") {
+    setTimeout(autoStartInlineApp, 0);
+} else {
+    document.addEventListener("DOMContentLoaded", autoStartInlineApp);
+}
