@@ -682,6 +682,11 @@ SAML_IDP_ENTITY_ID = os.getenv("SAML_IDP_ENTITY_ID", "")
 SAML_IDP_SSO_URL = os.getenv("SAML_IDP_SSO_URL", "")
 SAML_IDP_SLO_URL = os.getenv("SAML_IDP_SLO_URL", "")
 SAML_IDP_X509_CERT = os.getenv("SAML_IDP_X509_CERT", "")
+SAML_ALLOWED_ROLES = [
+    role.strip().lower()
+    for role in os.getenv("SAML_ALLOWED_ROLES", "").split(",")
+    if role.strip()
+]
 SAML_REQUEST_CACHE_MAX = int(os.getenv("SAML_REQUEST_CACHE_MAX", "512"))
 SAML_REQUEST_CACHE_TTL = int(os.getenv("SAML_REQUEST_CACHE_TTL", "600"))
 
@@ -1245,6 +1250,22 @@ async def saml_assertion_consumer(request: Request, application: str):
         key: list(values) if isinstance(values, (list, tuple)) else [values]
         for key, values in attributes.items()
     }
+
+    if SAML_ALLOWED_ROLES:
+        flattened_roles = {
+            str(value).strip().lower()
+            for value_list in normalized_attributes.values()
+            for value in (value_list if isinstance(value_list, (list, tuple)) else [value_list])
+            if isinstance(value, str) and value.strip()
+        }
+        print(f"DEBUG: Flattened SAML roles/values: {flattened_roles}")
+        has_allowed_role = any(role in flattened_roles for role in SAML_ALLOWED_ROLES)
+        if not has_allowed_role:
+            print(
+                f"DEBUG: User missing required SAML role. "
+                f"Allowed roles={SAML_ALLOWED_ROLES}"
+            )
+            raise HTTPException(status_code=401, detail="Not authorized for this application")
 
     user_info = {
         "email": email_attr,
