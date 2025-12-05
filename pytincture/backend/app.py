@@ -687,6 +687,20 @@ SAML_ALLOWED_ROLES = [
     for role in os.getenv("SAML_ALLOWED_ROLES", "").split(",")
     if role.strip()
 ]
+SAML_ROLE_ATTRIBUTE_KEYS = [
+    key.strip()
+    for key in os.getenv("SAML_ROLE_ATTRIBUTE_KEYS", "").split(",")
+    if key.strip()
+]
+if not SAML_ROLE_ATTRIBUTE_KEYS:
+    SAML_ROLE_ATTRIBUTE_KEYS = [
+        "roles",
+        "role",
+        "groups",
+        "group",
+        "http://schemas.auth0.com/roles",
+        "http://schemas.microsoft.com/ws/2008/06/identity/claims/role",
+    ]
 SAML_REQUEST_CACHE_MAX = int(os.getenv("SAML_REQUEST_CACHE_MAX", "512"))
 SAML_REQUEST_CACHE_TTL = int(os.getenv("SAML_REQUEST_CACHE_TTL", "600"))
 
@@ -977,7 +991,16 @@ def _get_saml_attribute(attributes: Dict[str, List[str]], attribute_name: str) -
     """
     Helper to fetch the first attribute value, returning None if missing.
     """
+    if not attribute_name:
+        return None
+
     values = attributes.get(attribute_name)
+    if values is None:
+        lowered_lookup = {key.lower(): key for key in attributes.keys()}
+        matched_key = lowered_lookup.get(attribute_name.lower())
+        if matched_key:
+            values = attributes.get(matched_key)
+
     if not values:
         return None
     if isinstance(values, list):
@@ -1236,7 +1259,27 @@ async def saml_assertion_consumer(request: Request, application: str):
     attributes = saml_auth.get_attributes()
     print(f"DEBUG: Final attributes received: {attributes}")
     
-    email_attr = _get_saml_attribute(attributes, SAML_EMAIL_ATTRIBUTE) or saml_auth.get_nameid()
+    email_candidate_keys = [
+        key for key in [
+            SAML_EMAIL_ATTRIBUTE,
+            "email",
+            "mail",
+            "emailaddress",
+            "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn",
+        ]
+        if key
+    ]
+
+    email_attr = None
+    for candidate_key in email_candidate_keys:
+        email_attr = _get_saml_attribute(attributes, candidate_key)
+        if email_attr:
+            break
+
+    if not email_attr:
+        email_attr = saml_auth.get_nameid()
+
     print(f"DEBUG: Email attribute extracted: {email_attr}")
     
     if not email_attr:
@@ -1252,18 +1295,20 @@ async def saml_assertion_consumer(request: Request, application: str):
     }
 
     if SAML_ALLOWED_ROLES:
-        flattened_roles = {
-            str(value).strip().lower()
-            for value_list in normalized_attributes.values()
-            for value in (value_list if isinstance(value_list, (list, tuple)) else [value_list])
-            if isinstance(value, str) and value.strip()
-        }
-        print(f"DEBUG: Flattened SAML roles/values: {flattened_roles}")
+        role_values: List[str] = []
+        normalized_key_map = {key.lower(): key for key in normalized_attributes.keys()}
+        for candidate_key in SAML_ROLE_ATTRIBUTE_KEYS:
+            matched_key = normalized_key_map.get(candidate_key.lower())
+            if matched_key:
+                role_values.extend(normalized_attributes.get(matched_key, []))
+        flattened_roles = {str(value).strip().lower() for value in role_values if isinstance(value, str) and value.strip()}
+        print(f"DEBUG: Candidate role values from attributes: {flattened_roles}")
         has_allowed_role = any(role in flattened_roles for role in SAML_ALLOWED_ROLES)
         if not has_allowed_role:
             print(
                 f"DEBUG: User missing required SAML role. "
-                f"Allowed roles={SAML_ALLOWED_ROLES}"
+                f"Allowed roles={SAML_ALLOWED_ROLES} "
+                f"searched_keys={SAML_ROLE_ATTRIBUTE_KEYS}"
             )
             raise HTTPException(status_code=401, detail="Not authorized for this application")
 
