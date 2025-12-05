@@ -161,6 +161,35 @@ With the CDN script on the page, pytincture auto-detects any `<script type="text
 
 Errors are rendered inside `#maindiv` (if present) and logged to the console, making it easy to host pure-static demos without the full framework.
 
+### Backend-for-Frontend access policies
+Every `@backend_for_frontend` class exposes its methods via `/classcall`, but you can now gate each method without modifying pytincture core:
+
+1. Tag the method with `@bff_policy(...)` to describe whatever metadata you need (roles, scopes, tenants, etc.):
+   ```python
+   from pytincture.dataclass import backend_for_frontend, bff_policy
+
+   @backend_for_frontend
+   class Reports:
+       @bff_policy(role="manager", scopes=["reports:view"])
+       def export(self):
+           ...
+   ```
+2. Register a server-side hook that runs before every call. The hook receives the authenticated user (from OAuth/SAML/local login), the policy metadata, the class/method names, and the request. It can raise `HTTPException` to block the call:
+   ```python
+   from fastapi import HTTPException
+   from pytincture.backend.app import set_bff_policy_hook
+
+   def my_policy_hook(user, policy, **kwargs):
+       roles = set(user.get("roles", []))
+       required = policy.get("role")
+       if required and required not in roles:
+           raise HTTPException(status_code=403, detail="Forbidden")
+
+   set_bff_policy_hook(my_policy_hook)
+   ```
+
+Because the authorization decision lives on the server, even an authenticated user who opens the browser console can’t call methods they don’t have rights to. The hook is optional—if you don’t register one, `bff_policy` metadata is ignored.
+
 ### CI/CD release flow
 Publishing a GitHub release (or manually triggering the `Publish to PyPI` workflow) now runs the following automatically:
 

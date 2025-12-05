@@ -112,7 +112,7 @@ def test_get_imports_used_in_class(tmp_path):
 # Tests for generate_stub_classes and get_parsed_output
 # --------------------------------------------
 
-def test_generate_stub_classes_returns_stub(tmp_path):
+def test_generate_stub_classes_returns_stub(tmp_path, monkeypatch):
     """
     Create a dummy file that contains a class decorated with @backend_for_frontend.
     Verify that generate_stub_classes returns a stub with the fetch method and generated URL.
@@ -126,6 +126,8 @@ def test_generate_stub_classes_returns_stub(tmp_path):
     """)
     file_path = tmp_path / "service.py"
     file_path.write_text(dummy_code)
+
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
     
     # Call generate_stub_classes with dummy return values.
     stub = generate_stub_classes(str(file_path), "example.com", "https")
@@ -140,7 +142,7 @@ def test_generate_stub_classes_returns_stub(tmp_path):
     assert "from io import StringIO" in stub
 
 
-def test_generate_stub_classes_streaming(tmp_path):
+def test_generate_stub_classes_streaming(tmp_path, monkeypatch):
     """
     Streaming methods should generate async stub methods that iterate over the stream.
     """
@@ -153,6 +155,7 @@ def test_generate_stub_classes_streaming(tmp_path):
     """)
     file_path = tmp_path / "stream_service.py"
     file_path.write_text(dummy_code)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
 
     stub = generate_stub_classes(str(file_path), "example.com", "https")
     assert "class StreamService:" in stub
@@ -160,6 +163,27 @@ def test_generate_stub_classes_streaming(tmp_path):
     assert "async def ticker" in stub
     assert "async for chunk in stream_iter" in stub
     assert "yield json.loads(line)" in stub
+
+
+def test_generate_stub_classes_nested_path(tmp_path, monkeypatch):
+    """
+    Stubs should reference the relative folder structure when files live in subdirectories.
+    """
+    nested_dir = tmp_path / "api" / "v1"
+    nested_dir.mkdir(parents=True)
+    dummy_code = textwrap.dedent("""
+        @backend_for_frontend
+        class NestedService:
+            def ping(self):
+                return "pong"
+    """)
+    file_path = nested_dir / "service.py"
+    file_path.write_text(dummy_code)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+
+    stub = generate_stub_classes(str(file_path), "example.com", "https")
+    expected_url = "https://example.com/classcall/api/v1/service.py/NestedService/ping"
+    assert expected_url in stub
 
 def test_get_parsed_output_returns_stub(tmp_path):
     """

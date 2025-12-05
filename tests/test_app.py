@@ -9,7 +9,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 # Import the app instance and helpers from the module.
-from pytincture.backend.app import app, ALLOWED_NOAUTH_CLASSCALLS, _sanitize_return_to
+from pytincture.backend.app import app, ALLOWED_NOAUTH_CLASSCALLS, _sanitize_return_to, set_bff_policy_hook
+from fastapi import HTTPException
 
 @pytest.fixture(autouse=True)
 def override_env(monkeypatch):
@@ -108,7 +109,7 @@ def test_class_call_noauth(dummy_module, monkeypatch, fresh_client):
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
     ALLOWED_NOAUTH_CLASSCALLS.clear()
     allowed_calls = [{
-        "file": "example.py",
+        "file": "Example.PY",
         "class": "ExampleClass",
         "function": "testfunc"
     }]
@@ -118,6 +119,54 @@ def test_class_call_noauth(dummy_module, monkeypatch, fresh_client):
     assert response.status_code == 200
     json_response = response.json()
     assert json_response.get("result") == "success"
+
+
+def test_class_call_policy_hook(monkeypatch, fresh_client, tmp_path):
+    """
+    Custom policy hooks can inspect metadata and user context before allowing a call.
+    """
+    import pytincture.backend.app as backend_app
+
+    modules_dir = tmp_path / "policy_modules"
+    modules_dir.mkdir()
+    module_code = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_policy
+
+        @backend_for_frontend
+        class Restricted:
+            @bff_policy(role="admin")
+            def secret(self):
+                return {"ok": True}
+    """)
+    (modules_dir / "restricted.py").write_text(module_code)
+
+    monkeypatch.setenv("MODULES_PATH", str(modules_dir))
+
+    current_user = {"email": "user@example.com", "roles": []}
+
+    def fake_require_auth(request):
+        return current_user
+
+    monkeypatch.setattr(backend_app, "require_auth", fake_require_auth)
+
+    def policy_hook(user, policy, **kwargs):
+        required_role = policy.get("role")
+        roles = set(user.get("roles", []))
+        if required_role and required_role not in roles:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+    set_bff_policy_hook(policy_hook)
+    try:
+        response = fresh_client.post("/classcall/restricted.py/Restricted/secret", json={"kwargs": {}})
+        assert response.status_code == 403
+
+        current_user["roles"] = ["admin"]
+        response = fresh_client.post("/classcall/restricted.py/Restricted/secret", json={"kwargs": {}})
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+    finally:
+        set_bff_policy_hook(None)
+
 
 def test_class_call_with_auth(dummy_module, monkeypatch, fresh_client):
     """
@@ -135,6 +184,66 @@ def test_class_call_with_auth(dummy_module, monkeypatch, fresh_client):
         json={"args": [], "kwargs": {}}
     )
     assert response.status_code == 401
+
+
+def test_class_call_nested_module_path(monkeypatch, fresh_client, tmp_path):
+    """
+    Files inside nested directories should be resolvable via /classcall/{folder/...}.
+    """
+    import pytincture.backend.app as backend_app
+
+    modules_dir = tmp_path / "nested_modules"
+    target_dir = modules_dir / "pkg" / "internal"
+    target_dir.mkdir(parents=True)
+    module_code = textwrap.dedent("""
+        class Worker:
+            def __init__(self, _user):
+                self._user = _user
+
+            def ping(self, value):
+                return {"echo": value}
+    """)
+    (target_dir / "worker.py").write_text(module_code)
+
+    monkeypatch.setenv("MODULES_PATH", str(modules_dir))
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "tester@example.com"})
+
+    response = fresh_client.post(
+        "/classcall/pkg/internal/worker.py/Worker/ping",
+        json={"kwargs": {"value": "hello"}}
+    )
+    assert response.status_code == 200
+    assert response.json()["echo"] == "hello"
+
+
+def test_class_call_noauth_nested_path(monkeypatch, fresh_client, tmp_path):
+    """
+    No-auth allowances should work with nested file paths irrespective of case.
+    """
+    modules_dir = tmp_path / "nested_noauth"
+    target_dir = modules_dir / "pkg" / "internal"
+    target_dir.mkdir(parents=True)
+    module_code = textwrap.dedent("""
+        class Worker:
+            def __init__(self, _user):
+                self._user = _user
+
+            def ping(self):
+                return {"status": "ok"}
+    """)
+    (target_dir / "worker.py").write_text(module_code)
+
+    monkeypatch.setenv("MODULES_PATH", str(modules_dir))
+    ALLOWED_NOAUTH_CLASSCALLS.clear()
+    ALLOWED_NOAUTH_CLASSCALLS.extend([{
+        "file": "PKG/Internal/worker.py",
+        "class": "Worker",
+        "function": "ping"
+    }])
+
+    response = fresh_client.get("/classcall/pkg/internal/worker.py/Worker/ping")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
 
 
 def test_class_call_streaming(monkeypatch, fresh_client, tmp_path):

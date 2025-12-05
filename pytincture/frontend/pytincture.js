@@ -1,3 +1,5 @@
+const FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
+
 const DEFAULT_CONFIG = {
     application: null,
     entrypoint: null,
@@ -11,7 +13,7 @@ const DEFAULT_CONFIG = {
     logEndpoint: "/logs",
     inlineSelector: 'script[type="text/python"]',
     libsSelector: '#micropip-libs',
-    devWidgetHost: "http://0.0.0.0:8070",
+    devWidgetHost: null,
     devWheelVersion: "99.99.99",
 };
 
@@ -26,10 +28,24 @@ function ensureTrailingSlash(value) {
 }
 
 function normalizeConfig(arg1, widgetlib, entrypoint) {
+    const resolveDevWidgetHost = host => {
+        if (host) {
+            return host;
+        }
+        if (typeof window !== "undefined" && window.location) {
+            if (window.location.origin) {
+                return window.location.origin;
+            }
+            return `${window.location.protocol}//${window.location.host}`;
+        }
+        return FALLBACK_DEV_WIDGET_HOST;
+    };
+
     if (typeof arg1 === "object" && arg1 !== null) {
         const merged = { ...DEFAULT_CONFIG, ...arg1 };
         merged.pyodideBaseUrl = ensureTrailingSlash(merged.pyodideBaseUrl);
         merged.entrypoint = merged.entrypoint || merged.application;
+        merged.devWidgetHost = resolveDevWidgetHost(merged.devWidgetHost);
         if (!("enableBackendLogging" in arg1)) {
             merged.enableBackendLogging = !!merged.application;
         }
@@ -44,6 +60,7 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
         entrypoint: entrypoint || application,
     };
     config.pyodideBaseUrl = ensureTrailingSlash(config.pyodideBaseUrl);
+    config.devWidgetHost = resolveDevWidgetHost(config.devWidgetHost);
     config.enableBackendLogging = !!application;
     return config;
 }

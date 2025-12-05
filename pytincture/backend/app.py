@@ -9,6 +9,12 @@ import zipfile
 import importlib
 import asyncio
 import nest_asyncio
+import secrets
+import time
+import base64
+import hashlib
+from collections import OrderedDict
+from xml.etree import ElementTree
 nest_asyncio.apply()
 
 # FastAPI / Starlette
@@ -29,7 +35,7 @@ from authlib.integrations.starlette_client import OAuth, OAuthError
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.config import Config
 
-from typing import Any, Union, Dict, List, Optional, Iterable, AsyncIterable
+from typing import Any, Union, Dict, List, Optional, Iterable, AsyncIterable, Set, Callable
 
 # Pydantic for JSON validation
 from pydantic import BaseModel
@@ -37,6 +43,7 @@ from pydantic import BaseModel
 # SAML Toolkit (OneLogin)
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.settings import OneLogin_Saml2_Settings
+from onelogin.saml2.errors import OneLogin_Saml2_ValidationError
 from urllib.parse import urlparse
 
 # ========================
@@ -367,27 +374,92 @@ except json.JSONDecodeError as e:
 
 app.mount("/{application}/frontend", StaticFiles(directory=STATIC_PATH), name="static")
 
+BFF_POLICY_HOOK: Optional[Callable[..., None]] = None
+
+
+def set_bff_policy_hook(hook: Optional[Callable[..., None]]):
+    """
+    Register (or clear) a global hook that runs before each backend_for_frontend call.
+    The hook receives the resolved user session, policy metadata, and request context.
+    """
+    global BFF_POLICY_HOOK
+    BFF_POLICY_HOOK = hook
+    return hook
+
+
+def _normalize_file_identifier(value: str) -> str:
+    normalized = (value or "").replace("\\", "/")
+    normalized = normalized.strip("/")
+    normalized = normalized.lstrip("./")
+    return normalized
+
+
+def _file_aliases(value: str) -> Set[str]:
+    normalized = _normalize_file_identifier(value)
+    if not normalized:
+        return set()
+
+    aliases = {normalized}
+    basename = os.path.basename(normalized)
+    aliases.add(basename)
+
+    def add_variants(name: str):
+        if not name:
+            return
+        if name.lower().endswith(".py"):
+            aliases.add(name[:-3])
+        else:
+            aliases.add(f"{name}.py")
+
+    add_variants(normalized)
+    add_variants(basename)
+
+    return {alias for alias in aliases if alias}
+
 
 def is_noauth_allowed(file_name: str, class_name: str, function_name: str) -> bool:
     """
     Check if the given file, class, and function is allowed to be called without auth.
+    Matching is case-insensitive and supports relative paths or basenames with/without `.py`.
     """
+    requested_aliases = _file_aliases(file_name)
+    requested_aliases_casefold = {alias.casefold() for alias in requested_aliases}
+
     for entry in ALLOWED_NOAUTH_CLASSCALLS:
-        if (entry.get("file") == file_name and
-            entry.get("class") == class_name and
-            entry.get("function") == function_name):
-            return True
+        entry_file = entry.get("file", "")
+        entry_aliases = _file_aliases(entry_file)
+        if not entry_aliases:
+            continue
+
+        entry_aliases_casefold = {alias.casefold() for alias in entry_aliases}
+        if ((requested_aliases & entry_aliases) or
+                (requested_aliases_casefold & entry_aliases_casefold)):
+            if (entry.get("class") == class_name and
+                    entry.get("function") == function_name):
+                return True
     return False
 
 def require_auth(request: Request):
     if ENABLE_GOOGLE_AUTH or ENABLE_USER_LOGIN or ENABLE_SAML_AUTH:
         user_session = request.session.get("user") or {}
-        if user_session.get("email", None) in USER_SESSION_DICT:
-            if user_session != USER_SESSION_DICT[user_session["email"]]:
-                raise HTTPException(status_code=401, detail="Error with authentication")
-            return user_session
-        else:
+        email = user_session.get("email")
+        print(f"DEBUG AUTH: session email={email} keys={list(request.session.keys())}")
+        if not email:
+            print("DEBUG AUTH: no email found in session")
             return None
+
+        backend_snapshot = USER_SESSION_DICT.get(email)
+        if backend_snapshot is None:
+            print("DEBUG AUTH: email missing from USER_SESSION_DICT, seeding from session")
+            USER_SESSION_DICT[email] = user_session
+            return user_session
+
+        if user_session != backend_snapshot:
+            print("DEBUG AUTH: session and backend snapshots differ")
+            raise HTTPException(status_code=401, detail="Error with authentication")
+
+        print("DEBUG AUTH: session validated via USER_SESSION_DICT")
+        return user_session
     else:
         return {
             "email": "",
@@ -410,17 +482,25 @@ def download_appcode(request: Request, user=Depends(require_auth)):
 
 app.mount("/{application}/appcode", StaticFiles(directory=MODULE_PATH), name="static")
 
-@app.get("/classcall/{file_name}/{class_name}/{function_name}", operation_id="getClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float]) or StreamingResponse for streaming methods"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
-@app.post("/classcall/{file_name}/{class_name}/{function_name}", operation_id="postClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float]) or StreamingResponse for streaming methods"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
+@app.get("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="getClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float]) or StreamingResponse for streaming methods"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
+@app.post("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="postClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float]) or StreamingResponse for streaming methods"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
 async def class_call(
-    file_name: str,
+    file_path: str,
     class_name: str,
     function_name: str,
     request: Request
 ):
     
     # Determine if this call is allowed without auth.
-    if is_noauth_allowed(file_name, class_name, function_name):
+    normalized_identifier = _normalize_file_identifier(file_path)
+    if not normalized_identifier:
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    request_identifier_with_ext = normalized_identifier
+    if not request_identifier_with_ext.lower().endswith(".py"):
+        request_identifier_with_ext += ".py"
+
+    if is_noauth_allowed(request_identifier_with_ext, class_name, function_name):
         user = "noauth"
     else:
         # Perform authentication check for calls not whitelisted for no-auth.
@@ -429,20 +509,30 @@ async def class_call(
     if not user:
         raise HTTPException(status_code=401, detail="Call not authorized")
 
-    # 1) Dynamically load the file_name
-    appcode_folder = get_modules_path()
-    base_dir = os.path.abspath(appcode_folder)
-    requested_name = file_name
-    if not requested_name.endswith(".py"):
-        requested_name += ".py"
-    sanitized_name = os.path.basename(requested_name)
-    if sanitized_name.startswith("."):
+    modules_root = os.path.abspath(get_modules_path())
+    fs_relative = request_identifier_with_ext.replace("/", os.sep)
+    fs_relative = os.path.normpath(fs_relative)
+
+    if fs_relative.startswith("..") or os.path.isabs(fs_relative) or os.path.splitdrive(fs_relative)[0]:
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    if os.path.basename(fs_relative).startswith("."):
         raise HTTPException(status_code=400, detail="Invalid file name")
-    file_path = os.path.abspath(os.path.join(base_dir, sanitized_name))
-    if not file_path.startswith(f"{base_dir}{os.sep}") or not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail=f"File {sanitized_name} not found in appcode folder")
+
+    module_file_path = os.path.abspath(os.path.join(modules_root, fs_relative))
+
+    try:
+        common_root = os.path.commonpath([module_file_path, modules_root])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid module path")
+
+    if common_root != modules_root:
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    if not os.path.isfile(module_file_path):
+        raise HTTPException(status_code=404, detail=f"File {request_identifier_with_ext} not found in appcode folder")
     
-    loader = SourceFileLoader(class_name, file_path)
+    loader = SourceFileLoader(class_name, module_file_path)
     spec = importlib.util.spec_from_loader(class_name, loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
@@ -470,6 +560,17 @@ async def class_call(
             print("could not convert data to json")
 
     # 5) Call the function with *args / **kwargs if needed
+    if BFF_POLICY_HOOK:
+        policy_metadata = getattr(function_obj, "_bff_policy", {}) or {}
+        BFF_POLICY_HOOK(
+            user=user,
+            policy=policy_metadata,
+            class_name=class_name,
+            function_name=function_name,
+            module_path=request_identifier_with_ext,
+            request=request,
+        )
+
     if callable(func):
         args = data.get("args", [])
         kwargs = data.get("kwargs", {})
@@ -581,6 +682,47 @@ SAML_IDP_ENTITY_ID = os.getenv("SAML_IDP_ENTITY_ID", "")
 SAML_IDP_SSO_URL = os.getenv("SAML_IDP_SSO_URL", "")
 SAML_IDP_SLO_URL = os.getenv("SAML_IDP_SLO_URL", "")
 SAML_IDP_X509_CERT = os.getenv("SAML_IDP_X509_CERT", "")
+SAML_REQUEST_CACHE_MAX = int(os.getenv("SAML_REQUEST_CACHE_MAX", "512"))
+SAML_REQUEST_CACHE_TTL = int(os.getenv("SAML_REQUEST_CACHE_TTL", "600"))
+
+_SAML_REQUEST_STATE: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+
+
+def _generate_relay_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _prune_saml_state(now: float) -> None:
+    expired: List[str] = []
+    for key, payload in _SAML_REQUEST_STATE.items():
+        timestamp = payload.get("ts", now)
+        if now - timestamp > SAML_REQUEST_CACHE_TTL:
+            expired.append(key)
+    for key in expired:
+        _SAML_REQUEST_STATE.pop(key, None)
+    while len(_SAML_REQUEST_STATE) > SAML_REQUEST_CACHE_MAX:
+        _SAML_REQUEST_STATE.popitem(last=False)
+
+
+def _store_saml_state(token: str, payload: Dict[str, Any]) -> None:
+    now = time.time()
+    payload = dict(payload)
+    payload["ts"] = now
+    _SAML_REQUEST_STATE[token] = payload
+    _SAML_REQUEST_STATE.move_to_end(token)
+    _prune_saml_state(now)
+
+
+def _consume_saml_state(token: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not token:
+        return None
+    payload = _SAML_REQUEST_STATE.pop(token, None)
+    if not payload:
+        return None
+    timestamp = payload.pop("ts", time.time())
+    if time.time() - timestamp > SAML_REQUEST_CACHE_TTL:
+        return None
+    return payload
 
 
 def _normalize_certificate(value: str) -> str:
@@ -590,6 +732,52 @@ def _normalize_certificate(value: str) -> str:
     if not value:
         return value
     return value.replace("\\n", "\n").strip()
+
+
+def _strip_pem_headers(value: str) -> str:
+    cleaned = value.replace("-----BEGIN CERTIFICATE-----", "")
+    cleaned = cleaned.replace("-----END CERTIFICATE-----", "")
+    return cleaned.replace("\n", "").replace("\r", "").replace(" ", "")
+
+
+def _certificate_fingerprint(value: str) -> Optional[str]:
+    """
+    Return the SHA1 fingerprint for a PEM or raw base64 certificate.
+    """
+    if not value:
+        return None
+    normalized = _normalize_certificate(value)
+    pem_pattern = r"-----BEGIN CERTIFICATE-----\s*(.*?)\s*-----END CERTIFICATE-----"
+    matches = re.findall(pem_pattern, normalized, flags=re.DOTALL)
+    if matches:
+        raw_body = matches[0]
+    else:
+        raw_body = normalized
+    body = "".join(raw_body.split())
+    try:
+        der = base64.b64decode(body)
+    except Exception as exc:
+        print(f"DEBUG: Failed to decode certificate for fingerprint: {exc}")
+        return None
+    return hashlib.sha1(der).hexdigest()
+
+
+def _extract_response_certificates(xml_payload: str) -> List[str]:
+    """
+    Extract embedded ds:X509Certificate values from a decoded SAML response.
+    """
+    try:
+        ns = {"ds": "http://www.w3.org/2000/09/xmldsig#"}
+        root = ElementTree.fromstring(xml_payload)
+        nodes = root.findall(".//ds:Signature/ds:KeyInfo/ds:X509Data/ds:X509Certificate", ns)
+        return [
+            (node.text or "").strip()
+            for node in nodes
+            if (node.text or "").strip()
+        ]
+    except Exception as exc:
+        print(f"DEBUG: Failed to parse SAML XML for embedded certificates: {exc}")
+        return []
 
 
 def _extract_request_origin(request: Request) -> Dict[str, Any]:
@@ -654,6 +842,33 @@ def _apply_saml_template(value: str, application: str, origin: Dict[str, Any]) -
         .replace("{host_with_port}", origin["host_with_port"])
         .replace("{protocol}", origin["protocol"])
     )
+
+
+def _debug_session_state(stage: str, request: Request) -> None:
+    """
+    Emit diagnostic information about the Starlette session + cookies.
+    """
+    try:
+        cookie_value = request.cookies.get("session")
+        cookie_present = cookie_value is not None
+        cookie_length = len(cookie_value) if cookie_present else 0
+        session_keys = list(request.session.keys())
+        tracked_snapshot = {
+            key: request.session.get(key)
+            for key in (
+                "saml_request_id",
+                "return_to",
+                "saml_name_id",
+                "saml_session_index",
+            )
+        }
+        print(
+            f"DEBUG: Session state ({stage}) -> "
+            f"cookie_present={cookie_present} size={cookie_length} "
+            f"keys={session_keys} tracked_values={tracked_snapshot}"
+        )
+    except Exception as exc:  # pragma: no cover - diagnostics only
+        print(f"DEBUG: Failed to inspect session during {stage}: {exc}")
 
 
 def _build_saml_settings(request: Request, application: str) -> Dict[str, Any]:
@@ -806,7 +1021,12 @@ else:
     oauth = None
 
 # Add session middleware (needed to store "return_to" and user info)
-app.add_middleware(SessionMiddleware, secret_key=config.get("SECRET_KEY"))
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=config.get("SECRET_KEY"),
+    same_site="lax",   # allow session cookies on top-level navigation while keeping CSRF protection
+    https_only=False,  # flip to True once you’re behind HTTPS
+)
 
 # ================
 # SAML SSO SETUP
@@ -829,10 +1049,17 @@ async def saml_login(request: Request, application: str):
     if not ENABLE_SAML_AUTH:
         raise HTTPException(status_code=404, detail="SAML authentication not enabled")
 
+    _debug_session_state("saml_login:entry", request)
     return_to = request.query_params.get("return_to")
     safe_return_to = _sanitize_return_to(return_to)
     if safe_return_to:
         request.session["return_to"] = safe_return_to
+        print(f"DEBUG: Stored return_to '{safe_return_to}' in session for application '{application}'")
+    else:
+        if return_to:
+            print(f"DEBUG: Ignored unsafe return_to '{return_to}'")
+        else:
+            print("DEBUG: No return_to param supplied")
 
     try:
         saml_auth = _init_saml_auth(request, application)
@@ -841,8 +1068,23 @@ async def saml_login(request: Request, application: str):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"SAML initialization failed: {exc}") from exc
 
-    auth_url = saml_auth.login()
-    request.session["saml_request_id"] = saml_auth.get_last_request_id()
+    relay_token = _generate_relay_token()
+    auth_url = saml_auth.login(return_to=relay_token)
+    request_id = saml_auth.get_last_request_id()
+    request.session["saml_request_id"] = request_id
+    fallback_return = safe_return_to or request.session.get("return_to")
+    _store_saml_state(
+        relay_token,
+        {
+            "request_id": request_id,
+            "return_to": fallback_return,
+        },
+    )
+    print(
+        f"DEBUG: SAML login generated request ID: {request_id} "
+        f"and relay token: {relay_token}"
+    )
+    _debug_session_state("saml_login:stored_request_id", request)
     return RedirectResponse(url=auth_url)
 
 
@@ -852,7 +1094,8 @@ async def saml_login(request: Request, application: str):
     response_class=RedirectResponse,
     responses={
         302: {"description": "RedirectResponse (to original path after login)"},
-        400: {"description": "HTTPException (if SAML response invalid)"},
+        400: {
+            "description": "HTTPException (if SAML response invalid)"},
         401: {"description": "HTTPException (if user not authorized)"},
         404: {"description": "HTTPException (if SAML disabled)"},
     },
@@ -864,31 +1107,138 @@ async def saml_assertion_consumer(request: Request, application: str):
     if not ENABLE_SAML_AUTH:
         raise HTTPException(status_code=404, detail="SAML authentication not enabled")
 
+    _debug_session_state("saml_acs:entry", request)
     form_data = await request.form()
     post_data = dict(form_data.multi_items())
+    relay_token = post_data.get("RelayState")
+    cached_state = _consume_saml_state(relay_token)
+    if cached_state:
+        print(
+            f"DEBUG: Retrieved cached relay state for token {relay_token}: "
+            f"{cached_state}"
+        )
+    else:
+        print(f"DEBUG: No cached relay state found for token {relay_token}")
+    
+    # DEBUG: Log what we received
+    print(f"DEBUG: Received form data keys: {list(post_data.keys())}")
+    if 'SAMLResponse' in post_data:
+        try:
+            decoded_response = base64.b64decode(post_data['SAMLResponse']).decode('utf-8')
+            print(f"DEBUG: SAML Response (first 500 chars): {decoded_response[:500]}...")
+            embedded_certs = _extract_response_certificates(decoded_response)
+            if embedded_certs:
+                for idx, embedded_cert in enumerate(embedded_certs):
+                    fingerprint = _certificate_fingerprint(embedded_cert)
+                    preview = embedded_cert[:80]
+                    print(
+                        f"DEBUG: Embedded certificate #{idx} fingerprint={fingerprint} "
+                        f"preview={preview}..."
+                    )
+                    print(f"DEBUG: Embedded certificate #{idx} full={embedded_cert}")
+            else:
+                print("DEBUG: No embedded certificates found inside SAML response XML")
+        except Exception as e:
+            print(f"DEBUG: Could not decode SAML response: {e}")
 
     try:
         saml_auth = _init_saml_auth(request, application, post_data=post_data)
-        request_id = request.session.pop("saml_request_id", None)
-        saml_auth.process_response(request_id=request_id)
+        
+        # DEBUG: Log SAML settings  
+        settings = saml_auth.get_settings()
+        sp_data = settings.get_sp_data()
+        idp_data = settings.get_idp_data()
+        
+        print(f"DEBUG: SP Entity ID: {sp_data.get('entityId')}")
+        print(f"DEBUG: SP ACS URL: {sp_data.get('assertionConsumerService', {}).get('url')}")
+        print(f"DEBUG: IdP Entity ID: {idp_data.get('entityId')}")
+        print(f"DEBUG: IdP SSO URL: {idp_data.get('singleSignOnService', {}).get('url')}")
+        
+        # DEBUG: Check certificate
+        idp_cert = idp_data.get('x509cert', '')
+        print(f"DEBUG: IdP Certificate (first 100 chars): {idp_cert[:100]}...")
+        env_fingerprint = _certificate_fingerprint(idp_cert)
+        print(f"DEBUG: IdP Certificate fingerprint (env): {env_fingerprint}")
+        
+        request_id = None
+        if cached_state and cached_state.get("request_id"):
+            request_id = cached_state["request_id"]
+            print(f"DEBUG: Using request ID from relay cache: {request_id}")
+        else:
+            request_id = request.session.pop("saml_request_id", None)
+            print(f"DEBUG: Request ID from session (pre-process): {request_id}")
+            _debug_session_state("saml_acs:after_pop_request_id", request)
+        
+        # Process the SAML response
+        try:
+            saml_auth.process_response(request_id=request_id)
+        except OneLogin_Saml2_ValidationError as validation_error:
+            print(
+                "DEBUG: OneLogin validation error encountered during process_response "
+                f"(code={validation_error.code}): {validation_error.message}"
+            )
+            import traceback
+            traceback.print_exc()
+            raise
+        
+        # DEBUG: Get detailed error information
+        errors = saml_auth.get_errors()
+        print(f"DEBUG: SAML Errors: {errors}")
+        print(f"DEBUG: SAML Last Error Reason: {saml_auth.get_last_error_reason()}")
+        print(f"DEBUG: SAML Is Authenticated: {saml_auth.is_authenticated()}")
+        
+        try:
+            print(f"DEBUG: SAML Name ID: {saml_auth.get_nameid()}")
+        except:
+            print("DEBUG: Could not get Name ID")
+        
+        # DEBUG: Check what attributes we got
+        try:
+            attributes = saml_auth.get_attributes()
+            print(f"DEBUG: SAML Attributes: {attributes}")
+        except:
+            print("DEBUG: Could not get attributes")
+        
     except RuntimeError as config_error:
+        print(f"DEBUG: Runtime error: {config_error}")
         raise HTTPException(status_code=500, detail=str(config_error)) from config_error
     except Exception as exc:  # noqa: BLE001
+        print(f"DEBUG: General exception: {exc}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=400, detail=f"Failed to process SAML response: {exc}") from exc
 
     errors = saml_auth.get_errors()
     if errors:
+        # DEBUG: More detailed error logging
+        print(f"DEBUG: Detailed SAML errors before raising exception: {errors}")
+        print(f"DEBUG: SAML last error reason: {saml_auth.get_last_error_reason()}")
+        
+        # Check for specific signature validation errors
+        if any('signature' in str(error).lower() for error in errors):
+            print("DEBUG: Signature validation error detected")
+            settings = saml_auth.get_settings()
+            idp_data = settings.get_idp_data()
+            cert = idp_data.get('x509cert', '')
+            print(f"DEBUG: Certificate being used: {cert[:200]}...")
+        
         raise HTTPException(status_code=400, detail=f"SAML response contained errors: {errors}")
 
     if not saml_auth.is_authenticated():
+        print("DEBUG: SAML authentication failed - user not authenticated")
         raise HTTPException(status_code=401, detail="SAML authentication failed")
 
     attributes = saml_auth.get_attributes()
+    print(f"DEBUG: Final attributes received: {attributes}")
+    
     email_attr = _get_saml_attribute(attributes, SAML_EMAIL_ATTRIBUTE) or saml_auth.get_nameid()
+    print(f"DEBUG: Email attribute extracted: {email_attr}")
+    
     if not email_attr:
         raise HTTPException(status_code=400, detail="SAML response missing required email attribute")
 
     name_attr = _get_saml_attribute(attributes, SAML_NAME_ATTRIBUTE) if SAML_NAME_ATTRIBUTE else None
+    print(f"DEBUG: Name attribute extracted: {name_attr}")
 
     # Normalize attributes so they are JSON serializable for session storage.
     normalized_attributes: Dict[str, List[str]] = {
@@ -909,6 +1259,8 @@ async def saml_assertion_consumer(request: Request, application: str):
 
     if os.getenv("ALLOWED_EMAILS", "") != "":
         allowed_emails = [email.strip().lower() for email in os.getenv("ALLOWED_EMAILS", "").split(",") if email.strip()]
+        print(f"DEBUG: Allowed emails: {allowed_emails}")
+        print(f"DEBUG: User email: {email_attr.lower()}")
         if email_attr.lower() not in allowed_emails:
             raise HTTPException(status_code=401, detail="Not authorized")
 
@@ -917,9 +1269,18 @@ async def saml_assertion_consumer(request: Request, application: str):
     request.session["saml_name_id"] = saml_auth.get_nameid()
     request.session["saml_session_index"] = saml_auth.get_session_index()
 
-    redirect_target = _sanitize_return_to(request.session.pop("return_to", None))
-    if not redirect_target:
-        redirect_target = _get_saml_default_redirect(application, request)
+    cached_redirect = None
+    if cached_state:
+        cached_redirect = _sanitize_return_to(cached_state.get("return_to"))
+        if cached_redirect:
+            print(f"DEBUG: Using cached return_to from relay cache: {cached_redirect}")
+    if not cached_redirect:
+        cached_redirect = _sanitize_return_to(request.session.pop("return_to", None))
+        if cached_redirect:
+            print(f"DEBUG: Using return_to from session: {cached_redirect}")
+    redirect_target = cached_redirect or _get_saml_default_redirect(application, request)
+    
+    print(f"DEBUG: Redirecting to: {redirect_target}")
     return RedirectResponse(url=redirect_target, status_code=302)
 
 
@@ -1220,10 +1581,12 @@ async def main_app_route(response: Response, application: str, request: Request)
     # Check session
     user_session = require_auth(request)
     user_entry = user_session.get("email", "") if user_session else "noauth"
+    print(f"DEBUG MAIN_APP: user_entry={user_entry} cache_has={user_entry in USER_SESSION_DICT if hasattr(USER_SESSION_DICT, '__contains__') else user_entry in USER_SESSION_DICT}")
     
     if (ENABLE_USER_LOGIN or ENABLE_GOOGLE_AUTH or ENABLE_SAML_AUTH) and not USER_SESSION_DICT.get(user_entry, None):
         # Not logged in, so remember where they wanted to go:
         request.session["return_to"] = f"/{application}"
+        print(f"DEBUG MAIN_APP: user missing from session store, redirecting to login. return_to set to /{application}")
         # Then send them to Login page:
         return RedirectResponse(url=f"/{application}/login")
     else:

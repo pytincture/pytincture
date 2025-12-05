@@ -1,6 +1,5 @@
 import ast
 from decimal import Subnormal
-from os import sep
 import os
 import sys
 from typing import Set
@@ -13,6 +12,32 @@ from pytincture import get_modules_path
 
 # Global set to track BFF endpoints
 bff_routes: Dict[str, Dict] = {}
+
+
+def _module_relative_identifier(file_path: str) -> str:
+    """
+    Return a stable, POSIX-style path (including `.py`) for a module relative to MODULES_PATH.
+    Falls back to the file basename when the module is outside the configured folder.
+    """
+    modules_root = os.path.abspath(get_modules_path() or os.getcwd())
+    absolute_file = os.path.abspath(file_path)
+
+    try:
+        rel_path = os.path.relpath(absolute_file, modules_root)
+    except ValueError:
+        rel_path = os.path.basename(absolute_file)
+
+    if rel_path.startswith(".."):
+        rel_path = os.path.basename(absolute_file)
+
+    rel_path = rel_path.replace("\\", "/").lstrip("./")
+    if not rel_path:
+        rel_path = os.path.basename(absolute_file)
+
+    if not rel_path.lower().endswith(".py"):
+        rel_path += ".py"
+
+    return rel_path
 
 
 def bff_stream(func=None, *, raw: bool = False, media_type: str = "text/event-stream"):
@@ -34,6 +59,22 @@ def bff_stream(func=None, *, raw: bool = False, media_type: str = "text/event-st
     if func is None:
         return _apply
     return _apply(func)
+
+
+def bff_policy(**metadata):
+    """
+    Attach arbitrary policy metadata to a backend_for_frontend method.
+    The metadata is later surfaced to the server-side policy hook so applications
+    can run custom authorization/validation logic per call.
+    """
+
+    def _apply(target):
+        existing = getattr(target, "_bff_policy", {})
+        combined = {**existing, **metadata}
+        setattr(target, "_bff_policy", combined)
+        return target
+
+    return _apply
 
 def get_method_info_from_node(class_node: ast.ClassDef) -> Dict[str, Any]:
     """Extract method information from a class AST node"""
@@ -81,19 +122,15 @@ def backend_for_frontend(cls):
 
     # Get module/file name consistently
     module_name = cls.__module__.split('.')[-1]
-    #if not module_name.endswith('.py'):
-    #    module_name += '.py'
 
-    # Compute the folder path relative to MODULES_PATH
+    # Compute the relative module identifier for routing (includes folders + .py)
     module_file = inspect.getfile(cls)
-    appcode_folder = get_modules_path()
-    rel_path = os.path.relpath(module_file, appcode_folder)
-    folder = os.path.dirname(rel_path) if os.path.dirname(rel_path) != '.' else ''
+    module_identifier = _module_relative_identifier(module_file)
 
     # Register all methods
     for method_name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
         if not method_name.startswith('_'):
-            route_path = f"/classcall/{folder}/{module_name}/{cls.__name__}/{method_name}" if folder else f"/classcall/{module_name}/{cls.__name__}/{method_name}"
+            route_path = f"/classcall/{module_identifier}/{cls.__name__}/{method_name}"
 
             # Get method signature
             sig = inspect.signature(method)
@@ -332,7 +369,7 @@ def generate_stub_classes(file_path, return_url, return_protocol):
     with open(file_path, 'r') as file:
         code = file.read()
     
-    file_name = file_path.split(sep)[-1]
+    file_identifier = _module_relative_identifier(file_path)
 
     if not "@backend_for_frontend" in code:
         return code
@@ -435,7 +472,7 @@ def generate_stub_classes(file_path, return_url, return_protocol):
                     stream_config = streaming_methods.get(node.name, {"raw": False})
                     if is_streaming:
                         stub_class_code += f"    async def {node.name}(self, *args, **kwargs):\n"
-                        stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_name}/{class_name}/{node.name}'\n"
+                        stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_identifier}/{class_name}/{node.name}'\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
                         stub_class_code +=  "        stream_iter = self.fetch_stream(url, payload, 'POST')\n"
                         if stream_config.get("raw"):
@@ -458,7 +495,7 @@ def generate_stub_classes(file_path, return_url, return_protocol):
                             stub_class_code +=  "            yield json.loads(buffer)\n"
                     else:
                         stub_class_code += f"    def {node.name}(self, *args, **kwargs):\n"
-                        stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_name}/{class_name}/{node.name}'\n"
+                        stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_identifier}/{class_name}/{node.name}'\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
                         stub_class_code +=  "        response = self.fetch(url, payload, 'POST')\n"
                         stub_class_code +=  "        return json.loads(response)\n"
@@ -468,7 +505,7 @@ def generate_stub_classes(file_path, return_url, return_protocol):
                             property_name = target.id
                             stub_class_code +=  "    @property\n"
                             stub_class_code += f"    def {property_name}(self):\n"
-                            stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_name}/{class_name}/{property_name}'\n"
+                            stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_identifier}/{class_name}/{property_name}'\n"
                             stub_class_code +=  "        response = self.fetch(url)\n"
                             stub_class_code +=  "        return json.loads(response)\n"
         else:
