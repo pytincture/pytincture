@@ -15,7 +15,12 @@ import base64
 import hashlib
 from collections import OrderedDict
 from xml.etree import ElementTree
-nest_asyncio.apply()
+try:
+    nest_asyncio.apply()
+except ValueError as exc:
+    # uvloop event loops cannot be patched; skip when uvloop is active.
+    if "uvloop" not in str(exc):
+        raise
 
 # FastAPI / Starlette
 from fastapi import Depends, FastAPI, Request, Response, HTTPException, Body
