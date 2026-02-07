@@ -31,7 +31,7 @@ class Demo(MainWindow):
 
 What happens:
 
-- The runtime loads Pyodide (default `https://cdn.jsdelivr.net/pyodide/v0.28.0/full/`).
+- The runtime loads Pyodide (default `./frontend/pyodide/0.29.3/full/`).
 - Installs `micropip` and any extra wheels listed in `#micropip-libs`.
 - Installs the default widget library (`dhxpyt`) or another package you configure.
 - Auto-detects `<script type="text/python">` blocks, mounts them under `/appcode`, finds a `MainWindow` subclass (or explicit entrypoint), and runs it.
@@ -46,7 +46,8 @@ Before the script tag loads, you may set the following globals:
   window.pytinctureAutoStartConfig = {
     widgetlib: "dhxpyt",
     libsSelector: "#micropip-libs",
-    pyodideBaseUrl: "https://cdn.jsdelivr.net/pyodide/v0.28.0/full/",
+    pyodideBaseUrl: "./frontend/pyodide/0.29.3/full/",
+    enableServiceWorker: true,
     enableBackendLogging: false
   };
   // Disable auto-start if you want to call runTinctureApp manually:
@@ -64,6 +65,24 @@ runTinctureApp({
   enableBackendLogging: false
 });
 ```
+
+## Caching
+
+To avoid re-downloading Pyodide assets on refresh, you can enable the bundled service worker:
+
+```html
+<script>
+  window.pytinctureAutoStartConfig = {
+    enableServiceWorker: true,
+    serviceWorkerUrl: "sw.js",
+    serviceWorkerScope: "./"
+  };
+</script>
+```
+
+Notes:
+- Service workers require HTTPS (or localhost) and a same-origin `sw.js`.
+- The bundled `sw.js` caches Pyodide assets and same-origin `.js/.wasm/.data/.json/.css/.whl/.pyt` files.
 
 ## Development
 

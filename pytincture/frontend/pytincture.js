@@ -6,7 +6,7 @@ const DEFAULT_CONFIG = {
     widgetlib: "dhxpyt",
     widgetSource: null,
     mode: "auto", // 'package', 'inline', or 'auto'
-    pyodideBaseUrl: "https://cdn.jsdelivr.net/pyodide/v0.28.0/full/",
+    pyodideBaseUrl: "./frontend/pyodide/0.29.3/full/",
     loadMaterialIcons: true,
     materialIconsUrl: "https://cdnjs.cloudflare.com/ajax/libs/MaterialDesign-Webfont/7.4.47/css/materialdesignicons.css",
     enableBackendLogging: false,
@@ -15,6 +15,13 @@ const DEFAULT_CONFIG = {
     libsSelector: '#micropip-libs',
     devWidgetHost: null,
     devWheelVersion: "99.99.99",
+    enableServiceWorker: false,
+    serviceWorkerUrl: "sw.js",
+    serviceWorkerScope: "./",
+    warmPyodideCache: true,
+    showLoadingOverlay: true,
+    loadingOverlayId: "pytincture-loading",
+    loadingTitle: "Starting PyTincture",
 };
 
 let loggingInstalled = false;
@@ -49,6 +56,9 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
         if (!("enableBackendLogging" in arg1)) {
             merged.enableBackendLogging = !!merged.application;
         }
+        if (merged.application && merged.pyodideBaseUrl.startsWith("frontend/")) {
+            merged.pyodideBaseUrl = ensureTrailingSlash(`${merged.application}/${merged.pyodideBaseUrl}`);
+        }
         return merged;
     }
 
@@ -62,6 +72,9 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
     config.pyodideBaseUrl = ensureTrailingSlash(config.pyodideBaseUrl);
     config.devWidgetHost = resolveDevWidgetHost(config.devWidgetHost);
     config.enableBackendLogging = !!application;
+    if (config.application && config.pyodideBaseUrl.startsWith("frontend/")) {
+        config.pyodideBaseUrl = ensureTrailingSlash(`${config.application}/${config.pyodideBaseUrl}`);
+    }
     return config;
 }
 
@@ -132,6 +145,148 @@ function enableBackendLogging(endpoint) {
     });
 
     loggingInstalled = true;
+}
+
+function ensureLoadingOverlay(config) {
+    if (!config.showLoadingOverlay || typeof document === "undefined") {
+        return null;
+    }
+    const existing = document.getElementById(config.loadingOverlayId);
+    if (existing) {
+        return existing;
+    }
+    const overlay = document.createElement("div");
+    overlay.id = config.loadingOverlayId;
+    overlay.innerHTML = `
+      <div class="pytincture-loading__card">
+        <div class="pytincture-loading__title">${config.loadingTitle}</div>
+        <div class="pytincture-loading__status">Loading…</div>
+        <div class="pytincture-loading__bar">
+          <div class="pytincture-loading__bar-inner"></div>
+        </div>
+      </div>
+    `;
+
+    const style = document.createElement("style");
+    style.textContent = `
+      #${config.loadingOverlayId} {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: radial-gradient(circle at 20% 20%, #f5f6f7, #e8ebef);
+        z-index: 99999;
+        font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      }
+      #${config.loadingOverlayId} .pytincture-loading__card {
+        background: #ffffff;
+        border-radius: 14px;
+        padding: 20px 24px;
+        box-shadow: 0 12px 30px rgba(10, 22, 70, 0.12);
+        min-width: 260px;
+        max-width: 360px;
+        text-align: left;
+      }
+      #${config.loadingOverlayId} .pytincture-loading__title {
+        font-weight: 600;
+        font-size: 16px;
+        margin-bottom: 6px;
+        color: #1f2937;
+      }
+      #${config.loadingOverlayId} .pytincture-loading__status {
+        font-size: 13px;
+        color: #4b5563;
+        margin-bottom: 12px;
+      }
+      #${config.loadingOverlayId} .pytincture-loading__bar {
+        height: 8px;
+        background: #e5e7eb;
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      #${config.loadingOverlayId} .pytincture-loading__bar-inner {
+        height: 100%;
+        width: 40%;
+        background: linear-gradient(90deg, #2563eb, #38bdf8);
+        animation: pytincture-loading 1.4s ease-in-out infinite;
+      }
+      @keyframes pytincture-loading {
+        0% { transform: translateX(-120%); }
+        50% { transform: translateX(10%); }
+        100% { transform: translateX(220%); }
+      }
+    `;
+    overlay.appendChild(style);
+    document.body.appendChild(overlay);
+    return overlay;
+}
+
+function updateLoadingStatus(overlay, status) {
+    if (!overlay) {
+        return;
+    }
+    const statusEl = overlay.querySelector(".pytincture-loading__status");
+    if (statusEl) {
+        statusEl.textContent = status;
+    }
+}
+
+function removeLoadingOverlay(overlay) {
+    if (!overlay) {
+        return;
+    }
+    overlay.remove();
+}
+
+async function ensureServiceWorker(config) {
+    if (!config.enableServiceWorker) {
+        return;
+    }
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+        return;
+    }
+    try {
+        await navigator.serviceWorker.register(config.serviceWorkerUrl, {
+            scope: config.serviceWorkerScope,
+        });
+    } catch (err) {
+        console.warn("Service worker registration failed:", err);
+    }
+}
+
+async function warmPyodideCache(config) {
+    if (!config.enableServiceWorker || !config.warmPyodideCache) {
+        return;
+    }
+    if (typeof caches === "undefined") {
+        return;
+    }
+    const base = ensureTrailingSlash(config.pyodideBaseUrl);
+    const resources = [
+        `${base}pyodide.js`,
+        `${base}pyodide.asm.js`,
+        `${base}pyodide.asm.wasm`,
+        `${base}pyodide-lock.json`,
+        `${base}python_stdlib.zip`,
+    ];
+    try {
+        const cache = await caches.open("pytincture-preload");
+        await Promise.all(
+            resources.map(async url => {
+                const request = new Request(url, { mode: "cors", credentials: "omit" });
+                const existing = await cache.match(request);
+                if (!existing) {
+                    const response = await fetch(request);
+                    if (response && (response.ok || response.type === "opaque")) {
+                        await cache.put(request, response.clone());
+                    }
+                }
+            }),
+        );
+    } catch (err) {
+        console.warn("Pyodide cache warm failed:", err);
+    }
 }
 
 async function ensurePyodideLoaded(config) {
@@ -332,6 +487,7 @@ for root, _, files in os.walk(package_path):
 
 async function runTinctureApp(arg1, widgetlib, entrypoint) {
     const config = normalizeConfig(arg1, widgetlib, entrypoint);
+    const loadingOverlay = ensureLoadingOverlay(config);
 
     if (config.enableBackendLogging) {
         enableBackendLogging(config.logEndpoint);
@@ -340,36 +496,52 @@ async function runTinctureApp(arg1, widgetlib, entrypoint) {
         ensureMaterialIcons(config.materialIconsUrl);
     }
 
-    await ensurePyodideLoaded(config);
+    try {
+        updateLoadingStatus(loadingOverlay, "Preparing runtime…");
+        await ensureServiceWorker(config);
+        warmPyodideCache(config);
+        updateLoadingStatus(loadingOverlay, "Loading Pyodide…");
+        await ensurePyodideLoaded(config);
 
-    const pyodide = await loadPyodide({ indexURL: config.pyodideBaseUrl });
-    await pyodide.loadPackage("micropip");
-    await installExtraMicropipLibs(pyodide, config.libsSelector);
+        const pyodide = await loadPyodide({ indexURL: config.pyodideBaseUrl });
+        updateLoadingStatus(loadingOverlay, "Loading micropip…");
+        await pyodide.loadPackage("micropip");
+        updateLoadingStatus(loadingOverlay, "Installing extra packages…");
+        await installExtraMicropipLibs(pyodide, config.libsSelector);
 
-    const widgetSource = await resolveWidgetSource(config);
-    await installAndLoadWidgetset(pyodide, widgetSource);
+        updateLoadingStatus(loadingOverlay, "Loading widgetset…");
+        const widgetSource = await resolveWidgetSource(config);
+        await installAndLoadWidgetset(pyodide, widgetSource);
 
-    if (config.mode === "inline") {
-        await runInlineApp(pyodide, config);
-        return;
-    }
-
-    if (config.mode === "package" || config.application) {
-        try {
-            await runPackagedApp(pyodide, config);
+        updateLoadingStatus(loadingOverlay, "Starting app…");
+        if (config.mode === "inline") {
+            await runInlineApp(pyodide, config);
+            removeLoadingOverlay(loadingOverlay);
             return;
-        } catch (err) {
-            console.error("Failed to run packaged app:", err);
-            if (config.mode === "package") {
-                throw err;
-            }
-            console.warn("Falling back to inline mode.");
         }
-    }
 
-    const inlineStarted = await runInlineApp(pyodide, config);
-    if (!inlineStarted) {
-        throw new Error("No application could be started: packaged app missing and no inline scripts found.");
+        if (config.mode === "package" || config.application) {
+            try {
+                await runPackagedApp(pyodide, config);
+                removeLoadingOverlay(loadingOverlay);
+                return;
+            } catch (err) {
+                console.error("Failed to run packaged app:", err);
+                if (config.mode === "package") {
+                    throw err;
+                }
+                console.warn("Falling back to inline mode.");
+            }
+        }
+
+        const inlineStarted = await runInlineApp(pyodide, config);
+        if (!inlineStarted) {
+            throw new Error("No application could be started: packaged app missing and no inline scripts found.");
+        }
+        removeLoadingOverlay(loadingOverlay);
+    } catch (err) {
+        updateLoadingStatus(loadingOverlay, "Failed to start. Check console for details.");
+        throw err;
     }
 }
 

@@ -1,4 +1,5 @@
 import os
+import ast
 import re
 from signal import raise_signal
 import sys
@@ -50,6 +51,7 @@ from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.settings import OneLogin_Saml2_Settings
 from onelogin.saml2.errors import OneLogin_Saml2_ValidationError
 from urllib.parse import urlparse
+from html import escape
 
 # ========================
 #  FASTAPI SETUP
@@ -73,12 +75,25 @@ def reload_mcp_tools():
     
     # Test tool name lengths
     print("\nTesting MCP Tool Name Lengths:")
-    tools = asyncio.run(mcp.get_tools())
-    for tool in tools.values():
-        name_length = len(tool.name)
-        print(f"Tool: {tool.name} | Length: {name_length} chars | Over Limit: {name_length > 64}")
-        if name_length > 64:
-            print(f"  WARNING: Exceeds 64-char limit! Suggested truncate: {tool.name[:61]}...")
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            print("Skipping MCP tool length test: event loop already running.")
+        else:
+            tools = loop.run_until_complete(mcp.get_tools())
+            for tool in tools.values():
+                name_length = len(tool.name)
+                print(f"Tool: {tool.name} | Length: {name_length} chars | Over Limit: {name_length > 64}")
+                if name_length > 64:
+                    print(f"  WARNING: Exceeds 64-char limit! Suggested truncate: {tool.name[:61]}...")
+    except RuntimeError:
+        # Fallback when no event loop is set in this context.
+        tools = asyncio.run(mcp.get_tools())
+        for tool in tools.values():
+            name_length = len(tool.name)
+            print(f"Tool: {tool.name} | Length: {name_length} chars | Over Limit: {name_length > 64}")
+            if name_length > 64:
+                print(f"  WARNING: Exceeds 64-char limit! Suggested truncate: {tool.name[:61]}...")
     
     # Step 3: Recreate SSE app
     sse_mcp_app = mcp.sse_app(path='/')
@@ -378,6 +393,7 @@ except json.JSONDecodeError as e:
 
 
 app.mount("/{application}/frontend", StaticFiles(directory=STATIC_PATH), name="static")
+app.mount("/frontend", StaticFiles(directory=STATIC_PATH), name="static_frontend")
 
 BFF_POLICY_HOOK: Optional[Callable[..., None]] = None
 
@@ -1687,6 +1703,11 @@ async def main_app_route(response: Response, application: str, request: Request)
         # If file doesn't exist, just use the application name as-is
         index_html = index_html.replace("***ENTRYPOINT***", safe_application)
     
+    loading_title = application
+    if os.path.exists(app_file_path):
+        loading_title = find_app_loading_title(app_file_path, application)
+    index_html = index_html.replace("***LOADING_TITLE***", escape(loading_title))
+
     index_html = index_html.replace("***WIDGETSET***", widgetset)
     return HTMLResponse(content=index_html)
 
@@ -1715,6 +1736,41 @@ def find_main_window_subclass(file_path):
     except Exception as e:
         print(f"Error finding MainWindow subclass: {e}")
         return None
+
+def find_app_loading_title(file_path, default_title):
+    """
+    Read a lightweight title from the app source without importing it.
+    Looks for APP_TITLE / APP_LOADING_TITLE or APP_CONFIG = {"title": "..."}.
+    """
+    try:
+        with open(file_path, "r") as f:
+            source = f.read()
+        tree = ast.parse(source)
+    except Exception as e:
+        print(f"Error reading loading title: {e}")
+        return default_title
+
+    def extract_string(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    if target.id in ("APP_TITLE", "APP_LOADING_TITLE"):
+                        value = extract_string(node.value)
+                        if value:
+                            return value
+                    if target.id == "APP_CONFIG" and isinstance(node.value, ast.Dict):
+                        for key, value_node in zip(node.value.keys, node.value.values):
+                            key_str = extract_string(key)
+                            if key_str in ("title", "loading_title"):
+                                value = extract_string(value_node)
+                                if value:
+                                    return value
+    return default_title
 
 
 add_bff_docs_to_app(app)

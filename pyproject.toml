@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pytincture"
-version = "0.9.27"
+version = "0.9.28"
 description = "UI Builder"
 readme = "README.md"
 license = { text = "MIT" }
@@ -39,3 +39,6 @@ Homepage = "https://github.com/pytincture/pytincture"
 
 [tool.setuptools.packages]
 find = {}
+
+[tool.setuptools.package-data]
+pytincture = ["frontend/**/*"]
