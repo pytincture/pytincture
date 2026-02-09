@@ -56,8 +56,9 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
         if (!("enableBackendLogging" in arg1)) {
             merged.enableBackendLogging = !!merged.application;
         }
-        if (merged.application && merged.pyodideBaseUrl.startsWith("frontend/")) {
-            merged.pyodideBaseUrl = ensureTrailingSlash(`${merged.application}/${merged.pyodideBaseUrl}`);
+        if (merged.application && (merged.pyodideBaseUrl.startsWith("frontend/") || merged.pyodideBaseUrl.startsWith("./frontend/"))) {
+            const cleanPath = merged.pyodideBaseUrl.replace(/^\.\//, "");
+            merged.pyodideBaseUrl = ensureTrailingSlash(`${merged.application}/${cleanPath}`);
         }
         return merged;
     }
@@ -72,8 +73,9 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
     config.pyodideBaseUrl = ensureTrailingSlash(config.pyodideBaseUrl);
     config.devWidgetHost = resolveDevWidgetHost(config.devWidgetHost);
     config.enableBackendLogging = !!application;
-    if (config.application && config.pyodideBaseUrl.startsWith("frontend/")) {
-        config.pyodideBaseUrl = ensureTrailingSlash(`${config.application}/${config.pyodideBaseUrl}`);
+    if (config.application && (config.pyodideBaseUrl.startsWith("frontend/") || config.pyodideBaseUrl.startsWith("./frontend/"))) {
+        const cleanPath = config.pyodideBaseUrl.replace(/^\.\//, "");
+        config.pyodideBaseUrl = ensureTrailingSlash(`${config.application}/${cleanPath}`);
     }
     return config;
 }

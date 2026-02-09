@@ -16,6 +16,7 @@ pytincture.egg-info/top_level.txt
 dist
 dist/*.whl
 *.zip
+!pytincture/frontend/pyodide/**/python_stdlib.zip
 *.pyt
 .DS_Store
 pytincture/backend/.env
