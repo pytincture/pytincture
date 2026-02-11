@@ -448,21 +448,40 @@ def replace_font_urls(css_content, font_folder_path):
     if not os.path.isdir(font_folder_path):
         return css_content
 
-    font_files = [f for f in os.listdir(font_folder_path) if os.path.isfile(os.path.join(font_folder_path, f))]
+    mime_types = {
+        'woff': 'font/woff',
+        'woff2': 'font/woff2',
+        'ttf': 'font/ttf',
+        'otf': 'font/otf',
+        'eot': 'application/vnd.ms-fontobject',
+    }
+
+    try:
+        font_files = [
+            f for f in os.listdir(font_folder_path)
+            if os.path.isfile(os.path.join(font_folder_path, f))
+        ]
+    except Exception:
+        return css_content
 
     for font_file in font_files:
-        font_extension = font_file.split('.')[-1].lower()
-        if font_extension not in ['woff', 'woff2']:
+        font_extension = font_file.rsplit('.', 1)[-1].lower()
+        if font_extension not in mime_types:
             continue
         font_file_path = os.path.join(font_folder_path, font_file)
-        with open(font_file_path, "rb") as f:
-            font_data = base64.b64encode(f.read()).decode("utf-8")
-        mime_type = f"font/{font_extension}"
-        css_content = re.sub(
-            rf"""url\\(['"]?\\./fonts/{re.escape(font_file)}['"]?\\)""",
-            f"url(data:{mime_type};charset=utf-8;base64,{font_data})",
-            css_content
-        )
+        try:
+            with open(font_file_path, "rb") as f:
+                font_data = base64.b64encode(f.read()).decode("utf-8")
+        except Exception:
+            continue
+        data_uri = f"url(data:{mime_types[font_extension]};base64,{font_data})"
+        patterns = [
+            rf"""url\\(['"]?\\.?\\.?/fonts/{re.escape(font_file)}['"]?\\)""",
+            rf"""url\\(['"]?/?fonts/{re.escape(font_file)}['"]?\\)""",
+            rf"""url\\(['"]?{re.escape(font_file)}['"]?\\)""",
+        ]
+        for pattern in patterns:
+            css_content = re.sub(pattern, data_uri, css_content, flags=re.IGNORECASE)
     return css_content
 
 package_path = site.getsitepackages()[0]
