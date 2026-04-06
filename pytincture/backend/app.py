@@ -59,6 +59,56 @@ from html import escape
 
 app = FastAPI(title="pyTincture API")
 
+
+def _build_dynamic_module_name(file_path: str, name_hint: str) -> str:
+    """
+    Build a stable module name for manually loaded source files.
+
+    The name includes a sanitized hint for readability and a path hash to avoid
+    collisions between different files that share a class name or basename.
+    """
+    absolute_path = os.path.abspath(file_path)
+    modules_root = os.path.abspath(get_modules_path() or os.getcwd())
+
+    try:
+        relative_path = os.path.relpath(absolute_path, modules_root)
+    except ValueError:
+        relative_path = os.path.basename(absolute_path)
+
+    if relative_path.startswith(".."):
+        relative_path = os.path.basename(absolute_path)
+
+    sanitized_hint = re.sub(r"[^0-9a-zA-Z_]+", "_", name_hint).strip("_") or "module"
+    sanitized_path = re.sub(r"[^0-9a-zA-Z_]+", "_", relative_path.replace("\\", "/")).strip("_") or "source"
+    path_hash = hashlib.sha1(absolute_path.encode("utf-8")).hexdigest()[:12]
+    return f"pytincture_dynamic_{sanitized_hint}_{sanitized_path}_{path_hash}"
+
+
+def _load_source_module(file_path: str, name_hint: str):
+    """
+    Load a Python source file using importlib-compatible sys.modules registration.
+    """
+    module_name = _build_dynamic_module_name(file_path, name_hint)
+    loader = SourceFileLoader(module_name, file_path)
+    spec = importlib.util.spec_from_loader(module_name, loader)
+    if spec is None:
+        raise ImportError(f"Unable to create import spec for {file_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    previous_module = sys.modules.get(spec.name)
+    sys.modules[spec.name] = module
+
+    try:
+        loader.exec_module(module)
+    except Exception:
+        if previous_module is None:
+            sys.modules.pop(spec.name, None)
+        else:
+            sys.modules[spec.name] = previous_module
+        raise
+
+    return module
+
 def reload_mcp_tools():
     global mcp, sse_mcp_app  # Use globals or pass as needed if in a class/module
     
@@ -76,18 +126,13 @@ def reload_mcp_tools():
     # Test tool name lengths
     print("\nTesting MCP Tool Name Lengths:")
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            print("Skipping MCP tool length test: event loop already running.")
-        else:
-            tools = loop.run_until_complete(mcp.get_tools())
-            for tool in tools.values():
-                name_length = len(tool.name)
-                print(f"Tool: {tool.name} | Length: {name_length} chars | Over Limit: {name_length > 64}")
-                if name_length > 64:
-                    print(f"  WARNING: Exceeds 64-char limit! Suggested truncate: {tool.name[:61]}...")
+        loop = asyncio.get_running_loop()
     except RuntimeError:
-        # Fallback when no event loop is set in this context.
+        loop = None
+
+    if loop is not None and loop.is_running():
+        print("Skipping MCP tool length test: event loop already running.")
+    else:
         tools = asyncio.run(mcp.get_tools())
         for tool in tools.values():
             name_length = len(tool.name)
@@ -553,10 +598,7 @@ async def class_call(
     if not os.path.isfile(module_file_path):
         raise HTTPException(status_code=404, detail=f"File {request_identifier_with_ext} not found in appcode folder")
     
-    loader = SourceFileLoader(class_name, module_file_path)
-    spec = importlib.util.spec_from_loader(class_name, loader)
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
+    module = _load_source_module(module_file_path, class_name)
     cls = getattr(module, class_name)
     instance = cls(_user=user)
 
@@ -1719,10 +1761,7 @@ def find_main_window_subclass(file_path):
     try:
         # Load the module
         module_name = os.path.basename(file_path).replace('.py', '')
-        loader = SourceFileLoader(module_name, file_path)
-        spec = importlib.util.spec_from_loader(module_name, loader)
-        module = importlib.util.module_from_spec(spec)
-        loader.exec_module(module)
+        module = _load_source_module(file_path, module_name)
         
         # Inspect all classes in the module
         for name, obj in inspect.getmembers(module):

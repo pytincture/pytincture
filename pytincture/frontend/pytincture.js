@@ -34,6 +34,14 @@ function ensureTrailingSlash(value) {
     return value.endsWith("/") ? value : `${value}/`;
 }
 
+function makeRequestId() {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return crypto.randomUUID();
+    }
+    const rand = Math.random().toString(16).slice(2, 10);
+    return `${Date.now().toString(16)}-${rand}`;
+}
+
 function normalizeConfig(arg1, widgetlib, entrypoint) {
     const resolveDevWidgetHost = host => {
         if (host) {
@@ -341,7 +349,11 @@ async function resolveWidgetSource(config) {
     if (config.application) {
         const match = (config.widgetlib || "").match(/^[A-Za-z0-9_\-]+/);
         const widgetPackage = match ? match[0] : DEFAULT_CONFIG.widgetlib;
-        const widgetUrl = `${config.devWidgetHost}/${config.application}/appcode/${widgetPackage}-${config.devWheelVersion}-py3-none-any.whl`;
+        let widgetUrl = `${config.devWidgetHost}/${config.application}/appcode/${widgetPackage}-${config.devWheelVersion}-py3-none-any.whl`;
+        if (config.devWheelVersion === DEFAULT_CONFIG.devWheelVersion) {
+            const separator = widgetUrl.includes("?") ? "&" : "?";
+            widgetUrl = `${widgetUrl}${separator}id=${encodeURIComponent(makeRequestId())}`;
+        }
         if (await urlExists(widgetUrl)) {
             return widgetUrl;
         }
@@ -444,8 +456,8 @@ import site
 import base64
 import re
 
-def replace_font_urls(css_content, font_folder_path):
-    if not os.path.isdir(font_folder_path):
+def replace_font_urls(css_content, search_dirs):
+    if not search_dirs:
         return css_content
 
     mime_types = {
@@ -456,33 +468,44 @@ def replace_font_urls(css_content, font_folder_path):
         'eot': 'application/vnd.ms-fontobject',
     }
 
-    try:
-        font_files = [
-            f for f in os.listdir(font_folder_path)
-            if os.path.isfile(os.path.join(font_folder_path, f))
-        ]
-    except Exception:
-        return css_content
-
-    for font_file in font_files:
-        font_extension = font_file.rsplit('.', 1)[-1].lower()
-        if font_extension not in mime_types:
-            continue
-        font_file_path = os.path.join(font_folder_path, font_file)
+    def try_inline(url_value, base_dir):
+        if not url_value:
+            return None
+        if url_value.startswith('data:'):
+            return None
+        if re.match(r'^(https?:)?//', url_value):
+            return None
+        path = url_value
+        if '?' in path:
+            path = path.split('?', 1)[0]
+        if '#' in path:
+            path = path.split('#', 1)[0]
+        path = path.lstrip('/')
+        candidate = os.path.normpath(os.path.join(base_dir, path))
+        if not os.path.isfile(candidate):
+            return None
+        ext = os.path.splitext(candidate)[1].lstrip('.').lower()
+        if ext not in mime_types:
+            return None
         try:
-            with open(font_file_path, "rb") as f:
+            with open(candidate, "rb") as f:
                 font_data = base64.b64encode(f.read()).decode("utf-8")
         except Exception:
-            continue
-        data_uri = f"url(data:{mime_types[font_extension]};base64,{font_data})"
-        patterns = [
-            rf"""url\\(['"]?\\.?\\.?/fonts/{re.escape(font_file)}['"]?\\)""",
-            rf"""url\\(['"]?/?fonts/{re.escape(font_file)}['"]?\\)""",
-            rf"""url\\(['"]?{re.escape(font_file)}['"]?\\)""",
-        ]
-        for pattern in patterns:
-            css_content = re.sub(pattern, data_uri, css_content, flags=re.IGNORECASE)
-    return css_content
+            return None
+        return f"url(data:{mime_types[ext]};base64,{font_data})"
+
+    def repl(match):
+        raw = match.group(1)
+        if not raw:
+            return match.group(0)
+        cleaned = raw.strip().strip("'").strip('"')
+        for base_dir in search_dirs:
+            data_uri = try_inline(cleaned, base_dir)
+            if data_uri:
+                return f"url('{data_uri[4:-1]}')" if data_uri.startswith('url(') else data_uri
+        return match.group(0)
+
+    return re.sub(r"url\(([^)]+)\)", repl, css_content, flags=re.IGNORECASE)
 
 package_path = site.getsitepackages()[0]
 
@@ -495,7 +518,9 @@ for root, _, files in os.walk(package_path):
                 js.eval(f.read())
         elif file_extension == '.css':
             with open(file_path) as f:
-                style_content = replace_font_urls(f.read(), os.path.join(os.path.dirname(file_path), "fonts"))
+                css_dir = os.path.dirname(file_path)
+                search_dirs = [css_dir, os.path.join(css_dir, "fonts")]
+                style_content = replace_font_urls(f.read(), search_dirs)
             style = js.document.createElement('style')
             style.innerHTML = style_content
             js.document.head.appendChild(style)

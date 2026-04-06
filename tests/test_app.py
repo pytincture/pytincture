@@ -9,7 +9,13 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 # Import the app instance and helpers from the module.
-from pytincture.backend.app import app, ALLOWED_NOAUTH_CLASSCALLS, _sanitize_return_to, set_bff_policy_hook
+from pytincture.backend.app import (
+    app,
+    ALLOWED_NOAUTH_CLASSCALLS,
+    _build_dynamic_module_name,
+    _sanitize_return_to,
+    set_bff_policy_hook,
+)
 from fastapi import HTTPException
 
 @pytest.fixture(autouse=True)
@@ -166,6 +172,49 @@ def test_class_call_policy_hook(monkeypatch, fresh_client, tmp_path):
         assert response.json()["ok"] is True
     finally:
         set_bff_policy_hook(None)
+
+
+def test_class_call_loads_decorated_module_without_standard_import(monkeypatch, fresh_client, tmp_path):
+    """
+    Decorated backend classes should load correctly on the first direct classcall import.
+    """
+    import pytincture.backend.app as backend_app
+
+    modules_dir = tmp_path / "direct_load_modules"
+    modules_dir.mkdir()
+    module_code = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class DirectLoad:
+            def ping(self):
+                return {"status": "ok"}
+    """)
+    (modules_dir / "direct_load.py").write_text(module_code)
+
+    monkeypatch.setenv("MODULES_PATH", str(modules_dir))
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "tester@example.com"})
+
+    response = fresh_client.get("/classcall/direct_load.py/DirectLoad/ping")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
+def test_dynamic_module_names_are_unique_for_distinct_paths(tmp_path):
+    """
+    Manually loaded modules should not share sys.modules keys when file paths differ.
+    """
+    first_path = tmp_path / "pkg_a" / "worker.py"
+    second_path = tmp_path / "pkg_b" / "worker.py"
+    first_path.parent.mkdir()
+    second_path.parent.mkdir()
+    first_path.write_text("class Worker:\n    pass\n")
+    second_path.write_text("class Worker:\n    pass\n")
+
+    first_name = _build_dynamic_module_name(str(first_path), "Worker")
+    second_name = _build_dynamic_module_name(str(second_path), "Worker")
+
+    assert first_name != second_name
 
 
 def test_class_call_with_auth(dummy_module, monkeypatch, fresh_client):
