@@ -174,6 +174,50 @@ def test_class_call_policy_hook(monkeypatch, fresh_client, tmp_path):
         set_bff_policy_hook(None)
 
 
+def test_class_call_policy_hook_receives_mapping_for_noauth(monkeypatch, fresh_client, tmp_path):
+    """
+    No-auth calls should still provide a mapping-shaped user object to policy hooks.
+    """
+    modules_dir = tmp_path / "policy_noauth_modules"
+    modules_dir.mkdir()
+    module_code = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_policy
+
+        @backend_for_frontend
+        class PublicRestricted:
+            @bff_policy(role="admin")
+            def inspect(self):
+                return {"ok": True}
+    """)
+    (modules_dir / "public_restricted.py").write_text(module_code)
+
+    monkeypatch.setenv("MODULES_PATH", str(modules_dir))
+    ALLOWED_NOAUTH_CLASSCALLS.clear()
+    ALLOWED_NOAUTH_CLASSCALLS.extend([{
+        "file": "public_restricted.py",
+        "class": "PublicRestricted",
+        "function": "inspect",
+    }])
+
+    seen_user = {}
+
+    def policy_hook(user, policy, **kwargs):
+        seen_user.update(user)
+        roles = set(user.get("roles", []))
+        required_role = policy.get("role")
+        if required_role and required_role not in roles:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+    set_bff_policy_hook(policy_hook)
+    try:
+        response = fresh_client.post("/classcall/public_restricted.py/PublicRestricted/inspect", json={"kwargs": {}})
+        assert response.status_code == 403
+        assert seen_user["auth_type"] == "noauth"
+        assert seen_user["is_authenticated"] is False
+    finally:
+        set_bff_policy_hook(None)
+
+
 def test_class_call_loads_decorated_module_without_standard_import(monkeypatch, fresh_client, tmp_path):
     """
     Decorated backend classes should load correctly on the first direct classcall import.
@@ -198,6 +242,35 @@ def test_class_call_loads_decorated_module_without_standard_import(monkeypatch, 
     response = fresh_client.get("/classcall/direct_load.py/DirectLoad/ping")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_class_call_decorated_constructor_receives_user(monkeypatch, fresh_client, tmp_path):
+    """
+    Decorated classes that define __init__(_user) should receive the resolved user.
+    """
+    import pytincture.backend.app as backend_app
+
+    modules_dir = tmp_path / "constructor_modules"
+    modules_dir.mkdir()
+    module_code = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class UserAware:
+            def __init__(self, _user):
+                self._user = _user
+
+            def whoami(self):
+                return {"email": self._user["email"]}
+    """)
+    (modules_dir / "user_aware.py").write_text(module_code)
+
+    monkeypatch.setenv("MODULES_PATH", str(modules_dir))
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "tester@example.com"})
+
+    response = fresh_client.get("/classcall/user_aware.py/UserAware/whoami")
+    assert response.status_code == 200
+    assert response.json()["email"] == "tester@example.com"
 
 
 def test_dynamic_module_names_are_unique_for_distinct_paths(tmp_path):
@@ -356,6 +429,23 @@ def test_download_appcode(fresh_client, monkeypatch, tmp_path):
     assert "filename=appcode.pyt" in cd
     # Check that the content appears to be a zip archive (starts with PK).
     assert response.content.startswith(b"PK")
+
+def test_frontend_runtime_cache_busts_packaged_app_fetch(fresh_client):
+    """
+    The packaged app fetch should include a per-launch uuid query parameter.
+    """
+    response = fresh_client.get("/frontend/pytincture.js")
+    assert response.status_code == 200
+    assert 'appcode/appcode.pyt?uuid=${encodeURIComponent(makeRequestId())}' in response.text
+
+def test_service_worker_skips_cache_for_uuid_busted_appcode(fresh_client):
+    """
+    Cache-busted app packages should bypass the service-worker cache.
+    """
+    response = fresh_client.get("/frontend/sw.js")
+    assert response.status_code == 200
+    assert 'url.pathname.endsWith("/appcode/appcode.pyt")' in response.text
+    assert 'url.searchParams.has("uuid")' in response.text
 
 def test_get_widgetset(tmp_path, monkeypatch):
     """

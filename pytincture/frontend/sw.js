@@ -2,6 +2,14 @@ const CACHE_NAME = "pytincture-sw-v1";
 const PYODIDE_CDN_PREFIX = "https://cdn.jsdelivr.net/pyodide/";
 const CACHEABLE_EXTENSIONS = [".wasm", ".data", ".js", ".json", ".css", ".whl", ".pyt"];
 
+function isCacheBustedAppcodeRequest(url) {
+    return (
+        url.origin === self.location.origin &&
+        url.pathname.endsWith("/appcode/appcode.pyt") &&
+        url.searchParams.has("uuid")
+    );
+}
+
 self.addEventListener("install", event => {
     self.skipWaiting();
 });
@@ -19,6 +27,9 @@ function shouldCache(url) {
         return true;
     }
     if (url.origin === self.location.origin) {
+        if (isCacheBustedAppcodeRequest(url)) {
+            return false;
+        }
         if (url.pathname.includes("/appcode/")) {
             return true;
         }
