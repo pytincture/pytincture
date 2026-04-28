@@ -145,11 +145,12 @@ def test_generate_stub_classes_returns_stub(tmp_path, monkeypatch):
     
     # Call generate_stub_classes with dummy return values.
     stub = generate_stub_classes(str(file_path), "example.com", "https")
-    # We expect the stub to contain a class definition for MyService, async fetch helpers, and a generated URL.
+    # Sync backend methods should keep synchronous stubs.
     assert "class MyService:" in stub
     assert "async def fetch(self, url, payload=None, method='GET'):" in stub
-    assert "async def foo(self, *args, **kwargs):" in stub
-    assert "response = await self.fetch(url, payload, 'POST')" in stub
+    assert "def foo(self, *args, **kwargs):" in stub
+    assert "response = self.fetch_sync(url, payload, 'POST')" in stub
+    assert "async def foo(self, *args, **kwargs):" not in stub
     expected_url = f"https://example.com/classcall/service.py/MyService/foo"
     assert expected_url in stub
     # Also check that required imports are added.
@@ -208,6 +209,28 @@ def test_generate_stub_classes_supports_decorator_aliases_and_async_methods(tmp_
     assert "async def ping(self, *args, **kwargs):" in stub
     assert "response = await self.fetch(url, payload, 'POST')" in stub
     assert "stream_iter = self.fetch_stream(url, payload, 'POST')" in stub
+
+
+def test_generate_stub_classes_keeps_sync_alias_methods_sync(tmp_path, monkeypatch):
+    """
+    Module-qualified decorators should still preserve sync stubs for sync methods.
+    """
+    dummy_code = textwrap.dedent("""
+        import pytincture.dataclass as dc
+
+        @dc.backend_for_frontend
+        class AliasSyncService:
+            def ping(self):
+                return {"status": "ok"}
+    """)
+    file_path = tmp_path / "alias_sync_service.py"
+    file_path.write_text(dummy_code)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+
+    stub = generate_stub_classes(str(file_path), "example.com", "https")
+    assert "def ping(self, *args, **kwargs):" in stub
+    assert "response = self.fetch_sync(url, payload, 'POST')" in stub
+    assert "async def ping(self, *args, **kwargs):" not in stub
 
 
 def test_generate_stub_classes_nested_path(tmp_path, monkeypatch):
