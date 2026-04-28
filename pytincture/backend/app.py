@@ -60,6 +60,18 @@ from html import escape
 app = FastAPI(title="pyTincture API")
 
 
+def _build_streamable_mcp_app(mcp_server, path: str = "/"):
+    http_builder = getattr(mcp_server, "http_app", None)
+    if callable(http_builder):
+        return http_builder(path=path, transport="streamable-http")
+
+    streamable_builder = getattr(mcp_server, "streamable_http_app", None)
+    if callable(streamable_builder):
+        return streamable_builder(path=path)
+
+    raise AttributeError("FastMCP server does not expose streamable_http_app() or http_app()")
+
+
 def _build_dynamic_module_name(file_path: str, name_hint: str) -> str:
     """
     Build a stable module name for manually loaded source files.
@@ -110,13 +122,13 @@ def _load_source_module(file_path: str, name_hint: str):
     return module
 
 def reload_mcp_tools():
-    global mcp, sse_mcp_app  # Use globals or pass as needed if in a class/module
+    global mcp, mcp_http_app  # Use globals or pass as needed if in a class/module
     
     # Step 1: Remove existing MCP-mounted routes to avoid duplicates
-    # Filter out routes starting with "/sse-mcp" (adjust prefix if needed)
+    # Filter out routes starting with "/mcp" to avoid duplicate mounts.
     app.router.routes = [
         route for route in app.router.routes
-        if not route.path.startswith("/sse-mcp")
+        if not route.path.startswith("/mcp")
     ]
     
     # Step 2: Recreate FastMCP instance (rescans app for new endpoints/tools)
@@ -140,11 +152,11 @@ def reload_mcp_tools():
             if name_length > 64:
                 print(f"  WARNING: Exceeds 64-char limit! Suggested truncate: {tool.name[:61]}...")
     
-    # Step 3: Recreate SSE app
-    sse_mcp_app = mcp.sse_app(path='/')
+    # Step 3: Recreate MCP app using streamable HTTP transport
+    mcp_http_app = _build_streamable_mcp_app(mcp, path='/')
     
-    # Step 4: Remount the updated SSE app
-    app.mount("/sse-mcp", sse_mcp_app)
+    # Step 4: Remount the updated MCP app
+    app.mount("/mcp", mcp_http_app)
 
 def create_appcode_pkg_in_memory(host, protocol):
     """Generate an appcode package in memory for the browser to pull for the frontend."""

@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from pytincture.backend.app import (
     app,
     ALLOWED_NOAUTH_CLASSCALLS,
+    _build_streamable_mcp_app,
     _build_dynamic_module_name,
     _sanitize_return_to,
     set_bff_policy_hook,
@@ -105,6 +106,29 @@ def test_main_route_no_auth_when_disabled(fresh_client, monkeypatch):
     application_name = "demoapp"
     response = fresh_client.get(f"/{application_name}")
     assert response.status_code == 200
+
+
+def test_build_streamable_mcp_app_prefers_http_app():
+    class DummyMCP:
+        def streamable_http_app(self, path=None):
+            return {"transport": "streamable_http_app", "path": path}
+
+        def http_app(self, path=None, transport=None):
+            return {"transport": transport, "path": path}
+
+    result = _build_streamable_mcp_app(DummyMCP(), path="/")
+
+    assert result == {"transport": "streamable-http", "path": "/"}
+
+
+def test_build_streamable_mcp_app_falls_back_to_http_app():
+    class DummyMCP:
+        def http_app(self, path=None, transport=None):
+            return {"transport": transport, "path": path}
+
+    result = _build_streamable_mcp_app(DummyMCP(), path="/")
+
+    assert result == {"transport": "streamable-http", "path": "/"}
 
 def test_class_call_noauth(dummy_module, monkeypatch, fresh_client):
     """
