@@ -581,6 +581,7 @@ def generate_stub_classes(file_path, return_url, return_protocol):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith('_'):
                     is_streaming = node.name in streaming_methods
                     stream_config = streaming_methods.get(node.name, {"raw": False})
+                    is_async_method = isinstance(node, ast.AsyncFunctionDef)
                     if is_streaming:
                         stub_class_code += f"    async def {node.name}(self, *args, **kwargs):\n"
                         stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_identifier}/{class_name}/{node.name}'\n"
@@ -604,11 +605,17 @@ def generate_stub_classes(file_path, return_url, return_protocol):
                             stub_class_code +=  "                yield json.loads(line)\n"
                             stub_class_code +=  "        if buffer.strip():\n"
                             stub_class_code +=  "            yield json.loads(buffer)\n"
-                    else:
+                    elif is_async_method:
                         stub_class_code += f"    async def {node.name}(self, *args, **kwargs):\n"
                         stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_identifier}/{class_name}/{node.name}'\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
                         stub_class_code +=  "        response = await self.fetch(url, payload, 'POST')\n"
+                        stub_class_code +=  "        return json.loads(response)\n"
+                    else:
+                        stub_class_code += f"    async def {node.name}(self, *args, **kwargs):\n"
+                        stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_identifier}/{class_name}/{node.name}'\n"
+                        stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
+                        stub_class_code +=  "        response = self.fetch_sync(url, payload, 'POST')\n"
                         stub_class_code +=  "        return json.loads(response)\n"
                 elif isinstance(node, ast.Assign):
                     for target in node.targets:
