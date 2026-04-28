@@ -42,6 +42,20 @@ def test_backend_for_frontend_decorator():
     assert instance._real_instance._user == "tester"
 
 
+def test_backend_for_frontend_passes_user_into_constructor():
+    """Classes that explicitly accept _user should receive it during construction."""
+
+    @backend_for_frontend
+    class NeedsUser:
+        def __init__(self, _user):
+            self.user = _user
+
+    instance = NeedsUser(_user={"email": "tester@example.com"})
+
+    assert instance.user == {"email": "tester@example.com"}
+    assert instance._real_instance.user == {"email": "tester@example.com"}
+
+
 def test_backend_for_frontend_stream_registration():
     """Ensure streaming metadata is recorded for documentation."""
     previous_routes = dict(bff_routes)
@@ -131,9 +145,11 @@ def test_generate_stub_classes_returns_stub(tmp_path, monkeypatch):
     
     # Call generate_stub_classes with dummy return values.
     stub = generate_stub_classes(str(file_path), "example.com", "https")
-    # We expect the stub to contain a class definition for MyService, a fetch method, and a generated URL.
+    # We expect the stub to contain a class definition for MyService, async fetch helpers, and a generated URL.
     assert "class MyService:" in stub
-    assert "def fetch(self, url, payload=None, method='GET'):" in stub
+    assert "async def fetch(self, url, payload=None, method='GET'):" in stub
+    assert "async def foo(self, *args, **kwargs):" in stub
+    assert "response = await self.fetch(url, payload, 'POST')" in stub
     expected_url = f"https://example.com/classcall/service.py/MyService/foo"
     assert expected_url in stub
     # Also check that required imports are added.
@@ -163,6 +179,35 @@ def test_generate_stub_classes_streaming(tmp_path, monkeypatch):
     assert "async def ticker" in stub
     assert "async for chunk in stream_iter" in stub
     assert "yield json.loads(line)" in stub
+
+
+def test_generate_stub_classes_supports_decorator_aliases_and_async_methods(tmp_path, monkeypatch):
+    """
+    Stub generation should work with module-qualified decorators and async methods.
+    """
+    dummy_code = textwrap.dedent("""
+        import pytincture.dataclass as dc
+
+        @dc.backend_for_frontend
+        class AsyncService:
+            @dc.bff_stream()
+            async def ticker(self):
+                yield {"value": 1}
+
+            async def ping(self):
+                return {"status": "ok"}
+    """)
+    file_path = tmp_path / "async_service.py"
+    file_path.write_text(dummy_code)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+
+    stub = generate_stub_classes(str(file_path), "example.com", "https")
+    assert "class AsyncService:" in stub
+    assert "async def fetch(self, url, payload=None, method='GET'):" in stub
+    assert "async def ticker(self, *args, **kwargs):" in stub
+    assert "async def ping(self, *args, **kwargs):" in stub
+    assert "response = await self.fetch(url, payload, 'POST')" in stub
+    assert "stream_iter = self.fetch_stream(url, payload, 'POST')" in stub
 
 
 def test_generate_stub_classes_nested_path(tmp_path, monkeypatch):
@@ -203,7 +248,7 @@ def test_get_parsed_output_returns_stub(tmp_path):
     parsed_output = get_parsed_output(str(file_path), "example.com", "https")
     assert parsed_output is not None
     assert "class MyService:" in parsed_output
-    assert "def fetch(" in parsed_output
+    assert "async def fetch(" in parsed_output
     
     # Case 2: File does NOT contain the marker.
     dummy_code_without_marker = textwrap.dedent("""
@@ -219,4 +264,4 @@ def test_get_parsed_output_returns_stub(tmp_path):
     assert parsed_output2 is not None
     assert "class PlainService:" in parsed_output2
     # It should not contain any fetch method.
-    assert "def fetch(" not in parsed_output2
+    assert "async def fetch(" not in parsed_output2

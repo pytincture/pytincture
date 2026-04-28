@@ -505,6 +505,20 @@ def is_noauth_allowed(file_name: str, class_name: str, function_name: str) -> bo
                 return True
     return False
 
+
+def _coerce_policy_user(user: Any) -> Dict[str, Any]:
+    if isinstance(user, dict):
+        return user
+    if user == "noauth":
+        return {
+            "email": "",
+            "password": "",
+            "picture": "appcode/profile.png",
+            "auth_type": "noauth",
+            "is_authenticated": False,
+        }
+    return {"value": user}
+
 def require_auth(request: Request):
     if ENABLE_GOOGLE_AUTH or ENABLE_USER_LOGIN or ENABLE_SAML_AUTH:
         user_session = request.session.get("user") or {}
@@ -626,7 +640,7 @@ async def class_call(
     if BFF_POLICY_HOOK:
         policy_metadata = getattr(function_obj, "_bff_policy", {}) or {}
         BFF_POLICY_HOOK(
-            user=user,
+            user=_coerce_policy_user(user),
             policy=policy_metadata,
             class_name=class_name,
             function_name=function_name,

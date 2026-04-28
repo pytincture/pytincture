@@ -365,7 +365,7 @@ async function runPackagedApp(pyodide, config) {
     if (!config.application) {
         throw new Error("No application supplied for packaged mode.");
     }
-    const archiveUrl = `${config.application}/appcode/appcode.pyt`;
+    const archiveUrl = `${config.application}/appcode/appcode.pyt?uuid=${encodeURIComponent(makeRequestId())}`;
     const response = await fetch(archiveUrl);
     if (!response.ok) {
         throw new Error(`Failed to fetch packaged app from ${archiveUrl}`);
