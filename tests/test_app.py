@@ -94,6 +94,35 @@ def test_main_route_with_auth_enabled_no_user_session(fresh_client, monkeypatch)
     assert response.status_code in (302, 307), f"Expected redirect, got {response.status_code}"
     assert f"/{application_name}/login" in response.headers.get("location", "")
 
+
+def test_main_route_clears_stale_session_snapshot(fresh_client, monkeypatch):
+    """
+    A stale browser session should be cleared and sent through login instead of returning a hard 401.
+    """
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {})
+
+    response = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "stale@example.com", "password": "old-password"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    backend_app.USER_SESSION_DICT["stale@example.com"] = {
+        "email": "stale@example.com",
+        "password": "new-password",
+        "picture": "demoapp/appcode/profile.png",
+    }
+
+    response = fresh_client.get("/demoapp", follow_redirects=False)
+    assert response.status_code in (302, 307)
+    assert response.headers.get("location") == "/demoapp/login"
+
 def test_main_route_no_auth_when_disabled(fresh_client, monkeypatch):
     """
     If both ENABLE_GOOGLE_AUTH and ENABLE_USER_LOGIN are disabled,
@@ -618,7 +647,107 @@ def test_sanitize_return_to_rejects_external_urls():
 
 def test_login_endpoint_includes_saml_button_when_enabled(fresh_client, monkeypatch, tmp_path):
     """
-    Ensure the login page surfaces the SAML option when enabled.
+    Ensure the login page surfaces the SAML option when multiple auth methods exist.
+    """
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
+
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+
+    response = fresh_client.get("/demoapp/login")
+    assert response.status_code == 200
+    assert "Login with Google" in response.text
+    assert "Login with SAML" in response.text
+
+
+def test_login_endpoint_uses_single_saml_label_and_logo(fresh_client, monkeypatch, tmp_path):
+    """
+    Single-provider SAML deployments can customize the visible login button.
+    """
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
+
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", "")
+    monkeypatch.setattr(backend_app, "SAML_LOGIN_LABEL", "Login with Contoso")
+    monkeypatch.setattr(backend_app, "SAML_LOGO_URL", "/logos/contoso.svg")
+
+    response = fresh_client.get("/demoapp/login")
+    assert response.status_code == 200
+    assert "Login with Contoso" in response.text
+    assert 'src="/logos/contoso.svg"' in response.text
+    assert 'href="auth/saml/login"' in response.text
+
+
+def test_login_endpoint_lists_multiple_saml_providers(fresh_client, monkeypatch, tmp_path):
+    """
+    Multiple SAML providers should render as separate choices with labels and logos.
+    """
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
+
+    providers = [
+        {"id": "company-a", "label": "Login with Company A", "logo_url": "/logos/a.svg"},
+        {"id": "company-b", "label": "Login with Company B", "logo_url": "/logos/b.svg"},
+    ]
+
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", providers)
+
+    response = fresh_client.get("/demoapp/login", follow_redirects=False)
+    assert response.status_code == 200
+    assert "Login with Company A" in response.text
+    assert "Login with Company B" in response.text
+    assert 'href="auth/saml/company-a/login"' in response.text
+    assert 'href="auth/saml/company-b/login"' in response.text
+    assert 'src="/logos/a.svg"' in response.text
+    assert 'src="/logos/b.svg"' in response.text
+
+
+def test_login_endpoint_redirects_directly_to_saml_when_only_option(fresh_client, monkeypatch, tmp_path):
+    """
+    When SAML is the only configured login method, skip the chooser page.
+    """
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
+
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+    monkeypatch.delenv("ENABLE_GOOGLE_AUTH", raising=False)
+    monkeypatch.delenv("ENABLE_USER_LOGIN", raising=False)
+    monkeypatch.delenv("ENABLE_SAML_AUTH", raising=False)
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+
+    response = fresh_client.get("/demoapp/login", follow_redirects=False)
+    assert response.status_code in (302, 307)
+    assert response.headers.get("location") == "/demoapp/auth/saml/login"
+
+
+def test_login_endpoint_does_not_redirect_when_multiple_saml_only(fresh_client, monkeypatch, tmp_path):
+    """
+    If SAML has multiple providers, the chooser must remain visible even when it is the only auth type.
     """
     import pytincture.backend.app as backend_app
 
@@ -630,10 +759,15 @@ def test_login_endpoint_includes_saml_button_when_enabled(fresh_client, monkeypa
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", [
+        {"id": "company-a", "label": "Company A"},
+        {"id": "company-b", "label": "Company B"},
+    ])
 
-    response = fresh_client.get("/demoapp/login")
+    response = fresh_client.get("/demoapp/login", follow_redirects=False)
     assert response.status_code == 200
-    assert "Login with SAML" in response.text
+    assert "Company A" in response.text
+    assert "Company B" in response.text
 
 
 def test_saml_metadata_route_returns_metadata(fresh_client, monkeypatch, tmp_path):
@@ -673,3 +807,49 @@ def test_saml_metadata_route_returns_metadata(fresh_client, monkeypatch, tmp_pat
     response = fresh_client.get("/demoapp/auth/saml/metadata")
     assert response.status_code == 200
     assert "EntityDescriptor" in response.text
+
+
+def test_saml_provider_metadata_route_uses_provider_config(fresh_client, monkeypatch, tmp_path):
+    """
+    Provider metadata should use the selected provider's IdP/SP config and provider-specific ACS route.
+    """
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
+
+    dummy_modules = tmp_path / "modules"
+    dummy_modules.mkdir()
+    monkeypatch.setenv("MODULES_PATH", str(dummy_modules))
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+
+    dummy_cert = (
+        "-----BEGIN CERTIFICATE-----\n"
+        "MIIBszCCAVmgAwIBAgIUO3VsbHlDZXJ0Q29kZXgxEzARBgNVBAMMCkxvY2FsIElE\n"
+        "UDEPMA0GA1UECgwGQXBwQ28wHhcNMjQwMTAxMDAwMDAwWhcNMzQwMTAxMDAwMDAw\n"
+        "WjATMREwDwYDVQQDDAhVbml0VGVzdDCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkC\n"
+        "gYEAy1atZ0mFsrl5FTvhYGfEpDj6rVdlHPff0T3hj5VYiC7P+60F2/diFr9GY29s\n"
+        "F1tXsEBuFQzL85zzBdNxcQvTxlyvq9Y6lBJ8K8w9Y4mGe/7y6QSyp4i0b36W3YLv\n"
+        "oH4p64a1PgVno6Pwx1yk3B9uJJl63/tVspEP1JuxlTCbeu0CAwEAATANBgkqhkiG\n"
+        "9w0BAQsFAAOBgQBSAdwLY7z9mVJgE+B76MpxGg7Trz4Y32faVYblaRHmbZt3FvX6\n"
+        "6R0tPLfrE38AyFQBtcyqH68v9d5dTU8l2zl4OPcnBHdUMf56XI5clJ8zJqVU6M/p\n"
+        "jdJp4bYaXMtOmvw5FXX0HP7h+G5aD3JBt+1w0FSf1V/Iv9ldnYNoG9/HYg==\n"
+        "-----END CERTIFICATE-----"
+    )
+
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", [{
+        "id": "company-a",
+        "label": "Company A",
+        "idp_entity_id": "https://idp-a.example.com/metadata",
+        "idp_sso_url": "https://idp-a.example.com/sso",
+        "idp_x509_cert": dummy_cert,
+        "sp_entity_id": "https://example.com/{application}/auth/saml/company-a/metadata",
+    }])
+
+    response = fresh_client.get("/demoapp/auth/saml/company-a/metadata")
+    assert response.status_code == 200
+    assert "EntityDescriptor" in response.text
+    assert "https://example.com/demoapp/auth/saml/company-a/metadata" in response.text
+    assert "http://testserver/demoapp/auth/saml/company-a/acs" in response.text

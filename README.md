@@ -49,6 +49,10 @@ pip install .
    example: "email"
 - SAML_NAME_ATTRIBUTE: Optional attribute for the display name.
    example: "givenName"
+- SAML_LOGIN_LABEL: Optional label for the single-provider SAML login button.
+   example: "Login with Contoso"
+- SAML_LOGO_URL: Optional image URL for the single-provider SAML login button.
+   example: "/appcode/contoso-logo.svg"
 - SAML_DEFAULT_REDIRECT: Optional redirect path or URL template after SAML login (defaults to `/{application}` when unset).
    example: "/{application}"
 - SAML_SP_ENTITY_ID: Optional template for the SP entity ID (supports {application}, {base_url}, {host}); defaults to `/{application}/auth/saml/metadata`.
@@ -59,6 +63,30 @@ pip install .
 - SAML_IDP_SSO_URL: Identity Provider SSO URL.
 - SAML_IDP_SLO_URL: Optional Identity Provider SLO URL.
 - SAML_IDP_X509_CERT: Identity Provider certificate in PEM format.
+- SAML_PROVIDERS: Optional JSON configuration for multiple named SAML providers. When set, the login page renders one SAML button per provider and uses provider-specific routes such as `/{application}/auth/saml/{provider_id}/login`, `/{application}/auth/saml/{provider_id}/acs`, and `/{application}/auth/saml/{provider_id}/metadata`.
+    example:
+    ```json
+    [
+       {
+          "id": "company-a",
+          "label": "Login with Company A",
+          "logo_url": "/appcode/company-a.svg",
+          "idp_entity_id": "https://idp-a.example.com/metadata",
+          "idp_sso_url": "https://idp-a.example.com/sso",
+          "idp_x509_cert": "-----BEGIN CERTIFICATE-----...",
+          "sp_entity_id": "{base_url}/{application}/auth/saml/company-a/metadata"
+       },
+       {
+          "id": "company-b",
+          "label": "Login with Company B",
+          "logo_url": "/appcode/company-b.svg",
+          "idp_entity_id": "https://idp-b.example.com/metadata",
+          "idp_sso_url": "https://idp-b.example.com/sso",
+          "idp_x509_cert": "-----BEGIN CERTIFICATE-----..."
+       }
+    ]
+    ```
+    Provider entries may also override `sp_assertion_consumer_service_url`, `sp_x509_cert`, `sp_private_key`, `idp_slo_url`, `default_redirect`, `allowed_roles`, and `role_attribute_keys`. If `SAML_PROVIDERS` is not set, the existing single-provider `SAML_*` variables continue to work.
 - SAML_DEBUG: Enable verbose SAML logging.
 - ALLOWED_NOAUTH_CLASSCALLS
    example: [{"file": "somefile.py", "class": "SomeClass", "function": "somefunction"}]
