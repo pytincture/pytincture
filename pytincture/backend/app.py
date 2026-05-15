@@ -1117,8 +1117,6 @@ def _build_saml_settings(request: Request, application: str, provider: Optional[
     Construct the settings dict consumed by python3-saml using runtime request data.
     """
     origin = _extract_request_origin(request)
-    provider_id = provider.get("id") if provider else "default"
-    provider_route_segment = "" if provider_id == "default" else f"/{provider_id}"
 
     sp_entity_id = _provider_value(provider, "sp_entity_id", "spEntityId", default=SAML_SP_ENTITY_ID)
     sp_assertion_url = _provider_value(
@@ -1136,14 +1134,14 @@ def _build_saml_settings(request: Request, application: str, provider: Optional[
     idp_slo_value = _provider_value(provider, "idp_slo_url", "idpSloUrl", default=SAML_IDP_SLO_URL)
     idp_cert_value = _provider_value(provider, "idp_x509_cert", "idp_cert", "idpX509Cert", default=SAML_IDP_X509_CERT)
 
-    default_entity = f"{origin['base_url']}/{application}/auth/saml{provider_route_segment}/metadata"
+    default_entity = f"{origin['base_url']}/{application}/auth/saml/metadata"
     entity_id = _apply_saml_template(sp_entity_id or default_entity, application, origin)
 
-    default_acs = f"{origin['base_url']}/{application}/auth/saml{provider_route_segment}/acs"
+    default_acs = f"{origin['base_url']}/{application}/auth/saml/acs"
     if not sp_assertion_url and entity_id:
         parsed_entity = urlparse(entity_id)
         if parsed_entity.scheme and parsed_entity.netloc:
-            default_acs = f"{parsed_entity.scheme}://{parsed_entity.netloc}/{application}/auth/saml{provider_route_segment}/acs"
+            default_acs = f"{parsed_entity.scheme}://{parsed_entity.netloc}/{application}/auth/saml/acs"
     acs_url = _apply_saml_template(sp_assertion_url or default_acs, application, origin)
 
     idp_entity = _apply_saml_template(idp_entity_value, application, origin)

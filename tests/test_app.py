@@ -811,7 +811,7 @@ def test_saml_metadata_route_returns_metadata(fresh_client, monkeypatch, tmp_pat
 
 def test_saml_provider_metadata_route_uses_provider_config(fresh_client, monkeypatch, tmp_path):
     """
-    Provider metadata should use the selected provider's IdP/SP config and provider-specific ACS route.
+    Provider metadata should use the selected provider's IdP config with shared SP URLs by default.
     """
     import pytincture.backend.app as backend_app
 
@@ -845,11 +845,10 @@ def test_saml_provider_metadata_route_uses_provider_config(fresh_client, monkeyp
         "idp_entity_id": "https://idp-a.example.com/metadata",
         "idp_sso_url": "https://idp-a.example.com/sso",
         "idp_x509_cert": dummy_cert,
-        "sp_entity_id": "https://example.com/{application}/auth/saml/company-a/metadata",
     }])
 
     response = fresh_client.get("/demoapp/auth/saml/company-a/metadata")
     assert response.status_code == 200
     assert "EntityDescriptor" in response.text
-    assert "https://example.com/demoapp/auth/saml/company-a/metadata" in response.text
-    assert "http://testserver/demoapp/auth/saml/company-a/acs" in response.text
+    assert "http://testserver/demoapp/auth/saml/metadata" in response.text
+    assert "http://testserver/demoapp/auth/saml/acs" in response.text
