@@ -43,6 +43,12 @@ pip install .
    example: "some@email.com,joe@email.com"
 - ENABLE_GOOGLE_AUTH: Enable the respective authentication mechanisms.
    example: "true"
+- ENABLE_MICROSOFT_AUTH: Enable Microsoft OAuth2 authentication using the shared `common` tenant endpoint.
+   example: "true"
+- GOOGLE_CLIENT_ID: OAuth client ID for Google.
+- GOOGLE_CLIENT_SECRET: OAuth client secret for Google.
+- MICROSOFT_CLIENT_ID: OAuth client ID for Microsoft Azure AD / Microsoft identity platform.
+- MICROSOFT_CLIENT_SECRET: OAuth client secret for Microsoft Azure AD / Microsoft identity platform.
 - ENABLE_SAML_AUTH: Enable SAML 2.0 authentication.
    example: "true"
 - SAML_EMAIL_ATTRIBUTE: Attribute name used to extract the user email from the SAML assertion.
