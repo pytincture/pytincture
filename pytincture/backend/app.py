@@ -776,6 +776,7 @@ SAML_NAME_ATTRIBUTE = os.getenv("SAML_NAME_ATTRIBUTE", "givenName")
 SAML_LOGIN_LABEL = os.getenv("SAML_LOGIN_LABEL", "Login with SAML")
 SAML_LOGO_URL = os.getenv("SAML_LOGO_URL", "")
 SAML_PROVIDERS = os.getenv("SAML_PROVIDERS", "")
+SAML_DEFAULT_PROVIDER_ID = os.getenv("SAML_DEFAULT_PROVIDER_ID", "")
 SAML_DEFAULT_REDIRECT = os.getenv("SAML_DEFAULT_REDIRECT", "")
 SAML_SP_ENTITY_ID = os.getenv("SAML_SP_ENTITY_ID", "")
 SAML_SP_ASSERTION_URL = os.getenv("SAML_SP_ASSERTION_CONSUMER_SERVICE_URL", "")
@@ -891,7 +892,11 @@ def _get_saml_provider(provider_id: Optional[str] = None) -> Dict[str, Any]:
     if provider_id is None:
         if len(providers) == 1:
             return providers[0]
-        raise HTTPException(status_code=400, detail="SAML provider id is required")
+        default_provider_id = _normalize_saml_provider_id(SAML_DEFAULT_PROVIDER_ID)
+        if default_provider_id:
+            provider_id = default_provider_id
+        else:
+            raise HTTPException(status_code=400, detail="SAML provider id is required")
 
     normalized_id = _normalize_saml_provider_id(provider_id)
     for provider in providers:
@@ -1829,6 +1834,9 @@ async def login(request: Request, application: str):
     enable_microsoft_auth = _resolve_auth_flag("ENABLE_MICROSOFT_AUTH", ENABLE_MICROSOFT_AUTH)
 
     saml_login_buttons = _get_saml_login_buttons() if enable_saml_auth else []
+    if enable_saml_auth and not enable_google_auth and not enable_user_login and not enable_microsoft_auth and SAML_DEFAULT_PROVIDER_ID:
+        return RedirectResponse(url=f"/{application}/auth/saml/login", status_code=302)
+
     if enable_saml_auth and not enable_google_auth and not enable_user_login and not enable_microsoft_auth and len(saml_login_buttons) == 1:
         return RedirectResponse(url=f"/{application}/{saml_login_buttons[0]['href']}", status_code=302)
 
