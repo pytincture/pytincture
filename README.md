@@ -43,12 +43,6 @@ pip install .
    example: "some@email.com,joe@email.com"
 - ENABLE_GOOGLE_AUTH: Enable the respective authentication mechanisms.
    example: "true"
-- ENABLE_MICROSOFT_AUTH: Enable Microsoft OAuth2 authentication using the shared `common` tenant endpoint.
-   example: "true"
-- GOOGLE_CLIENT_ID: OAuth client ID for Google.
-- GOOGLE_CLIENT_SECRET: OAuth client secret for Google.
-- MICROSOFT_CLIENT_ID: OAuth client ID for Microsoft Azure AD / Microsoft identity platform.
-- MICROSOFT_CLIENT_SECRET: OAuth client secret for Microsoft Azure AD / Microsoft identity platform.
 - ENABLE_SAML_AUTH: Enable SAML 2.0 authentication.
    example: "true"
 - SAML_EMAIL_ATTRIBUTE: Attribute name used to extract the user email from the SAML assertion.
@@ -92,8 +86,6 @@ pip install .
     ]
     ```
       Provider entries may also override `sp_entity_id`, `sp_assertion_consumer_service_url`, `sp_x509_cert`, `sp_private_key`, `idp_slo_url`, `default_redirect`, `allowed_roles`, and `role_attribute_keys`. If `SAML_PROVIDERS` is not set, the existing single-provider `SAML_*` variables continue to work.
-- SAML_DEFAULT_PROVIDER_ID: Optional provider id used for the legacy `/{application}/auth/saml/login` route when multiple SAML providers are configured.
-   example: "default"
 - SAML_DEBUG: Enable verbose SAML logging.
 - ALLOWED_NOAUTH_CLASSCALLS
    example: [{"file": "somefile.py", "class": "SomeClass", "function": "somefunction"}]

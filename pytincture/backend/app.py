@@ -760,13 +760,10 @@ async def logs_endpoint(request: Request, user=Depends(require_auth)):
 ENABLE_GOOGLE_AUTH = os.getenv("ENABLE_GOOGLE_AUTH", "false").lower() == "true"
 ENABLE_USER_LOGIN = os.getenv("ENABLE_USER_LOGIN", "false").lower() == "true"
 ENABLE_SAML_AUTH = os.getenv("ENABLE_SAML_AUTH", "false").lower() == "true"
-ENABLE_MICROSOFT_AUTH = os.getenv("ENABLE_MICROSOFT_AUTH", "false").lower() == "true"
 
 config_data = {
     "GOOGLE_CLIENT_ID": os.getenv("GOOGLE_CLIENT_ID", ""),
     "GOOGLE_CLIENT_SECRET": os.getenv("GOOGLE_CLIENT_SECRET", ""),
-    "MICROSOFT_CLIENT_ID": os.getenv("MICROSOFT_CLIENT_ID", ""),
-    "MICROSOFT_CLIENT_SECRET": os.getenv("MICROSOFT_CLIENT_SECRET", ""),
     "SECRET_KEY": os.getenv("SECRET_KEY", "verysecretkey"),
 }
 config = Config(environ=config_data)
@@ -776,7 +773,6 @@ SAML_NAME_ATTRIBUTE = os.getenv("SAML_NAME_ATTRIBUTE", "givenName")
 SAML_LOGIN_LABEL = os.getenv("SAML_LOGIN_LABEL", "Login with SAML")
 SAML_LOGO_URL = os.getenv("SAML_LOGO_URL", "")
 SAML_PROVIDERS = os.getenv("SAML_PROVIDERS", "")
-SAML_DEFAULT_PROVIDER_ID = os.getenv("SAML_DEFAULT_PROVIDER_ID", "")
 SAML_DEFAULT_REDIRECT = os.getenv("SAML_DEFAULT_REDIRECT", "")
 SAML_SP_ENTITY_ID = os.getenv("SAML_SP_ENTITY_ID", "")
 SAML_SP_ASSERTION_URL = os.getenv("SAML_SP_ASSERTION_CONSUMER_SERVICE_URL", "")
@@ -892,11 +888,7 @@ def _get_saml_provider(provider_id: Optional[str] = None) -> Dict[str, Any]:
     if provider_id is None:
         if len(providers) == 1:
             return providers[0]
-        default_provider_id = _normalize_saml_provider_id(SAML_DEFAULT_PROVIDER_ID)
-        if default_provider_id:
-            provider_id = default_provider_id
-        else:
-            raise HTTPException(status_code=400, detail="SAML provider id is required")
+        raise HTTPException(status_code=400, detail="SAML provider id is required")
 
     normalized_id = _normalize_saml_provider_id(provider_id)
     for provider in providers:
@@ -1277,26 +1269,17 @@ def _sanitize_return_to(value: Optional[str]) -> Optional[str]:
         sanitized += f"#{parsed.fragment}"
     return sanitized
 
-# Create an OAuth object and register supported providers
-if ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH:
+# Create an OAuth object and register the Google provider
+if ENABLE_GOOGLE_AUTH:
     oauth = OAuth(config)
-    if ENABLE_GOOGLE_AUTH:
-        oauth.register(
-            name="google",
-            client_id=config.get("GOOGLE_CLIENT_ID"),
-            client_secret=config.get("GOOGLE_CLIENT_SECRET"),
-            # Use the well-known OIDC discovery document
-            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-            client_kwargs={"scope": "openid email profile"},
-        )
-    if ENABLE_MICROSOFT_AUTH:
-        oauth.register(
-            name="microsoft",
-            client_id=config.get("MICROSOFT_CLIENT_ID"),
-            client_secret=config.get("MICROSOFT_CLIENT_SECRET"),
-            server_metadata_url="https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration",
-            client_kwargs={"scope": "openid email profile offline_access"},
-        )
+    oauth.register(
+        name="google",
+        client_id=config.get("GOOGLE_CLIENT_ID"),
+        client_secret=config.get("GOOGLE_CLIENT_SECRET"),
+        # Use the well-known OIDC discovery document
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+    )
 else:
     oauth = None
 
@@ -1733,12 +1716,7 @@ async def auth_google_callback(request: Request, application: str):
     except OAuthError as e:
         return JSONResponse({"error": str(e)}, status_code=401)
     
-    user_info = token.get("userinfo") or {}
-    if not user_info:
-        try:
-            user_info = await oauth.google.parse_id_token(request, token)
-        except Exception:
-            user_info = user_info or {}
+    user_info = token.get("userinfo")
 
     # You can optionally grab user info from token["userinfo"]
     if os.getenv("ALLOWED_EMAILS", "") != "":
@@ -1750,53 +1728,6 @@ async def auth_google_callback(request: Request, application: str):
     request.session["user"] = user_info  # store in session
 
     # See if we stored a "return_to" path earlier; default to "/"
-    return_to = _sanitize_return_to(request.session.pop("return_to", None)) or "/"
-    return RedirectResponse(url=return_to)
-
-@app.get("/{application}/auth/microsoft", operation_id="initiateMicrosoftAuth", response_class=RedirectResponse, responses={302: {"description": "RedirectResponse (to Microsoft OAuth URL)"}})
-async def auth_microsoft(request: Request, application: str):
-    """
-    Redirect the user to Microsoft's OAuth2 screen.
-    """
-    if oauth is None or not ENABLE_MICROSOFT_AUTH:
-        raise HTTPException(status_code=404, detail="Microsoft authentication not enabled")
-
-    forwarded_proto = request.headers.get("x-forwarded-proto")
-    host = request.headers["host"]
-    protocol = forwarded_proto or request.url.scheme
-    redirect_uri = f"{protocol}://{host}/{application}/auth/microsoft/callback"
-
-    return await oauth.microsoft.authorize_redirect(request, redirect_uri)
-
-@app.get("/{application}/auth/microsoft/callback", name="auth_microsoft_callback", operation_id="handleMicrosoftAuthCallback", response_class=RedirectResponse, responses={302: {"description": "RedirectResponse (to original path after login)"}, 401: {"description": "JSONResponse (if OAuth error or not authorized)"}})
-async def auth_microsoft_callback(request: Request, application: str):
-    """
-    Microsoft redirects here after login. Authlib will exchange code for token.
-    We'll store user info in the session, then redirect back to original app path.
-    """
-    if oauth is None or not ENABLE_MICROSOFT_AUTH:
-        raise HTTPException(status_code=404, detail="Microsoft authentication not enabled")
-
-    try:
-        token = await oauth.microsoft.authorize_access_token(request)
-    except OAuthError as e:
-        return JSONResponse({"error": str(e)}, status_code=401)
-
-    user_info = token.get("userinfo") or {}
-    if not user_info:
-        try:
-            user_info = await oauth.microsoft.parse_id_token(request, token)
-        except Exception:
-            user_info = user_info or {}
-
-    if os.getenv("ALLOWED_EMAILS", "") != "":
-        allowed_emails = os.getenv("ALLOWED_EMAILS").split(",")  # Assuming comma-separated
-        if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
-            return JSONResponse({"error": "Not authorized"}, status_code=401)
-
-    USER_SESSION_DICT[user_info["email"]] = user_info
-    request.session["user"] = user_info  # store in session
-
     return_to = _sanitize_return_to(request.session.pop("return_to", None)) or "/"
     return RedirectResponse(url=return_to)
 
@@ -1831,13 +1762,9 @@ async def login(request: Request, application: str):
     enable_google_auth = _resolve_auth_flag("ENABLE_GOOGLE_AUTH", ENABLE_GOOGLE_AUTH)
     enable_user_login = _resolve_auth_flag("ENABLE_USER_LOGIN", ENABLE_USER_LOGIN)
     enable_saml_auth = _resolve_auth_flag("ENABLE_SAML_AUTH", ENABLE_SAML_AUTH)
-    enable_microsoft_auth = _resolve_auth_flag("ENABLE_MICROSOFT_AUTH", ENABLE_MICROSOFT_AUTH)
 
     saml_login_buttons = _get_saml_login_buttons() if enable_saml_auth else []
-    if enable_saml_auth and not enable_google_auth and not enable_user_login and not enable_microsoft_auth and SAML_DEFAULT_PROVIDER_ID:
-        return RedirectResponse(url=f"/{application}/auth/saml/login", status_code=302)
-
-    if enable_saml_auth and not enable_google_auth and not enable_user_login and not enable_microsoft_auth and len(saml_login_buttons) == 1:
+    if enable_saml_auth and not enable_google_auth and not enable_user_login and len(saml_login_buttons) == 1:
         return RedirectResponse(url=f"/{application}/{saml_login_buttons[0]['href']}", status_code=302)
 
     # Start building the HTML content
@@ -1939,11 +1866,6 @@ async def login(request: Request, application: str):
             '<a href="auth/google" class="login-button">Login with Google</a>'
         )
 
-    if enable_microsoft_auth:
-        social_buttons.append(
-            '<a href="auth/microsoft" class="login-button">Login with Microsoft</a>'
-        )
-
     if enable_saml_auth:
         for button in saml_login_buttons:
             label = escape(button["label"])
@@ -1975,7 +1897,7 @@ async def login(request: Request, application: str):
         '''
 
     # Handle case where no login methods are enabled
-    if not (enable_google_auth or enable_user_login or enable_saml_auth or enable_microsoft_auth):
+    if not (enable_google_auth or enable_user_login or enable_saml_auth):
         html_content += '''
             <p>No login methods are currently available. Please contact support.</p>
         '''

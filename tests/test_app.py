@@ -599,29 +599,6 @@ def test_login_endpoint(fresh_client, monkeypatch, tmp_path):
     assert "type=\"email\"" in html
     assert "type=\"password\"" in html
 
-
-def test_login_endpoint_includes_microsoft_button_when_enabled(fresh_client, monkeypatch, tmp_path):
-    """
-    Ensure the login page surfaces the Microsoft option when it is enabled.
-    """
-    import pytincture.backend.app as backend_app
-
-    dummy_frontend = tmp_path / "frontend"
-    dummy_frontend.mkdir()
-    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
-
-    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
-    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
-    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
-    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
-    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", True)
-
-    response = fresh_client.get("/demoapp/login")
-    assert response.status_code == 200
-    assert "Login with Microsoft" in response.text
-    assert 'href="auth/microsoft"' in response.text
-
-
 def test_auth_user_callback(fresh_client, monkeypatch):
     """
     Test the /{application}/auth/user endpoint simulating email/password login.
@@ -808,51 +785,6 @@ def test_login_endpoint_does_not_redirect_when_multiple_saml_only(fresh_client, 
     assert response.status_code == 200
     assert "Company A" in response.text
     assert "Company B" in response.text
-
-
-def test_saml_default_provider_allows_legacy_login_route(monkeypatch):
-    """
-    Multiple SAML providers can still support the legacy /auth/saml/login route
-    when a default provider is configured.
-    """
-    import pytincture.backend.app as backend_app
-
-    monkeypatch.setattr(backend_app, "SAML_DEFAULT_PROVIDER_ID", "default")
-    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", [
-        {"id": "default", "label": "Arul"},
-        {"id": "medlytix", "label": "Medlytix"},
-    ])
-
-    provider = backend_app._get_saml_provider()
-    assert provider["id"] == "default"
-    assert provider["label"] == "Arul"
-
-
-def test_login_endpoint_redirects_to_default_saml_when_multiple_saml_only(fresh_client, monkeypatch, tmp_path):
-    """
-    SAML-only deployments with a default provider keep the old direct SSO start
-    behavior even when alternate providers are configured.
-    """
-    import pytincture.backend.app as backend_app
-
-    dummy_frontend = tmp_path / "frontend"
-    dummy_frontend.mkdir()
-    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
-
-    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
-    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
-    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
-    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
-    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
-    monkeypatch.setattr(backend_app, "SAML_DEFAULT_PROVIDER_ID", "default")
-    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", [
-        {"id": "default", "label": "Arul"},
-        {"id": "medlytix", "label": "Medlytix"},
-    ])
-
-    response = fresh_client.get("/demoapp/login", follow_redirects=False)
-    assert response.status_code in (302, 307)
-    assert response.headers.get("location") == "/demoapp/auth/saml/login"
 
 
 def test_saml_metadata_route_returns_metadata(fresh_client, monkeypatch, tmp_path):
