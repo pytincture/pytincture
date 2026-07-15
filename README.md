@@ -9,8 +9,8 @@
 - Dynamic Code Packaging: Generate in-memory ZIP packages for frontend consumption.
 - Widgetset Stub Generation: Automatically generate frontend stub classes using the @backend_for_frontend decorator.
 - Streaming BFF Calls: Enable true streaming responses with the @bff_stream decorator.
-- Authentication & Sessions: Supports Google OAuth2, SAML 2.0 SSO, and email/password authentication with session management.
-- Redis Integration: Optionally use a Redis-backed session store via Upstash.
+- Authentication & Sessions: Supports Google and Microsoft OAuth2, SAML 2.0 SSO, and email/password authentication with compact signed sessions that work across replicas.
+- Redis Integration: Optionally expose the legacy shared `USER_SESSION_DICT` through Upstash; authentication does not require Redis.
 - Cross-Platform Compatibility: Works on any platform where Pyodide is supported.
 - Easy to Use: Provides a user-friendly API to streamline GUI development.
 - Production Launcher: Includes a uvicorn-based launcher for deploying the service.
@@ -38,7 +38,7 @@ pip install .
 
 ## Environment Variables
 - MODULES_PATH: Directory containing module files used for dynamic packaging. This is set automatically from `modules_folder` when `launch_service` starts; overriding it via env vars is usually unnecessary.
-- USE_REDIS_INSTANCE: Set to "true" to enable Redis-backed session storage.
+- USE_REDIS_INSTANCE: Set to "true" to back the legacy `USER_SESSION_DICT` with Upstash. Authentication does not read or write this dictionary.
 - ALLOWED_EMAILS: A comma-separated list of authorized email addresses.
    example: "some@email.com,joe@email.com"
 - ENABLE_GOOGLE_AUTH: Enable the respective authentication mechanisms.
@@ -59,6 +59,10 @@ pip install .
    example: "Login with Contoso"
 - SAML_LOGO_URL: Optional image URL for the single-provider SAML login button.
    example: "/appcode/contoso-logo.svg"
+- SAML_SECRET_KEY: Primary signing key for stateless authentication cookies and SAML RelayState. Use at least 32 random characters, keep it stable across deployments, and provide the same value to every replica. When configured, secure cookies default to enabled.
+- AUTH_SESSION_MAX_AGE_SECONDS: Signed authentication cookie lifetime in seconds. Defaults to `28800` (8 hours).
+- AUTH_SESSION_HTTPS_ONLY: Set to `true` to require HTTPS for the authentication cookie. Defaults to `true` when `SAML_SECRET_KEY` is configured and `false` only for legacy/local compatibility.
+- SAML_RELAY_STATE_TTL_SECONDS: Maximum SAML login handshake age in seconds. Defaults to `600` (10 minutes).
 - SAML_DEFAULT_REDIRECT: Optional redirect path or URL template after SAML login (defaults to `/{application}` when unset).
    example: "/{application}"
 - SAML_SP_ENTITY_ID: Optional template for the SP entity ID (supports {application}, {base_url}, {host}); defaults to `/{application}/auth/saml/metadata`.
@@ -97,14 +101,14 @@ pip install .
    example: [{"file": "somefile.py", "class": "SomeClass", "function": "somefunction"}]
 - GOOGLE_CLIENT_ID
 - GOOGLE_CLIENT_SECRET
-- SECRET_KEY: Secret key for google auth
-- USE_REDIS_INSTANCE: Enable the redis upstash for sessions
-   example: "true"
+- SECRET_KEY: Legacy fallback signing key used only when `SAML_SECRET_KEY` is unset.
 - REDIS_UPSTASH_INSTANCE_URL: Url for upstash redis instance
    example: "http://127.0.0.1:16379"
 - REDIS_UPSTASH_INSTANCE_TOKEN: Redis Upstash token
 - DATABASE_URL: Database connection string
    example: "sqlite:////absolute/path/to/database.db"
+
+Authenticated browser cookies contain only stable identity claims such as email, name, provider, roles, and picture. Passwords, complete SAML attributes, SAML assertions, and changing SAML session indexes are not stored in the cookie. BFF classes and policy hooks continue to receive the compact authenticated identity.
 
 ## Running the Service with your application
 -------------------
