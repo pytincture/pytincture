@@ -2,8 +2,7 @@
 pyTincture uvicorn launcher
 """
 
-__version__ = "0.9.38"
-
+__version__ = "0.9.39"
 
 from multiprocessing import Process, freeze_support
 import os
