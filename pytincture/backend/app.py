@@ -24,7 +24,7 @@ except ValueError as exc:
 from fastapi import Depends, FastAPI, Request, Response, HTTPException, Body
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastmcp import FastMCP
 
@@ -2359,17 +2359,22 @@ def _normalize_app_asset_path(value: Optional[str]) -> Optional[str]:
     return "/".join(segments)
 
 
-def find_app_favicon(file_path) -> Optional[str]:
-    """
-    Resolve an explicit favicon file/folder or a conventional favicon directory.
-    """
+def _find_explicit_app_favicon(file_path) -> Optional[str]:
     configured = _find_app_string_setting(
         file_path,
         assignment_names=("APP_FAVICON",),
         config_keys=("favicon",),
     )
+    return _normalize_app_asset_path(configured)
+
+
+def find_app_favicon(file_path) -> Optional[str]:
+    """
+    Resolve an explicit favicon file/folder or a conventional favicon directory.
+    """
+    configured = _find_explicit_app_favicon(file_path)
     if configured:
-        return _normalize_app_asset_path(configured)
+        return configured
 
     app_root = os.path.dirname(os.fspath(file_path))
     application = os.path.splitext(os.path.basename(os.fspath(file_path)))[0]
@@ -2406,6 +2411,46 @@ def _is_favicon_asset(filename: str) -> bool:
     )
 
 
+def _get_configured_favicon_root() -> Optional[str]:
+    configured = os.getenv("PYTINCTURE_FAVICON_FOLDER", "").strip()
+    if not configured:
+        return None
+
+    configured = os.path.expanduser(configured)
+    if not os.path.isabs(configured):
+        configured = os.path.join(get_modules_path(), configured)
+    return os.path.realpath(configured)
+
+
+def _get_configured_favicon_directory(application: str) -> Optional[str]:
+    root = _get_configured_favicon_root()
+    if not root or not os.path.isdir(root):
+        return None
+
+    if (
+        application not in ("", ".", "..")
+        and all(char.isalnum() or char in "._-" for char in application)
+    ):
+        application_folder = os.path.realpath(os.path.join(root, application))
+        try:
+            is_within_root = os.path.commonpath((root, application_folder)) == root
+        except ValueError:
+            is_within_root = False
+        if is_within_root and os.path.isdir(application_folder):
+            return application_folder
+
+    return root
+
+
+def _find_favicon_assets_in_directory(directory: str) -> List[str]:
+    assets = []
+    with os.scandir(directory) as entries:
+        for entry in sorted(entries, key=lambda item: item.name.lower()):
+            if entry.is_file(follow_symlinks=False) and _is_favicon_asset(entry.name):
+                assets.append(entry.name)
+    return assets
+
+
 def find_app_favicon_assets(file_path) -> List[str]:
     """Return the declared favicon file or supported files in its directory."""
     favicon_path = find_app_favicon(file_path)
@@ -2417,12 +2462,10 @@ def find_app_favicon_assets(file_path) -> List[str]:
     if not os.path.isdir(local_path):
         return [favicon_path]
 
-    assets = []
-    with os.scandir(local_path) as entries:
-        for entry in sorted(entries, key=lambda item: item.name.lower()):
-            if entry.is_file(follow_symlinks=False) and _is_favicon_asset(entry.name):
-                assets.append(f"{favicon_path}/{entry.name}")
-    return assets
+    return [
+        f"{favicon_path}/{filename}"
+        for filename in _find_favicon_assets_in_directory(local_path)
+    ]
 
 
 def _favicon_size(filename: str) -> Optional[str]:
@@ -2432,9 +2475,14 @@ def _favicon_size(filename: str) -> Optional[str]:
     return f"{match.group(1)}x{match.group(2)}"
 
 
-def _build_favicon_tag(application: str, asset_path: str) -> Optional[str]:
+def _build_favicon_tag(
+    application: str,
+    asset_path: str,
+    *,
+    asset_route: str = "appcode",
+) -> Optional[str]:
     favicon_url = (
-        f"/{quote(application, safe='')}/appcode/"
+        f"/{quote(application, safe='')}/{asset_route}/"
         f"{quote(asset_path, safe='/')}"
     )
     safe_url = escape(favicon_url)
@@ -2470,12 +2518,57 @@ def _build_favicon_tag(application: str, asset_path: str) -> Optional[str]:
 
 def build_app_favicon_markup(application: str, file_path) -> str:
     """Generate browser favicon declarations for an application's assets."""
+    configured_directory = None
+    if _find_explicit_app_favicon(file_path) is None:
+        configured_directory = _get_configured_favicon_directory(application)
+
+    if configured_directory is not None:
+        tags = [
+            tag
+            for asset_path in _find_favicon_assets_in_directory(configured_directory)
+            if (
+                tag := _build_favicon_tag(
+                    application,
+                    asset_path,
+                    asset_route="favicon-assets",
+                )
+            ) is not None
+        ]
+        if tags:
+            return "\n    ".join(tags)
+
     tags = [
         tag
         for asset_path in find_app_favicon_assets(file_path)
         if (tag := _build_favicon_tag(application, asset_path)) is not None
     ]
     return "\n    ".join(tags)
+
+
+@app.get(
+    "/{application}/favicon-assets/{asset_name}",
+    include_in_schema=False,
+)
+async def configured_favicon_asset(application: str, asset_name: str):
+    """Serve a browser favicon asset from the launcher-configured directory."""
+    if asset_name != os.path.basename(asset_name) or not _is_favicon_asset(asset_name):
+        raise HTTPException(status_code=404, detail="Favicon asset not found")
+
+    favicon_directory = _get_configured_favicon_directory(application)
+    if favicon_directory is None:
+        raise HTTPException(status_code=404, detail="Favicon asset not found")
+
+    asset_path = os.path.realpath(os.path.join(favicon_directory, asset_name))
+    try:
+        is_within_directory = (
+            os.path.commonpath((favicon_directory, asset_path)) == favicon_directory
+        )
+    except ValueError:
+        is_within_directory = False
+
+    if not is_within_directory or not os.path.isfile(asset_path):
+        raise HTTPException(status_code=404, detail="Favicon asset not found")
+    return FileResponse(asset_path)
 
 
 add_bff_docs_to_app(app)

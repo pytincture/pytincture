@@ -1181,6 +1181,55 @@ def test_favicon_folder_prefers_application_specific_directory(tmp_path):
     assert backend_app.find_app_favicon(app_file) == "favicon/demoapp"
 
 
+def test_launcher_favicon_folder_supports_external_path(monkeypatch, tmp_path):
+    import pytincture.backend.app as backend_app
+
+    modules_folder = tmp_path / "modules"
+    modules_folder.mkdir()
+    app_file = modules_folder / "demoapp.py"
+    app_file.write_text("# use launcher favicon folder\n")
+
+    favicon_folder = tmp_path / "shared-branding"
+    favicon_folder.mkdir()
+    (favicon_folder / "favicon-32x32.png").write_bytes(b"configured-icon")
+    monkeypatch.setenv("PYTINCTURE_FAVICON_FOLDER", str(favicon_folder))
+
+    markup = backend_app.build_app_favicon_markup("demoapp", app_file)
+
+    assert 'href="/demoapp/favicon-assets/favicon-32x32.png"' in markup
+    assert 'sizes="32x32"' in markup
+
+
+def test_launcher_favicon_folder_serves_per_app_assets(fresh_client, monkeypatch, tmp_path):
+    favicon_root = tmp_path / "favicons"
+    app_favicon_folder = favicon_root / "demoapp"
+    app_favicon_folder.mkdir(parents=True)
+    (favicon_root / "favicon.ico").write_bytes(b"shared-icon")
+    (app_favicon_folder / "favicon.ico").write_bytes(b"demo-icon")
+    monkeypatch.setenv("PYTINCTURE_FAVICON_FOLDER", str(favicon_root))
+
+    response = fresh_client.get("/demoapp/favicon-assets/favicon.ico")
+
+    assert response.status_code == 200
+    assert response.content == b"demo-icon"
+
+
+def test_app_favicon_setting_overrides_launcher_folder(monkeypatch, tmp_path):
+    import pytincture.backend.app as backend_app
+
+    app_file = tmp_path / "demoapp.py"
+    app_file.write_text('APP_FAVICON = "branding/app-icon.svg"\n')
+    favicon_folder = tmp_path / "launcher-favicons"
+    favicon_folder.mkdir()
+    (favicon_folder / "favicon.ico").write_bytes(b"launcher-icon")
+    monkeypatch.setenv("PYTINCTURE_FAVICON_FOLDER", str(favicon_folder))
+
+    markup = backend_app.build_app_favicon_markup("demoapp", app_file)
+
+    assert 'href="/demoapp/appcode/branding/app-icon.svg"' in markup
+    assert "favicon-assets" not in markup
+
+
 def test_find_app_favicon_rejects_unsafe_asset_paths(tmp_path):
     import pytincture.backend.app as backend_app
 
