@@ -84,15 +84,22 @@ def test_launch_service(monkeypatch, tmp_path):
     # Before calling launch_service, clear the environment variables if set.
     os.environ.pop("MODULES_PATH", None)
     os.environ.pop("TEST_VAR", None)
+    os.environ.pop("PYTINCTURE_DEFAULT_APPLICATION", None)
 
     # Call launch_service.
     from pytincture.__init__ import launch_service
-    launch_service(modules_folder=test_folder, port=test_port, env_vars=env_vars)
+    launch_service(
+        modules_folder=test_folder,
+        port=test_port,
+        env_vars=env_vars,
+        default_application="demoapp",
+    )
 
     # Verify that the module path was stored and env vars applied.
     assert get_modules_path() == test_folder
     assert os.environ["MODULES_PATH"] == test_folder
     assert os.environ["TEST_VAR"] == "value"
+    assert os.environ["PYTINCTURE_DEFAULT_APPLICATION"] == "demoapp"
 
     # Check that our FakeProcess methods were called.
     assert "start" in process_calls
@@ -100,6 +107,7 @@ def test_launch_service(monkeypatch, tmp_path):
     set_modules_path(None)
     os.environ.pop("MODULES_PATH", None)
     os.environ.pop("TEST_VAR", None)
+    os.environ.pop("PYTINCTURE_DEFAULT_APPLICATION", None)
 
 
 def test_launch_service_ignores_env_var_override(monkeypatch, tmp_path):

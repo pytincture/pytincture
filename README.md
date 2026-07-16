@@ -120,11 +120,20 @@ if __name__=="__main__":
     from pytincture import launch_service
     launch_service(
         modules_folder=".",  # point to your modules directly
+        default_application="py_ui",  # optional: redirect / to /py_ui
         env_vars={
             "ALLOWED_EMAILS": []
         }
     )
 ~~~
+
+For an app-specific browser icon, place the icon under `modules_folder` and declare its appcode-relative path in the application module:
+
+```python
+APP_FAVICON = "assets/favicon.svg"
+```
+
+The equivalent `APP_CONFIG = {"favicon": "assets/favicon.svg"}` form is also supported. Each application gets its own URL, such as `/py_ui/appcode/assets/favicon.svg`; `.ico`, `.png`, and `.svg` files all work.
 
 ## Testing
 
