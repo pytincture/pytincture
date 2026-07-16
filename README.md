@@ -121,19 +121,31 @@ if __name__=="__main__":
     launch_service(
         modules_folder=".",  # point to your modules directly
         default_application="py_ui",  # optional: redirect / to /py_ui
+        favicon_folder="branding/favicon",  # optional; relative to modules_folder
         env_vars={
             "ALLOWED_EMAILS": []
         }
     )
 ~~~
 
-For an app-specific browser icon, place the icon under `modules_folder` and declare its appcode-relative path in the application module:
+For one application, place the complete favicon set in a conventional `favicon` directory under `modules_folder`:
 
-```python
-APP_FAVICON = "assets/favicon.svg"
+```text
+favicon/
+  favicon.ico
+  favicon-16x16.png
+  favicon-32x32.png
+  apple-touch-icon.png
+  android-chrome-192x192.png
+  android-chrome-512x512.png
+  site.webmanifest
 ```
 
-The equivalent `APP_CONFIG = {"favicon": "assets/favicon.svg"}` form is also supported. Each application gets its own URL, such as `/py_ui/appcode/assets/favicon.svg`; `.ico`, `.png`, and `.svg` files all work.
+pyTincture scans the directory and emits the icon, size, Apple touch icon, mask icon, and web-manifest declarations browsers need. Browsers do not enumerate favicon directories themselves.
+
+Set `favicon_folder` on `launch_service` to use a different directory. Relative paths are resolved from `modules_folder`, and absolute paths are supported, including paths outside the modules directory.
+
+For multiple applications, use one directory per application, such as `favicon/py_ui/` and `favicon/admin/`. This also works under a launcher-configured directory. An application can override both the launcher setting and the convention with either `APP_FAVICON = "branding/icons"` or `APP_CONFIG = {"favicon": "branding/icons"}`; the value may point to a directory or a single icon file under `modules_folder`.
 
 ## Testing
 
