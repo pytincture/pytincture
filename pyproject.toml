@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pytincture"
+
 version = "0.9.40"
+
 description = "UI Builder"
 readme = "README.md"
 license = { text = "MIT" }
