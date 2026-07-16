@@ -1130,9 +1130,55 @@ def test_main_app_route_includes_per_app_favicon(fresh_client, monkeypatch, tmp_
 
     assert response.status_code == 200
     assert (
-        '<link rel="icon" href="/demoapp/appcode/assets/demo%20icon.svg">'
+        '<link rel="icon" href="/demoapp/appcode/assets/demo%20icon.svg" '
+        'type="image/svg+xml" sizes="any">'
         in response.text
     )
+
+
+def test_favicon_folder_declares_available_browser_assets(tmp_path):
+    import pytincture.backend.app as backend_app
+
+    app_file = tmp_path / "demoapp.py"
+    app_file.write_text("# favicon folder uses convention-based discovery\n")
+    favicon_folder = tmp_path / "favicon"
+    favicon_folder.mkdir()
+    for filename in (
+        "android-chrome-192x192.png",
+        "apple-touch-icon.png",
+        "favicon-16x16.ico",
+        "favicon-32x32.png",
+        "favicon.ico",
+        "safari-pinned-tab.svg",
+        "site.webmanifest",
+    ):
+        (favicon_folder / filename).write_bytes(b"icon")
+    (favicon_folder / "notes.txt").write_text("not a browser favicon asset")
+
+    markup = backend_app.build_app_favicon_markup("demoapp", app_file)
+
+    assert 'href="/demoapp/appcode/favicon/favicon.ico"' in markup
+    assert 'href="/demoapp/appcode/favicon/favicon-16x16.ico"' in markup
+    assert 'sizes="16x16"' in markup
+    assert 'href="/demoapp/appcode/favicon/favicon-32x32.png"' in markup
+    assert 'sizes="32x32"' in markup
+    assert 'rel="apple-touch-icon"' in markup
+    assert 'rel="mask-icon"' in markup
+    assert 'rel="manifest"' in markup
+    assert "notes.txt" not in markup
+
+
+def test_favicon_folder_prefers_application_specific_directory(tmp_path):
+    import pytincture.backend.app as backend_app
+
+    app_file = tmp_path / "demoapp.py"
+    app_file.write_text("# app-specific favicon folder\n")
+    (tmp_path / "favicon").mkdir()
+    app_favicon_folder = tmp_path / "favicon" / "demoapp"
+    app_favicon_folder.mkdir()
+    (app_favicon_folder / "favicon.ico").write_bytes(b"icon")
+
+    assert backend_app.find_app_favicon(app_file) == "favicon/demoapp"
 
 
 def test_find_app_favicon_rejects_unsafe_asset_paths(tmp_path):

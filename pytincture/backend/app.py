@@ -2256,18 +2256,12 @@ async def main_app_route(response: Response, application: str, request: Request)
         index_html = index_html.replace("***ENTRYPOINT***", safe_application)
     
     loading_title = application
-    favicon_link = ""
+    favicon_markup = ""
     if os.path.exists(app_file_path):
         loading_title = find_app_loading_title(app_file_path, application)
-        favicon_path = find_app_favicon(app_file_path)
-        if favicon_path:
-            favicon_url = (
-                f"/{quote(application, safe='')}/appcode/"
-                f"{quote(favicon_path, safe='/')}"
-            )
-            favicon_link = f'<link rel="icon" href="{escape(favicon_url)}">'
+        favicon_markup = build_app_favicon_markup(application, app_file_path)
     index_html = index_html.replace("***LOADING_TITLE***", escape(loading_title))
-    index_html = index_html.replace("***FAVICON_LINK***", favicon_link)
+    index_html = index_html.replace("***FAVICON_LINK***", favicon_markup)
 
     index_html = index_html.replace("***WIDGETSET***", widgetset)
     return HTMLResponse(content=index_html)
@@ -2367,14 +2361,121 @@ def _normalize_app_asset_path(value: Optional[str]) -> Optional[str]:
 
 def find_app_favicon(file_path) -> Optional[str]:
     """
-    Read APP_FAVICON or APP_CONFIG["favicon"] as an appcode-relative path.
+    Resolve an explicit favicon file/folder or a conventional favicon directory.
     """
     configured = _find_app_string_setting(
         file_path,
         assignment_names=("APP_FAVICON",),
         config_keys=("favicon",),
     )
-    return _normalize_app_asset_path(configured)
+    if configured:
+        return _normalize_app_asset_path(configured)
+
+    app_root = os.path.dirname(os.fspath(file_path))
+    application = os.path.splitext(os.path.basename(os.fspath(file_path)))[0]
+    for candidate in (f"favicon/{application}", "favicon"):
+        candidate_path = os.path.join(app_root, *candidate.split("/"))
+        if os.path.isdir(candidate_path):
+            return candidate
+    return None
+
+
+_FAVICON_MIME_TYPES = {
+    ".gif": "image/gif",
+    ".ico": "image/x-icon",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+}
+_FAVICON_MANIFEST_NAMES = {
+    "manifest.json",
+    "manifest.webmanifest",
+    "site.webmanifest",
+}
+
+
+def _is_favicon_asset(filename: str) -> bool:
+    lowered = filename.lower()
+    extension = os.path.splitext(lowered)[1]
+    return (
+        extension in _FAVICON_MIME_TYPES
+        or lowered in _FAVICON_MANIFEST_NAMES
+        or lowered == "browserconfig.xml"
+    )
+
+
+def find_app_favicon_assets(file_path) -> List[str]:
+    """Return the declared favicon file or supported files in its directory."""
+    favicon_path = find_app_favicon(file_path)
+    if not favicon_path:
+        return []
+
+    app_root = os.path.dirname(os.fspath(file_path))
+    local_path = os.path.join(app_root, *favicon_path.split("/"))
+    if not os.path.isdir(local_path):
+        return [favicon_path]
+
+    assets = []
+    with os.scandir(local_path) as entries:
+        for entry in sorted(entries, key=lambda item: item.name.lower()):
+            if entry.is_file(follow_symlinks=False) and _is_favicon_asset(entry.name):
+                assets.append(f"{favicon_path}/{entry.name}")
+    return assets
+
+
+def _favicon_size(filename: str) -> Optional[str]:
+    match = re.search(r"(?<!\d)(\d{1,4})x(\d{1,4})(?!\d)", filename)
+    if not match:
+        return None
+    return f"{match.group(1)}x{match.group(2)}"
+
+
+def _build_favicon_tag(application: str, asset_path: str) -> Optional[str]:
+    favicon_url = (
+        f"/{quote(application, safe='')}/appcode/"
+        f"{quote(asset_path, safe='/')}"
+    )
+    safe_url = escape(favicon_url)
+    filename = os.path.basename(asset_path).lower()
+
+    if filename in _FAVICON_MANIFEST_NAMES:
+        return f'<link rel="manifest" href="{safe_url}">'
+    if filename == "browserconfig.xml":
+        return f'<meta name="msapplication-config" content="{safe_url}">'
+
+    extension = os.path.splitext(filename)[1]
+    mime_type = _FAVICON_MIME_TYPES.get(extension)
+    if not mime_type:
+        return None
+
+    if filename.startswith("apple-touch-icon-precomposed"):
+        relation = "apple-touch-icon-precomposed"
+    elif filename.startswith("apple-touch-icon"):
+        relation = "apple-touch-icon"
+    elif "mask-icon" in filename or filename == "safari-pinned-tab.svg":
+        relation = "mask-icon"
+    else:
+        relation = "icon"
+
+    attributes = [f'rel="{relation}"', f'href="{safe_url}"', f'type="{mime_type}"']
+    size = _favicon_size(filename)
+    if size:
+        attributes.append(f'sizes="{size}"')
+    elif extension == ".svg":
+        attributes.append('sizes="any"')
+    return f"<link {' '.join(attributes)}>"
+
+
+def build_app_favicon_markup(application: str, file_path) -> str:
+    """Generate browser favicon declarations for an application's assets."""
+    tags = [
+        tag
+        for asset_path in find_app_favicon_assets(file_path)
+        if (tag := _build_favicon_tag(application, asset_path)) is not None
+    ]
+    return "\n    ".join(tags)
 
 
 add_bff_docs_to_app(app)

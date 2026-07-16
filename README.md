@@ -127,13 +127,22 @@ if __name__=="__main__":
     )
 ~~~
 
-For an app-specific browser icon, place the icon under `modules_folder` and declare its appcode-relative path in the application module:
+For one application, place the complete favicon set in a conventional `favicon` directory under `modules_folder`:
 
-```python
-APP_FAVICON = "assets/favicon.svg"
+```text
+favicon/
+  favicon.ico
+  favicon-16x16.png
+  favicon-32x32.png
+  apple-touch-icon.png
+  android-chrome-192x192.png
+  android-chrome-512x512.png
+  site.webmanifest
 ```
 
-The equivalent `APP_CONFIG = {"favicon": "assets/favicon.svg"}` form is also supported. Each application gets its own URL, such as `/py_ui/appcode/assets/favicon.svg`; `.ico`, `.png`, and `.svg` files all work.
+pyTincture scans the directory and emits the icon, size, Apple touch icon, mask icon, and web-manifest declarations browsers need. Browsers do not enumerate favicon directories themselves.
+
+For multiple applications, use one directory per application, such as `favicon/py_ui/` and `favicon/admin/`. An application can override the convention with either `APP_FAVICON = "branding/icons"` or `APP_CONFIG = {"favicon": "branding/icons"}`; the value may point to a directory or a single icon file.
 
 ## Testing
 
