@@ -54,6 +54,7 @@ def override_env(monkeypatch):
     monkeypatch.setenv("MODULES_PATH", "/tmp")
     monkeypatch.setenv("USE_REDIS_INSTANCE", "false")
     monkeypatch.setenv("ALLOWED_NOAUTH_CLASSCALLS", json.dumps([]))
+    monkeypatch.delenv("PYTINCTURE_DEFAULT_APPLICATION", raising=False)
 
     # Import the module and override its globals.
     import pytincture.backend.app as backend_app
@@ -98,6 +99,18 @@ def test_favicon(fresh_client):
     response = fresh_client.get("/favicon.ico")
     # With the placeholder, expect 200 or 404.
     assert response.status_code in (200, 404)
+
+
+def test_root_redirects_to_configured_default_application(fresh_client, monkeypatch):
+    response = fresh_client.get("/", follow_redirects=False)
+    assert response.status_code == 404
+
+    monkeypatch.setenv("PYTINCTURE_DEFAULT_APPLICATION", "demoapp")
+    response = fresh_client.get("/", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/demoapp"
+
 
 def test_main_route_with_auth_enabled_no_user_session(fresh_client, monkeypatch):
     """
@@ -1087,6 +1100,48 @@ def test_main_app_route_logged_in(fresh_client, monkeypatch, tmp_path):
     assert "***APPLICATION***" not in html
     assert "widgetset_val==3.0" in html
     del sys.modules["dummywidget"]
+
+
+def test_main_app_route_includes_per_app_favicon(fresh_client, monkeypatch, tmp_path):
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text(
+        "<html><head>***FAVICON_LINK***</head>"
+        "<body>***APPLICATION*** ***ENTRYPOINT*** ***LOADING_TITLE*** "
+        "***WIDGETSET***</body></html>"
+    )
+
+    dummy_modules = tmp_path / "modules"
+    dummy_modules.mkdir()
+    (dummy_modules / "demoapp.py").write_text(
+        'APP_CONFIG = {"favicon": "assets/demo icon.svg"}\n'
+    )
+
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+    monkeypatch.setattr(backend_app, "get_modules_path", lambda: str(dummy_modules))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+
+    response = fresh_client.get("/demoapp")
+
+    assert response.status_code == 200
+    assert (
+        '<link rel="icon" href="/demoapp/appcode/assets/demo%20icon.svg">'
+        in response.text
+    )
+
+
+def test_find_app_favicon_rejects_unsafe_asset_paths(tmp_path):
+    import pytincture.backend.app as backend_app
+
+    app_file = tmp_path / "unsafe.py"
+    app_file.write_text('APP_FAVICON = "../outside.ico"\n')
+
+    assert backend_app.find_app_favicon(app_file) is None
 
 
 def test_sanitize_return_to_allows_relative_paths():

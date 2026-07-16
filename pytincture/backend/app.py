@@ -48,7 +48,7 @@ from pydantic import BaseModel
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.settings import OneLogin_Saml2_Settings
 from onelogin.saml2.errors import OneLogin_Saml2_ValidationError
-from urllib.parse import parse_qsl, urlparse, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlparse, urlsplit, urlunsplit
 from html import escape
 
 # ========================
@@ -177,6 +177,29 @@ def create_appcode_pkg_in_memory(host, protocol):
                             zipf.write(file_path, arcname)
     in_memory_zip.seek(0)
     return in_memory_zip
+
+
+def _get_default_application() -> Optional[str]:
+    configured = os.getenv("PYTINCTURE_DEFAULT_APPLICATION", "").strip().strip("/")
+    if not configured:
+        return None
+    if (
+        configured in (".", "..")
+        or not all(char.isalnum() or char in "._-" for char in configured)
+    ):
+        raise RuntimeError(
+            "PYTINCTURE_DEFAULT_APPLICATION must be a single application name without a path"
+        )
+    return configured
+
+
+@app.get("/", include_in_schema=False)
+async def default_application_redirect():
+    default_application = _get_default_application()
+    if default_application is None:
+        raise HTTPException(status_code=404, detail="No default application configured")
+    application_path = quote(default_application, safe="")
+    return RedirectResponse(url=f"/{application_path}", status_code=302)
 
 
 @app.get("/favicon.ico", operation_id="getFavicon", responses={200: {"description": "Response (binary content for favicon.ico, or empty if not implemented)"}, 404: {"description": "JSONResponse (if file not found, but currently not handled)"}})
@@ -2233,9 +2256,18 @@ async def main_app_route(response: Response, application: str, request: Request)
         index_html = index_html.replace("***ENTRYPOINT***", safe_application)
     
     loading_title = application
+    favicon_link = ""
     if os.path.exists(app_file_path):
         loading_title = find_app_loading_title(app_file_path, application)
+        favicon_path = find_app_favicon(app_file_path)
+        if favicon_path:
+            favicon_url = (
+                f"/{quote(application, safe='')}/appcode/"
+                f"{quote(favicon_path, safe='/')}"
+            )
+            favicon_link = f'<link rel="icon" href="{escape(favicon_url)}">'
     index_html = index_html.replace("***LOADING_TITLE***", escape(loading_title))
+    index_html = index_html.replace("***FAVICON_LINK***", favicon_link)
 
     index_html = index_html.replace("***WIDGETSET***", widgetset)
     return HTMLResponse(content=index_html)
@@ -2263,18 +2295,17 @@ def find_main_window_subclass(file_path):
         print(f"Error finding MainWindow subclass: {e}")
         return None
 
-def find_app_loading_title(file_path, default_title):
+def _find_app_string_setting(file_path, assignment_names, config_keys):
     """
-    Read a lightweight title from the app source without importing it.
-    Looks for APP_TITLE / APP_LOADING_TITLE or APP_CONFIG = {"title": "..."}.
+    Read a string setting from app source without importing the application.
     """
     try:
         with open(file_path, "r") as f:
             source = f.read()
         tree = ast.parse(source)
     except Exception as e:
-        print(f"Error reading loading title: {e}")
-        return default_title
+        print(f"Error reading app configuration: {e}")
+        return None
 
     def extract_string(node):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -2285,18 +2316,65 @@ def find_app_loading_title(file_path, default_title):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    if target.id in ("APP_TITLE", "APP_LOADING_TITLE"):
+                    if target.id in assignment_names:
                         value = extract_string(node.value)
                         if value:
                             return value
                     if target.id == "APP_CONFIG" and isinstance(node.value, ast.Dict):
                         for key, value_node in zip(node.value.keys, node.value.values):
                             key_str = extract_string(key)
-                            if key_str in ("title", "loading_title"):
+                            if key_str in config_keys:
                                 value = extract_string(value_node)
                                 if value:
                                     return value
-    return default_title
+    return None
+
+
+def find_app_loading_title(file_path, default_title):
+    """
+    Read APP_TITLE, APP_LOADING_TITLE, or the matching APP_CONFIG value.
+    """
+    return _find_app_string_setting(
+        file_path,
+        assignment_names=("APP_TITLE", "APP_LOADING_TITLE"),
+        config_keys=("title", "loading_title"),
+    ) or default_title
+
+
+def _normalize_app_asset_path(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+
+    candidate = value.strip()
+    if candidate.startswith("/appcode/"):
+        candidate = candidate[len("/appcode/"):]
+    elif candidate.startswith("appcode/"):
+        candidate = candidate[len("appcode/"):]
+    elif candidate.startswith("/"):
+        return None
+
+    parsed = urlsplit(candidate)
+    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+        return None
+    if "\\" in candidate:
+        return None
+
+    segments = candidate.split("/")
+    if any(not segment or segment in (".", "..") for segment in segments):
+        return None
+    return "/".join(segments)
+
+
+def find_app_favicon(file_path) -> Optional[str]:
+    """
+    Read APP_FAVICON or APP_CONFIG["favicon"] as an appcode-relative path.
+    """
+    configured = _find_app_string_setting(
+        file_path,
+        assignment_names=("APP_FAVICON",),
+        config_keys=("favicon",),
+    )
+    return _normalize_app_asset_path(configured)
 
 
 add_bff_docs_to_app(app)
