@@ -5,6 +5,9 @@ import json
 import textwrap
 import zipfile
 import tempfile
+import asyncio
+import subprocess
+import sys
 import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
@@ -19,6 +22,7 @@ from pytincture.backend.app import (
     _build_dynamic_module_name,
     _sanitize_return_to,
     set_bff_policy_hook,
+    set_user_authenticator,
 )
 from fastapi import HTTPException
 
@@ -45,6 +49,12 @@ def _tamper_token(token):
     return f"{token[:index]}{replacement}{token[index + 1:]}"
 
 
+def _csrf_headers(client):
+    token = client.cookies.get("pytincture_csrf")
+    assert token
+    return {"X-CSRF-Token": token}
+
+
 @pytest.fixture(autouse=True)
 def override_env(monkeypatch):
     """
@@ -61,17 +71,23 @@ def override_env(monkeypatch):
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
     monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", False)
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_BFF_REPLAY_TOKENS", False)
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {})
+    monkeypatch.setattr(backend_app, "AUTH_SESSION_REVOCATIONS", {})
+    monkeypatch.setattr(backend_app, "BFF_REPLAY_TOKEN_STORE", {})
+    set_user_authenticator(None)
     ALLOWED_NOAUTH_CLASSCALLS.clear()
     yield
+    set_user_authenticator(None)
 
 @pytest.fixture
 def fresh_client(override_env):
     """
     Provide a fresh TestClient instance with cleared cookies.
     """
-    client = TestClient(app)
+    client = TestClient(app, base_url="https://testserver")
     client.cookies.clear()
     return client
 
@@ -84,6 +100,9 @@ def dummy_module(tmp_path: Path):
     """
     dummy_file = tmp_path / "example.py"
     dummy_file.write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
         class ExampleClass:
             __widgetset__ = "dummywidget"
             __version__ = "1.0"
@@ -93,6 +112,408 @@ def dummy_module(tmp_path: Path):
                 return {"result": "success", "args": args, "kwargs": kwargs}
     """))
     return dummy_file.parent  # Return the directory containing example.py
+
+
+def test_user_login_requires_enabled_flag(fresh_client, monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    response = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "anything"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 403
+
+
+def test_password_hash_verifier_rejects_wrong_password(fresh_client, monkeypatch):
+    import pytincture.backend.app as backend_app
+    from argon2 import PasswordHasher
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", False)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setenv(
+        "AUTH_PASSWORD_HASHES",
+        json.dumps({"person@example.com": PasswordHasher().hash("correct-password")}),
+    )
+
+    wrong = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "wrong-password"},
+        follow_redirects=False,
+    )
+    assert wrong.status_code == 401
+
+    correct = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "correct-password"},
+        follow_redirects=False,
+    )
+    assert correct.status_code == 303
+
+
+def test_development_email_login_is_loopback_only(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    with TestClient(app, base_url="https://public.example.com") as client:
+        response = client.post(
+            "/demoapp/auth/user",
+            data={"email": "person@example.com", "password": "ignored"},
+            follow_redirects=False,
+        )
+    assert response.status_code == 401
+
+
+def test_authentication_enabled_requires_strong_startup_secret(tmp_path):
+    environment = os.environ.copy()
+    environment.update({
+        "ENABLE_USER_LOGIN": "true",
+        "ENABLE_GOOGLE_AUTH": "false",
+        "ENABLE_MICROSOFT_AUTH": "false",
+        "ENABLE_SAML_AUTH": "false",
+        "PYTHONPATH": str(Path(__file__).parents[1]),
+    })
+    environment.pop("SAML_SECRET_KEY", None)
+    environment.pop("SECRET_KEY", None)
+    result = subprocess.run(
+        [sys.executable, "-c", "import pytincture.backend.app"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode != 0
+    assert "Authentication requires SAML_SECRET_KEY" in result.stderr
+
+
+def test_dependency_routes_reject_missing_authenticated_session(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    assert fresh_client.post("/logs", json={}).status_code == 401
+    assert fresh_client.get("/demoapp/appcode/appcode.pyt").status_code == 401
+
+
+def test_unknown_bff_target_is_rejected_before_module_execution(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    marker = tmp_path / "executed"
+    (tmp_path / "danger.py").write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('imported')\n"
+        "class Danger:\n"
+        "    def run(self): return True\n"
+    )
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "user@example.com"})
+    response = fresh_client.post("/classcall/danger.py/Danger/run", json={})
+    assert response.status_code == 404
+    assert not marker.exists()
+
+
+def test_async_policy_runs_before_constructor(fresh_client, monkeypatch, tmp_path):
+    import pytincture.backend.app as backend_app
+
+    marker = tmp_path / "constructed"
+    (tmp_path / "restricted.py").write_text(textwrap.dedent(f"""
+        from pathlib import Path
+        from pytincture.dataclass import backend_for_frontend, bff_policy
+
+        @backend_for_frontend
+        class Restricted:
+            def __init__(self):
+                Path({str(marker)!r}).write_text("constructed")
+
+            @bff_policy(role="admin")
+            def run(self):
+                return True
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: {"roles": []})
+
+    async def deny_policy(**kwargs):
+        await asyncio.sleep(0)
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    set_bff_policy_hook(deny_policy)
+    try:
+        response = fresh_client.post("/classcall/restricted.py/Restricted/run", json={})
+    finally:
+        set_bff_policy_hook(None)
+    assert response.status_code == 403
+    assert not marker.exists()
+
+
+def test_state_changing_bff_call_requires_csrf(
+    fresh_client, monkeypatch, dummy_module
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "local"},
+        follow_redirects=False,
+    )
+    without_token = fresh_client.post(
+        "/classcall/example.py/ExampleClass/testfunc", json={}
+    )
+    assert without_token.status_code == 403
+    with_token = fresh_client.post(
+        "/classcall/example.py/ExampleClass/testfunc",
+        json={},
+        headers=_csrf_headers(fresh_client),
+    )
+    assert with_token.status_code == 200
+
+
+def test_bff_replay_token_is_opaque_session_bound_and_single_use(
+    fresh_client, monkeypatch, dummy_module
+):
+    import ast
+    import re
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_BFF_REPLAY_TOKENS", True)
+    monkeypatch.setattr(backend_app, "BFF_REPLAY_TOKEN_BATCH_SIZE", 4)
+    monkeypatch.setattr(backend_app, "BFF_REPLAY_TOKEN_LOW_WATERMARK", 1)
+    monkeypatch.setenv("BFF_REPLAY_TOKEN_LOW_WATERMARK", "1")
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    backend_app.reload_bff_registry(str(dummy_module))
+
+    login = fresh_client.post(
+        "/example/auth/user",
+        data={"email": "person@example.com", "password": "local"},
+        follow_redirects=False,
+    )
+    assert login.status_code == 303
+
+    package = fresh_client.get("/example/appcode/appcode.pyt")
+    assert package.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(package.content)) as archive:
+        stub = archive.read("example.py").decode("utf-8")
+    capsule_match = re.search(r"_pytincture_replay_capsule = (.+)", stub)
+    key_match = re.search(r"_pytincture_replay_key = (.+)", stub)
+    assert capsule_match and key_match
+    capsule = ast.literal_eval(capsule_match.group(1))
+    client_key = bytes(ast.literal_eval(key_match.group(1)))
+
+    state_headers = {
+        **_csrf_headers(fresh_client),
+        "X-Pytincture-Client": capsule,
+    }
+    state_response = fresh_client.post("/_pytincture/state", headers=state_headers)
+    assert state_response.status_code == 200
+    assert state_response.headers["content-type"].startswith("application/octet-stream")
+    decoded = json.loads(
+        backend_app._decrypt_opaque_envelope(client_key, state_response.text)
+    )
+    assert decoded["v"] == 1
+    assert len(decoded["items"]) == 4
+    assert all(token not in state_response.text for token in decoded["items"])
+
+    # The capsule is stateless: a stable backend secret can recover the client
+    # key and issue a fresh opaque pool after process-local token state is lost.
+    backend_app.BFF_REPLAY_TOKEN_STORE.clear()
+    after_restart = fresh_client.post("/_pytincture/state", headers=state_headers)
+    assert after_restart.status_code == 200
+
+    call_headers = {
+        **_csrf_headers(fresh_client),
+    }
+    # Use a token from the post-restart refill because pre-restart tokens were
+    # deliberately invalidated with process-local storage.
+    restarted_tokens = json.loads(
+        backend_app._decrypt_opaque_envelope(client_key, after_restart.text)
+    )["items"]
+    call_headers["X-Pytincture-BFF-Token"] = restarted_tokens[0]
+    first = fresh_client.post(
+        "/classcall/example.py/ExampleClass/testfunc",
+        json={},
+        headers=call_headers,
+    )
+    copied_curl_replay = fresh_client.post(
+        "/classcall/example.py/ExampleClass/testfunc",
+        json={},
+        headers=call_headers,
+    )
+    assert first.status_code == 200
+    assert copied_curl_replay.status_code == 409
+
+
+def test_bff_methods_default_to_post(fresh_client, monkeypatch, dummy_module):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "user@example.com"})
+    response = fresh_client.get("/classcall/example.py/ExampleClass/testfunc")
+    assert response.status_code == 405
+    assert response.headers["allow"] == "POST"
+
+
+def test_revoked_session_is_rejected(fresh_client, monkeypatch, dummy_module):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "local"},
+        follow_redirects=False,
+    )
+    session_data = _decode_session_cookie(fresh_client, backend_app.SAML_SECRET_KEY)
+    backend_app.revoke_session(session_data["session_id"])
+    response = fresh_client.post(
+        "/classcall/example.py/ExampleClass/testfunc",
+        json={},
+        headers=_csrf_headers(fresh_client),
+    )
+    assert response.status_code == 401
+
+
+def test_session_key_rotation_accepts_and_resigns_previous_key():
+    from fastapi import FastAPI, Request
+    from pytincture.backend.app import RotatingSessionMiddleware
+
+    old_key = "old-key-with-at-least-thirty-two-random-chars"
+    new_key = "new-key-with-at-least-thirty-two-random-chars"
+    mini_app = FastAPI()
+
+    @mini_app.get("/")
+    async def read_session(request: Request):
+        return request.session
+
+    mini_app.add_middleware(
+        RotatingSessionMiddleware,
+        secret_key=new_key,
+        previous_secret_keys=[old_key],
+        https_only=True,
+    )
+    encoded = base64.b64encode(json.dumps({"user": "legacy"}).encode())
+    old_cookie = TimestampSigner(old_key).sign(encoded).decode()
+    with TestClient(mini_app, base_url="https://testserver") as client:
+        client.cookies.set("session", old_cookie)
+        response = client.get("/")
+        assert response.json() == {"user": "legacy"}
+        resigned = response.headers["set-cookie"].split("session=", 1)[1].split(";", 1)[0]
+    decoded = TimestampSigner(new_key).unsign(resigned)
+    assert json.loads(base64.b64decode(decoded)) == {"user": "legacy"}
+
+
+def test_raw_server_files_are_not_public_assets(fresh_client, monkeypatch, tmp_path):
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    (tmp_path / "server.py").write_text("SECRET = 'hidden'\n")
+    (tmp_path / ".env").write_text("SECRET=hidden\n")
+    (tmp_path / "logo.png").write_bytes(b"png")
+
+    assert fresh_client.get("/demoapp/appcode/server.py").status_code == 404
+    assert fresh_client.get("/demoapp/appcode/.env").status_code == 404
+    assert fresh_client.get("/demoapp/appcode/logo.png").status_code == 200
+
+
+def test_browser_package_excludes_unreachable_server_modules(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    (tmp_path / "demoapp.py").write_text("from service import Service\n")
+    (tmp_path / "service.py").write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+        class ServerHelper:
+            secret = "helper-must-not-ship"
+        @backend_for_frontend
+        class Service:
+            def secret(self):
+                return "must-not-ship"
+    """))
+    (tmp_path / "server_only.py").write_text("SECRET = 'must-not-ship'\n")
+
+    response = fresh_client.get("/demoapp/appcode/appcode.pyt")
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert set(archive.namelist()) == {"demoapp.py", "service.py"}
+        assert "must-not-ship" not in archive.read("service.py").decode()
+        assert "ServerHelper" not in archive.read("service.py").decode()
+
+
+def test_mcp_has_no_automatic_tools_and_rejects_sensitive_allowlist(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    assert asyncio.run(backend_app.mcp.get_tools()) == {}
+    monkeypatch.setenv("ENABLE_MCP", "true")
+    monkeypatch.setenv("MCP_EXPOSED_OPERATIONS", '["handleUserAuth"]')
+    with pytest.raises(RuntimeError, match="session/login/application"):
+        backend_app._mcp_operation_ids()
+
+
+def test_mcp_classcall_cannot_bypass_http_authentication(monkeypatch, tmp_path):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "service.py").write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+        @backend_for_frontend
+        class Service:
+            def run(self):
+                return True
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
+    backend_app.reload_bff_registry(str(tmp_path))
+    mcp_server = backend_app.FastMCP.from_fastapi(
+        backend_app._FilteredFastAPIApp(app, {"postClassCall"}),
+        name="security-test",
+    )
+
+    async def invoke_tool():
+        tool = (await mcp_server.get_tools())["postClassCall"]
+        return await tool.run({
+            "file_path": "service.py",
+            "class_name": "Service",
+            "function_name": "run",
+        })
+
+    with pytest.raises(ValueError, match="HTTP error 401"):
+        asyncio.run(invoke_tool())
+
+
+def test_validation_error_does_not_echo_request_body(fresh_client):
+    response = fresh_client.post(
+        "/demoapp/auth/mcp",
+        json={"email": "person@example.com", "secret": "must-not-echo"},
+    )
+    assert response.status_code == 422
+    assert "must-not-echo" not in response.text
+
+
+def test_request_body_limit_rejects_oversized_payload(fresh_client):
+    response = fresh_client.post("/logs", content=b"x" * (2 * 1024 * 1024 + 1))
+    assert response.status_code == 413
 
 def test_favicon(fresh_client):
     """Test the /favicon.ico route (placeholder)."""
@@ -143,8 +564,10 @@ def test_main_route_ignores_backend_session_snapshot(fresh_client, monkeypatch):
 
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {})
+    monkeypatch.setenv("ALLOWED_EMAILS", "stale@example.com")
 
     response = fresh_client.post(
         "/demoapp/auth/user",
@@ -213,7 +636,9 @@ def test_class_call_noauth(dummy_module, monkeypatch, fresh_client):
     }]
     ALLOWED_NOAUTH_CLASSCALLS.extend(allowed_calls)
     fresh_client.cookies.clear()
-    response = fresh_client.get("/classcall/example.py/ExampleClass/testfunc")
+    response = fresh_client.post(
+        "/classcall/example.py/ExampleClass/testfunc", json={"kwargs": {}}
+    )
     assert response.status_code == 200
     json_response = response.json()
     assert json_response.get("result") == "success"
@@ -331,7 +756,7 @@ def test_class_call_loads_decorated_module_without_standard_import(monkeypatch, 
     monkeypatch.setenv("MODULES_PATH", str(modules_dir))
     monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "tester@example.com"})
 
-    response = fresh_client.get("/classcall/direct_load.py/DirectLoad/ping")
+    response = fresh_client.post("/classcall/direct_load.py/DirectLoad/ping", json={})
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
@@ -360,7 +785,7 @@ def test_class_call_decorated_constructor_receives_user(monkeypatch, fresh_clien
     monkeypatch.setenv("MODULES_PATH", str(modules_dir))
     monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "tester@example.com"})
 
-    response = fresh_client.get("/classcall/user_aware.py/UserAware/whoami")
+    response = fresh_client.post("/classcall/user_aware.py/UserAware/whoami", json={})
     assert response.status_code == 200
     assert response.json()["email"] == "tester@example.com"
 
@@ -410,6 +835,9 @@ def test_class_call_nested_module_path(monkeypatch, fresh_client, tmp_path):
     target_dir = modules_dir / "pkg" / "internal"
     target_dir.mkdir(parents=True)
     module_code = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
         class Worker:
             def __init__(self, _user):
                 self._user = _user
@@ -438,6 +866,9 @@ def test_class_call_noauth_nested_path(monkeypatch, fresh_client, tmp_path):
     target_dir = modules_dir / "pkg" / "internal"
     target_dir.mkdir(parents=True)
     module_code = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
         class Worker:
             def __init__(self, _user):
                 self._user = _user
@@ -455,7 +886,9 @@ def test_class_call_noauth_nested_path(monkeypatch, fresh_client, tmp_path):
         "function": "ping"
     }])
 
-    response = fresh_client.get("/classcall/pkg/internal/worker.py/Worker/ping")
+    response = fresh_client.post(
+        "/classcall/pkg/internal/worker.py/Worker/ping", json={}
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
@@ -508,6 +941,7 @@ def test_download_appcode(fresh_client, monkeypatch, tmp_path):
     # Create a dummy modules folder with a file.
     dummy_dir = tmp_path / "dummy_modules"
     dummy_dir.mkdir()
+    (dummy_dir / "demoapp.py").write_text("class Demo: pass\n")
     (dummy_dir / "dummy.txt").write_text("dummy content")
     monkeypatch.setenv("MODULES_PATH", str(dummy_dir))
     # Override require_auth to simulate a valid user.
@@ -606,7 +1040,9 @@ def test_require_auth_does_not_print_debug_output(monkeypatch, capsys):
     import pytincture.backend.app as backend_app
 
     user = backend_app._build_auth_session_user({"email": "quiet@example.com"})
-    request = type("Request", (), {"session": {"user": user}})()
+    request = type("Request", (), {
+        "session": {"user": user, "session_id": "test-session"}
+    })()
 
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
@@ -620,6 +1056,7 @@ def test_user_login_stores_only_compact_stateless_claims(fresh_client, monkeypat
 
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {"sentinel": {"value": True}})
@@ -651,6 +1088,7 @@ def test_stateless_session_survives_logout_in_another_browser_and_replica(
 
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
@@ -662,7 +1100,9 @@ def test_stateless_session_survives_logout_in_another_browser_and_replica(
     )
     assert first_login.status_code == 303
 
-    with TestClient(app) as second_browser, TestClient(app) as another_replica:
+    with TestClient(app, base_url="https://testserver") as second_browser, TestClient(
+        app, base_url="https://testserver"
+    ) as another_replica:
         second_login = second_browser.post(
             "/demoapp/auth/user",
             data={"email": "person@example.com", "password": "second"},
@@ -670,7 +1110,9 @@ def test_stateless_session_survives_logout_in_another_browser_and_replica(
         )
         assert second_login.status_code == 303
         second_cookie = second_browser.cookies.get("session")
+        second_csrf_cookie = second_browser.cookies.get("pytincture_csrf")
         assert second_cookie
+        assert second_csrf_cookie
 
         backend_app.USER_SESSION_DICT["person@example.com"] = {
             "email": "person@example.com",
@@ -679,9 +1121,11 @@ def test_stateless_session_survives_logout_in_another_browser_and_replica(
         fresh_client.get("/demoapp/auth/logout", follow_redirects=False)
 
         another_replica.cookies.set("session", second_cookie)
+        another_replica.cookies.set("pytincture_csrf", second_csrf_cookie)
         response = another_replica.post(
             "/classcall/example.py/ExampleClass/testfunc",
             json={"kwargs": {"source": "replica"}},
+            headers=_csrf_headers(another_replica),
         )
 
     assert response.status_code == 200
@@ -697,6 +1141,7 @@ def test_tampered_and_expired_stateless_sessions_are_rejected(
 
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
@@ -957,8 +1402,10 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
     assert "saml_session_index" not in session_data
 
     backend_app.USER_SESSION_DICT["person@example.com"] = {"stale": True}
-    bff_response = fresh_client.get(
-        "/classcall/example.py/ExampleClass/testfunc"
+    bff_response = fresh_client.post(
+        "/classcall/example.py/ExampleClass/testfunc",
+        json={},
+        headers=_csrf_headers(fresh_client),
     )
     assert bff_response.status_code == 200
 
@@ -968,6 +1415,8 @@ def test_login_endpoint(fresh_client, monkeypatch, tmp_path):
     Test the /{application}/login endpoint returns expected HTML content.
     """
     import pytincture.backend.app as backend_app
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
     monkeypatch.setenv("ENABLE_GOOGLE_AUTH", "true")
     monkeypatch.setenv("ENABLE_USER_LOGIN", "true")
     # Create a dummy frontend directory with an index.html.
@@ -1062,6 +1511,8 @@ def test_auth_user_callback(fresh_client, monkeypatch):
     Test the /{application}/auth/user endpoint simulating email/password login.
     """
     import pytincture.backend.app as backend_app
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
     monkeypatch.setenv("ALLOWED_EMAILS", "test@example.com")
     response = fresh_client.post(
         "/demoapp/auth/user",
@@ -1459,8 +1910,11 @@ def test_saml_provider_metadata_route_uses_provider_config(fresh_client, monkeyp
         "idp_x509_cert": dummy_cert,
     }])
 
-    response = fresh_client.get("/demoapp/auth/saml/company-a/metadata")
+    response = fresh_client.get(
+        "/demoapp/auth/saml/company-a/metadata",
+        headers={"host": "service.example.com"},
+    )
     assert response.status_code == 200
     assert "EntityDescriptor" in response.text
-    assert "http://testserver/demoapp/auth/saml/metadata" in response.text
-    assert "http://testserver/demoapp/auth/saml/acs" in response.text
+    assert "https://service.example.com/demoapp/auth/saml/metadata" in response.text
+    assert "https://service.example.com/demoapp/auth/saml/acs" in response.text

@@ -6,10 +6,10 @@
 ## Features
 - Pyodide Integration: Seamlessly bring Python to the web via Pyodide.
 - GUI Library Support: Simplify the creation and management of GUI components in Python.
-- Dynamic Code Packaging: Generate in-memory ZIP packages for frontend consumption.
+- Browser-safe Code Packaging: Package the application entrypoint, reachable local imports, and explicitly configured browser files.
 - Widgetset Stub Generation: Automatically generate frontend stub classes using the @backend_for_frontend decorator.
 - Streaming BFF Calls: Enable true streaming responses with the @bff_stream decorator.
-- Authentication & Sessions: Supports Google and Microsoft OAuth2, SAML 2.0 SSO, and email/password authentication with compact signed sessions that work across replicas.
+- Authentication & Sessions: Supports Google and Microsoft OAuth2, SAML 2.0 SSO, verified email/password login, key rotation, CSRF protection, and revocable signed sessions.
 - Redis Integration: Optionally expose the legacy shared `USER_SESSION_DICT` through Upstash; authentication does not require Redis.
 - Cross-Platform Compatibility: Works on any platform where Pyodide is supported.
 - Easy to Use: Provides a user-friendly API to streamline GUI development.
@@ -39,8 +39,13 @@ pip install .
 ## Environment Variables
 - MODULES_PATH: Directory containing module files used for dynamic packaging. This is set automatically from `modules_folder` when `launch_service` starts; overriding it via env vars is usually unnecessary.
 - USE_REDIS_INSTANCE: Set to "true" to back the legacy `USER_SESSION_DICT` with Upstash. Authentication does not read or write this dictionary.
-- ALLOWED_EMAILS: A comma-separated list of authorized email addresses.
+- ALLOWED_EMAILS: An optional comma-separated authorization allowlist. It is not a password verifier.
    example: "some@email.com,joe@email.com"
+- ENABLE_USER_LOGIN: Enable verified local email/password login. This route is rejected when the flag is false.
+- AUTH_PASSWORD_HASHES: JSON object mapping normalized email addresses to Argon2id or bcrypt hashes.
+   example: `{"user@example.com":"$argon2id$..."}`
+- AUTH_USER_AUTHENTICATOR: Optional dotted path to a sync or async callable accepting `email`, `password`, and `request`. It must return trusted user claims, `True`, or `False`.
+- ENABLE_DEV_EMAIL_LOGIN: Allow a non-empty `ALLOWED_EMAILS` list without password verification only on loopback hosts. This is intentionally unsafe and must only be set to `true` for local development.
 - ENABLE_GOOGLE_AUTH: Enable the respective authentication mechanisms.
    example: "true"
 - ENABLE_MICROSOFT_AUTH: Enable Microsoft OAuth2 authentication using the shared `common` tenant endpoint.
@@ -59,9 +64,11 @@ pip install .
    example: "Login with Contoso"
 - SAML_LOGO_URL: Optional image URL for the single-provider SAML login button.
    example: "/appcode/contoso-logo.svg"
-- SAML_SECRET_KEY: Primary signing key for stateless authentication cookies and SAML RelayState. Use at least 32 random characters, keep it stable across deployments, and provide the same value to every replica. When configured, secure cookies default to enabled.
+- SAML_SECRET_KEY: Required whenever any production authentication method is enabled. Use at least 32 random characters, keep it stable across deployments, and provide the same value to every replica. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Loopback development login may use an ephemeral generated key.
+- AUTH_SESSION_PREVIOUS_SECRET_KEYS: JSON list (or comma-separated list) of prior strong signing keys accepted during rotation. Cookies accepted with an old key are re-signed with the current key.
 - AUTH_SESSION_MAX_AGE_SECONDS: Signed authentication cookie lifetime in seconds. Defaults to `28800` (8 hours).
-- AUTH_SESSION_HTTPS_ONLY: Set to `true` to require HTTPS for the authentication cookie. Defaults to `true` when `SAML_SECRET_KEY` is configured and `false` only for legacy/local compatibility.
+- AUTH_SESSION_HTTPS_ONLY: Require HTTPS for authentication and CSRF cookies. Defaults to `true`; loopback development login defaults it to `false` unless explicitly overridden.
+- AUTH_SESSION_SAME_SITE: Cookie SameSite policy: `lax`, `strict`, or `none`. Defaults to `lax`.
 - SAML_RELAY_STATE_TTL_SECONDS: Maximum SAML login handshake age in seconds. Defaults to `600` (10 minutes).
 - SAML_DEFAULT_REDIRECT: Optional redirect path or URL template after SAML login (defaults to `/{application}` when unset).
    example: "/{application}"
@@ -107,8 +114,23 @@ pip install .
 - REDIS_UPSTASH_INSTANCE_TOKEN: Redis Upstash token
 - DATABASE_URL: Database connection string
    example: "sqlite:////absolute/path/to/database.db"
+- PYTINCTURE_BROWSER_FILES: JSON list or comma-separated globs for extra files to include in the browser package. Python entrypoints and reachable local imports are discovered automatically.
+- PYTINCTURE_PUBLIC_ASSET_PATHS: Explicit globs for files that may be served from `/{application}/appcode/` in addition to standard image, font, media, CSS, and JavaScript assets. Python and configuration files are denied by default.
+- MAX_REQUEST_BODY_BYTES: Maximum request body size. Defaults to 2 MiB.
+- BFF_CALL_TIMEOUT_SECONDS: Maximum non-streaming BFF execution time. Defaults to 30 seconds.
+- BFF_STREAM_MAX_SECONDS: Maximum BFF stream duration. Defaults to 300 seconds.
+- BFF_STREAM_MAX_BYTES: Maximum BFF stream output. Defaults to 10 MiB.
+- BFF_POLICY_HOOK_PATH: Dotted path to a sync or async policy hook. This is the recommended launcher configuration because the hook must be available before application modules are imported or constructed.
+- ENABLE_BFF_REPLAY_TOKENS: Opt-in one-time request proofs for authenticated BFF calls. Generated browser stubs automatically obtain, consume, and refill an in-memory token pool. Defaults to `false`.
+- BFF_REPLAY_TOKEN_BATCH_SIZE: Number of one-time proofs returned in each opaque refill. Defaults to `12`.
+- BFF_REPLAY_TOKEN_LOW_WATERMARK: Refill the browser-side pool when this many proofs remain. Defaults to `3`.
+- BFF_REPLAY_TOKEN_TTL_SECONDS: Lifetime of an unused proof. Defaults to `300` seconds.
+- ENABLE_MCP: Enable the MCP mount. MCP exports no tools by default.
+- MCP_EXPOSED_OPERATIONS: JSON list of explicitly allowed FastAPI operation IDs. Login, session, logging, application delivery, and appcode download operations cannot be exported.
 
-Authenticated browser cookies contain only stable identity claims such as email, name, provider, roles, and picture. Passwords, complete SAML attributes, SAML assertions, and changing SAML session indexes are not stored in the cookie. BFF classes and policy hooks continue to receive the compact authenticated identity.
+Authenticated browser cookies contain only stable identity claims plus opaque session and CSRF identifiers. Passwords, complete SAML attributes, SAML assertions, and changing SAML session indexes are not stored in the cookie. Logout revokes the current session; Upstash-backed services share revocations between replicas.
+
+When `ENABLE_BFF_REPLAY_TOKENS=true`, each authenticated `.pyt` download receives a random, short-lived client decoder and an opaque session-bound capsule. Token refills return an authenticated opaque payload rather than a visible JSON token list. The capsule is recoverable after backend restarts as long as `SAML_SECRET_KEY` remains stable. Without Upstash, already-issued tokens are intentionally invalidated by a backend restart and generated stubs transparently refill them. This feature makes copied completed BFF requests fail and adds a reverse-engineering barrier; it is not a security boundary against a user who controls the browser, WASM memory, or application archive.
 
 ## Running the Service with your application
 -------------------
@@ -123,7 +145,10 @@ if __name__=="__main__":
         default_application="py_ui",  # optional: redirect / to /py_ui
         favicon_folder="branding/favicon",  # optional; relative to modules_folder
         env_vars={
-            "ALLOWED_EMAILS": []
+            "ENABLE_USER_LOGIN": "true",
+            "ENABLE_DEV_EMAIL_LOGIN": "true",
+            "ALLOWED_EMAILS": "developer@example.com",
+            "AUTH_SESSION_HTTPS_ONLY": "false",
         }
     )
 ~~~
@@ -220,7 +245,21 @@ With the CDN script on the page, pytincture auto-detects any `<script type="text
 Errors are rendered inside `#maindiv` (if present) and logged to the console, making it easy to host pure-static demos without the full framework.
 
 ### Backend-for-Frontend access policies
-Every `@backend_for_frontend` class exposes its methods via `/classcall`, but you can now gate each method without modifying pytincture core:
+Only classes marked with `@backend_for_frontend` and their public methods/attributes are registered. Unknown targets are rejected from a static manifest before application code is imported or constructed. Methods default to POST.
+
+Use `@bff_http_methods` to opt a side-effect-free method into GET or to select PUT, PATCH, or DELETE:
+
+```python
+from pytincture.dataclass import backend_for_frontend, bff_http_methods
+
+@backend_for_frontend
+class Reports:
+    @bff_http_methods("GET")
+    def status(self):
+        return {"ready": True}
+```
+
+Policy metadata must use literal values so it can be read without importing the module. Hooks may be synchronous or asynchronous and run before module import, construction, or attribute access:
 
 1. Tag the method with `@bff_policy(...)` to describe whatever metadata you need (roles, scopes, tenants, etc.):
    ```python
@@ -246,7 +285,21 @@ Every `@backend_for_frontend` class exposes its methods via `/classcall`, but yo
    set_bff_policy_hook(my_policy_hook)
    ```
 
-Because the authorization decision lives on the server, even an authenticated user who opens the browser console can’t call methods they don’t have rights to. The hook is optional—if you don’t register one, `bff_policy` metadata is ignored.
+Because the authorization decision lives on the server, even an authenticated user who opens the browser console can’t call methods they don’t have rights to. The hook is optional—if you don’t register one, `bff_policy` metadata is ignored. Cookie-authenticated state-changing calls also require the CSRF token automatically sent by generated browser stubs.
+
+### 0.10 security migration
+
+Version 0.10 intentionally removes insecure legacy behavior:
+
+- configure a strong `SAML_SECRET_KEY` before enabling authentication;
+- configure `AUTH_PASSWORD_HASHES` or `AUTH_USER_AUTHENTICATOR` for local login, or use `ENABLE_DEV_EMAIL_LOGIN` only on loopback during development;
+- decorate every remotely callable class with `@backend_for_frontend`;
+- change manually issued GET method calls to POST or declare `@bff_http_methods("GET")`;
+- explicitly list extra browser package files and public assets;
+- explicitly opt in to MCP operations;
+- update custom cookie-based clients to echo the `pytincture_csrf` cookie in `X-CSRF-Token` for POST, PUT, PATCH, and DELETE.
+
+Pytincture does not currently provide rate limiting. Production deployments should enforce suitable login and request rates at the application gateway or reverse proxy.
 
 ### CI/CD release flow
 Publishing a GitHub release (or manually triggering the `Publish to PyPI` workflow) now runs the following automatically:

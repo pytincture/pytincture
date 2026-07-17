@@ -8,7 +8,9 @@ from pathlib import Path
 # Import functions to test from dataclass.py
 from pytincture.dataclass import (
     backend_for_frontend,
+    bff_http_methods,
     bff_stream,
+    get_bff_manifest,
     get_imports_used_in_class,
     generate_stub_classes,
     get_parsed_output,
@@ -76,6 +78,37 @@ def test_backend_for_frontend_stream_registration():
     finally:
         bff_routes.clear()
         bff_routes.update(previous_routes)
+
+
+def test_bff_http_methods_and_static_manifest(tmp_path):
+    file_path = tmp_path / "reports.py"
+    file_path.write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_http_methods, bff_policy
+
+        @backend_for_frontend
+        @bff_policy(tenant="acme")
+        class Reports:
+            @bff_http_methods("GET")
+            @bff_policy(role="reader")
+            def status(self):
+                return {"ready": True}
+
+            def refresh(self):
+                return {"ready": True}
+    """))
+
+    manifest = get_bff_manifest(str(file_path))
+    assert manifest[("Reports", "status")] == {
+        "policy": {"tenant": "acme", "role": "reader"},
+        "http_methods": ("GET",),
+        "kind": "method",
+    }
+    assert manifest[("Reports", "refresh")]["http_methods"] == ("POST",)
+
+
+def test_bff_http_methods_rejects_unsupported_method():
+    with pytest.raises(ValueError):
+        bff_http_methods("TRACE")
 
 # --------------------------------------------
 # Tests for get_imports_used_in_class
@@ -147,7 +180,7 @@ def test_generate_stub_classes_returns_stub(tmp_path, monkeypatch):
     stub = generate_stub_classes(str(file_path), "example.com", "https")
     # Sync backend methods should keep synchronous stubs.
     assert "class MyService:" in stub
-    assert "async def fetch(self, url, payload=None, method='GET'):" in stub
+    assert "async def fetch(self, url, payload=None, method='GET', _replay_retry=True):" in stub
     assert "def foo(self, *args, **kwargs):" in stub
     assert "response = self.fetch_sync(url, payload, 'POST')" in stub
     assert "async def foo(self, *args, **kwargs):" not in stub
@@ -204,7 +237,7 @@ def test_generate_stub_classes_supports_decorator_aliases_and_async_methods(tmp_
 
     stub = generate_stub_classes(str(file_path), "example.com", "https")
     assert "class AsyncService:" in stub
-    assert "async def fetch(self, url, payload=None, method='GET'):" in stub
+    assert "async def fetch(self, url, payload=None, method='GET', _replay_retry=True):" in stub
     assert "async def ticker(self, *args, **kwargs):" in stub
     assert "async def ping(self, *args, **kwargs):" in stub
     assert "response = await self.fetch(url, payload, 'POST')" in stub
@@ -252,6 +285,54 @@ def test_generate_stub_classes_nested_path(tmp_path, monkeypatch):
     stub = generate_stub_classes(str(file_path), "example.com", "https")
     expected_url = "https://example.com/classcall/api/v1/service.py/NestedService/ping"
     assert expected_url in stub
+
+
+def test_generated_stub_sends_csrf_and_declared_http_method(tmp_path, monkeypatch):
+    file_path = tmp_path / "status.py"
+    file_path.write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_http_methods
+
+        @backend_for_frontend
+        class Status:
+            @bff_http_methods("GET")
+            def read(self):
+                return True
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+
+    stub = generate_stub_classes(str(file_path), "example.com", "https")
+    assert "X-CSRF-Token" in stub
+    assert "pytincture_csrf" in stub
+    assert "response = self.fetch_sync(url, payload, 'GET')" in stub
+
+
+def test_generated_stub_injects_opaque_replay_state_client(tmp_path, monkeypatch):
+    file_path = tmp_path / "service.py"
+    file_path.write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class Service:
+            def read(self):
+                return True
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    replay_client = {"capsule": "opaque-capsule", "key": bytes(range(32))}
+
+    stub = generate_stub_classes(
+        str(file_path),
+        "example.com",
+        "https",
+        replay_client=replay_client,
+    )
+
+    assert "_pytincture_replay_enabled = True" in stub
+    assert "_pytincture_replay_capsule = 'opaque-capsule'" in stub
+    assert "https://example.com/_pytincture/state" in stub
+    assert "X-Pytincture-BFF-Token" in stub
+    assert "X-Pytincture-Client" in stub
+    assert "_decode_pytincture_state" in stub
+    compile(stub, str(file_path), "exec")
 
 def test_get_parsed_output_returns_stub(tmp_path):
     """
