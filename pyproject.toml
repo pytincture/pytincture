@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "aiofiles==25.1.0",
     "fastapi==0.128.0",
-    "fastmcp==2.14.5",
+    "fastmcp==3.2.4",
     "upstash-redis>=1.2.0",
     "pyyaml==6.0.3",
     "requests==2.32.5",
