@@ -302,16 +302,16 @@ Version 0.10 intentionally removes insecure legacy behavior:
 Pytincture does not currently provide rate limiting. Production deployments should enforce suitable login and request rates at the application gateway or reverse proxy.
 
 ### CI/CD release flow
-Publishing a GitHub release (or manually triggering the `Publish to PyPI` workflow) now runs the following automatically:
+Python and JavaScript publishing use separate GitHub Actions workflows. Publishing a GitHub release triggers both independently, and either workflow can also be run manually:
 
-1. Build and upload the Python package to PyPI via `twine`.
-2. Build the frontend runtime bundles and publish them to npm (using the same version as `pytincture/__init__.__version__`).
+1. `Publish to PyPI` builds and uploads only the Python package via `twine`.
+2. `Publish JavaScript Runtime` builds and publishes only `@pytincture/runtime` to npm, using the version from `pytincture/__init__.__version__`.
 
 Required GitHub secrets:
 - `PYPI_PASSWORD`: a PyPI API token (formatted `pypi-***`) with publish rights to `pytincture`.
 - `NPM_TOKEN`: an npm access token with publish rights to `@pytincture/runtime`.
 
-Both secrets must be configured at the repo (or org) level for the workflow to succeed.
+Each secret is required only by its corresponding workflow, so a missing or failed npm publication does not affect the PyPI publication, and vice versa.
 
 ## License
 `pyTincture` is licensed under the MIT License.
