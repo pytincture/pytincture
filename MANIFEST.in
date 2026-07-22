@@ -1,1 +1,14 @@
-recursive-include pytincture/frontend *
+include pytincture/frontend/index.html
+include pytincture/frontend/pytincture.js
+include pytincture/frontend/sw.js
+recursive-include pytincture/frontend/dist *
+recursive-include pytincture/frontend/pyodide *
+exclude pytincture/frontend/README.md
+exclude pytincture/frontend/package.json
+exclude pytincture/frontend/package-lock.json
+exclude pytincture/frontend/build.mjs
+exclude pytincture/frontend/sync-version.mjs
+prune pytincture/frontend/node_modules
+prune pytincture/frontend/__pycache__
+prune build
+global-exclude *.py[cod]

@@ -9,17 +9,16 @@ import io
 import zipfile
 import importlib
 import asyncio
-import nest_asyncio
 import base64
 import hashlib
+import hmac
+import logging
+import secrets
+import time
+import uuid
+import fnmatch
+import copy
 from xml.etree import ElementTree
-try:
-    nest_asyncio.apply()
-except ValueError as exc:
-    # uvloop event loops cannot be patched; skip when uvloop is active.
-    if "uvloop" not in str(exc):
-        raise
-
 # FastAPI / Starlette
 from fastapi import Depends, FastAPI, Request, Response, HTTPException, Body
 from fastapi.exceptions import RequestValidationError
@@ -30,13 +29,16 @@ from fastmcp import FastMCP
 
 # Pytincture
 from pytincture import get_modules_path
-from pytincture.dataclass import get_parsed_output, add_bff_docs_to_app
+from pytincture.dataclass import get_parsed_output, add_bff_docs_to_app, get_bff_manifest
 from importlib.machinery import SourceFileLoader
 
 # Google OAuth via Authlib
 from authlib.integrations.starlette_client import OAuth, OAuthError
-from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from itsdangerous import BadSignature, SignatureExpired, TimestampSigner, URLSafeTimedSerializer
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.datastructures import MutableHeaders
+from starlette.requests import HTTPConnection
+from starlette.concurrency import run_in_threadpool
 from starlette.config import Config
 
 from typing import Any, Union, Dict, List, Optional, Iterable, AsyncIterable, Set, Callable
@@ -56,6 +58,107 @@ from html import escape
 # ========================
 
 app = FastAPI(title="pyTincture API")
+logger = logging.getLogger("pytincture.security")
+
+
+class RotatingSessionMiddleware(SessionMiddleware):
+    """Starlette sessions that accept old signing keys and re-sign with the current key."""
+
+    def __init__(self, app, secret_key, previous_secret_keys=None, **kwargs):
+        super().__init__(app, secret_key=secret_key, **kwargs)
+        self.previous_signers = [
+            TimestampSigner(str(key)) for key in (previous_secret_keys or []) if str(key)
+        ]
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        connection = HTTPConnection(scope)
+        initial_session_was_empty = True
+        if self.session_cookie in connection.cookies:
+            signed_data = connection.cookies[self.session_cookie].encode("utf-8")
+            for signer in (self.signer, *self.previous_signers):
+                try:
+                    decoded = signer.unsign(signed_data, max_age=self.max_age)
+                    scope["session"] = json.loads(base64.b64decode(decoded))
+                    initial_session_was_empty = False
+                    break
+                except (BadSignature, ValueError, json.JSONDecodeError):
+                    continue
+            else:
+                scope["session"] = {}
+        else:
+            scope["session"] = {}
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                if scope["session"]:
+                    data = base64.b64encode(json.dumps(scope["session"]).encode("utf-8"))
+                    signed = self.signer.sign(data).decode("utf-8")
+                    max_age = f"Max-Age={self.max_age}; " if self.max_age else ""
+                    headers.append(
+                        "Set-Cookie",
+                        f"{self.session_cookie}={signed}; path={self.path}; "
+                        f"{max_age}{self.security_flags}",
+                    )
+                elif not initial_session_was_empty:
+                    headers.append(
+                        "Set-Cookie",
+                        f"{self.session_cookie}=null; path={self.path}; "
+                        f"expires=Thu, 01 Jan 1970 00:00:00 GMT; {self.security_flags}",
+                    )
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
+class RequestBodyLimitMiddleware:
+    """Reject request bodies that exceed the configured byte limit."""
+
+    def __init__(self, app, max_bytes: int):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = dict(scope.get("headers") or [])
+        content_length = headers.get(b"content-length")
+        if content_length:
+            try:
+                if int(content_length) > self.max_bytes:
+                    response = JSONResponse(
+                        {"detail": "Request body too large"}, status_code=413
+                    )
+                    await response(scope, receive, send)
+                    return
+            except ValueError:
+                response = JSONResponse({"detail": "Invalid Content-Length"}, status_code=400)
+                await response(scope, receive, send)
+                return
+
+        received = 0
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message.get("type") == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    raise HTTPException(status_code=413, detail="Request body too large")
+            return message
+
+        try:
+            await self.app(scope, limited_receive, send)
+        except HTTPException as exc:
+            if exc.status_code != 413:
+                raise
+            response = JSONResponse({"detail": "Request body too large"}, status_code=413)
+            await response(scope, receive, send)
 
 
 def _build_streamable_mcp_app(mcp_server, path: str = "/"):
@@ -119,6 +222,60 @@ def _load_source_module(file_path: str, name_hint: str):
 
     return module
 
+class _FilteredFastAPIApp:
+    def __init__(self, source_app: FastAPI, operation_ids: Set[str]):
+        self.source_app = source_app
+        self.operation_ids = operation_ids
+        self.title = source_app.title
+
+    def openapi(self):
+        schema = copy.deepcopy(self.source_app.openapi())
+        filtered_paths = {}
+        for path, path_item in schema.get("paths", {}).items():
+            selected = {
+                key: value
+                for key, value in path_item.items()
+                if key not in {"get", "post", "put", "patch", "delete", "options", "head"}
+                or value.get("operationId") in self.operation_ids
+            }
+            if any(key in selected for key in {"get", "post", "put", "patch", "delete"}):
+                filtered_paths[path] = selected
+        schema["paths"] = filtered_paths
+        return schema
+
+    async def __call__(self, scope, receive, send):
+        await self.source_app(scope, receive, send)
+
+
+def _mcp_operation_ids() -> Set[str]:
+    if os.getenv("ENABLE_MCP", "false").lower() != "true":
+        return set()
+    raw = os.getenv("MCP_EXPOSED_OPERATIONS", "[]")
+    try:
+        configured = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("MCP_EXPOSED_OPERATIONS must be a JSON list") from exc
+    if not isinstance(configured, list) or any(not isinstance(value, str) for value in configured):
+        raise RuntimeError("MCP_EXPOSED_OPERATIONS must be a JSON list")
+    forbidden = {
+        "handleUserAuth", "mcpAuth", "logoutUser", "postLogs",
+        "downloadAppcodePackage", "getLoginPage", "getMainApp",
+        "issueBffReplayTokens",
+        "initiateGoogleAuth", "handleGoogleAuthCallback",
+        "initiateMicrosoftAuth", "handleMicrosoftAuthCallback",
+        "initiateSamlAuth", "initiateSamlProviderAuth",
+        "handleSamlAuthCallback", "handleSamlProviderAuthCallback",
+    }
+    requested = set(configured)
+    disallowed = requested & forbidden
+    if disallowed:
+        raise RuntimeError(
+            "MCP_EXPOSED_OPERATIONS contains session/login/application routes: "
+            + ", ".join(sorted(disallowed))
+        )
+    return requested
+
+
 def reload_mcp_tools():
     global mcp, mcp_http_app  # Use globals or pass as needed if in a class/module
     
@@ -129,26 +286,13 @@ def reload_mcp_tools():
         if not route.path.startswith("/mcp")
     ]
     
-    # Step 2: Recreate FastMCP instance (rescans app for new endpoints/tools)
-    mcp = FastMCP.from_fastapi(app=app, name="short")  # Add name="short" to reduce prefixed/suffixed lengths
-    print("MCP Tools reloaded successfully.")
-    
-    # Test tool name lengths
-    print("\nTesting MCP Tool Name Lengths:")
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop is not None and loop.is_running():
-        print("Skipping MCP tool length test: event loop already running.")
+    operation_ids = _mcp_operation_ids()
+    if operation_ids:
+        mcp_source = _FilteredFastAPIApp(app, operation_ids)
+        mcp = FastMCP.from_fastapi(app=mcp_source, name="pytincture")
     else:
-        tools = asyncio.run(mcp.get_tools())
-        for tool in tools.values():
-            name_length = len(tool.name)
-            print(f"Tool: {tool.name} | Length: {name_length} chars | Over Limit: {name_length > 64}")
-            if name_length > 64:
-                print(f"  WARNING: Exceeds 64-char limit! Suggested truncate: {tool.name[:61]}...")
+        mcp = FastMCP(name="pytincture")
+    logger.info("MCP tools reloaded for operations: %s", sorted(operation_ids))
     
     # Step 3: Recreate MCP app using streamable HTTP transport
     mcp_http_app = _build_streamable_mcp_app(mcp, path='/')
@@ -156,25 +300,97 @@ def reload_mcp_tools():
     # Step 4: Remount the updated MCP app
     app.mount("/mcp", mcp_http_app)
 
-def create_appcode_pkg_in_memory(host, protocol):
-    """Generate an appcode package in memory for the browser to pull for the frontend."""
-    appcode_folder = get_modules_path()
+def _local_python_imports(file_path: str, modules_root: str) -> Set[str]:
+    """Return local Python files directly imported by a browser module."""
+    try:
+        with open(file_path, "r", encoding="utf-8") as source_file:
+            tree = ast.parse(source_file.read(), filename=file_path)
+    except (OSError, SyntaxError):
+        return set()
+    discovered: Set[str] = set()
+    for node in ast.walk(tree):
+        candidates: List[str] = []
+        if isinstance(node, ast.Import):
+            candidates.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            candidates.append(node.module)
+        for module_name in candidates:
+            relative = module_name.replace(".", os.sep)
+            for candidate in (
+                os.path.join(modules_root, f"{relative}.py"),
+                os.path.join(modules_root, relative, "__init__.py"),
+            ):
+                if os.path.isfile(candidate):
+                    discovered.add(os.path.abspath(candidate))
+    return discovered
+
+
+def _configured_browser_files(modules_root: str) -> Set[str]:
+    raw_patterns = os.getenv("PYTINCTURE_BROWSER_FILES", "").strip()
+    if not raw_patterns:
+        return set()
+    try:
+        patterns = json.loads(raw_patterns)
+    except json.JSONDecodeError:
+        patterns = [value.strip() for value in raw_patterns.split(",") if value.strip()]
+    if not isinstance(patterns, list) or any(not isinstance(value, str) for value in patterns):
+        raise RuntimeError("PYTINCTURE_BROWSER_FILES must be a JSON list or comma-separated globs")
+    selected: Set[str] = set()
+    for root, dirs, files in os.walk(modules_root):
+        dirs[:] = [
+            directory
+            for directory in dirs
+            if not directory.startswith(".")
+            and directory
+            not in {"__pycache__", ".venv", "venv", "node_modules", "build", "dist"}
+        ]
+        for filename in files:
+            absolute = os.path.abspath(os.path.join(root, filename))
+            relative = os.path.relpath(absolute, modules_root).replace(os.sep, "/")
+            if any(fnmatch.fnmatch(relative, pattern) for pattern in patterns):
+                selected.add(absolute)
+    return selected
+
+
+def _browser_package_files(application: str) -> Set[str]:
+    modules_root = os.path.abspath(get_modules_path())
+    entrypoint = os.path.abspath(os.path.join(modules_root, f"{application}.py"))
+    if os.path.commonpath((modules_root, entrypoint)) != modules_root or not os.path.isfile(entrypoint):
+        raise HTTPException(status_code=404, detail="Application entrypoint not found")
+    selected = {entrypoint}
+    pending = [entrypoint]
+    while pending:
+        for imported in _local_python_imports(pending.pop(), modules_root):
+            if imported not in selected:
+                selected.add(imported)
+                pending.append(imported)
+    for python_file in tuple(selected):
+        parent = os.path.dirname(python_file)
+        while parent != modules_root and os.path.commonpath((modules_root, parent)) == modules_root:
+            package_init = os.path.join(parent, "__init__.py")
+            if os.path.isfile(package_init):
+                selected.add(os.path.abspath(package_init))
+            parent = os.path.dirname(parent)
+    return selected | _configured_browser_files(modules_root)
+
+
+def create_appcode_pkg_in_memory(host, protocol, application, replay_client=None):
+    """Generate an explicit browser-safe app package in memory."""
+    appcode_folder = os.path.abspath(get_modules_path())
     in_memory_zip = io.BytesIO()
     with zipfile.ZipFile(in_memory_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk(appcode_folder):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, appcode_folder)
-                if not (file.endswith('.zip') or file.endswith('.pyt') or file.endswith('.pyc') or file.endswith('.whl') or file.startswith('.')):
-                    if "__pycache__" not in root and ".venv" not in root:
-                        if file.endswith('.py'):
-                            file_contents = get_parsed_output(file_path, host, protocol)
-                            if os.path.getsize(file_path) != 0:
-                                zipf.writestr(arcname, file_contents)
-                            else:
-                                zipf.write(file_path, arcname)
-                        else:
-                            zipf.write(file_path, arcname)
+        for file_path in sorted(_browser_package_files(application)):
+            arcname = os.path.relpath(file_path, appcode_folder).replace(os.sep, "/")
+            if file_path.endswith('.py'):
+                file_contents = get_parsed_output(
+                    file_path,
+                    host,
+                    protocol,
+                    replay_client=replay_client,
+                )
+                zipf.writestr(arcname, file_contents or "")
+            else:
+                zipf.write(file_path, arcname)
     in_memory_zip.seek(0)
     return in_memory_zip
 
@@ -211,9 +427,63 @@ async def favicon():
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
+    sanitized_errors = [
+        {
+            key: value
+            for key, value in error.items()
+            if key in {"loc", "msg", "type"}
+        }
+        for error in exc.errors()
+    ]
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors(), "body": exc.body},
+        content={"detail": sanitized_errors},
+    )
+
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    correlation_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    request.state.correlation_id = correlation_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = correlation_id
+    csrf_token = request.session.get("csrf_token") if hasattr(request, "session") else None
+    if csrf_token:
+        response.set_cookie(
+            "pytincture_csrf",
+            csrf_token,
+            max_age=AUTH_SESSION_MAX_AGE_SECONDS,
+            secure=AUTH_SESSION_HTTPS_ONLY,
+            httponly=False,
+            samesite=AUTH_SESSION_SAME_SITE,
+        )
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def sanitized_http_exception_handler(request: Request, exc: HTTPException):
+    if exc.status_code >= 500:
+        correlation_id = getattr(request.state, "correlation_id", uuid.uuid4().hex)
+        logger.error(
+            "HTTP failure correlation_id=%s status=%s",
+            correlation_id,
+            exc.status_code,
+            exc_info=exc,
+        )
+        return JSONResponse(
+            {"detail": "Internal server error", "correlation_id": correlation_id},
+            status_code=exc.status_code,
+        )
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
+
+
+@app.exception_handler(Exception)
+async def sanitized_exception_handler(request: Request, exc: Exception):
+    correlation_id = getattr(request.state, "correlation_id", uuid.uuid4().hex)
+    logger.exception("Unhandled request failure correlation_id=%s", correlation_id)
+    return JSONResponse(
+        {"detail": "Internal server error", "correlation_id": correlation_id},
+        status_code=500,
     )
 
 def get_widgetset(application, static_path):
@@ -258,6 +528,13 @@ def create_pytincture_pkg_in_memory():
     in_memory_zip = io.BytesIO()
     with zipfile.ZipFile(in_memory_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(pytincture_folder):
+            dirs[:] = [
+                directory
+                for directory in dirs
+                if not directory.startswith(".")
+                and directory
+                not in {"__pycache__", ".venv", "venv", "node_modules", "build", "dist"}
+            ]
             for file in files:
                 file_path = os.path.join(root, file)
                 arcname = os.path.relpath(file_path, os.path.join(pytincture_folder, '..'))
@@ -282,7 +559,7 @@ if allowed_origins:
         allow_headers=allow_all_headers,
     )
 else:
-    print("CORS middleware disabled: set CORS_ALLOWED_ORIGINS to enable cross-origin requests.")
+    logger.info("CORS middleware disabled; set CORS_ALLOWED_ORIGINS to enable it")
 
 from upstash_redis import Redis
 
@@ -339,6 +616,13 @@ class RedisDict:
         # Update local cache with the *decoded* form
         self._cache[key] = value
 
+    def set_with_ttl(self, key, value, ttl_seconds: int):
+        """Set a value that Redis removes automatically after the TTL."""
+        full_key = self._prefix + key
+        serialized = json.dumps(value) if isinstance(value, dict) else str(value)
+        self._redis.set(full_key, serialized, ex=ttl_seconds)
+        self._cache[key] = value
+
     def __delitem__(self, key):
         """Deletes the item from Redis and the local cache. Raises KeyError if missing."""
         full_key = self._prefix + key
@@ -349,6 +633,17 @@ class RedisDict:
         # Also remove from local cache if present
         if key in self._cache:
             del self._cache[key]
+
+    def pop_atomic(self, key, default=None):
+        """Atomically fetch and delete a value, for one-time token consumption."""
+        full_key = self._prefix + key
+        value = self._redis.getdel(full_key)
+        self._cache.pop(key, None)
+        if value is None:
+            return default
+        if isinstance(value, str) and value.startswith("{") and value.endswith("}"):
+            return json.loads(value)
+        return value
 
     def __contains__(self, key):
         """
@@ -459,10 +754,70 @@ if  USE_REDIS_INSTANCE == "true":
         redis_token=REDIS_UPSTASH_INSTANCE_TOKEN,
         key_prefix="session"
     )
+    AUTH_SESSION_REVOCATIONS = RedisDict(
+        redis_url=REDIS_UPSTASH_INSTANCE_URL,
+        redis_token=REDIS_UPSTASH_INSTANCE_TOKEN,
+        key_prefix="revoked-session:",
+    )
+    BFF_REPLAY_TOKEN_STORE = RedisDict(
+        redis_url=REDIS_UPSTASH_INSTANCE_URL,
+        redis_token=REDIS_UPSTASH_INSTANCE_TOKEN,
+        key_prefix="bff-replay-token:",
+    )
 else:
     USER_SESSION_DICT = {}
+    AUTH_SESSION_REVOCATIONS = {}
+    BFF_REPLAY_TOKEN_STORE = {}
 
 MODULE_PATH = get_modules_path()
+
+
+def build_bff_registry(modules_root: Optional[str] = None) -> Dict[tuple[str, str, str], Dict[str, Any]]:
+    """Build the complete exported BFF registry without importing application code."""
+    root_path = os.path.abspath(modules_root or get_modules_path())
+    registry: Dict[tuple[str, str, str], Dict[str, Any]] = {}
+    if not os.path.isdir(root_path):
+        return registry
+    for root, dirs, files in os.walk(root_path):
+        dirs[:] = [
+            directory
+            for directory in dirs
+            if not directory.startswith(".")
+            and directory
+            not in {"__pycache__", ".venv", "venv", "node_modules", "build", "dist"}
+        ]
+        for filename in files:
+            if not filename.endswith(".py") or filename.startswith("."):
+                continue
+            file_path = os.path.join(root, filename)
+            relative_path = os.path.relpath(file_path, root_path).replace(os.sep, "/")
+            try:
+                file_manifest = get_bff_manifest(file_path)
+            except (OSError, SyntaxError, ValueError) as exc:
+                raise RuntimeError(f"Unable to build BFF manifest for {relative_path}") from exc
+            for (class_name, function_name), operation in file_manifest.items():
+                registry[(relative_path, class_name, function_name)] = operation
+    return registry
+
+
+BFF_REGISTRY_ROOT = os.path.abspath(MODULE_PATH)
+BFF_REGISTRY = build_bff_registry(BFF_REGISTRY_ROOT)
+
+
+def reload_bff_registry(modules_root: Optional[str] = None):
+    """Rebuild exported BFF operations, for example after development-time file changes."""
+    global BFF_REGISTRY_ROOT, BFF_REGISTRY
+    BFF_REGISTRY_ROOT = os.path.abspath(modules_root or get_modules_path())
+    BFF_REGISTRY = build_bff_registry(BFF_REGISTRY_ROOT)
+    return BFF_REGISTRY
+
+
+def _registered_bff_operation(
+    modules_root: str, relative_path: str, class_name: str, function_name: str
+) -> Optional[Dict[str, Any]]:
+    if os.path.abspath(modules_root) != BFF_REGISTRY_ROOT:
+        reload_bff_registry(modules_root)
+    return BFF_REGISTRY.get((relative_path.replace(os.sep, "/"), class_name, function_name))
 
 try:
     ALLOWED_NOAUTH_CLASSCALLS = json.loads(os.environ.get("ALLOWED_NOAUTH_CLASSCALLS", "[]"))
@@ -473,10 +828,11 @@ except json.JSONDecodeError as e:
 app.mount("/{application}/frontend", StaticFiles(directory=STATIC_PATH), name="static")
 app.mount("/frontend", StaticFiles(directory=STATIC_PATH), name="static_frontend")
 
-BFF_POLICY_HOOK: Optional[Callable[..., None]] = None
+BFF_POLICY_HOOK: Optional[Callable[..., Any]] = None
+USER_AUTHENTICATOR: Optional[Callable[..., Any]] = None
 
 
-def set_bff_policy_hook(hook: Optional[Callable[..., None]]):
+def set_bff_policy_hook(hook: Optional[Callable[..., Any]]):
     """
     Register (or clear) a global hook that runs before each backend_for_frontend call.
     The hook receives the resolved user session, policy metadata, and request context.
@@ -484,6 +840,167 @@ def set_bff_policy_hook(hook: Optional[Callable[..., None]]):
     global BFF_POLICY_HOOK
     BFF_POLICY_HOOK = hook
     return hook
+
+
+def _configured_bff_policy_hook() -> Optional[Callable[..., Any]]:
+    if BFF_POLICY_HOOK is not None:
+        return BFF_POLICY_HOOK
+    dotted_path = os.getenv("BFF_POLICY_HOOK_PATH", "").strip()
+    if not dotted_path:
+        return None
+    module_name, separator, attribute_name = dotted_path.rpartition(".")
+    if not separator:
+        raise RuntimeError("BFF_POLICY_HOOK_PATH must be a dotted callable path")
+    hook = getattr(importlib.import_module(module_name), attribute_name)
+    if not callable(hook):
+        raise RuntimeError("BFF_POLICY_HOOK_PATH must resolve to a callable")
+    return hook
+
+
+def set_user_authenticator(authenticator: Optional[Callable[..., Any]]):
+    """Register a local email/password authenticator that returns trusted user claims."""
+    global USER_AUTHENTICATOR
+    USER_AUTHENTICATOR = authenticator
+    return authenticator
+
+
+def revoke_session(session_id: str) -> None:
+    """Revoke a signed session; Redis-backed deployments share the revocation."""
+    if session_id:
+        expires_at = time.time() + AUTH_SESSION_MAX_AGE_SECONDS
+        set_with_ttl = getattr(AUTH_SESSION_REVOCATIONS, "set_with_ttl", None)
+        if callable(set_with_ttl):
+            set_with_ttl(session_id, expires_at, AUTH_SESSION_MAX_AGE_SECONDS)
+        else:
+            for revoked_id, revoked_until in tuple(AUTH_SESSION_REVOCATIONS.items()):
+                try:
+                    if float(revoked_until) <= time.time():
+                        del AUTH_SESSION_REVOCATIONS[revoked_id]
+                except (TypeError, ValueError):
+                    continue
+            AUTH_SESSION_REVOCATIONS[session_id] = expires_at
+
+
+def _session_is_revoked(session_id: str) -> bool:
+    expires_at = AUTH_SESSION_REVOCATIONS.get(session_id)
+    if expires_at is None:
+        return False
+    try:
+        if float(expires_at) > time.time():
+            return True
+    except (TypeError, ValueError):
+        return True
+    try:
+        del AUTH_SESSION_REVOCATIONS[session_id]
+    except (KeyError, TypeError):
+        pass
+    return False
+
+
+def _configured_user_authenticator() -> Optional[Callable[..., Any]]:
+    if USER_AUTHENTICATOR is not None:
+        return USER_AUTHENTICATOR
+    dotted_path = os.getenv("AUTH_USER_AUTHENTICATOR", "").strip()
+    if not dotted_path:
+        return None
+    module_name, separator, attribute_name = dotted_path.rpartition(".")
+    if not separator:
+        raise RuntimeError("AUTH_USER_AUTHENTICATOR must be a dotted callable path")
+    authenticator = getattr(importlib.import_module(module_name), attribute_name)
+    if not callable(authenticator):
+        raise RuntimeError("AUTH_USER_AUTHENTICATOR must resolve to a callable")
+    return authenticator
+
+
+def _allowed_email(email: str) -> bool:
+    configured = {
+        value.strip().casefold()
+        for value in os.getenv("ALLOWED_EMAILS", "").split(",")
+        if value.strip()
+    }
+    return not configured or email.casefold() in configured
+
+
+def _is_loopback_development_request(request: Request) -> bool:
+    allowed_hosts = {"localhost", "127.0.0.1", "::1", "testserver"}
+    hostname = (request.url.hostname or "").casefold()
+    forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0]
+    forwarded_hostname = forwarded_host.rsplit(":", 1)[0].strip("[]").casefold()
+    return hostname in allowed_hosts and (not forwarded_host or forwarded_hostname in allowed_hosts)
+
+
+def _verify_configured_password(email: str, password: str) -> bool:
+    raw_hashes = os.getenv("AUTH_PASSWORD_HASHES", "").strip()
+    if not raw_hashes:
+        return False
+    try:
+        password_hashes = json.loads(raw_hashes)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("AUTH_PASSWORD_HASHES must be a JSON object") from exc
+    if not isinstance(password_hashes, dict):
+        raise RuntimeError("AUTH_PASSWORD_HASHES must be a JSON object")
+    configured_hash = password_hashes.get(email) or password_hashes.get(email.casefold())
+    known_user = isinstance(configured_hash, str)
+    encoded_hash = configured_hash if known_user else (
+        "$argon2id$v=19$m=65536,t=3,p=4$afcNkBX8goR7Ng5icg3p9w$"
+        "UZsHTGXyFb9XrYQnpjpUvFRKKrc3WdWdH8oKTuGhX8M"
+    )
+    try:
+        if encoded_hash.startswith("$argon2id$"):
+            from argon2 import PasswordHasher
+            from argon2.exceptions import VerificationError
+
+            try:
+                verified = PasswordHasher().verify(encoded_hash, password)
+                return known_user and verified
+            except VerificationError:
+                return False
+        if encoded_hash.startswith(("$2a$", "$2b$", "$2y$")):
+            import bcrypt
+
+            verified = bcrypt.checkpw(password.encode("utf-8"), encoded_hash.encode("utf-8"))
+            return known_user and verified
+    except (ValueError, TypeError):
+        return False
+    raise RuntimeError("AUTH_PASSWORD_HASHES values must be Argon2id or bcrypt hashes")
+
+
+async def _authenticate_local_user(
+    request: Request, email: str, password: str
+) -> Dict[str, Any]:
+    if not ENABLE_USER_LOGIN:
+        raise HTTPException(status_code=403, detail="User login not enabled")
+    normalized_email = str(email or "").strip().casefold()
+    if not normalized_email or not isinstance(password, str) or not _allowed_email(normalized_email):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    authenticator = _configured_user_authenticator()
+    if authenticator is not None:
+        authenticated = authenticator(
+            email=normalized_email, password=password, request=request
+        )
+        if inspect.isawaitable(authenticated):
+            authenticated = await authenticated
+        if not authenticated:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        if authenticated is True:
+            return {"email": normalized_email}
+        if not isinstance(authenticated, dict):
+            raise RuntimeError("User authenticator must return a mapping, True, or False")
+        return {**authenticated, "email": normalized_email}
+
+    if _verify_configured_password(normalized_email, password):
+        return {"email": normalized_email}
+
+    if (
+        ENABLE_DEV_EMAIL_LOGIN
+        and os.getenv("ALLOWED_EMAILS", "").strip()
+        and _is_loopback_development_request(request)
+    ):
+        logger.warning("Using loopback-only development email login for %s", normalized_email)
+        return {"email": normalized_email}
+
+    raise HTTPException(status_code=401, detail="Invalid email or password")
 
 
 def _normalize_file_identifier(value: str) -> str:
@@ -556,6 +1073,8 @@ def _coerce_policy_user(user: Any) -> Dict[str, Any]:
 def _clear_auth_session(request: Request) -> None:
     for key in (
         "user",
+        "session_id",
+        "csrf_token",
         "saml_name_id",
         "saml_session_index",
         "saml_provider_id",
@@ -641,6 +1160,8 @@ def _set_authenticated_user(
     session_user = _build_auth_session_user(user_info, **identity_overrides)
     _clear_auth_session(request)
     request.session["user"] = session_user
+    request.session["session_id"] = secrets.token_urlsafe(24)
+    request.session["csrf_token"] = secrets.token_urlsafe(32)
     return session_user
 
 
@@ -669,6 +1190,11 @@ def require_auth(request: Request):
             _clear_auth_session(request)
             return None
 
+        session_id = request.session.get("session_id")
+        if not isinstance(session_id, str) or not session_id or _session_is_revoked(session_id):
+            _clear_auth_session(request)
+            return None
+
         return user_session
     else:
         return {
@@ -680,23 +1206,295 @@ def require_auth(request: Request):
             "is_authenticated": False,
         }
 
+
+def require_authenticated_user(request: Request):
+    user = require_auth(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
+
+
+def _request_origin(request: Request) -> str:
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",", 1)[0]
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", "")).split(",", 1)[0]
+    return f"{scheme}://{host}".rstrip("/")
+
+
+def _validate_csrf(request: Request, user: Any) -> None:
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    if not isinstance(user, dict) or user.get("is_authenticated") is not True:
+        return
+    expected = request.session.get("csrf_token", "")
+    supplied = request.headers.get("x-csrf-token", "")
+    if not expected or not supplied or not hmac.compare_digest(str(expected), supplied):
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
+    origin = request.headers.get("origin")
+    if origin and origin.rstrip("/") != _request_origin(request):
+        raise HTTPException(status_code=403, detail="Origin validation failed")
+
+
+def _bff_replay_subject(request: Request, user: Any) -> Optional[str]:
+    if not isinstance(user, dict) or user.get("is_authenticated") is not True:
+        return None
+    session_id = request.session.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return session_id
+
+
+def _bff_replay_token_key(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _purge_expired_bff_replay_tokens() -> None:
+    if not isinstance(BFF_REPLAY_TOKEN_STORE, dict):
+        return
+    now = time.time()
+    for key, value in tuple(BFF_REPLAY_TOKEN_STORE.items()):
+        if not isinstance(value, dict) or float(value.get("expires_at", 0)) <= now:
+            BFF_REPLAY_TOKEN_STORE.pop(key, None)
+
+
+def _store_with_optional_ttl(store, key: str, value: Dict[str, Any], ttl: int) -> None:
+    set_with_ttl = getattr(store, "set_with_ttl", None)
+    if callable(set_with_ttl):
+        set_with_ttl(key, value, ttl)
+    else:
+        store[key] = value
+
+
+def _register_bff_replay_client(request: Request, user: Any) -> Optional[Dict[str, Any]]:
+    if not ENABLE_BFF_REPLAY_TOKENS:
+        return None
+    session_id = _bff_replay_subject(request, user)
+    if session_id is None:
+        return None
+    key = secrets.token_bytes(32)
+    expires_at = time.time() + AUTH_SESSION_MAX_AGE_SECONDS
+    descriptor = json.dumps(
+        {
+            "session_id": session_id,
+            "key": base64.urlsafe_b64encode(key).decode("ascii"),
+            "expires_at": expires_at,
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    capsule_key = hashlib.sha256(
+        SAML_SECRET_KEY.encode("utf-8") + b"pytincture-bff-client-capsule-v1"
+    ).digest()
+    return {"capsule": _encrypt_opaque_envelope(capsule_key, descriptor), "key": key}
+
+
+def _bff_replay_client_key(request: Request, session_id: str) -> bytes:
+    capsule = request.headers.get("x-pytincture-client", "")
+    capsule_key = hashlib.sha256(
+        SAML_SECRET_KEY.encode("utf-8") + b"pytincture-bff-client-capsule-v1"
+    ).digest()
+    try:
+        record = json.loads(_decrypt_opaque_envelope(capsule_key, capsule))
+    except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=409, detail="Browser state expired") from exc
+    if (
+        not isinstance(record, dict)
+        or record.get("session_id") != session_id
+        or float(record.get("expires_at", 0)) <= time.time()
+    ):
+        raise HTTPException(status_code=409, detail="Browser state expired")
+    try:
+        return base64.urlsafe_b64decode(str(record["key"]).encode("ascii"))
+    except (KeyError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=409, detail="Browser state expired") from exc
+
+
+def _encrypt_opaque_envelope(key: bytes, plaintext: bytes) -> str:
+    nonce = secrets.token_bytes(16)
+    encrypted = bytearray()
+    for offset in range(0, len(plaintext), 32):
+        counter = (offset // 32).to_bytes(4, "big")
+        stream = hmac.new(key, b"enc" + nonce + counter, hashlib.sha256).digest()
+        encrypted.extend(
+            value ^ stream[index]
+            for index, value in enumerate(plaintext[offset:offset + 32])
+        )
+    ciphertext = bytes(encrypted)
+    tag = hmac.new(key, b"tag" + nonce + ciphertext, hashlib.sha256).digest()[:16]
+    return base64.urlsafe_b64encode(nonce + ciphertext + tag).decode("ascii").rstrip("=")
+
+
+def _decrypt_opaque_envelope(key: bytes, encoded: str) -> bytes:
+    if not encoded:
+        raise ValueError("Missing envelope")
+    padding = "=" * (-len(encoded) % 4)
+    packed = base64.urlsafe_b64decode((encoded + padding).encode("ascii"))
+    if len(packed) < 33:
+        raise ValueError("Invalid envelope")
+    nonce, ciphertext, supplied_tag = packed[:16], packed[16:-16], packed[-16:]
+    expected_tag = hmac.new(
+        key,
+        b"tag" + nonce + ciphertext,
+        hashlib.sha256,
+    ).digest()[:16]
+    if not hmac.compare_digest(supplied_tag, expected_tag):
+        raise ValueError("Invalid envelope")
+    plaintext = bytearray()
+    for offset in range(0, len(ciphertext), 32):
+        counter = (offset // 32).to_bytes(4, "big")
+        stream = hmac.new(key, b"enc" + nonce + counter, hashlib.sha256).digest()
+        plaintext.extend(
+            value ^ stream[index]
+            for index, value in enumerate(ciphertext[offset:offset + 32])
+        )
+    return bytes(plaintext)
+
+
+def _encrypt_bff_replay_payload(key: bytes, tokens: List[str]) -> str:
+    """Return an authenticated opaque envelope for the generated browser stub."""
+    plaintext = json.dumps({"v": 1, "items": tokens}, separators=(",", ":")).encode("utf-8")
+    return _encrypt_opaque_envelope(key, plaintext)
+
+
+def _issue_bff_replay_tokens(session_id: str) -> List[str]:
+    _purge_expired_bff_replay_tokens()
+    expires_at = time.time() + BFF_REPLAY_TOKEN_TTL_SECONDS
+    issued = []
+    for _ in range(BFF_REPLAY_TOKEN_BATCH_SIZE):
+        token = secrets.token_urlsafe(32)
+        value = {"session_id": session_id, "expires_at": expires_at}
+        key = _bff_replay_token_key(token)
+        _store_with_optional_ttl(
+            BFF_REPLAY_TOKEN_STORE,
+            key,
+            value,
+            BFF_REPLAY_TOKEN_TTL_SECONDS,
+        )
+        issued.append(token)
+    return issued
+
+
+def _validate_bff_replay_token(request: Request, user: Any) -> None:
+    if not ENABLE_BFF_REPLAY_TOKENS:
+        return
+    session_id = _bff_replay_subject(request, user)
+    if session_id is None:
+        return
+    supplied = request.headers.get("x-pytincture-bff-token", "")
+    if not supplied:
+        raise HTTPException(
+            status_code=409,
+            detail="BFF request proof invalid or expired",
+            headers={"X-Pytincture-Replay": "rejected"},
+        )
+    key = _bff_replay_token_key(supplied)
+    pop_atomic = getattr(BFF_REPLAY_TOKEN_STORE, "pop_atomic", None)
+    if callable(pop_atomic):
+        token_record = pop_atomic(key, None)
+    else:
+        token_record = BFF_REPLAY_TOKEN_STORE.pop(key, None)
+    if (
+        not isinstance(token_record, dict)
+        or token_record.get("session_id") != session_id
+        or float(token_record.get("expires_at", 0)) <= time.time()
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="BFF request proof invalid or expired",
+            headers={"X-Pytincture-Replay": "rejected"},
+        )
+
+
+@app.post(
+    "/_pytincture/state",
+    operation_id="issueBffReplayTokens",
+    include_in_schema=False,
+)
+async def issue_bff_replay_tokens(
+    request: Request,
+    user=Depends(require_authenticated_user),
+):
+    if not ENABLE_BFF_REPLAY_TOKENS:
+        raise HTTPException(status_code=404, detail="Not found")
+    _validate_csrf(request, user)
+    session_id = _bff_replay_subject(request, user)
+    if session_id is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    client_key = _bff_replay_client_key(request, session_id)
+    payload = _encrypt_bff_replay_payload(
+        client_key,
+        _issue_bff_replay_tokens(session_id),
+    )
+    return Response(
+        content=payload,
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "no-store"},
+    )
+
 @app.get("/{application}/appcode/appcode.pyt", operation_id="downloadAppcodePackage", responses={200: {"description": "StreamingResponse (ZIP file stream, media_type=\"application/zip\")"}, 401: {"description": "HTTPException (if authentication fails when required)"}})
-def download_appcode(request: Request, user=Depends(require_auth)):
+def download_appcode(request: Request, application: str, user=Depends(require_authenticated_user)):
     host = request.headers["host"]
     # Get the protocol from X-Forwarded-Proto header (if set)
     forwarded_proto = request.headers.get("x-forwarded-proto")
     protocol = forwarded_proto or request.url.scheme
-    file_like = create_appcode_pkg_in_memory(host, protocol)
+    replay_client = _register_bff_replay_client(request, user)
+    file_like = create_appcode_pkg_in_memory(
+        host,
+        protocol,
+        application,
+        replay_client=replay_client,
+    )
     return StreamingResponse(
         file_like,
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=appcode.pyt"}
     )
 
-app.mount("/{application}/appcode", StaticFiles(directory=MODULE_PATH), name="static")
+
+_DEFAULT_PUBLIC_ASSET_EXTENSIONS = {
+    ".avif", ".bmp", ".css", ".gif", ".ico", ".jpeg", ".jpg", ".js",
+    ".m4a", ".mp3", ".mp4", ".ogg", ".otf", ".png", ".svg", ".ttf",
+    ".wav", ".webm", ".webmanifest", ".webp", ".woff", ".woff2",
+}
+
+
+def _public_asset_allowed(relative_path: str) -> bool:
+    extension = os.path.splitext(relative_path)[1].lower()
+    if extension in _DEFAULT_PUBLIC_ASSET_EXTENSIONS:
+        return True
+    raw_patterns = os.getenv("PYTINCTURE_PUBLIC_ASSET_PATHS", "").strip()
+    if not raw_patterns:
+        return False
+    try:
+        patterns = json.loads(raw_patterns)
+    except json.JSONDecodeError:
+        patterns = [value.strip() for value in raw_patterns.split(",") if value.strip()]
+    if not isinstance(patterns, list):
+        raise RuntimeError("PYTINCTURE_PUBLIC_ASSET_PATHS must be a list of globs")
+    return any(
+        isinstance(pattern, str) and fnmatch.fnmatch(relative_path, pattern)
+        for pattern in patterns
+    )
+
+
+@app.get("/{application}/appcode/{asset_path:path}", include_in_schema=False)
+async def public_app_asset(application: str, asset_path: str):
+    normalized = asset_path.replace("\\", "/").strip("/")
+    if not normalized or any(part in {"", ".", ".."} or part.startswith(".") for part in normalized.split("/")):
+        raise HTTPException(status_code=404, detail="Asset not found")
+    modules_root = os.path.realpath(get_modules_path())
+    absolute_path = os.path.realpath(os.path.join(modules_root, *normalized.split("/")))
+    try:
+        within_root = os.path.commonpath((modules_root, absolute_path)) == modules_root
+    except ValueError:
+        within_root = False
+    if not within_root or not os.path.isfile(absolute_path) or not _public_asset_allowed(normalized):
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return FileResponse(absolute_path)
 
 @app.get("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="getClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float]) or StreamingResponse for streaming methods"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
 @app.post("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="postClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float]) or StreamingResponse for streaming methods"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
+@app.put("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="putClassCall", response_model=Any)
+@app.patch("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="patchClassCall", response_model=Any)
+@app.delete("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="deleteClassCall", response_model=Any)
 async def class_call(
     file_path: str,
     class_name: str,
@@ -744,7 +1542,38 @@ async def class_call(
 
     if not os.path.isfile(module_file_path):
         raise HTTPException(status_code=404, detail=f"File {request_identifier_with_ext} not found in appcode folder")
-    
+
+    operation = _registered_bff_operation(
+        modules_root,
+        request_identifier_with_ext,
+        class_name,
+        function_name,
+    )
+    if operation is None:
+        raise HTTPException(status_code=404, detail="BFF operation not exported")
+    allowed_methods = tuple(operation["http_methods"])
+    if request.method not in allowed_methods:
+        raise HTTPException(
+            status_code=405,
+            detail="HTTP method not allowed for this BFF operation",
+            headers={"Allow": ", ".join(allowed_methods)},
+        )
+
+    _validate_csrf(request, user)
+    _validate_bff_replay_token(request, user)
+    policy_hook = _configured_bff_policy_hook()
+    if policy_hook:
+        policy_result = policy_hook(
+            user=_coerce_policy_user(user),
+            policy=operation.get("policy", {}),
+            class_name=class_name,
+            function_name=function_name,
+            module_path=request_identifier_with_ext,
+            request=request,
+        )
+        if inspect.isawaitable(policy_result):
+            await policy_result
+
     module = _load_source_module(module_file_path, class_name)
     cls = getattr(module, class_name)
     instance = cls(_user=user)
@@ -760,30 +1589,25 @@ async def class_call(
 
     # 4) If it's a POST, parse JSON body
     data = {}
-    if request.method == "POST":
-        data = await request.json()
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        try:
+            data = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
     
-    if type(data) == str:
+    if isinstance(data, str):
         try:
             data = json.loads(str(data))
-        except Exception as e:
-            print("could not convert data to json")
-
-    # 5) Call the function with *args / **kwargs if needed
-    if BFF_POLICY_HOOK:
-        policy_metadata = getattr(function_obj, "_bff_policy", {}) or {}
-        BFF_POLICY_HOOK(
-            user=_coerce_policy_user(user),
-            policy=policy_metadata,
-            class_name=class_name,
-            function_name=function_name,
-            module_path=request_identifier_with_ext,
-            request=request,
-        )
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
 
     if callable(func):
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="BFF request body must be an object")
         args = data.get("args", [])
         kwargs = data.get("kwargs", {})
+        if not isinstance(args, list) or not isinstance(kwargs, dict):
+            raise HTTPException(status_code=400, detail="Invalid BFF arguments")
 
         # Handle structured args format if present
         if args and isinstance(args[0], dict) and 'value' in args[0]:
@@ -808,12 +1632,34 @@ async def class_call(
             return data_text
 
         def _sync_iterable(iterable: Iterable, raw: bool = False):
+            started = time.monotonic()
+            output_bytes = 0
             for item in iterable:
-                yield _serialize_stream_item(item, raw)
+                if time.monotonic() - started > BFF_STREAM_MAX_SECONDS:
+                    return
+                serialized = _serialize_stream_item(item, raw)
+                output_bytes += len(serialized.encode("utf-8") if isinstance(serialized, str) else serialized)
+                if output_bytes > BFF_STREAM_MAX_BYTES:
+                    return
+                yield serialized
 
         async def _async_iterable(iterable: AsyncIterable, raw: bool = False):
-            async for item in iterable:
-                yield _serialize_stream_item(item, raw)
+            started = time.monotonic()
+            output_bytes = 0
+            iterator = iterable.__aiter__()
+            while True:
+                remaining = BFF_STREAM_MAX_SECONDS - (time.monotonic() - started)
+                if remaining <= 0:
+                    return
+                try:
+                    item = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
+                except (StopAsyncIteration, asyncio.TimeoutError):
+                    return
+                serialized = _serialize_stream_item(item, raw)
+                output_bytes += len(serialized.encode("utf-8") if isinstance(serialized, str) else serialized)
+                if output_bytes > BFF_STREAM_MAX_BYTES:
+                    return
+                yield serialized
 
         def _as_streaming_response(result_obj):
             if isinstance(result_obj, StreamingResponse):
@@ -842,15 +1688,30 @@ async def class_call(
             if is_streaming:
                 return _as_streaming_response(result)
             collected_items = []
-            async for item in result:
-                collected_items.append(item)
+            async def collect_items():
+                async for item in result:
+                    collected_items.append(item)
+            try:
+                await asyncio.wait_for(collect_items(), timeout=BFF_CALL_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError as exc:
+                raise HTTPException(status_code=504, detail="BFF call timed out") from exc
             return collected_items
 
         if is_coroutine_function:
-            result = await func(*args, **kwargs)
+            try:
+                result = await asyncio.wait_for(
+                    func(*args, **kwargs), timeout=BFF_CALL_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError as exc:
+                raise HTTPException(status_code=504, detail="BFF call timed out") from exc
         else:
-            print(args, kwargs)
-            result = func(*args, **kwargs)
+            try:
+                result = await asyncio.wait_for(
+                    run_in_threadpool(func, *args, **kwargs),
+                    timeout=BFF_CALL_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError as exc:
+                raise HTTPException(status_code=504, detail="BFF call timed out") from exc
 
         if is_streaming:
             return _as_streaming_response(result)
@@ -860,9 +1721,14 @@ async def class_call(
     return func
 
 @app.post("/logs", operation_id="postLogs", responses={200: {"description": "JSONResponse ({\"status\": \"ok\"})"}, 401: {"description": "HTTPException (if authentication fails)"}})
-async def logs_endpoint(request: Request, user=Depends(require_auth)):
+async def logs_endpoint(request: Request, user=Depends(require_authenticated_user)):
+    _validate_csrf(request, user)
     data = await request.json()
-    print(data)
+    logger.info(
+        "Browser log received correlation_id=%s keys=%s",
+        getattr(request.state, "correlation_id", ""),
+        sorted(data) if isinstance(data, dict) else [],
+    )
     return {"status": "ok"}
 
 
@@ -874,24 +1740,93 @@ ENABLE_GOOGLE_AUTH = os.getenv("ENABLE_GOOGLE_AUTH", "false").lower() == "true"
 ENABLE_USER_LOGIN = os.getenv("ENABLE_USER_LOGIN", "false").lower() == "true"
 ENABLE_SAML_AUTH = os.getenv("ENABLE_SAML_AUTH", "false").lower() == "true"
 ENABLE_MICROSOFT_AUTH = os.getenv("ENABLE_MICROSOFT_AUTH", "false").lower() == "true"
+ENABLE_DEV_EMAIL_LOGIN = os.getenv("ENABLE_DEV_EMAIL_LOGIN", "false").lower() == "true"
+DEV_EMAIL_LOGIN_ONLY = bool(
+    ENABLE_DEV_EMAIL_LOGIN
+    and ENABLE_USER_LOGIN
+    and not (ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH or ENABLE_SAML_AUTH)
+)
+
+
+def _authentication_enabled() -> bool:
+    return bool(
+        ENABLE_GOOGLE_AUTH
+        or ENABLE_MICROSOFT_AUTH
+        or ENABLE_USER_LOGIN
+        or ENABLE_SAML_AUTH
+    )
 
 _configured_saml_secret = os.getenv("SAML_SECRET_KEY", "").strip()
-if _configured_saml_secret and len(_configured_saml_secret) < 32:
-    raise RuntimeError("SAML_SECRET_KEY must contain at least 32 characters")
+_configured_legacy_secret = os.getenv("SECRET_KEY", "").strip()
+SAML_SECRET_KEY = _configured_saml_secret or _configured_legacy_secret
+if _authentication_enabled():
+    if (
+        not SAML_SECRET_KEY
+        and ENABLE_DEV_EMAIL_LOGIN
+        and DEV_EMAIL_LOGIN_ONLY
+    ):
+        SAML_SECRET_KEY = secrets.token_urlsafe(32)
+        logger.warning(
+            "Generated an ephemeral development session key; sessions will reset on restart"
+        )
+    elif len(SAML_SECRET_KEY) < 32 or len(set(SAML_SECRET_KEY)) < 8:
+        raise RuntimeError(
+            "Authentication requires SAML_SECRET_KEY with at least 32 random characters; "
+            "generate one with `python -c \"import secrets; print(secrets.token_urlsafe(32))\"`"
+        )
+else:
+    # An unauthenticated development service still gets an unpredictable cookie signer.
+    SAML_SECRET_KEY = SAML_SECRET_KEY or secrets.token_urlsafe(32)
 
-SAML_SECRET_KEY = (
-    _configured_saml_secret
-    or os.getenv("SECRET_KEY", "").strip()
-    or "verysecretkey"
-)
-AUTH_SESSION_SCHEMA_VERSION = 1
+_previous_secret_value = os.getenv("AUTH_SESSION_PREVIOUS_SECRET_KEYS", "").strip()
+if _previous_secret_value:
+    try:
+        AUTH_SESSION_PREVIOUS_SECRET_KEYS = json.loads(_previous_secret_value)
+    except json.JSONDecodeError:
+        AUTH_SESSION_PREVIOUS_SECRET_KEYS = [
+            value.strip() for value in _previous_secret_value.split(",") if value.strip()
+        ]
+    if not isinstance(AUTH_SESSION_PREVIOUS_SECRET_KEYS, list) or any(
+        not isinstance(value, str) or len(value) < 32
+        for value in AUTH_SESSION_PREVIOUS_SECRET_KEYS
+    ):
+        raise RuntimeError("AUTH_SESSION_PREVIOUS_SECRET_KEYS must contain strong keys")
+else:
+    AUTH_SESSION_PREVIOUS_SECRET_KEYS = []
+
+AUTH_SESSION_SCHEMA_VERSION = 2
 AUTH_SESSION_MAX_AGE_SECONDS = int(os.getenv("AUTH_SESSION_MAX_AGE_SECONDS", "28800"))
 if AUTH_SESSION_MAX_AGE_SECONDS <= 0:
     raise RuntimeError("AUTH_SESSION_MAX_AGE_SECONDS must be greater than zero")
 AUTH_SESSION_HTTPS_ONLY = os.getenv(
     "AUTH_SESSION_HTTPS_ONLY",
-    "true" if _configured_saml_secret else "false",
+    "false" if DEV_EMAIL_LOGIN_ONLY else "true",
 ).lower() == "true"
+AUTH_SESSION_SAME_SITE = os.getenv("AUTH_SESSION_SAME_SITE", "lax").lower()
+if AUTH_SESSION_SAME_SITE not in {"lax", "strict", "none"}:
+    raise RuntimeError("AUTH_SESSION_SAME_SITE must be lax, strict, or none")
+MAX_REQUEST_BODY_BYTES = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(2 * 1024 * 1024)))
+if MAX_REQUEST_BODY_BYTES <= 0:
+    raise RuntimeError("MAX_REQUEST_BODY_BYTES must be greater than zero")
+BFF_CALL_TIMEOUT_SECONDS = float(os.getenv("BFF_CALL_TIMEOUT_SECONDS", "30"))
+BFF_STREAM_MAX_SECONDS = float(os.getenv("BFF_STREAM_MAX_SECONDS", "300"))
+BFF_STREAM_MAX_BYTES = int(os.getenv("BFF_STREAM_MAX_BYTES", str(10 * 1024 * 1024)))
+if BFF_CALL_TIMEOUT_SECONDS <= 0 or BFF_STREAM_MAX_SECONDS <= 0 or BFF_STREAM_MAX_BYTES <= 0:
+    raise RuntimeError("BFF timeout and stream limits must be greater than zero")
+ENABLE_BFF_REPLAY_TOKENS = os.getenv("ENABLE_BFF_REPLAY_TOKENS", "false").lower() == "true"
+BFF_REPLAY_TOKEN_BATCH_SIZE = int(os.getenv("BFF_REPLAY_TOKEN_BATCH_SIZE", "12"))
+BFF_REPLAY_TOKEN_LOW_WATERMARK = int(os.getenv("BFF_REPLAY_TOKEN_LOW_WATERMARK", "3"))
+BFF_REPLAY_TOKEN_TTL_SECONDS = int(os.getenv("BFF_REPLAY_TOKEN_TTL_SECONDS", "300"))
+if not 1 <= BFF_REPLAY_TOKEN_BATCH_SIZE <= 100:
+    raise RuntimeError("BFF_REPLAY_TOKEN_BATCH_SIZE must be between 1 and 100")
+if not 0 <= BFF_REPLAY_TOKEN_LOW_WATERMARK < BFF_REPLAY_TOKEN_BATCH_SIZE:
+    raise RuntimeError(
+        "BFF_REPLAY_TOKEN_LOW_WATERMARK must be non-negative and below the batch size"
+    )
+if not 10 <= BFF_REPLAY_TOKEN_TTL_SECONDS <= AUTH_SESSION_MAX_AGE_SECONDS:
+    raise RuntimeError(
+        "BFF_REPLAY_TOKEN_TTL_SECONDS must be between 10 seconds and the session maximum age"
+    )
 
 config_data = {
     "GOOGLE_CLIENT_ID": os.getenv("GOOGLE_CLIENT_ID", ""),
@@ -1163,7 +2098,7 @@ def _certificate_fingerprint(value: str) -> Optional[str]:
     try:
         der = base64.b64decode(body)
     except Exception as exc:
-        print(f"DEBUG: Failed to decode certificate for fingerprint: {exc}")
+        logger.debug("Failed to decode certificate for fingerprint", exc_info=exc)
         return None
     return hashlib.sha1(der).hexdigest()
 
@@ -1182,7 +2117,7 @@ def _extract_response_certificates(xml_payload: str) -> List[str]:
             if (node.text or "").strip()
         ]
     except Exception as exc:
-        print(f"DEBUG: Failed to parse SAML XML for embedded certificates: {exc}")
+        logger.debug("Failed to parse SAML XML certificates", exc_info=exc)
         return []
 
 
@@ -1259,22 +2194,15 @@ def _debug_session_state(stage: str, request: Request) -> None:
         cookie_present = cookie_value is not None
         cookie_length = len(cookie_value) if cookie_present else 0
         session_keys = list(request.session.keys())
-        tracked_snapshot = {
-            key: request.session.get(key)
-            for key in (
-                "saml_request_id",
-                "return_to",
-                "saml_name_id",
-                "saml_session_index",
-            )
-        }
-        print(
-            f"DEBUG: Session state ({stage}) -> "
-            f"cookie_present={cookie_present} size={cookie_length} "
-            f"keys={session_keys} tracked_values={tracked_snapshot}"
+        logger.debug(
+            "SAML session stage=%s cookie_present=%s cookie_size=%s keys=%s",
+            stage,
+            cookie_present,
+            cookie_length,
+            session_keys,
         )
     except Exception as exc:  # pragma: no cover - diagnostics only
-        print(f"DEBUG: Failed to inspect session during {stage}: {exc}")
+        logger.debug("Unable to inspect SAML session stage=%s", stage, exc_info=exc)
 
 
 def _build_saml_settings(request: Request, application: str, provider: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -1464,12 +2392,14 @@ else:
 
 # Add session middleware (needed to store "return_to" and user info)
 app.add_middleware(
-    SessionMiddleware,
+    RotatingSessionMiddleware,
     secret_key=SAML_SECRET_KEY,
+    previous_secret_keys=AUTH_SESSION_PREVIOUS_SECRET_KEYS,
     max_age=AUTH_SESSION_MAX_AGE_SECONDS,
-    same_site="lax",
+    same_site=AUTH_SESSION_SAME_SITE,
     https_only=AUTH_SESSION_HTTPS_ONLY,
 )
+app.add_middleware(RequestBodyLimitMiddleware, max_bytes=MAX_REQUEST_BODY_BYTES)
 
 # ================
 # SAML SSO SETUP
@@ -1517,19 +2447,13 @@ async def _saml_login(request: Request, application: str, provider_id: Optional[
     safe_return_to = _sanitize_return_to(return_to)
     if safe_return_to:
         request.session["return_to"] = safe_return_to
-        print(f"DEBUG: Stored return_to '{safe_return_to}' in session for application '{application}'")
-    else:
-        if return_to:
-            print(f"DEBUG: Ignored unsafe return_to '{return_to}'")
-        else:
-            print("DEBUG: No return_to param supplied")
 
     try:
         saml_auth = _init_saml_auth(request, application, provider=provider)
     except RuntimeError as config_error:
-        raise HTTPException(status_code=500, detail=str(config_error)) from config_error
+        raise HTTPException(status_code=500, detail="SAML configuration error") from config_error
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"SAML initialization failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail="SAML initialization failed") from exc
 
     session_return_to = _sanitize_return_to(request.session.pop("return_to", None))
     fallback_return = safe_return_to or session_return_to
@@ -1605,111 +2529,38 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
     if provider["id"] != state_provider_id:
         raise HTTPException(status_code=400, detail="SAML provider mismatch")
     
-    # DEBUG: Log what we received
-    print(f"DEBUG: Received form data keys: {list(post_data.keys())}")
-    if 'SAMLResponse' in post_data:
-        try:
-            decoded_response = base64.b64decode(post_data['SAMLResponse']).decode('utf-8')
-            print(f"DEBUG: SAML Response (first 500 chars): {decoded_response[:500]}...")
-            embedded_certs = _extract_response_certificates(decoded_response)
-            if embedded_certs:
-                for idx, embedded_cert in enumerate(embedded_certs):
-                    fingerprint = _certificate_fingerprint(embedded_cert)
-                    preview = embedded_cert[:80]
-                    print(
-                        f"DEBUG: Embedded certificate #{idx} fingerprint={fingerprint} "
-                        f"preview={preview}..."
-                    )
-                    print(f"DEBUG: Embedded certificate #{idx} full={embedded_cert}")
-            else:
-                print("DEBUG: No embedded certificates found inside SAML response XML")
-        except Exception as e:
-            print(f"DEBUG: Could not decode SAML response: {e}")
-
     try:
         saml_auth = _init_saml_auth(request, application, provider=provider, post_data=post_data)
-        
-        # DEBUG: Log SAML settings  
-        settings = saml_auth.get_settings()
-        sp_data = settings.get_sp_data()
-        idp_data = settings.get_idp_data()
-        
-        print(f"DEBUG: SP Entity ID: {sp_data.get('entityId')}")
-        print(f"DEBUG: SP ACS URL: {sp_data.get('assertionConsumerService', {}).get('url')}")
-        print(f"DEBUG: IdP Entity ID: {idp_data.get('entityId')}")
-        print(f"DEBUG: IdP SSO URL: {idp_data.get('singleSignOnService', {}).get('url')}")
-        
-        # DEBUG: Check certificate
-        idp_cert = idp_data.get('x509cert', '')
-        print(f"DEBUG: IdP Certificate (first 100 chars): {idp_cert[:100]}...")
-        env_fingerprint = _certificate_fingerprint(idp_cert)
-        print(f"DEBUG: IdP Certificate fingerprint (env): {env_fingerprint}")
-        
         request_id = relay_state["request_id"]
         request.session.pop("saml_request_id", None)
         request.session.pop("saml_provider_id", None)
-        
-        # Process the SAML response
         try:
             saml_auth.process_response(request_id=request_id)
         except OneLogin_Saml2_ValidationError as validation_error:
-            print(
-                "DEBUG: OneLogin validation error encountered during process_response "
-                f"(code={validation_error.code}): {validation_error.message}"
+            logger.warning(
+                "SAML response validation failed correlation_id=%s code=%s",
+                getattr(request.state, "correlation_id", ""),
+                validation_error.code,
             )
-            import traceback
-            traceback.print_exc()
             raise
-        
-        # DEBUG: Get detailed error information
-        errors = saml_auth.get_errors()
-        print(f"DEBUG: SAML Errors: {errors}")
-        print(f"DEBUG: SAML Last Error Reason: {saml_auth.get_last_error_reason()}")
-        print(f"DEBUG: SAML Is Authenticated: {saml_auth.is_authenticated()}")
-        
-        try:
-            print(f"DEBUG: SAML Name ID: {saml_auth.get_nameid()}")
-        except:
-            print("DEBUG: Could not get Name ID")
-        
-        # DEBUG: Check what attributes we got
-        try:
-            attributes = saml_auth.get_attributes()
-            print(f"DEBUG: SAML Attributes: {attributes}")
-        except:
-            print("DEBUG: Could not get attributes")
-        
     except RuntimeError as config_error:
-        print(f"DEBUG: Runtime error: {config_error}")
-        raise HTTPException(status_code=500, detail=str(config_error)) from config_error
+        raise HTTPException(status_code=500, detail="SAML configuration error") from config_error
     except Exception as exc:  # noqa: BLE001
-        print(f"DEBUG: General exception: {exc}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=400, detail=f"Failed to process SAML response: {exc}") from exc
+        raise HTTPException(status_code=400, detail="Invalid SAML response") from exc
 
     errors = saml_auth.get_errors()
     if errors:
-        # DEBUG: More detailed error logging
-        print(f"DEBUG: Detailed SAML errors before raising exception: {errors}")
-        print(f"DEBUG: SAML last error reason: {saml_auth.get_last_error_reason()}")
-        
-        # Check for specific signature validation errors
-        if any('signature' in str(error).lower() for error in errors):
-            print("DEBUG: Signature validation error detected")
-            settings = saml_auth.get_settings()
-            idp_data = settings.get_idp_data()
-            cert = idp_data.get('x509cert', '')
-            print(f"DEBUG: Certificate being used: {cert[:200]}...")
-        
-        raise HTTPException(status_code=400, detail=f"SAML response contained errors: {errors}")
+        logger.warning(
+            "SAML response rejected correlation_id=%s error_codes=%s",
+            getattr(request.state, "correlation_id", ""),
+            errors,
+        )
+        raise HTTPException(status_code=400, detail="Invalid SAML response")
 
     if not saml_auth.is_authenticated():
-        print("DEBUG: SAML authentication failed - user not authenticated")
         raise HTTPException(status_code=401, detail="SAML authentication failed")
 
     attributes = saml_auth.get_attributes()
-    print(f"DEBUG: Final attributes received: {attributes}")
     
     email_candidate_keys = [
         key for key in [
@@ -1732,13 +2583,10 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
     if not email_attr:
         email_attr = saml_auth.get_nameid()
 
-    print(f"DEBUG: Email attribute extracted: {email_attr}")
-    
     if not email_attr:
         raise HTTPException(status_code=400, detail="SAML response missing required email attribute")
 
     name_attr = _get_saml_attribute(attributes, SAML_NAME_ATTRIBUTE) if SAML_NAME_ATTRIBUTE else None
-    print(f"DEBUG: Name attribute extracted: {name_attr}")
 
     # Normalize attributes so they are JSON serializable for session storage.
     normalized_attributes: Dict[str, List[str]] = {
@@ -1758,14 +2606,8 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
 
     if allowed_roles:
         flattened_roles = set(session_roles)
-        print(f"DEBUG: Candidate role values from attributes: {flattened_roles}")
         has_allowed_role = any(role in flattened_roles for role in allowed_roles)
         if not has_allowed_role:
-            print(
-                f"DEBUG: User missing required SAML role. "
-                f"Allowed roles={allowed_roles} "
-                f"searched_keys={role_attribute_keys}"
-            )
             raise HTTPException(status_code=401, detail="Not authorized for this application")
 
     user_info = {
@@ -1785,8 +2627,6 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
 
     if os.getenv("ALLOWED_EMAILS", "") != "":
         allowed_emails = [email.strip().lower() for email in os.getenv("ALLOWED_EMAILS", "").split(",") if email.strip()]
-        print(f"DEBUG: Allowed emails: {allowed_emails}")
-        print(f"DEBUG: User email: {email_attr.lower()}")
         if email_attr.lower() not in allowed_emails:
             raise HTTPException(status_code=401, detail="Not authorized")
 
@@ -1794,15 +2634,9 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
 
     cached_redirect = _sanitize_return_to(relay_state.get("return_to"))
     session_redirect = _sanitize_return_to(request.session.pop("return_to", None))
-    if cached_redirect:
-        print(f"DEBUG: Using return_to from RelayState: {cached_redirect}")
     if not cached_redirect:
         cached_redirect = session_redirect
-        if cached_redirect:
-            print(f"DEBUG: Using return_to from session: {cached_redirect}")
     redirect_target = cached_redirect or _get_saml_default_redirect(application, request, provider=provider)
-    
-    print(f"DEBUG: Redirecting to: {redirect_target}")
     return RedirectResponse(url=redirect_target, status_code=302)
 
 
@@ -1848,11 +2682,11 @@ async def _saml_metadata(request: Request, application: str, provider_id: Option
             allowed_errors = {"sp_acs_url_invalid", "sp_entity_id_invalid"}
             remaining_errors = [err for err in errors if err not in allowed_errors]
             if remaining_errors:
-                raise HTTPException(status_code=500, detail=f"SAML metadata validation errors: {remaining_errors}")
+                raise HTTPException(status_code=500, detail="SAML metadata validation failed")
     except RuntimeError as config_error:
-        raise HTTPException(status_code=500, detail=str(config_error)) from config_error
+        raise HTTPException(status_code=500, detail="SAML configuration error") from config_error
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Failed to generate SAML metadata: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to generate SAML metadata") from exc
 
     return Response(content=metadata_xml, media_type="application/xml")
 
@@ -1878,7 +2712,8 @@ async def auth_google_callback(request: Request, application: str):
     try:
         token = await oauth.google.authorize_access_token(request)
     except OAuthError as e:
-        return JSONResponse({"error": str(e)}, status_code=401)
+        logger.info("Google OAuth callback rejected", exc_info=e)
+        return JSONResponse({"error": "Authentication failed"}, status_code=401)
     
     user_info = token.get("userinfo") or {}
     if not user_info:
@@ -1932,7 +2767,8 @@ async def auth_microsoft_callback(request: Request, application: str):
     try:
         token = await oauth.microsoft.authorize_access_token(request)
     except OAuthError as e:
-        return JSONResponse({"error": str(e)}, status_code=401)
+        logger.info("Microsoft OAuth callback rejected", exc_info=e)
+        return JSONResponse({"error": "Authentication failed"}, status_code=401)
 
     user_info = token.get("userinfo") or {}
     if not user_info:
@@ -1962,13 +2798,15 @@ def logout(request: Request,  application: str):
     """
     Logs the user out of *your app only*.
     """
-    # 1) Clear user info from session
+    revoke_session(str(request.session.get("session_id") or ""))
     _clear_auth_session(request)
     # 2) If stored tokens in session, remove them
     # request.session.pop("token", None)
 
     # 3) Redirect anywhere in *your* app after local logout
-    return RedirectResponse(url=f"/{application}/login", status_code=302)
+    response = RedirectResponse(url=f"/{application}/login", status_code=302)
+    response.delete_cookie("pytincture_csrf")
+    return response
 
 # ======================
 # LOGIN PAGE
@@ -2150,21 +2988,16 @@ async def auth_user_callback(request: Request, application: str):
     """
 
     form = await request.form()
-    email = form.get('email')
-    password = form.get('password')
+    email = str(form.get('email') or "")
+    password = str(form.get('password') or "")
+    authenticated_claims = await _authenticate_local_user(request, email, password)
 
     user_info = {
-        "email": email,
+        **authenticated_claims,
         "picture": f"{application}/appcode/profile.png",
         "auth_type": "user",
-        "roles": [],
+        "roles": authenticated_claims.get("roles", []),
     }
-
-    # You can optionally grab user info from token["userinfo"]
-    if os.getenv("ALLOWED_EMAILS", "") != "":
-        allowed_emails = os.getenv("ALLOWED_EMAILS").split(",")  # Assuming comma-separated
-        if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
-            return JSONResponse({"error": "Not authorized"}, status_code=401)
 
     _set_authenticated_user(request, user_info)
 
@@ -2182,20 +3015,15 @@ async def mcp_auth(request: Request, application: str, auth_input: MCPAuthInput 
     """
     MCP-specific authentication endpoint. Authenticates with email and password via JSON, sets session, and returns status. The response includes Set-Cookie header for session, which can be used in subsequent calls.
     """
-    if not ENABLE_USER_LOGIN:
-        raise HTTPException(status_code=403, detail="User login not enabled")
-
+    authenticated_claims = await _authenticate_local_user(
+        request, auth_input.email, auth_input.password
+    )
     user_info = {
-        "email": auth_input.email,
+        **authenticated_claims,
         "picture": f"{application}/appcode/profile.png",
         "auth_type": "user",
-        "roles": [],
+        "roles": authenticated_claims.get("roles", []),
     }
-
-    if os.getenv("ALLOWED_EMAILS", "") != "":
-        allowed_emails = os.getenv("ALLOWED_EMAILS").split(",")  # Assuming comma-separated
-        if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
-            raise HTTPException(status_code=401, detail="Not authorized")
 
     _set_authenticated_user(request, user_info)
 
@@ -2286,7 +3114,7 @@ def find_main_window_subclass(file_path):
         
         return None  # No MainWindow subclass found
     except Exception as e:
-        print(f"Error finding MainWindow subclass: {e}")
+        logger.warning("Unable to find MainWindow subclass", exc_info=e)
         return None
 
 def _find_app_string_setting(file_path, assignment_names, config_keys):
@@ -2298,7 +3126,7 @@ def _find_app_string_setting(file_path, assignment_names, config_keys):
             source = f.read()
         tree = ast.parse(source)
     except Exception as e:
-        print(f"Error reading app configuration: {e}")
+        logger.warning("Unable to read app configuration", exc_info=e)
         return None
 
     def extract_string(node):
