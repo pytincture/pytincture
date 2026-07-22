@@ -434,6 +434,38 @@ def test_raw_server_files_are_not_public_assets(fresh_client, monkeypatch, tmp_p
     assert fresh_client.get("/demoapp/appcode/logo.png").status_code == 200
 
 
+def test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not(
+    fresh_client, monkeypatch, tmp_path
+):
+    import sys
+
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.delenv("PYTINCTURE_PUBLIC_ASSET_PATHS", raising=False)
+    (tmp_path / "demoapp.py").write_text("import demo_widgets\n")
+    matching_version = "demo_widgets-0.1.0-py3-none-any.whl"
+    matching_dev = "demo_widgets-99.99.99-py3-none-any.whl"
+    unrelated = "server_helpers-1.0.0-py3-none-any.whl"
+    (tmp_path / matching_version).write_bytes(b"versioned-wheel")
+    (tmp_path / matching_dev).write_bytes(b"development-wheel")
+    (tmp_path / unrelated).write_bytes(b"server-only-wheel")
+    nested = tmp_path / "private"
+    nested.mkdir()
+    (nested / matching_version).write_bytes(b"nested-wheel")
+    widget_module = type("DemoWidgets", (), {
+        "__widgetset__": "demo-widgets",
+        "__version__": "0.1.0",
+    })
+    monkeypatch.setitem(sys.modules, "demo_widgets", widget_module)
+
+    assert fresh_client.get(f"/demoapp/appcode/{matching_version}").status_code == 200
+    assert fresh_client.get(f"/demoapp/appcode/{matching_dev}").status_code == 200
+    assert fresh_client.head(f"/demoapp/appcode/{matching_version}").status_code == 200
+    assert fresh_client.head(f"/demoapp/appcode/{matching_dev}").status_code == 200
+    assert fresh_client.get(f"/demoapp/appcode/{unrelated}").status_code == 404
+    assert fresh_client.head(f"/demoapp/appcode/{unrelated}").status_code == 404
+    assert fresh_client.get(f"/demoapp/appcode/private/{matching_version}").status_code == 404
+
+
 def test_browser_package_excludes_unreachable_server_modules(
     fresh_client, monkeypatch, tmp_path
 ):
@@ -465,7 +497,7 @@ def test_browser_package_excludes_unreachable_server_modules(
 def test_mcp_has_no_automatic_tools_and_rejects_sensitive_allowlist(monkeypatch):
     import pytincture.backend.app as backend_app
 
-    assert asyncio.run(backend_app.mcp.get_tools()) == {}
+    assert asyncio.run(backend_app.mcp.list_tools()) == []
     monkeypatch.setenv("ENABLE_MCP", "true")
     monkeypatch.setenv("MCP_EXPOSED_OPERATIONS", '["handleUserAuth"]')
     with pytest.raises(RuntimeError, match="session/login/application"):
@@ -491,7 +523,8 @@ def test_mcp_classcall_cannot_bypass_http_authentication(monkeypatch, tmp_path):
     )
 
     async def invoke_tool():
-        tool = (await mcp_server.get_tools())["postClassCall"]
+        tool = await mcp_server.get_tool("postClassCall")
+        assert tool is not None
         return await tool.run({
             "file_path": "service.py",
             "class_name": "Service",
@@ -963,6 +996,15 @@ def test_frontend_runtime_cache_busts_packaged_app_fetch(fresh_client):
     response = fresh_client.get("/frontend/pytincture.js")
     assert response.status_code == 200
     assert 'appcode/appcode.pyt?uuid=${encodeURIComponent(makeRequestId())}' in response.text
+
+
+def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_client):
+    response = fresh_client.get("/frontend/pytincture.js")
+    assert response.status_code == 200
+    assert "candidateVersions.push(pinnedMatch[1])" in response.text
+    assert "candidateVersions.push(config.devWheelVersion)" in response.text
+    assert 'name === "pytincture_csrf"' in response.text
+    assert 'headers["X-CSRF-Token"] = csrfToken' in response.text
 
 def test_service_worker_skips_cache_for_uuid_busted_appcode(fresh_client):
     """
