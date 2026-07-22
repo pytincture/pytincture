@@ -1475,7 +1475,38 @@ def _public_asset_allowed(relative_path: str) -> bool:
     )
 
 
-@app.get("/{application}/appcode/{asset_path:path}", include_in_schema=False)
+def _normalized_distribution_name(value: str) -> str:
+    return re.sub(r"[-_.]+", "-", value).casefold()
+
+
+def _application_widget_wheel_allowed(
+    application: str,
+    relative_path: str,
+    modules_root: str,
+) -> bool:
+    """Allow only a root-level wheel for the widgetset detected for this app."""
+    if "/" in relative_path or not relative_path.lower().endswith(".whl"):
+        return False
+    wheel_match = re.fullmatch(
+        r"(?P<distribution>[A-Za-z0-9_.]+)-[^/]+-[^-]+-[^-]+-[^-]+\.whl",
+        relative_path,
+    )
+    if not wheel_match:
+        return False
+    widget_spec = get_widgetset(application, modules_root)
+    widget_distribution = widget_spec.split("==", 1)[0].strip()
+    if not widget_distribution:
+        return False
+    return _normalized_distribution_name(wheel_match.group("distribution")) == (
+        _normalized_distribution_name(widget_distribution)
+    )
+
+
+@app.api_route(
+    "/{application}/appcode/{asset_path:path}",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
 async def public_app_asset(application: str, asset_path: str):
     normalized = asset_path.replace("\\", "/").strip("/")
     if not normalized or any(part in {"", ".", ".."} or part.startswith(".") for part in normalized.split("/")):
@@ -1486,7 +1517,12 @@ async def public_app_asset(application: str, asset_path: str):
         within_root = os.path.commonpath((modules_root, absolute_path)) == modules_root
     except ValueError:
         within_root = False
-    if not within_root or not os.path.isfile(absolute_path) or not _public_asset_allowed(normalized):
+    asset_allowed = _public_asset_allowed(normalized) or _application_widget_wheel_allowed(
+        application,
+        normalized,
+        modules_root,
+    )
+    if not within_root or not os.path.isfile(absolute_path) or not asset_allowed:
         raise HTTPException(status_code=404, detail="Asset not found")
     return FileResponse(absolute_path)
 

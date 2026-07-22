@@ -115,7 +115,7 @@ pip install .
 - DATABASE_URL: Database connection string
    example: "sqlite:////absolute/path/to/database.db"
 - PYTINCTURE_BROWSER_FILES: JSON list or comma-separated globs for extra files to include in the browser package. Python entrypoints and reachable local imports are discovered automatically.
-- PYTINCTURE_PUBLIC_ASSET_PATHS: Explicit globs for files that may be served from `/{application}/appcode/` in addition to standard image, font, media, CSS, and JavaScript assets. Python and configuration files are denied by default.
+- PYTINCTURE_PUBLIC_ASSET_PATHS: Explicit globs for files that may be served from `/{application}/appcode/` in addition to standard image, font, media, CSS, and JavaScript assets. Python and configuration files are denied by default. A root-level wheel whose distribution name matches the widgetset detected for the requested application is served automatically; unrelated wheels remain private.
 - MAX_REQUEST_BODY_BYTES: Maximum request body size. Defaults to 2 MiB.
 - BFF_CALL_TIMEOUT_SECONDS: Maximum non-streaming BFF execution time. Defaults to 30 seconds.
 - BFF_STREAM_MAX_SECONDS: Maximum BFF stream duration. Defaults to 300 seconds.
