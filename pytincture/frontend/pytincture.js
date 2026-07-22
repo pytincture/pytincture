@@ -129,9 +129,17 @@ function enableBackendLogging(endpoint) {
     });
 
     function sendToBackend(level, message) {
+        const csrfToken = String(document.cookie || "")
+            .split(";")
+            .map(cookie => cookie.trim().split("="))
+            .find(([name]) => name === "pytincture_csrf")?.slice(1).join("=") || "";
+        const headers = { "Content-Type": "application/json" };
+        if (csrfToken) {
+            headers["X-CSRF-Token"] = csrfToken;
+        }
         fetch(logEndpoint, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify({
                 level,
                 message,
@@ -347,15 +355,27 @@ async function resolveWidgetSource(config) {
         return config.widgetSource;
     }
     if (config.application) {
-        const match = (config.widgetlib || "").match(/^[A-Za-z0-9_\-]+/);
+        const match = (config.widgetlib || "").match(/^[A-Za-z0-9_.\-]+/);
         const widgetPackage = match ? match[0] : DEFAULT_CONFIG.widgetlib;
-        let widgetUrl = `${config.devWidgetHost}/${config.application}/appcode/${widgetPackage}-${config.devWheelVersion}-py3-none-any.whl`;
-        if (config.devWheelVersion === DEFAULT_CONFIG.devWheelVersion) {
-            const separator = widgetUrl.includes("?") ? "&" : "?";
-            widgetUrl = `${widgetUrl}${separator}id=${encodeURIComponent(makeRequestId())}`;
+        const pinnedMatch = (config.widgetlib || "").match(
+            /^[A-Za-z0-9_.\-]+==([A-Za-z0-9_.+!\-]+)$/,
+        );
+        const candidateVersions = [];
+        if (pinnedMatch) {
+            candidateVersions.push(pinnedMatch[1]);
         }
-        if (await urlExists(widgetUrl)) {
-            return widgetUrl;
+        if (!candidateVersions.includes(config.devWheelVersion)) {
+            candidateVersions.push(config.devWheelVersion);
+        }
+        for (const version of candidateVersions) {
+            let widgetUrl = `${config.devWidgetHost}/${config.application}/appcode/${widgetPackage}-${version}-py3-none-any.whl`;
+            if (version === DEFAULT_CONFIG.devWheelVersion) {
+                const separator = widgetUrl.includes("?") ? "&" : "?";
+                widgetUrl = `${widgetUrl}${separator}id=${encodeURIComponent(makeRequestId())}`;
+            }
+            if (await urlExists(widgetUrl)) {
+                return widgetUrl;
+            }
         }
     }
     return config.widgetlib;
