@@ -497,7 +497,7 @@ def test_browser_package_excludes_unreachable_server_modules(
 def test_mcp_has_no_automatic_tools_and_rejects_sensitive_allowlist(monkeypatch):
     import pytincture.backend.app as backend_app
 
-    assert asyncio.run(backend_app.mcp.get_tools()) == {}
+    assert asyncio.run(backend_app.mcp.list_tools()) == []
     monkeypatch.setenv("ENABLE_MCP", "true")
     monkeypatch.setenv("MCP_EXPOSED_OPERATIONS", '["handleUserAuth"]')
     with pytest.raises(RuntimeError, match="session/login/application"):
@@ -523,7 +523,8 @@ def test_mcp_classcall_cannot_bypass_http_authentication(monkeypatch, tmp_path):
     )
 
     async def invoke_tool():
-        tool = (await mcp_server.get_tools())["postClassCall"]
+        tool = await mcp_server.get_tool("postClassCall")
+        assert tool is not None
         return await tool.run({
             "file_path": "service.py",
             "class_name": "Service",
