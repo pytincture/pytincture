@@ -77,6 +77,8 @@ def test_launch_service(monkeypatch, tmp_path):
     # Create a dummy folder using tmp_path so that the directory exists.
     dummy_folder = tmp_path / "dummy_folder"
     dummy_folder.mkdir()
+    favicon_folder = dummy_folder / "branding" / "favicon"
+    favicon_folder.mkdir(parents=True)
     test_folder = str(dummy_folder)
     test_port = 8080
     env_vars = {"TEST_VAR": "value"}
@@ -84,15 +86,25 @@ def test_launch_service(monkeypatch, tmp_path):
     # Before calling launch_service, clear the environment variables if set.
     os.environ.pop("MODULES_PATH", None)
     os.environ.pop("TEST_VAR", None)
+    os.environ.pop("PYTINCTURE_DEFAULT_APPLICATION", None)
+    os.environ.pop("PYTINCTURE_FAVICON_FOLDER", None)
 
     # Call launch_service.
     from pytincture.__init__ import launch_service
-    launch_service(modules_folder=test_folder, port=test_port, env_vars=env_vars)
+    launch_service(
+        modules_folder=test_folder,
+        port=test_port,
+        env_vars=env_vars,
+        default_application="demoapp",
+        favicon_folder="branding/favicon",
+    )
 
     # Verify that the module path was stored and env vars applied.
     assert get_modules_path() == test_folder
     assert os.environ["MODULES_PATH"] == test_folder
     assert os.environ["TEST_VAR"] == "value"
+    assert os.environ["PYTINCTURE_DEFAULT_APPLICATION"] == "demoapp"
+    assert os.environ["PYTINCTURE_FAVICON_FOLDER"] == str(favicon_folder)
 
     # Check that our FakeProcess methods were called.
     assert "start" in process_calls
@@ -100,6 +112,8 @@ def test_launch_service(monkeypatch, tmp_path):
     set_modules_path(None)
     os.environ.pop("MODULES_PATH", None)
     os.environ.pop("TEST_VAR", None)
+    os.environ.pop("PYTINCTURE_DEFAULT_APPLICATION", None)
+    os.environ.pop("PYTINCTURE_FAVICON_FOLDER", None)
 
 
 def test_launch_service_ignores_env_var_override(monkeypatch, tmp_path):

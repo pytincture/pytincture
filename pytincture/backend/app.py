@@ -10,11 +10,8 @@ import zipfile
 import importlib
 import asyncio
 import nest_asyncio
-import secrets
-import time
 import base64
 import hashlib
-from collections import OrderedDict
 from xml.etree import ElementTree
 try:
     nest_asyncio.apply()
@@ -27,7 +24,7 @@ except ValueError as exc:
 from fastapi import Depends, FastAPI, Request, Response, HTTPException, Body
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastmcp import FastMCP
 
@@ -38,6 +35,7 @@ from importlib.machinery import SourceFileLoader
 
 # Google OAuth via Authlib
 from authlib.integrations.starlette_client import OAuth, OAuthError
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.config import Config
 
@@ -50,7 +48,7 @@ from pydantic import BaseModel
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.settings import OneLogin_Saml2_Settings
 from onelogin.saml2.errors import OneLogin_Saml2_ValidationError
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, quote, urlparse, urlsplit, urlunsplit
 from html import escape
 
 # ========================
@@ -179,6 +177,29 @@ def create_appcode_pkg_in_memory(host, protocol):
                             zipf.write(file_path, arcname)
     in_memory_zip.seek(0)
     return in_memory_zip
+
+
+def _get_default_application() -> Optional[str]:
+    configured = os.getenv("PYTINCTURE_DEFAULT_APPLICATION", "").strip().strip("/")
+    if not configured:
+        return None
+    if (
+        configured in (".", "..")
+        or not all(char.isalnum() or char in "._-" for char in configured)
+    ):
+        raise RuntimeError(
+            "PYTINCTURE_DEFAULT_APPLICATION must be a single application name without a path"
+        )
+    return configured
+
+
+@app.get("/", include_in_schema=False)
+async def default_application_redirect():
+    default_application = _get_default_application()
+    if default_application is None:
+        raise HTTPException(status_code=404, detail="No default application configured")
+    application_path = quote(default_application, safe="")
+    return RedirectResponse(url=f"/{application_path}", status_code=302)
 
 
 @app.get("/favicon.ico", operation_id="getFavicon", responses={200: {"description": "Response (binary content for favicon.ico, or empty if not implemented)"}, 404: {"description": "JSONResponse (if file not found, but currently not handled)"}})
@@ -531,32 +552,132 @@ def _coerce_policy_user(user: Any) -> Dict[str, Any]:
         }
     return {"value": user}
 
+
+def _clear_auth_session(request: Request) -> None:
+    for key in (
+        "user",
+        "saml_name_id",
+        "saml_session_index",
+        "saml_provider_id",
+        "saml_request_id",
+    ):
+        request.session.pop(key, None)
+
+
+def _normalize_auth_roles(value: Any) -> List[str]:
+    if isinstance(value, str):
+        candidates = value.split(",")
+    elif isinstance(value, (list, tuple, set)):
+        candidates = value
+    else:
+        candidates = []
+
+    roles = {
+        str(role).strip().lower()
+        for role in candidates
+        if str(role).strip()
+    }
+    return sorted(roles)
+
+
+def _build_auth_session_user(
+    user_info: Any,
+    *,
+    auth_type: Optional[str] = None,
+    auth_provider: Optional[str] = None,
+    auth_provider_label: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build the compact, stable identity stored in the signed session cookie."""
+    try:
+        source = dict(user_info or {})
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid authenticated user data") from exc
+
+    email = str(source.get("email") or "").strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Authenticated user is missing an email address")
+
+    resolved_auth_type = str(auth_type or source.get("auth_type") or "").strip()
+    resolved_provider = str(auth_provider or source.get("auth_provider") or "").strip()
+    resolved_provider_label = str(
+        auth_provider_label or source.get("auth_provider_label") or ""
+    ).strip()
+
+    session_user: Dict[str, Any] = {
+        "session_version": AUTH_SESSION_SCHEMA_VERSION,
+        "email": email,
+        "name": str(source.get("name") or "").strip(),
+        "picture": str(source.get("picture") or "appcode/profile.png"),
+        "auth_type": resolved_auth_type,
+        "roles": _normalize_auth_roles(source.get("roles")),
+        "is_authenticated": True,
+    }
+    if resolved_provider:
+        session_user["auth_provider"] = resolved_provider
+    if resolved_provider_label:
+        session_user["auth_provider_label"] = resolved_provider_label
+
+    saml_source = source.get("saml")
+    if isinstance(saml_source, dict):
+        saml_identity = {
+            "provider_id": str(saml_source.get("provider_id") or resolved_provider),
+            "provider_label": str(
+                saml_source.get("provider_label") or resolved_provider_label
+            ),
+            "name_id": str(saml_source.get("name_id") or ""),
+        }
+        session_user["saml"] = {
+            key: value for key, value in saml_identity.items() if value
+        }
+
+    return session_user
+
+
+def _set_authenticated_user(
+    request: Request,
+    user_info: Any,
+    **identity_overrides: Any,
+) -> Dict[str, Any]:
+    session_user = _build_auth_session_user(user_info, **identity_overrides)
+    _clear_auth_session(request)
+    request.session["user"] = session_user
+    return session_user
+
+
 def require_auth(request: Request):
-    if ENABLE_GOOGLE_AUTH or ENABLE_USER_LOGIN or ENABLE_SAML_AUTH:
+    if (
+        ENABLE_GOOGLE_AUTH
+        or ENABLE_MICROSOFT_AUTH
+        or ENABLE_USER_LOGIN
+        or ENABLE_SAML_AUTH
+    ):
         user_session = request.session.get("user") or {}
-        email = user_session.get("email")
-        print(f"DEBUG AUTH: session email={email} keys={list(request.session.keys())}")
-        if not email:
-            print("DEBUG AUTH: no email found in session")
+        if not isinstance(user_session, dict):
+            _clear_auth_session(request)
             return None
 
-        backend_snapshot = USER_SESSION_DICT.get(email)
-        if backend_snapshot is None:
-            print("DEBUG AUTH: email missing from USER_SESSION_DICT, seeding from session")
-            USER_SESSION_DICT[email] = user_session
-            return user_session
+        if user_session.get("session_version") != AUTH_SESSION_SCHEMA_VERSION:
+            _clear_auth_session(request)
+            return None
 
-        if user_session != backend_snapshot:
-            print("DEBUG AUTH: session and backend snapshots differ")
-            raise HTTPException(status_code=401, detail="Error with authentication")
+        email = user_session.get("email")
+        if not isinstance(email, str) or not email.strip():
+            _clear_auth_session(request)
+            return None
 
-        print("DEBUG AUTH: session validated via USER_SESSION_DICT")
+        if user_session.get("is_authenticated") is not True:
+            _clear_auth_session(request)
+            return None
+
         return user_session
     else:
         return {
             "email": "",
             "password": "",
-            "picture": "appcode/profile.png"
+            "picture": "appcode/profile.png",
+            "auth_type": "noauth",
+            "roles": [],
+            "is_authenticated": False,
         }
 
 @app.get("/{application}/appcode/appcode.pyt", operation_id="downloadAppcodePackage", responses={200: {"description": "StreamingResponse (ZIP file stream, media_type=\"application/zip\")"}, 401: {"description": "HTTPException (if authentication fails when required)"}})
@@ -752,16 +873,40 @@ async def logs_endpoint(request: Request, user=Depends(require_auth)):
 ENABLE_GOOGLE_AUTH = os.getenv("ENABLE_GOOGLE_AUTH", "false").lower() == "true"
 ENABLE_USER_LOGIN = os.getenv("ENABLE_USER_LOGIN", "false").lower() == "true"
 ENABLE_SAML_AUTH = os.getenv("ENABLE_SAML_AUTH", "false").lower() == "true"
+ENABLE_MICROSOFT_AUTH = os.getenv("ENABLE_MICROSOFT_AUTH", "false").lower() == "true"
+
+_configured_saml_secret = os.getenv("SAML_SECRET_KEY", "").strip()
+if _configured_saml_secret and len(_configured_saml_secret) < 32:
+    raise RuntimeError("SAML_SECRET_KEY must contain at least 32 characters")
+
+SAML_SECRET_KEY = (
+    _configured_saml_secret
+    or os.getenv("SECRET_KEY", "").strip()
+    or "verysecretkey"
+)
+AUTH_SESSION_SCHEMA_VERSION = 1
+AUTH_SESSION_MAX_AGE_SECONDS = int(os.getenv("AUTH_SESSION_MAX_AGE_SECONDS", "28800"))
+if AUTH_SESSION_MAX_AGE_SECONDS <= 0:
+    raise RuntimeError("AUTH_SESSION_MAX_AGE_SECONDS must be greater than zero")
+AUTH_SESSION_HTTPS_ONLY = os.getenv(
+    "AUTH_SESSION_HTTPS_ONLY",
+    "true" if _configured_saml_secret else "false",
+).lower() == "true"
 
 config_data = {
     "GOOGLE_CLIENT_ID": os.getenv("GOOGLE_CLIENT_ID", ""),
     "GOOGLE_CLIENT_SECRET": os.getenv("GOOGLE_CLIENT_SECRET", ""),
-    "SECRET_KEY": os.getenv("SECRET_KEY", "verysecretkey"),
+    "MICROSOFT_CLIENT_ID": os.getenv("MICROSOFT_CLIENT_ID", ""),
+    "MICROSOFT_CLIENT_SECRET": os.getenv("MICROSOFT_CLIENT_SECRET", ""),
+    "SECRET_KEY": SAML_SECRET_KEY,
 }
 config = Config(environ=config_data)
 
 SAML_EMAIL_ATTRIBUTE = os.getenv("SAML_EMAIL_ATTRIBUTE", "email")
 SAML_NAME_ATTRIBUTE = os.getenv("SAML_NAME_ATTRIBUTE", "givenName")
+SAML_LOGIN_LABEL = os.getenv("SAML_LOGIN_LABEL", "Login with SAML")
+SAML_LOGO_URL = os.getenv("SAML_LOGO_URL", "")
+SAML_PROVIDERS = os.getenv("SAML_PROVIDERS", "")
 SAML_DEFAULT_REDIRECT = os.getenv("SAML_DEFAULT_REDIRECT", "")
 SAML_SP_ENTITY_ID = os.getenv("SAML_SP_ENTITY_ID", "")
 SAML_SP_ASSERTION_URL = os.getenv("SAML_SP_ASSERTION_CONSUMER_SERVICE_URL", "")
@@ -790,47 +935,200 @@ if not SAML_ROLE_ATTRIBUTE_KEYS:
         "http://schemas.auth0.com/roles",
         "http://schemas.microsoft.com/ws/2008/06/identity/claims/role",
     ]
-SAML_REQUEST_CACHE_MAX = int(os.getenv("SAML_REQUEST_CACHE_MAX", "512"))
-SAML_REQUEST_CACHE_TTL = int(os.getenv("SAML_REQUEST_CACHE_TTL", "600"))
-
-_SAML_REQUEST_STATE: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
-
-
-def _generate_relay_token() -> str:
-    return secrets.token_urlsafe(32)
-
-
-def _prune_saml_state(now: float) -> None:
-    expired: List[str] = []
-    for key, payload in _SAML_REQUEST_STATE.items():
-        timestamp = payload.get("ts", now)
-        if now - timestamp > SAML_REQUEST_CACHE_TTL:
-            expired.append(key)
-    for key in expired:
-        _SAML_REQUEST_STATE.pop(key, None)
-    while len(_SAML_REQUEST_STATE) > SAML_REQUEST_CACHE_MAX:
-        _SAML_REQUEST_STATE.popitem(last=False)
+SAML_RELAY_STATE_TTL_SECONDS = int(
+    os.getenv(
+        "SAML_RELAY_STATE_TTL_SECONDS",
+        os.getenv("SAML_REQUEST_CACHE_TTL", "600"),
+    )
+)
+if SAML_RELAY_STATE_TTL_SECONDS <= 0:
+    raise RuntimeError("SAML_RELAY_STATE_TTL_SECONDS must be greater than zero")
 
 
-def _store_saml_state(token: str, payload: Dict[str, Any]) -> None:
-    now = time.time()
-    payload = dict(payload)
-    payload["ts"] = now
-    _SAML_REQUEST_STATE[token] = payload
-    _SAML_REQUEST_STATE.move_to_end(token)
-    _prune_saml_state(now)
+def _split_csv(value: Any) -> List[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return []
 
 
-def _consume_saml_state(token: Optional[str]) -> Optional[Dict[str, Any]]:
+def _provider_value(provider: Optional[Dict[str, Any]], *keys: str, default: Any = "") -> Any:
+    if provider:
+        for key in keys:
+            value = provider.get(key)
+            if value not in (None, ""):
+                return value
+    return default
+
+
+def _normalize_saml_provider_id(value: str) -> str:
+    normalized = re.sub(r"[^0-9a-zA-Z_-]+", "-", value.strip()).strip("-")
+    return normalized.lower()
+
+
+def _normalize_saml_provider(raw_provider: Dict[str, Any], fallback_id: str) -> Dict[str, Any]:
+    provider = dict(raw_provider)
+    provider_id = _normalize_saml_provider_id(str(provider.get("id") or fallback_id))
+    if not provider_id:
+        raise RuntimeError("SAML provider id cannot be empty")
+    provider["id"] = provider_id
+    provider["label"] = str(provider.get("label") or provider.get("name") or f"Login with {provider_id}")
+    logo_url = provider.get("logo_url") or provider.get("logo") or provider.get("logoUrl") or ""
+    provider["logo_url"] = str(logo_url)
+    return provider
+
+
+def _load_saml_providers() -> List[Dict[str, Any]]:
+    configured = SAML_PROVIDERS
+    if isinstance(configured, str):
+        configured = configured.strip()
+        if configured:
+            try:
+                configured = json.loads(configured)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError("Invalid JSON in SAML_PROVIDERS environment variable") from exc
+        else:
+            configured = None
+
+    providers: List[Dict[str, Any]] = []
+    if isinstance(configured, dict):
+        for provider_id, provider_data in configured.items():
+            if not isinstance(provider_data, dict):
+                raise RuntimeError("Each SAML_PROVIDERS entry must be an object")
+            providers.append(_normalize_saml_provider(provider_data, str(provider_id)))
+    elif isinstance(configured, list):
+        for index, provider_data in enumerate(configured):
+            if not isinstance(provider_data, dict):
+                raise RuntimeError("Each SAML_PROVIDERS entry must be an object")
+            providers.append(_normalize_saml_provider(provider_data, f"provider-{index + 1}"))
+    elif configured is not None:
+        raise RuntimeError("SAML_PROVIDERS must be a JSON object or array")
+
+    if providers:
+        seen_ids: Set[str] = set()
+        for provider in providers:
+            provider_id = provider["id"]
+            if provider_id in seen_ids:
+                raise RuntimeError(f"Duplicate SAML provider id: {provider_id}")
+            seen_ids.add(provider_id)
+        return providers
+
+    return [{
+        "id": "default",
+        "label": SAML_LOGIN_LABEL or "Login with SAML",
+        "logo_url": SAML_LOGO_URL,
+    }]
+
+
+def _get_saml_provider(provider_id: Optional[str] = None) -> Dict[str, Any]:
+    providers = _load_saml_providers()
+    if provider_id is None:
+        if len(providers) == 1:
+            return providers[0]
+        raise HTTPException(status_code=400, detail="SAML provider id is required")
+
+    normalized_id = _normalize_saml_provider_id(provider_id)
+    for provider in providers:
+        if provider["id"] == normalized_id:
+            return provider
+    raise HTTPException(status_code=404, detail=f"SAML provider '{provider_id}' not found")
+
+
+def _get_saml_login_buttons() -> List[Dict[str, str]]:
+    providers = _load_saml_providers()
+    use_provider_routes = len(providers) > 1 or providers[0]["id"] != "default"
+    buttons = []
+    for provider in providers:
+        href = "auth/saml/login"
+        if use_provider_routes:
+            href = f"auth/saml/{provider['id']}/login"
+        buttons.append({
+            "href": href,
+            "label": provider.get("label") or "Login with SAML",
+            "logo_url": provider.get("logo_url") or "",
+        })
+    return buttons
+
+
+def _get_saml_allowed_roles(provider: Optional[Dict[str, Any]] = None) -> List[str]:
+    provider_roles = _provider_value(provider, "allowed_roles", "allowedRoles", default=None)
+    roles = _split_csv(provider_roles) if provider_roles is not None else SAML_ALLOWED_ROLES
+    return [role.lower() for role in roles]
+
+
+def _get_saml_role_attribute_keys(provider: Optional[Dict[str, Any]] = None) -> List[str]:
+    provider_keys = _provider_value(provider, "role_attribute_keys", "roleAttributeKeys", default=None)
+    return _split_csv(provider_keys) if provider_keys is not None else SAML_ROLE_ATTRIBUTE_KEYS
+
+
+_SAML_RELAY_STATE_SALT = "pytincture-saml-relay-state-v1"
+
+
+def _get_saml_relay_state_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(
+        SAML_SECRET_KEY,
+        salt=_SAML_RELAY_STATE_SALT,
+        signer_kwargs={"digest_method": hashlib.sha256},
+    )
+
+
+def _sign_saml_relay_state(payload: Dict[str, Any]) -> str:
+    return _get_saml_relay_state_serializer().dumps(payload)
+
+
+def _load_saml_relay_state(token: Optional[str]) -> Dict[str, Any]:
     if not token:
-        return None
-    payload = _SAML_REQUEST_STATE.pop(token, None)
-    if not payload:
-        return None
-    timestamp = payload.pop("ts", time.time())
-    if time.time() - timestamp > SAML_REQUEST_CACHE_TTL:
-        return None
+        raise HTTPException(status_code=400, detail="SAML RelayState is required")
+
+    try:
+        payload = _get_saml_relay_state_serializer().loads(
+            token,
+            max_age=SAML_RELAY_STATE_TTL_SECONDS,
+        )
+    except SignatureExpired as exc:
+        raise HTTPException(status_code=400, detail="SAML RelayState has expired") from exc
+    except BadSignature as exc:
+        raise HTTPException(status_code=400, detail="Invalid SAML RelayState") from exc
+
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        raise HTTPException(status_code=400, detail="Invalid SAML RelayState")
+
+    for key in ("application", "provider_id", "request_id"):
+        if not isinstance(payload.get(key), str) or not payload[key]:
+            raise HTTPException(status_code=400, detail="Invalid SAML RelayState")
+
+    return_to = payload.get("return_to")
+    if return_to is not None and _sanitize_return_to(return_to) is None:
+        raise HTTPException(status_code=400, detail="Invalid SAML RelayState return path")
+
     return payload
+
+
+def _replace_saml_relay_state(
+    saml_auth: OneLogin_Saml2_Auth,
+    auth_url: str,
+    relay_state: str,
+) -> str:
+    """Replace the placeholder RelayState and refresh any redirect signature."""
+    parsed_url = urlsplit(auth_url)
+    parameters = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
+    if not parameters.get("SAMLRequest"):
+        raise RuntimeError("SAML login URL is missing SAMLRequest")
+
+    parameters["RelayState"] = relay_state
+    parameters.pop("Signature", None)
+    parameters.pop("SigAlg", None)
+
+    security = saml_auth.get_settings().get_security_data()
+    if security.get("authnRequestsSigned", False):
+        saml_auth.add_request_signature(
+            parameters,
+            security["signatureAlgorithm"],
+        )
+
+    base_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, parsed_url.path, "", ""))
+    return saml_auth.redirect_to(base_url, parameters)
 
 
 def _normalize_certificate(value: str) -> str:
@@ -979,28 +1277,45 @@ def _debug_session_state(stage: str, request: Request) -> None:
         print(f"DEBUG: Failed to inspect session during {stage}: {exc}")
 
 
-def _build_saml_settings(request: Request, application: str) -> Dict[str, Any]:
+def _build_saml_settings(request: Request, application: str, provider: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Construct the settings dict consumed by python3-saml using runtime request data.
     """
     origin = _extract_request_origin(request)
+
+    sp_entity_id = _provider_value(provider, "sp_entity_id", "spEntityId", default=SAML_SP_ENTITY_ID)
+    sp_assertion_url = _provider_value(
+        provider,
+        "sp_assertion_consumer_service_url",
+        "sp_acs_url",
+        "acs_url",
+        "spAssertionConsumerServiceUrl",
+        default=SAML_SP_ASSERTION_URL,
+    )
+    sp_cert_value = _provider_value(provider, "sp_x509_cert", "sp_cert", "spX509Cert", default=SAML_SP_X509_CERT)
+    sp_key_value = _provider_value(provider, "sp_private_key", "spPrivateKey", default=SAML_SP_PRIVATE_KEY)
+    idp_entity_value = _provider_value(provider, "idp_entity_id", "idpEntityId", default=SAML_IDP_ENTITY_ID)
+    idp_sso_value = _provider_value(provider, "idp_sso_url", "idpSsoUrl", default=SAML_IDP_SSO_URL)
+    idp_slo_value = _provider_value(provider, "idp_slo_url", "idpSloUrl", default=SAML_IDP_SLO_URL)
+    idp_cert_value = _provider_value(provider, "idp_x509_cert", "idp_cert", "idpX509Cert", default=SAML_IDP_X509_CERT)
+
     default_entity = f"{origin['base_url']}/{application}/auth/saml/metadata"
-    entity_id = _apply_saml_template(SAML_SP_ENTITY_ID or default_entity, application, origin)
+    entity_id = _apply_saml_template(sp_entity_id or default_entity, application, origin)
 
     default_acs = f"{origin['base_url']}/{application}/auth/saml/acs"
-    if not SAML_SP_ASSERTION_URL and entity_id:
+    if not sp_assertion_url and entity_id:
         parsed_entity = urlparse(entity_id)
         if parsed_entity.scheme and parsed_entity.netloc:
             default_acs = f"{parsed_entity.scheme}://{parsed_entity.netloc}/{application}/auth/saml/acs"
-    acs_url = _apply_saml_template(SAML_SP_ASSERTION_URL or default_acs, application, origin)
+    acs_url = _apply_saml_template(sp_assertion_url or default_acs, application, origin)
 
-    idp_entity = _apply_saml_template(SAML_IDP_ENTITY_ID, application, origin)
-    idp_sso = _apply_saml_template(SAML_IDP_SSO_URL, application, origin)
-    idp_slo = _apply_saml_template(SAML_IDP_SLO_URL, application, origin) if SAML_IDP_SLO_URL else ""
-    idp_cert = _normalize_certificate(SAML_IDP_X509_CERT)
+    idp_entity = _apply_saml_template(idp_entity_value, application, origin)
+    idp_sso = _apply_saml_template(idp_sso_value, application, origin)
+    idp_slo = _apply_saml_template(idp_slo_value, application, origin) if idp_slo_value else ""
+    idp_cert = _normalize_certificate(idp_cert_value)
 
     if not idp_entity or not idp_sso or not idp_cert:
-        raise RuntimeError("SAML IdP configuration is incomplete. Ensure SAML_IDP_ENTITY_ID, SAML_IDP_SSO_URL, and SAML_IDP_X509_CERT are set.")
+        raise RuntimeError("SAML IdP configuration is incomplete. Ensure each provider has idp_entity_id, idp_sso_url, and idp_x509_cert, or set SAML_IDP_ENTITY_ID, SAML_IDP_SSO_URL, and SAML_IDP_X509_CERT.")
 
     sp_settings: Dict[str, Any] = {
         "entityId": entity_id,
@@ -1011,8 +1326,8 @@ def _build_saml_settings(request: Request, application: str) -> Dict[str, Any]:
         "NameIDFormat": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
     }
 
-    sp_cert = _normalize_certificate(SAML_SP_X509_CERT)
-    sp_key = _normalize_certificate(SAML_SP_PRIVATE_KEY)
+    sp_cert = _normalize_certificate(sp_cert_value)
+    sp_key = _normalize_certificate(sp_key_value)
     if sp_cert:
         sp_settings["x509cert"] = sp_cert
     if sp_key:
@@ -1057,22 +1372,23 @@ def _build_saml_request_data(request: Request, post_data: Optional[Dict[str, Any
     }
 
 
-def _init_saml_auth(request: Request, application: str, post_data: Optional[Dict[str, Any]] = None) -> OneLogin_Saml2_Auth:
+def _init_saml_auth(request: Request, application: str, provider: Optional[Dict[str, Any]] = None, post_data: Optional[Dict[str, Any]] = None) -> OneLogin_Saml2_Auth:
     """
     Convenience wrapper to instantiate a SAML Auth client.
     """
     request_data = _build_saml_request_data(request, post_data=post_data)
-    settings = _build_saml_settings(request, application)
+    settings = _build_saml_settings(request, application, provider=provider)
     return OneLogin_Saml2_Auth(request_data, old_settings=settings)
 
 
-def _get_saml_default_redirect(application: str, request: Request) -> str:
+def _get_saml_default_redirect(application: str, request: Request, provider: Optional[Dict[str, Any]] = None) -> str:
     """
     Produce the default redirect target using optional templates.
     """
     origin = _extract_request_origin(request)
     default_target = f"/{application}"
-    configured_target = _apply_saml_template(SAML_DEFAULT_REDIRECT, application, origin) if SAML_DEFAULT_REDIRECT else ""
+    default_redirect = _provider_value(provider, "default_redirect", "defaultRedirect", default=SAML_DEFAULT_REDIRECT)
+    configured_target = _apply_saml_template(default_redirect, application, origin) if default_redirect else ""
     return configured_target or default_target
 
 
@@ -1123,26 +1439,36 @@ def _sanitize_return_to(value: Optional[str]) -> Optional[str]:
         sanitized += f"#{parsed.fragment}"
     return sanitized
 
-# Create an OAuth object and register the Google provider
-if ENABLE_GOOGLE_AUTH:
+# Create an OAuth object and register supported providers
+if ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH:
     oauth = OAuth(config)
-    oauth.register(
-        name="google",
-        client_id=config.get("GOOGLE_CLIENT_ID"),
-        client_secret=config.get("GOOGLE_CLIENT_SECRET"),
-        # Use the well-known OIDC discovery document
-        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-        client_kwargs={"scope": "openid email profile"},
-    )
+    if ENABLE_GOOGLE_AUTH:
+        oauth.register(
+            name="google",
+            client_id=config.get("GOOGLE_CLIENT_ID"),
+            client_secret=config.get("GOOGLE_CLIENT_SECRET"),
+            # Use the well-known OIDC discovery document
+            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+            client_kwargs={"scope": "openid email profile"},
+        )
+    if ENABLE_MICROSOFT_AUTH:
+        oauth.register(
+            name="microsoft",
+            client_id=config.get("MICROSOFT_CLIENT_ID"),
+            client_secret=config.get("MICROSOFT_CLIENT_SECRET"),
+            server_metadata_url="https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration",
+            client_kwargs={"scope": "openid email profile offline_access"},
+        )
 else:
     oauth = None
 
 # Add session middleware (needed to store "return_to" and user info)
 app.add_middleware(
     SessionMiddleware,
-    secret_key=config.get("SECRET_KEY"),
-    same_site="lax",   # allow session cookies on top-level navigation while keeping CSRF protection
-    https_only=False,  # flip to True once you’re behind HTTPS
+    secret_key=SAML_SECRET_KEY,
+    max_age=AUTH_SESSION_MAX_AGE_SECONDS,
+    same_site="lax",
+    https_only=AUTH_SESSION_HTTPS_ONLY,
 )
 
 # ================
@@ -1160,11 +1486,31 @@ app.add_middleware(
     },
 )
 async def saml_login(request: Request, application: str):
+    return await _saml_login(request, application)
+
+
+@app.get(
+    "/{application}/auth/saml/{provider_id}/login",
+    operation_id="initiateSamlProviderAuth",
+    response_class=RedirectResponse,
+    responses={
+        302: {"description": "RedirectResponse (to IdP login)"},
+        404: {"description": "HTTPException (if SAML disabled or provider missing)"},
+        500: {"description": "HTTPException (if configuration error)"},
+    },
+)
+async def saml_provider_login(request: Request, application: str, provider_id: str):
+    return await _saml_login(request, application, provider_id=provider_id)
+
+
+async def _saml_login(request: Request, application: str, provider_id: Optional[str] = None):
     """
     Redirect the user to the configured SAML Identity Provider.
     """
     if not ENABLE_SAML_AUTH:
         raise HTTPException(status_code=404, detail="SAML authentication not enabled")
+
+    provider = _get_saml_provider(provider_id)
 
     _debug_session_state("saml_login:entry", request)
     return_to = request.query_params.get("return_to")
@@ -1179,29 +1525,31 @@ async def saml_login(request: Request, application: str):
             print("DEBUG: No return_to param supplied")
 
     try:
-        saml_auth = _init_saml_auth(request, application)
+        saml_auth = _init_saml_auth(request, application, provider=provider)
     except RuntimeError as config_error:
         raise HTTPException(status_code=500, detail=str(config_error)) from config_error
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"SAML initialization failed: {exc}") from exc
 
-    relay_token = _generate_relay_token()
-    auth_url = saml_auth.login(return_to=relay_token)
+    session_return_to = _sanitize_return_to(request.session.pop("return_to", None))
+    fallback_return = safe_return_to or session_return_to
+    auth_url = saml_auth.login(return_to="pytincture-relay-state")
     request_id = saml_auth.get_last_request_id()
-    request.session["saml_request_id"] = request_id
-    fallback_return = safe_return_to or request.session.get("return_to")
-    _store_saml_state(
-        relay_token,
+    if not request_id:
+        raise HTTPException(status_code=500, detail="SAML login did not generate a request ID")
+
+    relay_token = _sign_saml_relay_state(
         {
+            "version": 1,
+            "application": application,
+            "provider_id": provider["id"],
             "request_id": request_id,
             "return_to": fallback_return,
-        },
+        }
     )
-    print(
-        f"DEBUG: SAML login generated request ID: {request_id} "
-        f"and relay token: {relay_token}"
-    )
-    _debug_session_state("saml_login:stored_request_id", request)
+    auth_url = _replace_saml_relay_state(saml_auth, auth_url, relay_token)
+    request.session.pop("saml_request_id", None)
+    request.session.pop("saml_provider_id", None)
     return RedirectResponse(url=auth_url)
 
 
@@ -1218,6 +1566,25 @@ async def saml_login(request: Request, application: str):
     },
 )
 async def saml_assertion_consumer(request: Request, application: str):
+    return await _saml_assertion_consumer(request, application)
+
+
+@app.post(
+    "/{application}/auth/saml/{provider_id}/acs",
+    operation_id="handleSamlProviderAuthCallback",
+    response_class=RedirectResponse,
+    responses={
+        302: {"description": "RedirectResponse (to original path after login)"},
+        400: {"description": "HTTPException (if SAML response invalid)"},
+        401: {"description": "HTTPException (if user not authorized)"},
+        404: {"description": "HTTPException (if SAML disabled or provider missing)"},
+    },
+)
+async def saml_provider_assertion_consumer(request: Request, application: str, provider_id: str):
+    return await _saml_assertion_consumer(request, application, provider_id=provider_id)
+
+
+async def _saml_assertion_consumer(request: Request, application: str, provider_id: Optional[str] = None):
     """
     Handle the assertion consumer service (ACS) endpoint invoked by the IdP.
     """
@@ -1228,14 +1595,15 @@ async def saml_assertion_consumer(request: Request, application: str):
     form_data = await request.form()
     post_data = dict(form_data.multi_items())
     relay_token = post_data.get("RelayState")
-    cached_state = _consume_saml_state(relay_token)
-    if cached_state:
-        print(
-            f"DEBUG: Retrieved cached relay state for token {relay_token}: "
-            f"{cached_state}"
-        )
-    else:
-        print(f"DEBUG: No cached relay state found for token {relay_token}")
+    relay_state = _load_saml_relay_state(relay_token)
+    if relay_state["application"] != application:
+        raise HTTPException(status_code=400, detail="SAML application mismatch")
+
+    state_provider_id = relay_state["provider_id"]
+    resolved_provider_id = provider_id or state_provider_id
+    provider = _get_saml_provider(resolved_provider_id)
+    if provider["id"] != state_provider_id:
+        raise HTTPException(status_code=400, detail="SAML provider mismatch")
     
     # DEBUG: Log what we received
     print(f"DEBUG: Received form data keys: {list(post_data.keys())}")
@@ -1259,7 +1627,7 @@ async def saml_assertion_consumer(request: Request, application: str):
             print(f"DEBUG: Could not decode SAML response: {e}")
 
     try:
-        saml_auth = _init_saml_auth(request, application, post_data=post_data)
+        saml_auth = _init_saml_auth(request, application, provider=provider, post_data=post_data)
         
         # DEBUG: Log SAML settings  
         settings = saml_auth.get_settings()
@@ -1277,14 +1645,9 @@ async def saml_assertion_consumer(request: Request, application: str):
         env_fingerprint = _certificate_fingerprint(idp_cert)
         print(f"DEBUG: IdP Certificate fingerprint (env): {env_fingerprint}")
         
-        request_id = None
-        if cached_state and cached_state.get("request_id"):
-            request_id = cached_state["request_id"]
-            print(f"DEBUG: Using request ID from relay cache: {request_id}")
-        else:
-            request_id = request.session.pop("saml_request_id", None)
-            print(f"DEBUG: Request ID from session (pre-process): {request_id}")
-            _debug_session_state("saml_acs:after_pop_request_id", request)
+        request_id = relay_state["request_id"]
+        request.session.pop("saml_request_id", None)
+        request.session.pop("saml_provider_id", None)
         
         # Process the SAML response
         try:
@@ -1383,21 +1746,25 @@ async def saml_assertion_consumer(request: Request, application: str):
         for key, values in attributes.items()
     }
 
-    if SAML_ALLOWED_ROLES:
-        role_values: List[str] = []
-        normalized_key_map = {key.lower(): key for key in normalized_attributes.keys()}
-        for candidate_key in SAML_ROLE_ATTRIBUTE_KEYS:
-            matched_key = normalized_key_map.get(candidate_key.lower())
-            if matched_key:
-                role_values.extend(normalized_attributes.get(matched_key, []))
-        flattened_roles = {str(value).strip().lower() for value in role_values if isinstance(value, str) and value.strip()}
+    allowed_roles = _get_saml_allowed_roles(provider)
+    role_attribute_keys = _get_saml_role_attribute_keys(provider)
+    role_values: List[str] = []
+    normalized_key_map = {key.lower(): key for key in normalized_attributes.keys()}
+    for candidate_key in role_attribute_keys:
+        matched_key = normalized_key_map.get(candidate_key.lower())
+        if matched_key:
+            role_values.extend(normalized_attributes.get(matched_key, []))
+    session_roles = _normalize_auth_roles(role_values)
+
+    if allowed_roles:
+        flattened_roles = set(session_roles)
         print(f"DEBUG: Candidate role values from attributes: {flattened_roles}")
-        has_allowed_role = any(role in flattened_roles for role in SAML_ALLOWED_ROLES)
+        has_allowed_role = any(role in flattened_roles for role in allowed_roles)
         if not has_allowed_role:
             print(
                 f"DEBUG: User missing required SAML role. "
-                f"Allowed roles={SAML_ALLOWED_ROLES} "
-                f"searched_keys={SAML_ROLE_ATTRIBUTE_KEYS}"
+                f"Allowed roles={allowed_roles} "
+                f"searched_keys={role_attribute_keys}"
             )
             raise HTTPException(status_code=401, detail="Not authorized for this application")
 
@@ -1405,10 +1772,14 @@ async def saml_assertion_consumer(request: Request, application: str):
         "email": email_attr,
         "name": name_attr or "",
         "picture": f"{application}/appcode/profile.png",
+        "auth_type": "saml",
+        "auth_provider": provider["id"],
+        "auth_provider_label": provider.get("label") or provider["id"],
+        "roles": session_roles,
         "saml": {
+            "provider_id": provider["id"],
+            "provider_label": provider.get("label") or provider["id"],
             "name_id": saml_auth.get_nameid(),
-            "session_index": saml_auth.get_session_index(),
-            "attributes": normalized_attributes,
         },
     }
 
@@ -1419,21 +1790,17 @@ async def saml_assertion_consumer(request: Request, application: str):
         if email_attr.lower() not in allowed_emails:
             raise HTTPException(status_code=401, detail="Not authorized")
 
-    USER_SESSION_DICT[email_attr] = user_info
-    request.session["user"] = user_info
-    request.session["saml_name_id"] = saml_auth.get_nameid()
-    request.session["saml_session_index"] = saml_auth.get_session_index()
+    _set_authenticated_user(request, user_info)
 
-    cached_redirect = None
-    if cached_state:
-        cached_redirect = _sanitize_return_to(cached_state.get("return_to"))
-        if cached_redirect:
-            print(f"DEBUG: Using cached return_to from relay cache: {cached_redirect}")
+    cached_redirect = _sanitize_return_to(relay_state.get("return_to"))
+    session_redirect = _sanitize_return_to(request.session.pop("return_to", None))
+    if cached_redirect:
+        print(f"DEBUG: Using return_to from RelayState: {cached_redirect}")
     if not cached_redirect:
-        cached_redirect = _sanitize_return_to(request.session.pop("return_to", None))
+        cached_redirect = session_redirect
         if cached_redirect:
             print(f"DEBUG: Using return_to from session: {cached_redirect}")
-    redirect_target = cached_redirect or _get_saml_default_redirect(application, request)
+    redirect_target = cached_redirect or _get_saml_default_redirect(application, request, provider=provider)
     
     print(f"DEBUG: Redirecting to: {redirect_target}")
     return RedirectResponse(url=redirect_target, status_code=302)
@@ -1449,6 +1816,23 @@ async def saml_assertion_consumer(request: Request, application: str):
     },
 )
 async def saml_metadata(request: Request, application: str):
+    return await _saml_metadata(request, application)
+
+
+@app.get(
+    "/{application}/auth/saml/{provider_id}/metadata",
+    operation_id="getSamlProviderMetadata",
+    responses={
+        200: {"description": "Response (SAML metadata XML)"},
+        404: {"description": "HTTPException (if SAML disabled or provider missing)"},
+        500: {"description": "HTTPException (if metadata generation fails)"},
+    },
+)
+async def saml_provider_metadata(request: Request, application: str, provider_id: str):
+    return await _saml_metadata(request, application, provider_id=provider_id)
+
+
+async def _saml_metadata(request: Request, application: str, provider_id: Optional[str] = None):
     """
     Provide SP metadata for the configured SAML settings.
     """
@@ -1456,7 +1840,8 @@ async def saml_metadata(request: Request, application: str):
         raise HTTPException(status_code=404, detail="SAML authentication not enabled")
 
     try:
-        settings = OneLogin_Saml2_Settings(settings=_build_saml_settings(request, application), sp_validation_only=True)
+        provider = _get_saml_provider(provider_id)
+        settings = OneLogin_Saml2_Settings(settings=_build_saml_settings(request, application, provider=provider), sp_validation_only=True)
         metadata_xml = settings.get_sp_metadata()
         errors = settings.validate_metadata(metadata_xml)
         if errors:
@@ -1495,7 +1880,12 @@ async def auth_google_callback(request: Request, application: str):
     except OAuthError as e:
         return JSONResponse({"error": str(e)}, status_code=401)
     
-    user_info = token.get("userinfo")
+    user_info = token.get("userinfo") or {}
+    if not user_info:
+        try:
+            user_info = await oauth.google.parse_id_token(request, token)
+        except Exception:
+            user_info = user_info or {}
 
     # You can optionally grab user info from token["userinfo"]
     if os.getenv("ALLOWED_EMAILS", "") != "":
@@ -1503,10 +1893,67 @@ async def auth_google_callback(request: Request, application: str):
         if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
             return JSONResponse({"error": "Not authorized"}, status_code=401)
 
-    USER_SESSION_DICT[user_info["email"]] = user_info
-    request.session["user"] = user_info  # store in session
+    _set_authenticated_user(
+        request,
+        user_info,
+        auth_type="google",
+        auth_provider="google",
+        auth_provider_label="Google",
+    )
 
     # See if we stored a "return_to" path earlier; default to "/"
+    return_to = _sanitize_return_to(request.session.pop("return_to", None)) or "/"
+    return RedirectResponse(url=return_to)
+
+@app.get("/{application}/auth/microsoft", operation_id="initiateMicrosoftAuth", response_class=RedirectResponse, responses={302: {"description": "RedirectResponse (to Microsoft OAuth URL)"}})
+async def auth_microsoft(request: Request, application: str):
+    """
+    Redirect the user to Microsoft's OAuth2 screen.
+    """
+    if oauth is None or not ENABLE_MICROSOFT_AUTH:
+        raise HTTPException(status_code=404, detail="Microsoft authentication not enabled")
+
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    host = request.headers["host"]
+    protocol = forwarded_proto or request.url.scheme
+    redirect_uri = f"{protocol}://{host}/{application}/auth/microsoft/callback"
+
+    return await oauth.microsoft.authorize_redirect(request, redirect_uri)
+
+@app.get("/{application}/auth/microsoft/callback", name="auth_microsoft_callback", operation_id="handleMicrosoftAuthCallback", response_class=RedirectResponse, responses={302: {"description": "RedirectResponse (to original path after login)"}, 401: {"description": "JSONResponse (if OAuth error or not authorized)"}})
+async def auth_microsoft_callback(request: Request, application: str):
+    """
+    Microsoft redirects here after login. Authlib will exchange code for token.
+    We'll store user info in the session, then redirect back to original app path.
+    """
+    if oauth is None or not ENABLE_MICROSOFT_AUTH:
+        raise HTTPException(status_code=404, detail="Microsoft authentication not enabled")
+
+    try:
+        token = await oauth.microsoft.authorize_access_token(request)
+    except OAuthError as e:
+        return JSONResponse({"error": str(e)}, status_code=401)
+
+    user_info = token.get("userinfo") or {}
+    if not user_info:
+        try:
+            user_info = await oauth.microsoft.parse_id_token(request, token)
+        except Exception:
+            user_info = user_info or {}
+
+    if os.getenv("ALLOWED_EMAILS", "") != "":
+        allowed_emails = os.getenv("ALLOWED_EMAILS").split(",")  # Assuming comma-separated
+        if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
+            return JSONResponse({"error": "Not authorized"}, status_code=401)
+
+    _set_authenticated_user(
+        request,
+        user_info,
+        auth_type="microsoft",
+        auth_provider="microsoft",
+        auth_provider_label="Microsoft",
+    )
+
     return_to = _sanitize_return_to(request.session.pop("return_to", None)) or "/"
     return RedirectResponse(url=return_to)
 
@@ -1516,9 +1963,7 @@ def logout(request: Request,  application: str):
     Logs the user out of *your app only*.
     """
     # 1) Clear user info from session
-    request.session.pop("user", None)
-    request.session.pop("saml_name_id", None)
-    request.session.pop("saml_session_index", None)
+    _clear_auth_session(request)
     # 2) If stored tokens in session, remove them
     # request.session.pop("token", None)
 
@@ -1534,9 +1979,20 @@ async def login(request: Request, application: str):
     """
     Serves the login page with options to login via Google and/or Email/Password based on configuration.
     """
-    # Retrieve configuration flags from environment variables
-    ENABLE_GOOGLE_AUTH = os.environ.get("ENABLE_GOOGLE_AUTH", "false").lower() == "true"
-    ENABLE_USER_LOGIN = os.environ.get("ENABLE_USER_LOGIN", "false").lower() == "true"
+    def _resolve_auth_flag(env_name: str, default: bool) -> bool:
+        env_value = os.environ.get(env_name)
+        if env_value is not None:
+            return env_value.lower() == "true"
+        return default
+
+    enable_google_auth = _resolve_auth_flag("ENABLE_GOOGLE_AUTH", ENABLE_GOOGLE_AUTH)
+    enable_user_login = _resolve_auth_flag("ENABLE_USER_LOGIN", ENABLE_USER_LOGIN)
+    enable_saml_auth = _resolve_auth_flag("ENABLE_SAML_AUTH", ENABLE_SAML_AUTH)
+    enable_microsoft_auth = _resolve_auth_flag("ENABLE_MICROSOFT_AUTH", ENABLE_MICROSOFT_AUTH)
+
+    saml_login_buttons = _get_saml_login_buttons() if enable_saml_auth else []
+    if enable_saml_auth and not enable_google_auth and not enable_user_login and not enable_microsoft_auth and len(saml_login_buttons) == 1:
+        return RedirectResponse(url=f"/{application}/{saml_login_buttons[0]['href']}", status_code=302)
 
     # Start building the HTML content
     html_content = """
@@ -1570,9 +2026,19 @@ async def login(request: Request, application: str):
                 font-size: 16px;
                 cursor: pointer;
                 text-decoration: none;
-                display: inline-block;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 10px;
                 margin: 10px 0;
                 width: 80%;
+                box-sizing: border-box;
+            }
+            .login-button img {
+                width: 20px;
+                height: 20px;
+                object-fit: contain;
+                flex: 0 0 auto;
             }
             .submit-button {
                 background-color: #4285F4;
@@ -1622,21 +2088,33 @@ async def login(request: Request, application: str):
 
     social_buttons = []
 
-    if ENABLE_GOOGLE_AUTH:
+    if enable_google_auth:
         social_buttons.append(
             '<a href="auth/google" class="login-button">Login with Google</a>'
         )
 
-    if ENABLE_SAML_AUTH:
+    if enable_microsoft_auth:
         social_buttons.append(
-            '<a href="auth/saml/login" class="login-button">Login with SAML</a>'
+            '<a href="auth/microsoft" class="login-button">Login with Microsoft</a>'
         )
+
+    if enable_saml_auth:
+        for button in saml_login_buttons:
+            label = escape(button["label"])
+            logo_url = button.get("logo_url") or ""
+            logo_html = ""
+            if logo_url:
+                safe_logo_url = escape(logo_url)
+                logo_html = f'<img src="{safe_logo_url}" alt="" aria-hidden="true">'
+            social_buttons.append(
+                f'<a href="{escape(button["href"])}" class="login-button">{logo_html}<span>{label}</span></a>'
+            )
 
     if social_buttons:
         html_content += "\n".join(social_buttons)
 
     # Conditionally add Email/Password login form
-    if ENABLE_USER_LOGIN:
+    if enable_user_login:
         if social_buttons:
             # Add a divider if both login methods are available
             html_content += '''
@@ -1651,7 +2129,7 @@ async def login(request: Request, application: str):
         '''
 
     # Handle case where no login methods are enabled
-    if not (ENABLE_GOOGLE_AUTH or ENABLE_USER_LOGIN or ENABLE_SAML_AUTH):
+    if not (enable_google_auth or enable_user_login or enable_saml_auth or enable_microsoft_auth):
         html_content += '''
             <p>No login methods are currently available. Please contact support.</p>
         '''
@@ -1677,8 +2155,9 @@ async def auth_user_callback(request: Request, application: str):
 
     user_info = {
         "email": email,
-        "password": password,
-        "picture": f"{application}/appcode/profile.png"
+        "picture": f"{application}/appcode/profile.png",
+        "auth_type": "user",
+        "roles": [],
     }
 
     # You can optionally grab user info from token["userinfo"]
@@ -1687,8 +2166,7 @@ async def auth_user_callback(request: Request, application: str):
         if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
             return JSONResponse({"error": "Not authorized"}, status_code=401)
 
-    USER_SESSION_DICT[user_info["email"]] = user_info
-    request.session["user"] = user_info  # store in session
+    _set_authenticated_user(request, user_info)
 
     # See if we stored a "return_to" path earlier; default to "/{application}"
     return_to = _sanitize_return_to(request.session.pop("return_to", None)) or f"/{application}"
@@ -1709,8 +2187,9 @@ async def mcp_auth(request: Request, application: str, auth_input: MCPAuthInput 
 
     user_info = {
         "email": auth_input.email,
-        "password": auth_input.password,
-        "picture": f"{application}/appcode/profile.png"
+        "picture": f"{application}/appcode/profile.png",
+        "auth_type": "user",
+        "roles": [],
     }
 
     if os.getenv("ALLOWED_EMAILS", "") != "":
@@ -1718,8 +2197,7 @@ async def mcp_auth(request: Request, application: str, auth_input: MCPAuthInput 
         if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
             raise HTTPException(status_code=401, detail="Not authorized")
 
-    USER_SESSION_DICT[user_info["email"]] = user_info
-    request.session["user"] = user_info  # store in session
+    _set_authenticated_user(request, user_info)
 
     return {"status": "authenticated"}
 
@@ -1734,19 +2212,25 @@ async def main_app_route(response: Response, application: str, request: Request)
     3) If yes, serve the index.html with the relevant widgetset replaced.
     """
     # Check session
-    user_session = require_auth(request)
-    user_entry = user_session.get("email", "") if user_session else "noauth"
-    print(f"DEBUG MAIN_APP: user_entry={user_entry} cache_has={user_entry in USER_SESSION_DICT if hasattr(USER_SESSION_DICT, '__contains__') else user_entry in USER_SESSION_DICT}")
-    
-    if (ENABLE_USER_LOGIN or ENABLE_GOOGLE_AUTH or ENABLE_SAML_AUTH) and not USER_SESSION_DICT.get(user_entry, None):
+    try:
+        user_session = require_auth(request)
+    except HTTPException as auth_error:
+        if auth_error.status_code != 401:
+            raise
+        _clear_auth_session(request)
+        request.session["return_to"] = f"/{application}"
+        return RedirectResponse(url=f"/{application}/login")
+
+    if (
+        ENABLE_USER_LOGIN
+        or ENABLE_GOOGLE_AUTH
+        or ENABLE_MICROSOFT_AUTH
+        or ENABLE_SAML_AUTH
+    ) and not user_session:
         # Not logged in, so remember where they wanted to go:
         request.session["return_to"] = f"/{application}"
-        print(f"DEBUG MAIN_APP: user missing from session store, redirecting to login. return_to set to /{application}")
         # Then send them to Login page:
         return RedirectResponse(url=f"/{application}/login")
-    else:
-        request.session["user"] = require_auth(request)
-        user_session = request.session.get("user")
 
     # Already logged in, proceed normally
     appcode_folder = get_modules_path()
@@ -1772,9 +2256,12 @@ async def main_app_route(response: Response, application: str, request: Request)
         index_html = index_html.replace("***ENTRYPOINT***", safe_application)
     
     loading_title = application
+    favicon_markup = ""
     if os.path.exists(app_file_path):
         loading_title = find_app_loading_title(app_file_path, application)
+        favicon_markup = build_app_favicon_markup(application, app_file_path)
     index_html = index_html.replace("***LOADING_TITLE***", escape(loading_title))
+    index_html = index_html.replace("***FAVICON_LINK***", favicon_markup)
 
     index_html = index_html.replace("***WIDGETSET***", widgetset)
     return HTMLResponse(content=index_html)
@@ -1802,18 +2289,17 @@ def find_main_window_subclass(file_path):
         print(f"Error finding MainWindow subclass: {e}")
         return None
 
-def find_app_loading_title(file_path, default_title):
+def _find_app_string_setting(file_path, assignment_names, config_keys):
     """
-    Read a lightweight title from the app source without importing it.
-    Looks for APP_TITLE / APP_LOADING_TITLE or APP_CONFIG = {"title": "..."}.
+    Read a string setting from app source without importing the application.
     """
     try:
         with open(file_path, "r") as f:
             source = f.read()
         tree = ast.parse(source)
     except Exception as e:
-        print(f"Error reading loading title: {e}")
-        return default_title
+        print(f"Error reading app configuration: {e}")
+        return None
 
     def extract_string(node):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -1824,18 +2310,265 @@ def find_app_loading_title(file_path, default_title):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    if target.id in ("APP_TITLE", "APP_LOADING_TITLE"):
+                    if target.id in assignment_names:
                         value = extract_string(node.value)
                         if value:
                             return value
                     if target.id == "APP_CONFIG" and isinstance(node.value, ast.Dict):
                         for key, value_node in zip(node.value.keys, node.value.values):
                             key_str = extract_string(key)
-                            if key_str in ("title", "loading_title"):
+                            if key_str in config_keys:
                                 value = extract_string(value_node)
                                 if value:
                                     return value
-    return default_title
+    return None
+
+
+def find_app_loading_title(file_path, default_title):
+    """
+    Read APP_TITLE, APP_LOADING_TITLE, or the matching APP_CONFIG value.
+    """
+    return _find_app_string_setting(
+        file_path,
+        assignment_names=("APP_TITLE", "APP_LOADING_TITLE"),
+        config_keys=("title", "loading_title"),
+    ) or default_title
+
+
+def _normalize_app_asset_path(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+
+    candidate = value.strip()
+    if candidate.startswith("/appcode/"):
+        candidate = candidate[len("/appcode/"):]
+    elif candidate.startswith("appcode/"):
+        candidate = candidate[len("appcode/"):]
+    elif candidate.startswith("/"):
+        return None
+
+    parsed = urlsplit(candidate)
+    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+        return None
+    if "\\" in candidate:
+        return None
+
+    segments = candidate.split("/")
+    if any(not segment or segment in (".", "..") for segment in segments):
+        return None
+    return "/".join(segments)
+
+
+def _find_explicit_app_favicon(file_path) -> Optional[str]:
+    configured = _find_app_string_setting(
+        file_path,
+        assignment_names=("APP_FAVICON",),
+        config_keys=("favicon",),
+    )
+    return _normalize_app_asset_path(configured)
+
+
+def find_app_favicon(file_path) -> Optional[str]:
+    """
+    Resolve an explicit favicon file/folder or a conventional favicon directory.
+    """
+    configured = _find_explicit_app_favicon(file_path)
+    if configured:
+        return configured
+
+    app_root = os.path.dirname(os.fspath(file_path))
+    application = os.path.splitext(os.path.basename(os.fspath(file_path)))[0]
+    for candidate in (f"favicon/{application}", "favicon"):
+        candidate_path = os.path.join(app_root, *candidate.split("/"))
+        if os.path.isdir(candidate_path):
+            return candidate
+    return None
+
+
+_FAVICON_MIME_TYPES = {
+    ".gif": "image/gif",
+    ".ico": "image/x-icon",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+}
+_FAVICON_MANIFEST_NAMES = {
+    "manifest.json",
+    "manifest.webmanifest",
+    "site.webmanifest",
+}
+
+
+def _is_favicon_asset(filename: str) -> bool:
+    lowered = filename.lower()
+    extension = os.path.splitext(lowered)[1]
+    return (
+        extension in _FAVICON_MIME_TYPES
+        or lowered in _FAVICON_MANIFEST_NAMES
+        or lowered == "browserconfig.xml"
+    )
+
+
+def _get_configured_favicon_root() -> Optional[str]:
+    configured = os.getenv("PYTINCTURE_FAVICON_FOLDER", "").strip()
+    if not configured:
+        return None
+
+    configured = os.path.expanduser(configured)
+    if not os.path.isabs(configured):
+        configured = os.path.join(get_modules_path(), configured)
+    return os.path.realpath(configured)
+
+
+def _get_configured_favicon_directory(application: str) -> Optional[str]:
+    root = _get_configured_favicon_root()
+    if not root or not os.path.isdir(root):
+        return None
+
+    if (
+        application not in ("", ".", "..")
+        and all(char.isalnum() or char in "._-" for char in application)
+    ):
+        application_folder = os.path.realpath(os.path.join(root, application))
+        try:
+            is_within_root = os.path.commonpath((root, application_folder)) == root
+        except ValueError:
+            is_within_root = False
+        if is_within_root and os.path.isdir(application_folder):
+            return application_folder
+
+    return root
+
+
+def _find_favicon_assets_in_directory(directory: str) -> List[str]:
+    assets = []
+    with os.scandir(directory) as entries:
+        for entry in sorted(entries, key=lambda item: item.name.lower()):
+            if entry.is_file(follow_symlinks=False) and _is_favicon_asset(entry.name):
+                assets.append(entry.name)
+    return assets
+
+
+def find_app_favicon_assets(file_path) -> List[str]:
+    """Return the declared favicon file or supported files in its directory."""
+    favicon_path = find_app_favicon(file_path)
+    if not favicon_path:
+        return []
+
+    app_root = os.path.dirname(os.fspath(file_path))
+    local_path = os.path.join(app_root, *favicon_path.split("/"))
+    if not os.path.isdir(local_path):
+        return [favicon_path]
+
+    return [
+        f"{favicon_path}/{filename}"
+        for filename in _find_favicon_assets_in_directory(local_path)
+    ]
+
+
+def _favicon_size(filename: str) -> Optional[str]:
+    match = re.search(r"(?<!\d)(\d{1,4})x(\d{1,4})(?!\d)", filename)
+    if not match:
+        return None
+    return f"{match.group(1)}x{match.group(2)}"
+
+
+def _build_favicon_tag(
+    application: str,
+    asset_path: str,
+    *,
+    asset_route: str = "appcode",
+) -> Optional[str]:
+    favicon_url = (
+        f"/{quote(application, safe='')}/{asset_route}/"
+        f"{quote(asset_path, safe='/')}"
+    )
+    safe_url = escape(favicon_url)
+    filename = os.path.basename(asset_path).lower()
+
+    if filename in _FAVICON_MANIFEST_NAMES:
+        return f'<link rel="manifest" href="{safe_url}">'
+    if filename == "browserconfig.xml":
+        return f'<meta name="msapplication-config" content="{safe_url}">'
+
+    extension = os.path.splitext(filename)[1]
+    mime_type = _FAVICON_MIME_TYPES.get(extension)
+    if not mime_type:
+        return None
+
+    if filename.startswith("apple-touch-icon-precomposed"):
+        relation = "apple-touch-icon-precomposed"
+    elif filename.startswith("apple-touch-icon"):
+        relation = "apple-touch-icon"
+    elif "mask-icon" in filename or filename == "safari-pinned-tab.svg":
+        relation = "mask-icon"
+    else:
+        relation = "icon"
+
+    attributes = [f'rel="{relation}"', f'href="{safe_url}"', f'type="{mime_type}"']
+    size = _favicon_size(filename)
+    if size:
+        attributes.append(f'sizes="{size}"')
+    elif extension == ".svg":
+        attributes.append('sizes="any"')
+    return f"<link {' '.join(attributes)}>"
+
+
+def build_app_favicon_markup(application: str, file_path) -> str:
+    """Generate browser favicon declarations for an application's assets."""
+    configured_directory = None
+    if _find_explicit_app_favicon(file_path) is None:
+        configured_directory = _get_configured_favicon_directory(application)
+
+    if configured_directory is not None:
+        tags = [
+            tag
+            for asset_path in _find_favicon_assets_in_directory(configured_directory)
+            if (
+                tag := _build_favicon_tag(
+                    application,
+                    asset_path,
+                    asset_route="favicon-assets",
+                )
+            ) is not None
+        ]
+        if tags:
+            return "\n    ".join(tags)
+
+    tags = [
+        tag
+        for asset_path in find_app_favicon_assets(file_path)
+        if (tag := _build_favicon_tag(application, asset_path)) is not None
+    ]
+    return "\n    ".join(tags)
+
+
+@app.get(
+    "/{application}/favicon-assets/{asset_name}",
+    include_in_schema=False,
+)
+async def configured_favicon_asset(application: str, asset_name: str):
+    """Serve a browser favicon asset from the launcher-configured directory."""
+    if asset_name != os.path.basename(asset_name) or not _is_favicon_asset(asset_name):
+        raise HTTPException(status_code=404, detail="Favicon asset not found")
+
+    favicon_directory = _get_configured_favicon_directory(application)
+    if favicon_directory is None:
+        raise HTTPException(status_code=404, detail="Favicon asset not found")
+
+    asset_path = os.path.realpath(os.path.join(favicon_directory, asset_name))
+    try:
+        is_within_directory = (
+            os.path.commonpath((favicon_directory, asset_path)) == favicon_directory
+        )
+    except ValueError:
+        is_within_directory = False
+
+    if not is_within_directory or not os.path.isfile(asset_path):
+        raise HTTPException(status_code=404, detail="Favicon asset not found")
+    return FileResponse(asset_path)
 
 
 add_bff_docs_to_app(app)

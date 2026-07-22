@@ -9,8 +9,8 @@
 - Dynamic Code Packaging: Generate in-memory ZIP packages for frontend consumption.
 - Widgetset Stub Generation: Automatically generate frontend stub classes using the @backend_for_frontend decorator.
 - Streaming BFF Calls: Enable true streaming responses with the @bff_stream decorator.
-- Authentication & Sessions: Supports Google OAuth2, SAML 2.0 SSO, and email/password authentication with session management.
-- Redis Integration: Optionally use a Redis-backed session store via Upstash.
+- Authentication & Sessions: Supports Google and Microsoft OAuth2, SAML 2.0 SSO, and email/password authentication with compact signed sessions that work across replicas.
+- Redis Integration: Optionally expose the legacy shared `USER_SESSION_DICT` through Upstash; authentication does not require Redis.
 - Cross-Platform Compatibility: Works on any platform where Pyodide is supported.
 - Easy to Use: Provides a user-friendly API to streamline GUI development.
 - Production Launcher: Includes a uvicorn-based launcher for deploying the service.
@@ -38,17 +38,31 @@ pip install .
 
 ## Environment Variables
 - MODULES_PATH: Directory containing module files used for dynamic packaging. This is set automatically from `modules_folder` when `launch_service` starts; overriding it via env vars is usually unnecessary.
-- USE_REDIS_INSTANCE: Set to "true" to enable Redis-backed session storage.
+- USE_REDIS_INSTANCE: Set to "true" to back the legacy `USER_SESSION_DICT` with Upstash. Authentication does not read or write this dictionary.
 - ALLOWED_EMAILS: A comma-separated list of authorized email addresses.
    example: "some@email.com,joe@email.com"
 - ENABLE_GOOGLE_AUTH: Enable the respective authentication mechanisms.
    example: "true"
+- ENABLE_MICROSOFT_AUTH: Enable Microsoft OAuth2 authentication using the shared `common` tenant endpoint.
+   example: "true"
+- GOOGLE_CLIENT_ID: OAuth client ID for Google.
+- GOOGLE_CLIENT_SECRET: OAuth client secret for Google.
+- MICROSOFT_CLIENT_ID: OAuth client ID for Microsoft Azure AD / Microsoft identity platform.
+- MICROSOFT_CLIENT_SECRET: OAuth client secret for Microsoft Azure AD / Microsoft identity platform.
 - ENABLE_SAML_AUTH: Enable SAML 2.0 authentication.
    example: "true"
 - SAML_EMAIL_ATTRIBUTE: Attribute name used to extract the user email from the SAML assertion.
    example: "email"
 - SAML_NAME_ATTRIBUTE: Optional attribute for the display name.
    example: "givenName"
+- SAML_LOGIN_LABEL: Optional label for the single-provider SAML login button.
+   example: "Login with Contoso"
+- SAML_LOGO_URL: Optional image URL for the single-provider SAML login button.
+   example: "/appcode/contoso-logo.svg"
+- SAML_SECRET_KEY: Primary signing key for stateless authentication cookies and SAML RelayState. Use at least 32 random characters, keep it stable across deployments, and provide the same value to every replica. When configured, secure cookies default to enabled.
+- AUTH_SESSION_MAX_AGE_SECONDS: Signed authentication cookie lifetime in seconds. Defaults to `28800` (8 hours).
+- AUTH_SESSION_HTTPS_ONLY: Set to `true` to require HTTPS for the authentication cookie. Defaults to `true` when `SAML_SECRET_KEY` is configured and `false` only for legacy/local compatibility.
+- SAML_RELAY_STATE_TTL_SECONDS: Maximum SAML login handshake age in seconds. Defaults to `600` (10 minutes).
 - SAML_DEFAULT_REDIRECT: Optional redirect path or URL template after SAML login (defaults to `/{application}` when unset).
    example: "/{application}"
 - SAML_SP_ENTITY_ID: Optional template for the SP entity ID (supports {application}, {base_url}, {host}); defaults to `/{application}/auth/saml/metadata`.
@@ -59,19 +73,42 @@ pip install .
 - SAML_IDP_SSO_URL: Identity Provider SSO URL.
 - SAML_IDP_SLO_URL: Optional Identity Provider SLO URL.
 - SAML_IDP_X509_CERT: Identity Provider certificate in PEM format.
+- SAML_PROVIDERS: Optional JSON configuration for multiple named SAML providers. When set, the login page renders one SAML button per provider and uses provider-specific login routes such as `/{application}/auth/saml/{provider_id}/login`. By default, providers share the standard SP entity ID and ACS URLs (`/{application}/auth/saml/metadata` and `/{application}/auth/saml/acs`) so existing IdP app registrations do not need new reply URLs. Provider entries may override these with `sp_entity_id` and `sp_assertion_consumer_service_url` when per-provider SP URLs are required.
+    example:
+    ```json
+    [
+       {
+          "id": "company-a",
+          "label": "Login with Company A",
+          "logo_url": "/appcode/company-a.svg",
+          "idp_entity_id": "https://idp-a.example.com/metadata",
+          "idp_sso_url": "https://idp-a.example.com/sso",
+          "idp_x509_cert": "-----BEGIN CERTIFICATE-----..."
+       },
+       {
+          "id": "company-b",
+          "label": "Login with Company B",
+          "logo_url": "/appcode/company-b.svg",
+          "idp_entity_id": "https://idp-b.example.com/metadata",
+          "idp_sso_url": "https://idp-b.example.com/sso",
+          "idp_x509_cert": "-----BEGIN CERTIFICATE-----..."
+       }
+    ]
+    ```
+      Provider entries may also override `sp_entity_id`, `sp_assertion_consumer_service_url`, `sp_x509_cert`, `sp_private_key`, `idp_slo_url`, `default_redirect`, `allowed_roles`, and `role_attribute_keys`. If `SAML_PROVIDERS` is not set, the existing single-provider `SAML_*` variables continue to work.
 - SAML_DEBUG: Enable verbose SAML logging.
 - ALLOWED_NOAUTH_CLASSCALLS
    example: [{"file": "somefile.py", "class": "SomeClass", "function": "somefunction"}]
 - GOOGLE_CLIENT_ID
 - GOOGLE_CLIENT_SECRET
-- SECRET_KEY: Secret key for google auth
-- USE_REDIS_INSTANCE: Enable the redis upstash for sessions
-   example: "true"
+- SECRET_KEY: Legacy fallback signing key used only when `SAML_SECRET_KEY` is unset.
 - REDIS_UPSTASH_INSTANCE_URL: Url for upstash redis instance
    example: "http://127.0.0.1:16379"
 - REDIS_UPSTASH_INSTANCE_TOKEN: Redis Upstash token
 - DATABASE_URL: Database connection string
    example: "sqlite:////absolute/path/to/database.db"
+
+Authenticated browser cookies contain only stable identity claims such as email, name, provider, roles, and picture. Passwords, complete SAML attributes, SAML assertions, and changing SAML session indexes are not stored in the cookie. BFF classes and policy hooks continue to receive the compact authenticated identity.
 
 ## Running the Service with your application
 -------------------
@@ -83,11 +120,32 @@ if __name__=="__main__":
     from pytincture import launch_service
     launch_service(
         modules_folder=".",  # point to your modules directly
+        default_application="py_ui",  # optional: redirect / to /py_ui
+        favicon_folder="branding/favicon",  # optional; relative to modules_folder
         env_vars={
             "ALLOWED_EMAILS": []
         }
     )
 ~~~
+
+For one application, place the complete favicon set in a conventional `favicon` directory under `modules_folder`:
+
+```text
+favicon/
+  favicon.ico
+  favicon-16x16.png
+  favicon-32x32.png
+  apple-touch-icon.png
+  android-chrome-192x192.png
+  android-chrome-512x512.png
+  site.webmanifest
+```
+
+pyTincture scans the directory and emits the icon, size, Apple touch icon, mask icon, and web-manifest declarations browsers need. Browsers do not enumerate favicon directories themselves.
+
+Set `favicon_folder` on `launch_service` to use a different directory. Relative paths are resolved from `modules_folder`, and absolute paths are supported, including paths outside the modules directory.
+
+For multiple applications, use one directory per application, such as `favicon/py_ui/` and `favicon/admin/`. This also works under a launcher-configured directory. An application can override both the launcher setting and the convention with either `APP_FAVICON = "branding/icons"` or `APP_CONFIG = {"favicon": "branding/icons"}`; the value may point to a directory or a single icon file under `modules_folder`.
 
 ## Testing
 

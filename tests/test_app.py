@@ -1,4 +1,5 @@
 import os
+import base64
 import io
 import json
 import textwrap
@@ -7,6 +8,8 @@ import tempfile
 import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
+from itsdangerous import TimestampSigner
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 # Import the app instance and helpers from the module.
 from pytincture.backend.app import (
@@ -19,6 +22,29 @@ from pytincture.backend.app import (
 )
 from fastapi import HTTPException
 
+
+def _decode_session_cookie(client, secret_key):
+    cookie_value = client.cookies.get("session")
+    assert cookie_value
+    unsigned = TimestampSigner(secret_key).unsign(cookie_value)
+    return json.loads(base64.b64decode(unsigned))
+
+
+def _build_expired_session_cookie(session_data, secret_key, max_age):
+    class ExpiredTimestampSigner(TimestampSigner):
+        def get_timestamp(self):
+            return super().get_timestamp() - max_age - 1
+
+    encoded = base64.b64encode(json.dumps(session_data).encode("utf-8"))
+    return ExpiredTimestampSigner(secret_key).sign(encoded).decode("utf-8")
+
+
+def _tamper_token(token):
+    index = len(token) // 2
+    replacement = "A" if token[index] != "A" else "B"
+    return f"{token[:index]}{replacement}{token[index + 1:]}"
+
+
 @pytest.fixture(autouse=True)
 def override_env(monkeypatch):
     """
@@ -28,10 +54,12 @@ def override_env(monkeypatch):
     monkeypatch.setenv("MODULES_PATH", "/tmp")
     monkeypatch.setenv("USE_REDIS_INSTANCE", "false")
     monkeypatch.setenv("ALLOWED_NOAUTH_CLASSCALLS", json.dumps([]))
+    monkeypatch.delenv("PYTINCTURE_DEFAULT_APPLICATION", raising=False)
 
     # Import the module and override its globals.
     import pytincture.backend.app as backend_app
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {})
@@ -72,6 +100,18 @@ def test_favicon(fresh_client):
     # With the placeholder, expect 200 or 404.
     assert response.status_code in (200, 404)
 
+
+def test_root_redirects_to_configured_default_application(fresh_client, monkeypatch):
+    response = fresh_client.get("/", follow_redirects=False)
+    assert response.status_code == 404
+
+    monkeypatch.setenv("PYTINCTURE_DEFAULT_APPLICATION", "demoapp")
+    response = fresh_client.get("/", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/demoapp"
+
+
 def test_main_route_with_auth_enabled_no_user_session(fresh_client, monkeypatch):
     """
     With auth enabled but no valid user session,
@@ -93,6 +133,34 @@ def test_main_route_with_auth_enabled_no_user_session(fresh_client, monkeypatch)
     # With authentication enabled and no session, expect a redirect.
     assert response.status_code in (302, 307), f"Expected redirect, got {response.status_code}"
     assert f"/{application_name}/login" in response.headers.get("location", "")
+
+
+def test_main_route_ignores_backend_session_snapshot(fresh_client, monkeypatch):
+    """
+    Stateless browser sessions must not depend on an email-keyed backend snapshot.
+    """
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {})
+
+    response = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "stale@example.com", "password": "old-password"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    backend_app.USER_SESSION_DICT["stale@example.com"] = {
+        "email": "stale@example.com",
+        "password": "new-password",
+        "picture": "demoapp/appcode/profile.png",
+    }
+
+    response = fresh_client.get("/demoapp", follow_redirects=False)
+    assert response.status_code == 200
 
 def test_main_route_no_auth_when_disabled(fresh_client, monkeypatch):
     """
@@ -532,6 +600,369 @@ def test_logs_endpoint(fresh_client, monkeypatch):
     data = response.json()
     assert data.get("status") == "ok"
 
+
+def test_require_auth_does_not_print_debug_output(monkeypatch, capsys):
+    """Successful session validation should not write authentication details to stdout."""
+    import pytincture.backend.app as backend_app
+
+    user = backend_app._build_auth_session_user({"email": "quiet@example.com"})
+    request = type("Request", (), {"session": {"user": user}})()
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    assert backend_app.require_auth(request) == user
+    assert capsys.readouterr().out == ""
+
+
+def test_user_login_stores_only_compact_stateless_claims(fresh_client, monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {"sentinel": {"value": True}})
+
+    response = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "do-not-store"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    session_data = _decode_session_cookie(fresh_client, backend_app.SAML_SECRET_KEY)
+    user = session_data["user"]
+    assert user["session_version"] == backend_app.AUTH_SESSION_SCHEMA_VERSION
+    assert user["email"] == "person@example.com"
+    assert user["auth_type"] == "user"
+    assert user["roles"] == []
+    assert user["is_authenticated"] is True
+    assert "password" not in user
+    assert backend_app.USER_SESSION_DICT == {"sentinel": {"value": True}}
+
+
+def test_stateless_session_survives_logout_in_another_browser_and_replica(
+    fresh_client,
+    monkeypatch,
+    dummy_module,
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+
+    first_login = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "first"},
+        follow_redirects=False,
+    )
+    assert first_login.status_code == 303
+
+    with TestClient(app) as second_browser, TestClient(app) as another_replica:
+        second_login = second_browser.post(
+            "/demoapp/auth/user",
+            data={"email": "person@example.com", "password": "second"},
+            follow_redirects=False,
+        )
+        assert second_login.status_code == 303
+        second_cookie = second_browser.cookies.get("session")
+        assert second_cookie
+
+        backend_app.USER_SESSION_DICT["person@example.com"] = {
+            "email": "person@example.com",
+            "stale": True,
+        }
+        fresh_client.get("/demoapp/auth/logout", follow_redirects=False)
+
+        another_replica.cookies.set("session", second_cookie)
+        response = another_replica.post(
+            "/classcall/example.py/ExampleClass/testfunc",
+            json={"kwargs": {"source": "replica"}},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["result"] == "success"
+
+
+def test_tampered_and_expired_stateless_sessions_are_rejected(
+    fresh_client,
+    monkeypatch,
+    dummy_module,
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+
+    fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "secret"},
+        follow_redirects=False,
+    )
+    valid_cookie = fresh_client.cookies.get("session")
+    assert valid_cookie
+
+    fresh_client.cookies.clear()
+    fresh_client.cookies.set("session", _tamper_token(valid_cookie))
+    tampered_response = fresh_client.get(
+        "/classcall/example.py/ExampleClass/testfunc"
+    )
+    assert tampered_response.status_code == 401
+
+    user = backend_app._build_auth_session_user(
+        {"email": "person@example.com", "auth_type": "user"}
+    )
+    expired_cookie = _build_expired_session_cookie(
+        {"user": user},
+        backend_app.SAML_SECRET_KEY,
+        backend_app.AUTH_SESSION_MAX_AGE_SECONDS,
+    )
+    fresh_client.cookies.clear()
+    fresh_client.cookies.set("session", expired_cookie)
+    expired_response = fresh_client.get(
+        "/classcall/example.py/ExampleClass/testfunc"
+    )
+    assert expired_response.status_code == 401
+
+
+def test_saml_relay_state_is_signed_and_expires(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    payload = {
+        "version": 1,
+        "application": "demoapp",
+        "provider_id": "default",
+        "request_id": "ONELOGIN_request",
+        "return_to": "/demoapp",
+    }
+    token = backend_app._sign_saml_relay_state(payload)
+    assert backend_app._load_saml_relay_state(token) == payload
+
+    with pytest.raises(HTTPException) as invalid_error:
+        backend_app._load_saml_relay_state(_tamper_token(token))
+    assert invalid_error.value.status_code == 400
+    assert invalid_error.value.detail == "Invalid SAML RelayState"
+
+    monkeypatch.setattr(backend_app, "SAML_RELAY_STATE_TTL_SECONDS", -1)
+    with pytest.raises(HTTPException) as expired_error:
+        backend_app._load_saml_relay_state(token)
+    assert expired_error.value.status_code == 400
+    assert expired_error.value.detail == "SAML RelayState has expired"
+
+
+def test_saml_login_embeds_replica_safe_relay_state(fresh_client, monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    class FakeSettings:
+        def get_security_data(self):
+            return {"authnRequestsSigned": False}
+
+    class FakeSamlAuth:
+        request_id = "ONELOGIN_replica_safe_request"
+
+        def login(self, return_to=None):
+            return "https://idp.example.com/saml?" + urlencode({
+                "SAMLRequest": "request-data",
+                "RelayState": return_to,
+            })
+
+        def get_last_request_id(self):
+            return self.request_id
+
+        def get_settings(self):
+            return FakeSettings()
+
+        def redirect_to(self, url, parameters):
+            return f"{url}?{urlencode(parameters)}"
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", "")
+    monkeypatch.setattr(
+        backend_app,
+        "_init_saml_auth",
+        lambda request, application, provider=None, post_data=None: FakeSamlAuth(),
+    )
+
+    response = fresh_client.get(
+        "/demoapp/auth/saml/login?return_to=/demoapp/work",
+        follow_redirects=False,
+    )
+
+    assert response.status_code in (302, 307)
+    query = parse_qs(urlsplit(response.headers["location"]).query)
+    relay_state = backend_app._load_saml_relay_state(query["RelayState"][0])
+    assert relay_state == {
+        "version": 1,
+        "application": "demoapp",
+        "provider_id": "default",
+        "request_id": FakeSamlAuth.request_id,
+        "return_to": "/demoapp/work",
+    }
+
+
+def test_saml_relay_state_replacement_resigns_authn_request():
+    import pytincture.backend.app as backend_app
+
+    class FakeSettings:
+        def get_security_data(self):
+            return {
+                "authnRequestsSigned": True,
+                "signatureAlgorithm": "rsa-sha256",
+            }
+
+    class FakeSamlAuth:
+        signed_parameters = None
+
+        def get_settings(self):
+            return FakeSettings()
+
+        def add_request_signature(self, parameters, algorithm):
+            self.signed_parameters = dict(parameters)
+            parameters["Signature"] = "new-signature"
+            parameters["SigAlg"] = algorithm
+
+        def redirect_to(self, url, parameters):
+            return f"{url}?{urlencode(parameters)}"
+
+    saml_auth = FakeSamlAuth()
+    auth_url = "https://idp.example.com/saml?" + urlencode({
+        "SAMLRequest": "request-data",
+        "RelayState": "placeholder",
+        "Signature": "old-signature",
+        "SigAlg": "old-algorithm",
+    })
+
+    replaced_url = backend_app._replace_saml_relay_state(
+        saml_auth,
+        auth_url,
+        "signed-relay-state",
+    )
+    query = parse_qs(urlsplit(replaced_url).query)
+
+    assert saml_auth.signed_parameters == {
+        "SAMLRequest": "request-data",
+        "RelayState": "signed-relay-state",
+    }
+    assert query["RelayState"] == ["signed-relay-state"]
+    assert query["Signature"] == ["new-signature"]
+    assert query["SigAlg"] == ["rsa-sha256"]
+
+
+def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
+    fresh_client,
+    monkeypatch,
+    dummy_module,
+):
+    import pytincture.backend.app as backend_app
+
+    class FakeSettings:
+        def get_sp_data(self):
+            return {
+                "entityId": "https://service.example.com/metadata",
+                "assertionConsumerService": {"url": "https://service.example.com/acs"},
+            }
+
+        def get_idp_data(self):
+            return {
+                "entityId": "https://idp.example.com/metadata",
+                "singleSignOnService": {"url": "https://idp.example.com/sso"},
+                "x509cert": "",
+            }
+
+    class FakeSamlAuth:
+        processed_request_id = None
+
+        def get_settings(self):
+            return FakeSettings()
+
+        def process_response(self, request_id=None):
+            self.processed_request_id = request_id
+
+        def get_errors(self):
+            return []
+
+        def get_last_error_reason(self):
+            return None
+
+        def is_authenticated(self):
+            return True
+
+        def get_nameid(self):
+            return "person@example.com"
+
+        def get_session_index(self):
+            return "changing-session-index"
+
+        def get_attributes(self):
+            return {
+                "email": ["person@example.com"],
+                "givenName": ["Person"],
+                "roles": ["Admin", "Analyst"],
+                "large-claim": ["must-not-enter-the-cookie"],
+            }
+
+    fake_saml_auth = FakeSamlAuth()
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", "")
+    monkeypatch.setattr(backend_app, "SAML_EMAIL_ATTRIBUTE", "email")
+    monkeypatch.setattr(backend_app, "SAML_NAME_ATTRIBUTE", "givenName")
+    monkeypatch.setattr(backend_app, "SAML_ALLOWED_ROLES", [])
+    monkeypatch.setattr(backend_app, "SAML_ROLE_ATTRIBUTE_KEYS", ["roles"])
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    monkeypatch.delenv("ALLOWED_EMAILS", raising=False)
+    monkeypatch.setattr(
+        backend_app,
+        "_init_saml_auth",
+        lambda request, application, provider=None, post_data=None: fake_saml_auth,
+    )
+
+    relay_state = backend_app._sign_saml_relay_state({
+        "version": 1,
+        "application": "demoapp",
+        "provider_id": "default",
+        "request_id": "ONELOGIN_original_request",
+        "return_to": "/demoapp",
+    })
+    response = fresh_client.post(
+        "/demoapp/auth/saml/acs",
+        data={
+            "SAMLResponse": base64.b64encode(b"<Response/>").decode("ascii"),
+            "RelayState": relay_state,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert fake_saml_auth.processed_request_id == "ONELOGIN_original_request"
+    session_data = _decode_session_cookie(fresh_client, backend_app.SAML_SECRET_KEY)
+    user = session_data["user"]
+    assert user["email"] == "person@example.com"
+    assert user["name"] == "Person"
+    assert user["roles"] == ["admin", "analyst"]
+    assert user["auth_provider"] == "default"
+    assert user["saml"]["name_id"] == "person@example.com"
+    assert "attributes" not in user["saml"]
+    assert "session_index" not in user["saml"]
+    assert "saml_session_index" not in session_data
+
+    backend_app.USER_SESSION_DICT["person@example.com"] = {"stale": True}
+    bff_response = fresh_client.get(
+        "/classcall/example.py/ExampleClass/testfunc"
+    )
+    assert bff_response.status_code == 200
+
+
 def test_login_endpoint(fresh_client, monkeypatch, tmp_path):
     """
     Test the /{application}/login endpoint returns expected HTML content.
@@ -552,6 +983,79 @@ def test_login_endpoint(fresh_client, monkeypatch, tmp_path):
     assert "Login with Google" in html
     assert "type=\"email\"" in html
     assert "type=\"password\"" in html
+
+
+def test_login_endpoint_includes_microsoft_button_when_enabled(fresh_client, monkeypatch, tmp_path):
+    """
+    Ensure the login page surfaces the Microsoft option when it is enabled.
+    """
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
+
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", True)
+
+    response = fresh_client.get("/demoapp/login")
+    assert response.status_code == 200
+    assert "Login with Microsoft" in response.text
+    assert 'href="auth/microsoft"' in response.text
+
+
+def test_microsoft_login_stores_only_compact_stateless_claims(
+    fresh_client,
+    monkeypatch,
+):
+    import pytincture.backend.app as backend_app
+
+    class FakeMicrosoftOAuth:
+        async def authorize_access_token(self, request):
+            return {
+                "access_token": "must-not-enter-the-cookie",
+                "userinfo": {
+                    "email": "person@example.com",
+                    "name": "Example Person",
+                    "picture": "https://example.com/profile.png",
+                    "tenant": "must-not-enter-the-cookie",
+                },
+            }
+
+    fake_oauth = type("FakeOAuth", (), {"microsoft": FakeMicrosoftOAuth()})()
+    monkeypatch.setattr(backend_app, "oauth", fake_oauth)
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", True)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {"sentinel": True})
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+
+    response = fresh_client.get(
+        "/demoapp/auth/microsoft/callback",
+        follow_redirects=False,
+    )
+
+    assert response.status_code in (302, 307)
+    session_data = _decode_session_cookie(fresh_client, backend_app.SAML_SECRET_KEY)
+    user = session_data["user"]
+    assert user == {
+        "session_version": backend_app.AUTH_SESSION_SCHEMA_VERSION,
+        "email": "person@example.com",
+        "name": "Example Person",
+        "picture": "https://example.com/profile.png",
+        "auth_type": "microsoft",
+        "roles": [],
+        "is_authenticated": True,
+        "auth_provider": "microsoft",
+        "auth_provider_label": "Microsoft",
+    }
+    assert "access_token" not in session_data
+    assert backend_app.USER_SESSION_DICT == {"sentinel": True}
+
 
 def test_auth_user_callback(fresh_client, monkeypatch):
     """
@@ -598,6 +1102,143 @@ def test_main_app_route_logged_in(fresh_client, monkeypatch, tmp_path):
     del sys.modules["dummywidget"]
 
 
+def test_main_app_route_includes_per_app_favicon(fresh_client, monkeypatch, tmp_path):
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text(
+        "<html><head>***FAVICON_LINK***</head>"
+        "<body>***APPLICATION*** ***ENTRYPOINT*** ***LOADING_TITLE*** "
+        "***WIDGETSET***</body></html>"
+    )
+
+    dummy_modules = tmp_path / "modules"
+    dummy_modules.mkdir()
+    (dummy_modules / "demoapp.py").write_text(
+        'APP_CONFIG = {"favicon": "assets/demo icon.svg"}\n'
+    )
+
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+    monkeypatch.setattr(backend_app, "get_modules_path", lambda: str(dummy_modules))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+
+    response = fresh_client.get("/demoapp")
+
+    assert response.status_code == 200
+    assert (
+        '<link rel="icon" href="/demoapp/appcode/assets/demo%20icon.svg" '
+        'type="image/svg+xml" sizes="any">'
+        in response.text
+    )
+
+
+def test_favicon_folder_declares_available_browser_assets(tmp_path):
+    import pytincture.backend.app as backend_app
+
+    app_file = tmp_path / "demoapp.py"
+    app_file.write_text("# favicon folder uses convention-based discovery\n")
+    favicon_folder = tmp_path / "favicon"
+    favicon_folder.mkdir()
+    for filename in (
+        "android-chrome-192x192.png",
+        "apple-touch-icon.png",
+        "favicon-16x16.ico",
+        "favicon-32x32.png",
+        "favicon.ico",
+        "safari-pinned-tab.svg",
+        "site.webmanifest",
+    ):
+        (favicon_folder / filename).write_bytes(b"icon")
+    (favicon_folder / "notes.txt").write_text("not a browser favicon asset")
+
+    markup = backend_app.build_app_favicon_markup("demoapp", app_file)
+
+    assert 'href="/demoapp/appcode/favicon/favicon.ico"' in markup
+    assert 'href="/demoapp/appcode/favicon/favicon-16x16.ico"' in markup
+    assert 'sizes="16x16"' in markup
+    assert 'href="/demoapp/appcode/favicon/favicon-32x32.png"' in markup
+    assert 'sizes="32x32"' in markup
+    assert 'rel="apple-touch-icon"' in markup
+    assert 'rel="mask-icon"' in markup
+    assert 'rel="manifest"' in markup
+    assert "notes.txt" not in markup
+
+
+def test_favicon_folder_prefers_application_specific_directory(tmp_path):
+    import pytincture.backend.app as backend_app
+
+    app_file = tmp_path / "demoapp.py"
+    app_file.write_text("# app-specific favicon folder\n")
+    (tmp_path / "favicon").mkdir()
+    app_favicon_folder = tmp_path / "favicon" / "demoapp"
+    app_favicon_folder.mkdir()
+    (app_favicon_folder / "favicon.ico").write_bytes(b"icon")
+
+    assert backend_app.find_app_favicon(app_file) == "favicon/demoapp"
+
+
+def test_launcher_favicon_folder_supports_external_path(monkeypatch, tmp_path):
+    import pytincture.backend.app as backend_app
+
+    modules_folder = tmp_path / "modules"
+    modules_folder.mkdir()
+    app_file = modules_folder / "demoapp.py"
+    app_file.write_text("# use launcher favicon folder\n")
+
+    favicon_folder = tmp_path / "shared-branding"
+    favicon_folder.mkdir()
+    (favicon_folder / "favicon-32x32.png").write_bytes(b"configured-icon")
+    monkeypatch.setenv("PYTINCTURE_FAVICON_FOLDER", str(favicon_folder))
+
+    markup = backend_app.build_app_favicon_markup("demoapp", app_file)
+
+    assert 'href="/demoapp/favicon-assets/favicon-32x32.png"' in markup
+    assert 'sizes="32x32"' in markup
+
+
+def test_launcher_favicon_folder_serves_per_app_assets(fresh_client, monkeypatch, tmp_path):
+    favicon_root = tmp_path / "favicons"
+    app_favicon_folder = favicon_root / "demoapp"
+    app_favicon_folder.mkdir(parents=True)
+    (favicon_root / "favicon.ico").write_bytes(b"shared-icon")
+    (app_favicon_folder / "favicon.ico").write_bytes(b"demo-icon")
+    monkeypatch.setenv("PYTINCTURE_FAVICON_FOLDER", str(favicon_root))
+
+    response = fresh_client.get("/demoapp/favicon-assets/favicon.ico")
+
+    assert response.status_code == 200
+    assert response.content == b"demo-icon"
+
+
+def test_app_favicon_setting_overrides_launcher_folder(monkeypatch, tmp_path):
+    import pytincture.backend.app as backend_app
+
+    app_file = tmp_path / "demoapp.py"
+    app_file.write_text('APP_FAVICON = "branding/app-icon.svg"\n')
+    favicon_folder = tmp_path / "launcher-favicons"
+    favicon_folder.mkdir()
+    (favicon_folder / "favicon.ico").write_bytes(b"launcher-icon")
+    monkeypatch.setenv("PYTINCTURE_FAVICON_FOLDER", str(favicon_folder))
+
+    markup = backend_app.build_app_favicon_markup("demoapp", app_file)
+
+    assert 'href="/demoapp/appcode/branding/app-icon.svg"' in markup
+    assert "favicon-assets" not in markup
+
+
+def test_find_app_favicon_rejects_unsafe_asset_paths(tmp_path):
+    import pytincture.backend.app as backend_app
+
+    app_file = tmp_path / "unsafe.py"
+    app_file.write_text('APP_FAVICON = "../outside.ico"\n')
+
+    assert backend_app.find_app_favicon(app_file) is None
+
+
 def test_sanitize_return_to_allows_relative_paths():
     """
     Relative, same-origin paths should be preserved.
@@ -618,7 +1259,107 @@ def test_sanitize_return_to_rejects_external_urls():
 
 def test_login_endpoint_includes_saml_button_when_enabled(fresh_client, monkeypatch, tmp_path):
     """
-    Ensure the login page surfaces the SAML option when enabled.
+    Ensure the login page surfaces the SAML option when multiple auth methods exist.
+    """
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
+
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+
+    response = fresh_client.get("/demoapp/login")
+    assert response.status_code == 200
+    assert "Login with Google" in response.text
+    assert "Login with SAML" in response.text
+
+
+def test_login_endpoint_uses_single_saml_label_and_logo(fresh_client, monkeypatch, tmp_path):
+    """
+    Single-provider SAML deployments can customize the visible login button.
+    """
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
+
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", "")
+    monkeypatch.setattr(backend_app, "SAML_LOGIN_LABEL", "Login with Contoso")
+    monkeypatch.setattr(backend_app, "SAML_LOGO_URL", "/logos/contoso.svg")
+
+    response = fresh_client.get("/demoapp/login")
+    assert response.status_code == 200
+    assert "Login with Contoso" in response.text
+    assert 'src="/logos/contoso.svg"' in response.text
+    assert 'href="auth/saml/login"' in response.text
+
+
+def test_login_endpoint_lists_multiple_saml_providers(fresh_client, monkeypatch, tmp_path):
+    """
+    Multiple SAML providers should render as separate choices with labels and logos.
+    """
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
+
+    providers = [
+        {"id": "company-a", "label": "Login with Company A", "logo_url": "/logos/a.svg"},
+        {"id": "company-b", "label": "Login with Company B", "logo_url": "/logos/b.svg"},
+    ]
+
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", providers)
+
+    response = fresh_client.get("/demoapp/login", follow_redirects=False)
+    assert response.status_code == 200
+    assert "Login with Company A" in response.text
+    assert "Login with Company B" in response.text
+    assert 'href="auth/saml/company-a/login"' in response.text
+    assert 'href="auth/saml/company-b/login"' in response.text
+    assert 'src="/logos/a.svg"' in response.text
+    assert 'src="/logos/b.svg"' in response.text
+
+
+def test_login_endpoint_redirects_directly_to_saml_when_only_option(fresh_client, monkeypatch, tmp_path):
+    """
+    When SAML is the only configured login method, skip the chooser page.
+    """
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
+
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+    monkeypatch.delenv("ENABLE_GOOGLE_AUTH", raising=False)
+    monkeypatch.delenv("ENABLE_USER_LOGIN", raising=False)
+    monkeypatch.delenv("ENABLE_SAML_AUTH", raising=False)
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+
+    response = fresh_client.get("/demoapp/login", follow_redirects=False)
+    assert response.status_code in (302, 307)
+    assert response.headers.get("location") == "/demoapp/auth/saml/login"
+
+
+def test_login_endpoint_does_not_redirect_when_multiple_saml_only(fresh_client, monkeypatch, tmp_path):
+    """
+    If SAML has multiple providers, the chooser must remain visible even when it is the only auth type.
     """
     import pytincture.backend.app as backend_app
 
@@ -630,10 +1371,15 @@ def test_login_endpoint_includes_saml_button_when_enabled(fresh_client, monkeypa
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", [
+        {"id": "company-a", "label": "Company A"},
+        {"id": "company-b", "label": "Company B"},
+    ])
 
-    response = fresh_client.get("/demoapp/login")
+    response = fresh_client.get("/demoapp/login", follow_redirects=False)
     assert response.status_code == 200
-    assert "Login with SAML" in response.text
+    assert "Company A" in response.text
+    assert "Company B" in response.text
 
 
 def test_saml_metadata_route_returns_metadata(fresh_client, monkeypatch, tmp_path):
@@ -673,3 +1419,48 @@ def test_saml_metadata_route_returns_metadata(fresh_client, monkeypatch, tmp_pat
     response = fresh_client.get("/demoapp/auth/saml/metadata")
     assert response.status_code == 200
     assert "EntityDescriptor" in response.text
+
+
+def test_saml_provider_metadata_route_uses_provider_config(fresh_client, monkeypatch, tmp_path):
+    """
+    Provider metadata should use the selected provider's IdP config with shared SP URLs by default.
+    """
+    import pytincture.backend.app as backend_app
+
+    dummy_frontend = tmp_path / "frontend"
+    dummy_frontend.mkdir()
+    (dummy_frontend / "index.html").write_text("<html>***APPLICATION***</html>")
+
+    dummy_modules = tmp_path / "modules"
+    dummy_modules.mkdir()
+    monkeypatch.setenv("MODULES_PATH", str(dummy_modules))
+    monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
+
+    dummy_cert = (
+        "-----BEGIN CERTIFICATE-----\n"
+        "MIIBszCCAVmgAwIBAgIUO3VsbHlDZXJ0Q29kZXgxEzARBgNVBAMMCkxvY2FsIElE\n"
+        "UDEPMA0GA1UECgwGQXBwQ28wHhcNMjQwMTAxMDAwMDAwWhcNMzQwMTAxMDAwMDAw\n"
+        "WjATMREwDwYDVQQDDAhVbml0VGVzdDCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkC\n"
+        "gYEAy1atZ0mFsrl5FTvhYGfEpDj6rVdlHPff0T3hj5VYiC7P+60F2/diFr9GY29s\n"
+        "F1tXsEBuFQzL85zzBdNxcQvTxlyvq9Y6lBJ8K8w9Y4mGe/7y6QSyp4i0b36W3YLv\n"
+        "oH4p64a1PgVno6Pwx1yk3B9uJJl63/tVspEP1JuxlTCbeu0CAwEAATANBgkqhkiG\n"
+        "9w0BAQsFAAOBgQBSAdwLY7z9mVJgE+B76MpxGg7Trz4Y32faVYblaRHmbZt3FvX6\n"
+        "6R0tPLfrE38AyFQBtcyqH68v9d5dTU8l2zl4OPcnBHdUMf56XI5clJ8zJqVU6M/p\n"
+        "jdJp4bYaXMtOmvw5FXX0HP7h+G5aD3JBt+1w0FSf1V/Iv9ldnYNoG9/HYg==\n"
+        "-----END CERTIFICATE-----"
+    )
+
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", [{
+        "id": "company-a",
+        "label": "Company A",
+        "idp_entity_id": "https://idp-a.example.com/metadata",
+        "idp_sso_url": "https://idp-a.example.com/sso",
+        "idp_x509_cert": dummy_cert,
+    }])
+
+    response = fresh_client.get("/demoapp/auth/saml/company-a/metadata")
+    assert response.status_code == 200
+    assert "EntityDescriptor" in response.text
+    assert "http://testserver/demoapp/auth/saml/metadata" in response.text
+    assert "http://testserver/demoapp/auth/saml/acs" in response.text

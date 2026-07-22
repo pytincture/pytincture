@@ -2,7 +2,7 @@
 pyTincture uvicorn launcher
 """
 
-__version__ = "0.9.34"
+__version__ = "0.9.41"
 
 from multiprocessing import Process, freeze_support
 import os
@@ -42,6 +42,30 @@ def get_modules_path():
     return os.environ.get("MODULES_PATH") or os.getcwd()
 
 
+def _normalize_default_application(value):
+    candidate = str(value).strip().strip("/")
+    if (
+        not candidate
+        or candidate in (".", "..")
+        or not all(char.isalnum() or char in "._-" for char in candidate)
+    ):
+        raise ValueError(
+            "default_application must be a single application name without a path"
+        )
+    return candidate
+
+
+def _normalize_favicon_folder(value, modules_folder):
+    candidate = os.fsdecode(os.fspath(value)).strip()
+    if not candidate:
+        raise ValueError("favicon_folder must not be empty")
+
+    candidate = os.path.expanduser(candidate)
+    if not os.path.isabs(candidate):
+        candidate = os.path.join(modules_folder, candidate)
+    return os.path.abspath(candidate)
+
+
 def main(port, ssl_keyfile=None, ssl_certfile=None, modules_folder=None):
     if modules_folder is not None:
         set_modules_path(os.fspath(modules_folder))
@@ -76,7 +100,9 @@ def launch_service(
     ssl_certfile=None, 
     env_vars: dict = {},
     bff_docs_path: str = "/bff-docs",
-    bff_docs_title: str = "pyTincture BFF API"
+    bff_docs_title: str = "pyTincture BFF API",
+    default_application=None,
+    favicon_folder=None,
 ):
     modules_folder = os.fspath(modules_folder)
     set_modules_path(modules_folder)
@@ -89,6 +115,17 @@ def launch_service(
         if akey == "MODULES_PATH":
             continue
         os.environ[akey] = value
+
+    if default_application is not None:
+        os.environ["PYTINCTURE_DEFAULT_APPLICATION"] = (
+            _normalize_default_application(default_application)
+        )
+
+    if favicon_folder is not None:
+        os.environ["PYTINCTURE_FAVICON_FOLDER"] = _normalize_favicon_folder(
+            favicon_folder,
+            modules_folder,
+        )
 
     main_application = Process(target=main, args=(port, ssl_keyfile, ssl_certfile, modules_folder))
     # launch data and main applications
