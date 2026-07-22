@@ -965,6 +965,63 @@ def _verify_configured_password(email: str, password: str) -> bool:
     raise RuntimeError("AUTH_PASSWORD_HASHES values must be Argon2id or bcrypt hashes")
 
 
+_SENSITIVE_USER_CLAIM_KEYS = {
+    "password",
+    "password_hash",
+    "secret",
+    "token",
+    "access_token",
+    "refresh_token",
+    "id_token",
+}
+
+
+def _configured_local_user_claims(email: str) -> Dict[str, Any]:
+    """Load profile claims separately from password verification.
+
+    AUTH_USER_CLAIMS is the preferred source. DEFAULT_APP_USERS remains a
+    compatibility fallback, but any password or token fields are discarded.
+    """
+    raw_claims = os.getenv("AUTH_USER_CLAIMS", "").strip()
+    source_name = "AUTH_USER_CLAIMS"
+    if not raw_claims:
+        raw_claims = os.getenv("DEFAULT_APP_USERS", "").strip()
+        source_name = "DEFAULT_APP_USERS"
+    if not raw_claims:
+        return {"email": email}
+    try:
+        configured = json.loads(raw_claims)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{source_name} must contain valid JSON") from exc
+
+    matched: Optional[Dict[str, Any]] = None
+    if isinstance(configured, list):
+        for candidate in configured:
+            if (
+                isinstance(candidate, dict)
+                and str(candidate.get("email") or "").strip().casefold() == email
+            ):
+                matched = candidate
+                break
+    elif isinstance(configured, dict):
+        for configured_email, candidate in configured.items():
+            if str(configured_email).strip().casefold() == email and isinstance(candidate, dict):
+                matched = candidate
+                break
+    else:
+        raise RuntimeError(f"{source_name} must be a user list or email-to-claims object")
+
+    if matched is None:
+        return {"email": email}
+    claims = {
+        str(key): value
+        for key, value in matched.items()
+        if str(key).casefold() not in _SENSITIVE_USER_CLAIM_KEYS
+    }
+    claims["email"] = email
+    return claims
+
+
 async def _authenticate_local_user(
     request: Request, email: str, password: str
 ) -> Dict[str, Any]:
@@ -990,7 +1047,7 @@ async def _authenticate_local_user(
         return {**authenticated, "email": normalized_email}
 
     if _verify_configured_password(normalized_email, password):
-        return {"email": normalized_email}
+        return _configured_local_user_claims(normalized_email)
 
     if (
         ENABLE_DEV_EMAIL_LOGIN
@@ -998,7 +1055,7 @@ async def _authenticate_local_user(
         and _is_loopback_development_request(request)
     ):
         logger.warning("Using loopback-only development email login for %s", normalized_email)
-        return {"email": normalized_email}
+        return _configured_local_user_claims(normalized_email)
 
     raise HTTPException(status_code=401, detail="Invalid email or password")
 
@@ -1099,6 +1156,33 @@ def _normalize_auth_roles(value: Any) -> List[str]:
     return sorted(roles)
 
 
+_DEFAULT_AUTH_SESSION_CLAIM_KEYS = {
+    "id",
+    "role",
+    "plan",
+    "next_billing",
+    "theme",
+    "sidebar",
+}
+
+
+def _auth_session_claim_keys() -> Set[str]:
+    configured = {
+        key.strip()
+        for key in os.getenv("AUTH_SESSION_CLAIM_KEYS", "").split(",")
+        if key.strip() and key.strip().casefold() not in _SENSITIVE_USER_CLAIM_KEYS
+    }
+    return _DEFAULT_AUTH_SESSION_CLAIM_KEYS | configured
+
+
+def _safe_session_claim_value(value: Any) -> bool:
+    try:
+        encoded = json.dumps(value, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return False
+    return len(encoded.encode("utf-8")) <= 1024
+
+
 def _build_auth_session_user(
     user_info: Any,
     *,
@@ -1128,9 +1212,27 @@ def _build_auth_session_user(
         "name": str(source.get("name") or "").strip(),
         "picture": str(source.get("picture") or "appcode/profile.png"),
         "auth_type": resolved_auth_type,
-        "roles": _normalize_auth_roles(source.get("roles")),
+        "roles": _normalize_auth_roles(source.get("roles", source.get("role"))),
         "is_authenticated": True,
     }
+    reserved_claims = set(session_user) | {
+        "password",
+        "password_hash",
+        "secret",
+        "token",
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "saml",
+    }
+    for claim_name in sorted(_auth_session_claim_keys()):
+        if (
+            claim_name not in reserved_claims
+            and claim_name.casefold() not in _SENSITIVE_USER_CLAIM_KEYS
+            and claim_name in source
+            and _safe_session_claim_value(source[claim_name])
+        ):
+            session_user[claim_name] = source[claim_name]
     if resolved_provider:
         session_user["auth_provider"] = resolved_provider
     if resolved_provider_label:
@@ -3032,7 +3134,7 @@ async def auth_user_callback(request: Request, application: str):
         **authenticated_claims,
         "picture": f"{application}/appcode/profile.png",
         "auth_type": "user",
-        "roles": authenticated_claims.get("roles", []),
+        "roles": authenticated_claims.get("roles", authenticated_claims.get("role", [])),
     }
 
     _set_authenticated_user(request, user_info)
@@ -3058,12 +3160,12 @@ async def mcp_auth(request: Request, application: str, auth_input: MCPAuthInput 
         **authenticated_claims,
         "picture": f"{application}/appcode/profile.png",
         "auth_type": "user",
-        "roles": authenticated_claims.get("roles", []),
+        "roles": authenticated_claims.get("roles", authenticated_claims.get("role", [])),
     }
 
-    _set_authenticated_user(request, user_info)
+    session_user = _set_authenticated_user(request, user_info)
 
-    return {"status": "authenticated"}
+    return {**session_user, "status": "authenticated"}
 
 # ======================
 # The /{application} route

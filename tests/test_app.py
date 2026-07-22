@@ -65,6 +65,9 @@ def override_env(monkeypatch):
     monkeypatch.setenv("USE_REDIS_INSTANCE", "false")
     monkeypatch.setenv("ALLOWED_NOAUTH_CLASSCALLS", json.dumps([]))
     monkeypatch.delenv("PYTINCTURE_DEFAULT_APPLICATION", raising=False)
+    monkeypatch.delenv("AUTH_USER_CLAIMS", raising=False)
+    monkeypatch.delenv("AUTH_SESSION_CLAIM_KEYS", raising=False)
+    monkeypatch.delenv("DEFAULT_APP_USERS", raising=False)
 
     # Import the module and override its globals.
     import pytincture.backend.app as backend_app
@@ -152,6 +155,65 @@ def test_password_hash_verifier_rejects_wrong_password(fresh_client, monkeypatch
         follow_redirects=False,
     )
     assert correct.status_code == 303
+
+
+def test_password_login_hydrates_safe_default_app_user_claims(
+    fresh_client, monkeypatch
+):
+    import pytincture.backend.app as backend_app
+    from argon2 import PasswordHasher
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", False)
+    monkeypatch.setenv("ALLOWED_EMAILS", "admin@arul.ai")
+    monkeypatch.setenv(
+        "AUTH_PASSWORD_HASHES",
+        json.dumps({"admin@arul.ai": PasswordHasher().hash("admin")}),
+    )
+    monkeypatch.setenv(
+        "DEFAULT_APP_USERS",
+        json.dumps([{
+            "id": "1",
+            "name": "Admin",
+            "email": "ADMIN@ARUL.AI",
+            "role": "Viewer",
+            "password": "must-not-return",
+            "access_token": "must-not-return",
+            "plan": "Enterprise",
+            "next_billing": "Dec 15, 2023",
+            "theme": "Dark",
+            "sidebar": "Open",
+        }]),
+    )
+
+    response = fresh_client.post(
+        "/demoapp/auth/mcp",
+        json={"email": "admin@arul.ai", "password": "admin"},
+    )
+
+    assert response.status_code == 200
+    returned_user = response.json()
+    assert returned_user["status"] == "authenticated"
+    assert returned_user["id"] == "1"
+    assert returned_user["name"] == "Admin"
+    assert returned_user["role"] == "Viewer"
+    assert returned_user["roles"] == ["viewer"]
+    assert returned_user["plan"] == "Enterprise"
+    assert returned_user["next_billing"] == "Dec 15, 2023"
+    assert returned_user["theme"] == "Dark"
+    assert returned_user["sidebar"] == "Open"
+    assert "password" not in returned_user
+    assert "access_token" not in returned_user
+
+    session_user = _decode_session_cookie(
+        fresh_client,
+        backend_app.SAML_SECRET_KEY,
+    )["user"]
+    assert session_user["id"] == "1"
+    assert session_user["role"] == "Viewer"
+    assert "password" not in session_user
+    assert "access_token" not in session_user
 
 
 def test_development_email_login_is_loopback_only(monkeypatch):
