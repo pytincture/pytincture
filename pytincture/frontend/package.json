@@ -1,6 +1,6 @@
 {
   "name": "@pytincture/runtime",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Standalone pytincture.js runtime with inline app auto-start support.",
   "type": "module",
   "main": "dist/pytincture.js",

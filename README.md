@@ -44,6 +44,8 @@ pip install .
 - ENABLE_USER_LOGIN: Enable verified local email/password login. This route is rejected when the flag is false.
 - AUTH_PASSWORD_HASHES: JSON object mapping normalized email addresses to Argon2id or bcrypt hashes.
    example: `{"user@example.com":"$argon2id$..."}`
+- AUTH_USER_CLAIMS: Optional JSON user list or email-to-claims object used to hydrate verified local users with application profile fields. Password and token fields are always discarded. When unset, `DEFAULT_APP_USERS` is read as a compatibility fallback after password verification succeeds.
+- AUTH_SESSION_CLAIM_KEYS: Optional comma-separated names of additional trusted claims to retain in the signed session. `id`, `role`, `plan`, `next_billing`, `theme`, and `sidebar` are retained by default; passwords, hashes, secrets, and tokens are never retained.
 - AUTH_USER_AUTHENTICATOR: Optional dotted path to a sync or async callable accepting `email`, `password`, and `request`. It must return trusted user claims, `True`, or `False`.
 - ENABLE_DEV_EMAIL_LOGIN: Allow a non-empty `ALLOWED_EMAILS` list without password verification only on loopback hosts. This is intentionally unsafe and must only be set to `true` for local development.
 - ENABLE_GOOGLE_AUTH: Enable the respective authentication mechanisms.
