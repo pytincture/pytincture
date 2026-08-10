@@ -82,6 +82,7 @@ pip install .
 - SAML_IDP_SSO_URL: Identity Provider SSO URL.
 - SAML_IDP_SLO_URL: Optional Identity Provider SLO URL.
 - SAML_IDP_X509_CERT: Identity Provider certificate in PEM format.
+- SAML_REQUESTED_AUTHN_CONTEXT: Include `RequestedAuthnContext` in SAML authentication requests. Defaults to `false`; set to `true` for identity providers that require it.
 - SAML_PROVIDERS: Optional JSON configuration for multiple named SAML providers. When set, the login page renders one SAML button per provider and uses provider-specific login routes such as `/{application}/auth/saml/{provider_id}/login`. By default, providers share the standard SP entity ID and ACS URLs (`/{application}/auth/saml/metadata` and `/{application}/auth/saml/acs`) so existing IdP app registrations do not need new reply URLs. Provider entries may override these with `sp_entity_id` and `sp_assertion_consumer_service_url` when per-provider SP URLs are required.
     example:
     ```json

@@ -1989,6 +1989,9 @@ SAML_IDP_ENTITY_ID = os.getenv("SAML_IDP_ENTITY_ID", "")
 SAML_IDP_SSO_URL = os.getenv("SAML_IDP_SSO_URL", "")
 SAML_IDP_SLO_URL = os.getenv("SAML_IDP_SLO_URL", "")
 SAML_IDP_X509_CERT = os.getenv("SAML_IDP_X509_CERT", "")
+SAML_REQUESTED_AUTHN_CONTEXT = os.getenv(
+    "SAML_REQUESTED_AUTHN_CONTEXT", "false"
+).lower() == "true"
 SAML_ALLOWED_ROLES = [
     role.strip().lower()
     for role in os.getenv("SAML_ALLOWED_ROLES", "").split(",")
@@ -2420,6 +2423,9 @@ def _build_saml_settings(request: Request, application: str, provider: Optional[
         "debug": debug_enabled,
         "sp": sp_settings,
         "idp": idp_settings,
+        "security": {
+            "requestedAuthnContext": SAML_REQUESTED_AUTHN_CONTEXT,
+        },
     }
 
 

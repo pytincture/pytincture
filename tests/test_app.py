@@ -1976,6 +1976,36 @@ def test_saml_metadata_route_returns_metadata(fresh_client, monkeypatch, tmp_pat
     assert "EntityDescriptor" in response.text
 
 
+def test_saml_requested_authn_context_is_disabled_by_default():
+    import pytincture.backend.app as backend_app
+    from fastapi import Request
+    from onelogin.saml2.authn_request import OneLogin_Saml2_Authn_Request
+    from onelogin.saml2.settings import OneLogin_Saml2_Settings
+
+    provider = {
+        "idp_entity_id": "https://idp.example.com/metadata",
+        "idp_sso_url": "https://idp.example.com/sso",
+        "idp_x509_cert": "dummy-certificate",
+    }
+
+    request = Request(
+        {
+            "type": "http",
+            "scheme": "https",
+            "server": ("service.example.com", 443),
+            "path": "/demoapp/auth/saml/login",
+            "query_string": b"",
+            "headers": [(b"host", b"service.example.com")],
+        }
+    )
+    settings = backend_app._build_saml_settings(request, "demoapp", provider=provider)
+    saml_settings = OneLogin_Saml2_Settings(settings=settings)
+    request_xml = OneLogin_Saml2_Authn_Request(saml_settings).get_xml()
+
+    assert settings["security"]["requestedAuthnContext"] is False
+    assert "RequestedAuthnContext" not in request_xml
+
+
 def test_saml_provider_metadata_route_uses_provider_config(fresh_client, monkeypatch, tmp_path):
     """
     Provider metadata should use the selected provider's IdP config with shared SP URLs by default.

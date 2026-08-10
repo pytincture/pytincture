@@ -1213,7 +1213,7 @@ wheels = [
 
 [[package]]
 name = "pytincture"
-version = "0.10.2"
+version = "0.10.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
