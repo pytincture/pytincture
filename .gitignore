@@ -23,4 +23,3 @@ pytincture/backend/.env
 fastmcp_stub/*
 pytincture/frontend/node_modules
 pytincture/frontend/dist
-pytincture/frontend/package-lock.json
