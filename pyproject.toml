@@ -31,7 +31,7 @@ dependencies = [
     "js==1.0",
     "pyodide-py==0.29.4",
     "authlib==1.7.2",
-    "python-dotenv==1.2.2",
+    "python-dotenv==1.2.3",
     "aioredis==2.0.1",
     "python3-saml==1.16.0",
     "markupsafe==3.0.3",
