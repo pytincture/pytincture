@@ -47,6 +47,9 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/pytincture/pytincture"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools.packages]
 find = { include = ["pytincture*"] }
 

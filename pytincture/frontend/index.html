@@ -5,11 +5,11 @@
     <script type="text/javascript">
         window.languagePluginUrl = './frontend/pyodide/0.29.3/full/';
     </script>
-    <link rel="preload" href="./frontend/pyodide/0.29.3/full/pyodide.asm.wasm" as="fetch" type="application/wasm" crossorigin="anonymous">
-    <link rel="preload" href="./frontend/pyodide/0.29.3/full/python_stdlib.zip" as="fetch" crossorigin="anonymous">
-    <script src="./frontend/pyodide/0.29.3/full/pyodide.js"></script>
-    <script src="***APPLICATION***/frontend/pytincture.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/MaterialDesign-Webfont/7.4.47/css/materialdesignicons.css?v=7.4.47" media="all" rel="stylesheet" type="text/css">
+    <link rel="preload" href="./frontend/pyodide/0.29.3/full/pyodide.asm.wasm?uuid=***REQUEST_UUID***" as="fetch" type="application/wasm" crossorigin="anonymous">
+    <link rel="preload" href="./frontend/pyodide/0.29.3/full/python_stdlib.zip?uuid=***REQUEST_UUID***" as="fetch" crossorigin="anonymous">
+    <script src="./frontend/pyodide/0.29.3/full/pyodide.js?uuid=***REQUEST_UUID***"></script>
+    <script src="./frontend/pyodide/0.29.3/full/pyodide.asm.js?uuid=***REQUEST_UUID***"></script>
+    <script src="***APPLICATION***/frontend/pytincture.js?uuid=***REQUEST_UUID***"></script>
 </head>
 <body>
     <script>
@@ -17,6 +17,7 @@
         application: "***APPLICATION***",
         widgetlib: "***WIDGETSET***",
         entrypoint: "***ENTRYPOINT***",
+        requestUuid: "***REQUEST_UUID***",
         enableServiceWorker: true,
         loadingTitle: "***LOADING_TITLE***"
       });

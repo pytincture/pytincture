@@ -1057,7 +1057,10 @@ def test_frontend_runtime_cache_busts_packaged_app_fetch(fresh_client):
     """
     response = fresh_client.get("/frontend/pytincture.js")
     assert response.status_code == 200
-    assert 'appcode/appcode.pyt?uuid=${encodeURIComponent(makeRequestId())}' in response.text
+    assert "installCacheBustingFetch(config.requestUuid)" in response.text
+    assert 'withRequestUuid(`${config.application}/appcode/appcode.pyt`, config.requestUuid)' in response.text
+    assert "loadScript(`${config.pyodideBaseUrl}pyodide.asm.js`, config.requestUuid)" in response.text
+    assert "cache_bust_url(cleaned)" in response.text
 
 
 def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_client):
@@ -1065,17 +1068,28 @@ def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_cli
     assert response.status_code == 200
     assert "candidateVersions.push(pinnedMatch[1])" in response.text
     assert "candidateVersions.push(config.devWheelVersion)" in response.text
+    assert response.text.index("candidateVersions.push(pinnedMatch[1])") < response.text.index(
+        "candidateVersions.push(config.devWheelVersion)"
+    )
+    assert response.text.index("await installWidgetsetSource(pyodide, primarySource)") < response.text.index(
+        "const backendSources = await resolveBackendWidgetSources(config)"
+    )
+    assert response.text.index("if (!(await urlExists(source)))") < response.text.index(
+        "await installWidgetsetSource(pyodide, source)"
+    )
+    assert "throw lastInstallError" in response.text
     assert 'name === "pytincture_csrf"' in response.text
     assert 'headers["X-CSRF-Token"] = csrfToken' in response.text
 
-def test_service_worker_skips_cache_for_uuid_busted_appcode(fresh_client):
+def test_service_worker_skips_cache_for_all_uuid_busted_files(fresh_client):
     """
-    Cache-busted app packages should bypass the service-worker cache.
+    Every UUID-bearing file should bypass the service-worker cache.
     """
     response = fresh_client.get("/frontend/sw.js")
     assert response.status_code == 200
-    assert 'url.pathname.endsWith("/appcode/appcode.pyt")' in response.text
     assert 'url.searchParams.has("uuid")' in response.text
+    assert "new Request(withRequestUuid(url), event.request)" in response.text
+    assert 'fetch(bustedRequest, { cache: "no-store" })' in response.text
 
 def test_get_widgetset(tmp_path, monkeypatch):
     """
@@ -1538,6 +1552,23 @@ def test_login_endpoint(fresh_client, monkeypatch, tmp_path):
     assert "type=\"password\"" in html
 
 
+def test_login_endpoint_renders_escaped_help_text(fresh_client, monkeypatch):
+    """Optional login guidance is visible without allowing HTML injection."""
+    monkeypatch.setenv(
+        "LOGIN_HELP_TEXT",
+        "Demo: user@example.com / demo-password <script>alert('x')</script>",
+    )
+
+    response = fresh_client.get("/demoapp/login")
+
+    assert response.status_code == 200
+    assert 'class="login-help-text"' in response.text
+    assert "Demo: user@example.com / demo-password" in response.text
+    assert "&lt;script&gt;" in response.text
+    assert "&lt;/script&gt;" in response.text
+    assert "<script>alert('x')</script>" not in response.text
+
+
 def test_login_endpoint_includes_microsoft_button_when_enabled(fresh_client, monkeypatch, tmp_path):
     """
     Ensure the login page surfaces the Microsoft option when it is enabled.
@@ -1657,6 +1688,31 @@ def test_main_app_route_logged_in(fresh_client, monkeypatch, tmp_path):
     del sys.modules["dummywidget"]
 
 
+def test_main_app_frontend_files_share_one_request_uuid(fresh_client, monkeypatch, tmp_path):
+    import re
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "demoapp.py").write_text("# cache-busted frontend\n")
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+
+    response = fresh_client.get("/demoapp")
+
+    assert response.status_code == 200
+    uuid_values = re.findall(
+        r'(?:[?&]uuid=|requestUuid:\s*")([a-f0-9]{32})',
+        response.text,
+    )
+    assert len(uuid_values) >= 6
+    assert len(set(uuid_values)) == 1
+    assert "***REQUEST_UUID***" not in response.text
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.headers["pragma"] == "no-cache"
+
+
 def test_main_app_route_includes_per_app_favicon(fresh_client, monkeypatch, tmp_path):
     import pytincture.backend.app as backend_app
 
@@ -1684,11 +1740,8 @@ def test_main_app_route_includes_per_app_favicon(fresh_client, monkeypatch, tmp_
     response = fresh_client.get("/demoapp")
 
     assert response.status_code == 200
-    assert (
-        '<link rel="icon" href="/demoapp/appcode/assets/demo%20icon.svg" '
-        'type="image/svg+xml" sizes="any">'
-        in response.text
-    )
+    assert '<link rel="icon" href="/demoapp/appcode/assets/demo%20icon.svg?uuid=' in response.text
+    assert 'type="image/svg+xml" sizes="any">' in response.text
 
 
 def test_favicon_folder_declares_available_browser_assets(tmp_path):

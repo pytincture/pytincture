@@ -5,6 +5,7 @@ const DEFAULT_CONFIG = {
     entrypoint: null,
     widgetlib: "dhxpyt",
     widgetSource: null,
+    requestUuid: null,
     mode: "auto", // 'package', 'inline', or 'auto'
     pyodideBaseUrl: "./frontend/pyodide/0.29.3/full/",
     loadMaterialIcons: true,
@@ -26,6 +27,8 @@ const DEFAULT_CONFIG = {
 
 let loggingInstalled = false;
 const originalConsoleMethods = {};
+let nativeFetch = null;
+let activeRequestUuid = null;
 
 function ensureTrailingSlash(value) {
     if (!value) {
@@ -40,6 +43,52 @@ function makeRequestId() {
     }
     const rand = Math.random().toString(16).slice(2, 10);
     return `${Date.now().toString(16)}-${rand}`;
+}
+
+function withRequestUuid(value, requestUuid) {
+    if (!value || !requestUuid || typeof value !== "string") {
+        return value;
+    }
+    if (/^(?:data|blob|javascript):/i.test(value) || value.startsWith("#")) {
+        return value;
+    }
+
+    const hashIndex = value.indexOf("#");
+    const hash = hashIndex >= 0 ? value.slice(hashIndex) : "";
+    let base = hashIndex >= 0 ? value.slice(0, hashIndex) : value;
+    const encodedUuid = encodeURIComponent(requestUuid);
+    if (/(?:^|[?&])uuid=/.test(base)) {
+        base = base.replace(/([?&])uuid=[^&]*/g, `$1uuid=${encodedUuid}`);
+    } else {
+        base = `${base}${base.includes("?") ? "&" : "?"}uuid=${encodedUuid}`;
+    }
+    return `${base}${hash}`;
+}
+
+function installCacheBustingFetch(requestUuid) {
+    if (!requestUuid || typeof globalThis === "undefined" || typeof globalThis.fetch !== "function") {
+        return;
+    }
+    activeRequestUuid = requestUuid;
+    if (nativeFetch) {
+        return;
+    }
+
+    nativeFetch = globalThis.fetch.bind(globalThis);
+    globalThis.fetch = function (resource, options) {
+        const requestMethod = String(
+            options?.method || (typeof Request !== "undefined" && resource instanceof Request ? resource.method : "GET"),
+        ).toUpperCase();
+        if (requestMethod !== "GET" && requestMethod !== "HEAD") {
+            return nativeFetch(resource, options);
+        }
+
+        if (typeof Request !== "undefined" && resource instanceof Request) {
+            const bustedRequest = new Request(withRequestUuid(resource.url, activeRequestUuid), resource);
+            return nativeFetch(bustedRequest, options);
+        }
+        return nativeFetch(withRequestUuid(String(resource), activeRequestUuid), options);
+    };
 }
 
 function normalizeConfig(arg1, widgetlib, entrypoint) {
@@ -59,6 +108,7 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
     if (typeof arg1 === "object" && arg1 !== null) {
         const merged = { ...DEFAULT_CONFIG, ...arg1 };
         merged.pyodideBaseUrl = ensureTrailingSlash(merged.pyodideBaseUrl);
+        merged.requestUuid = merged.requestUuid || makeRequestId();
         merged.entrypoint = merged.entrypoint || merged.application;
         merged.devWidgetHost = resolveDevWidgetHost(merged.devWidgetHost);
         if (!("enableBackendLogging" in arg1)) {
@@ -79,6 +129,7 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
         entrypoint: entrypoint || application,
     };
     config.pyodideBaseUrl = ensureTrailingSlash(config.pyodideBaseUrl);
+    config.requestUuid = config.requestUuid || makeRequestId();
     config.devWidgetHost = resolveDevWidgetHost(config.devWidgetHost);
     config.enableBackendLogging = !!application;
     if (config.application && (config.pyodideBaseUrl.startsWith("frontend/") || config.pyodideBaseUrl.startsWith("./frontend/"))) {
@@ -88,26 +139,27 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
     return config;
 }
 
-function loadScript(url) {
+function loadScript(url, requestUuid) {
     return new Promise((resolve, reject) => {
         const script = document.createElement("script");
-        script.src = url;
+        script.src = withRequestUuid(url, requestUuid);
         script.onload = resolve;
         script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
         document.head.appendChild(script);
     });
 }
 
-function ensureMaterialIcons(url) {
+function ensureMaterialIcons(url, requestUuid) {
     if (!url) {
         return;
     }
-    const existing = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).some(link => link.href === url);
+    const stylesheetUrl = withRequestUuid(url, requestUuid);
+    const existing = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).some(link => link.href === stylesheetUrl);
     if (existing) {
         return;
     }
     const link = document.createElement("link");
-    link.href = url;
+    link.href = stylesheetUrl;
     link.rel = "stylesheet";
     link.type = "text/css";
     link.media = "all";
@@ -265,9 +317,10 @@ async function ensureServiceWorker(config) {
         return;
     }
     try {
-        await navigator.serviceWorker.register(config.serviceWorkerUrl, {
+        await navigator.serviceWorker.register(withRequestUuid(config.serviceWorkerUrl, config.requestUuid), {
             scope: config.serviceWorkerScope,
         });
+        await navigator.serviceWorker.ready;
     } catch (err) {
         console.warn("Service worker registration failed:", err);
     }
@@ -292,7 +345,7 @@ async function warmPyodideCache(config) {
         const cache = await caches.open("pytincture-preload");
         await Promise.all(
             resources.map(async url => {
-                const request = new Request(url, { mode: "cors", credentials: "omit" });
+                const request = new Request(withRequestUuid(url, config.requestUuid), { mode: "cors", credentials: "omit" });
                 const existing = await cache.match(request);
                 if (!existing) {
                     const response = await fetch(request);
@@ -308,11 +361,13 @@ async function warmPyodideCache(config) {
 }
 
 async function ensurePyodideLoaded(config) {
-    if (typeof loadPyodide === "function") {
-        return;
+    if (typeof loadPyodide !== "function") {
+        window.languagePluginUrl = config.pyodideBaseUrl;
+        await loadScript(`${config.pyodideBaseUrl}pyodide.js`, config.requestUuid);
     }
-    window.languagePluginUrl = config.pyodideBaseUrl;
-    await loadScript(`${config.pyodideBaseUrl}pyodide.js`);
+    if (typeof _createPyodideModule !== "function") {
+        await loadScript(`${config.pyodideBaseUrl}pyodide.asm.js`, config.requestUuid);
+    }
 }
 
 async function installExtraMicropipLibs(pyodide, selector) {
@@ -332,7 +387,10 @@ async function installExtraMicropipLibs(pyodide, selector) {
     }
 
     for (const lib of libs) {
-        const libLiteral = JSON.stringify(lib);
+        const source = typeof lib === "string" && /(?:\.whl|\.zip|\.tar\.gz)(?:[?#]|$)/i.test(lib)
+            ? withRequestUuid(lib, activeRequestUuid)
+            : lib;
+        const libLiteral = JSON.stringify(source);
         await pyodide.runPythonAsync(`
 import micropip
 await micropip.install(${libLiteral})
@@ -350,42 +408,41 @@ async function urlExists(url) {
     }
 }
 
-async function resolveWidgetSource(config) {
-    if (config.widgetSource) {
-        return config.widgetSource;
+async function resolveBackendWidgetSources(config) {
+    if (!config.application) {
+        return [];
     }
-    if (config.application) {
-        const match = (config.widgetlib || "").match(/^[A-Za-z0-9_.\-]+/);
-        const widgetPackage = match ? match[0] : DEFAULT_CONFIG.widgetlib;
-        const pinnedMatch = (config.widgetlib || "").match(
-            /^[A-Za-z0-9_.\-]+==([A-Za-z0-9_.+!\-]+)$/,
-        );
-        const candidateVersions = [];
-        if (pinnedMatch) {
-            candidateVersions.push(pinnedMatch[1]);
-        }
-        if (!candidateVersions.includes(config.devWheelVersion)) {
-            candidateVersions.push(config.devWheelVersion);
-        }
-        for (const version of candidateVersions) {
-            let widgetUrl = `${config.devWidgetHost}/${config.application}/appcode/${widgetPackage}-${version}-py3-none-any.whl`;
-            if (version === DEFAULT_CONFIG.devWheelVersion) {
-                const separator = widgetUrl.includes("?") ? "&" : "?";
-                widgetUrl = `${widgetUrl}${separator}id=${encodeURIComponent(makeRequestId())}`;
-            }
-            if (await urlExists(widgetUrl)) {
-                return widgetUrl;
-            }
-        }
+
+    const match = (config.widgetlib || "").match(/^[A-Za-z0-9_.\-]+/);
+    const widgetPackage = match ? match[0] : DEFAULT_CONFIG.widgetlib;
+    const pinnedMatch = (config.widgetlib || "").match(
+        /^[A-Za-z0-9_.\-]+==([A-Za-z0-9_.+!\-]+)$/,
+    );
+    const candidateVersions = [];
+
+    // Prefer the deployed wheel matching the requested widgetset version.
+    if (pinnedMatch) {
+        candidateVersions.push(pinnedMatch[1]);
     }
-    return config.widgetlib;
+    // The development wheel is the final backend fallback.
+    if (!candidateVersions.includes(config.devWheelVersion)) {
+        candidateVersions.push(config.devWheelVersion);
+    }
+
+    const sources = [];
+    for (const version of candidateVersions) {
+        let widgetUrl = `${config.devWidgetHost}/${config.application}/appcode/${widgetPackage}-${version}-py3-none-any.whl`;
+        widgetUrl = withRequestUuid(widgetUrl, config.requestUuid);
+        sources.push(widgetUrl);
+    }
+    return sources;
 }
 
 async function runPackagedApp(pyodide, config) {
     if (!config.application) {
         throw new Error("No application supplied for packaged mode.");
     }
-    const archiveUrl = `${config.application}/appcode/appcode.pyt?uuid=${encodeURIComponent(makeRequestId())}`;
+    const archiveUrl = withRequestUuid(`${config.application}/appcode/appcode.pyt`, config.requestUuid);
     const response = await fetch(archiveUrl);
     if (!response.ok) {
         throw new Error(`Failed to fetch packaged app from ${archiveUrl}`);
@@ -456,18 +513,69 @@ except Exception as exc:
     return true;
 }
 
-async function installAndLoadWidgetset(pyodide, widgetlib) {
-    if (!widgetlib) {
+async function installWidgetsetSource(pyodide, source) {
+    const installSource = /(?:\.whl|\.zip|\.tar\.gz)(?:[?#]|$)/i.test(source)
+        ? withRequestUuid(source, activeRequestUuid)
+        : source;
+    const sourceLiteral = JSON.stringify(installSource);
+    await pyodide.runPythonAsync(`
+import micropip
+await micropip.install(${sourceLiteral})
+    `);
+}
+
+async function installAndLoadWidgetset(pyodide, config) {
+    const primarySource = config.widgetSource || config.widgetlib;
+    if (!primarySource) {
         return;
     }
-    const escapedLib = widgetlib.replace(/'/g, "\\'");
+
     try {
         await pyodide.runPythonAsync(`
 import micropip
 await micropip.install("python-dotenv")
-await micropip.install('${escapedLib}')
         `);
 
+        let installedSource = null;
+        let lastInstallError = null;
+        try {
+            // PyPI (or an explicit widgetSource) remains the primary source.
+            await installWidgetsetSource(pyodide, primarySource);
+            installedSource = primarySource;
+        } catch (error) {
+            lastInstallError = error;
+            if (config.widgetSource) {
+                throw error;
+            }
+            console.warn(
+                `Failed to install widgetset from ${primarySource}; checking backend wheels.`,
+                error,
+            );
+        }
+
+        if (!installedSource) {
+            // Backend order is the real pinned version first, then 99.99.99.
+            const backendSources = await resolveBackendWidgetSources(config);
+            for (const source of backendSources) {
+                if (!(await urlExists(source))) {
+                    continue;
+                }
+                try {
+                    await installWidgetsetSource(pyodide, source);
+                    installedSource = source;
+                    break;
+                } catch (error) {
+                    lastInstallError = error;
+                    console.warn(`Failed to install widgetset from ${source}.`, error);
+                }
+            }
+        }
+
+        if (!installedSource) {
+            throw lastInstallError || new Error(`No installable widgetset source found for ${primarySource}.`);
+        }
+
+        const requestUuidLiteral = JSON.stringify(config.requestUuid);
         const loadFilesCode = `
 import os
 import pyodide
@@ -475,6 +583,25 @@ import js
 import site
 import base64
 import re
+
+REQUEST_UUID = ${requestUuidLiteral}
+
+def cache_bust_url(url_value):
+    if not url_value or not REQUEST_UUID:
+        return url_value
+    if url_value.startswith(('data:', 'blob:', '#')):
+        return url_value
+    base, separator, fragment = url_value.partition('#')
+    encoded_uuid = str(REQUEST_UUID)
+    if re.search(r'(^|[?&])uuid=', base):
+        base = re.sub(
+            r'([?&])uuid=[^&]*',
+            lambda match: match.group(1) + 'uuid=' + encoded_uuid,
+            base,
+        )
+    else:
+        base = base + ('&' if '?' in base else '?') + 'uuid=' + encoded_uuid
+    return f"{base}{separator}{fragment}"
 
 def replace_font_urls(css_content, search_dirs):
     if not search_dirs:
@@ -523,7 +650,7 @@ def replace_font_urls(css_content, search_dirs):
             data_uri = try_inline(cleaned, base_dir)
             if data_uri:
                 return f"url('{data_uri[4:-1]}')" if data_uri.startswith('url(') else data_uri
-        return match.group(0)
+        return f"url('{cache_bust_url(cleaned)}')"
 
     return re.sub(r"url\(([^)]+)\)", repl, css_content, flags=re.IGNORECASE)
 
@@ -547,24 +674,25 @@ for root, _, files in os.walk(package_path):
         `;
         await pyodide.runPythonAsync(loadFilesCode);
     } catch (error) {
-        console.error(`Error installing and loading ${widgetlib}:`, error);
+        console.error(`Error installing and loading ${primarySource}:`, error);
+        throw error;
     }
 }
 
 async function runTinctureApp(arg1, widgetlib, entrypoint) {
     const config = normalizeConfig(arg1, widgetlib, entrypoint);
+    installCacheBustingFetch(config.requestUuid);
     const loadingOverlay = ensureLoadingOverlay(config);
 
     if (config.enableBackendLogging) {
         enableBackendLogging(config.logEndpoint);
     }
-    if (config.loadMaterialIcons) {
-        ensureMaterialIcons(config.materialIconsUrl);
-    }
-
     try {
         updateLoadingStatus(loadingOverlay, "Preparing runtime…");
         await ensureServiceWorker(config);
+        if (config.loadMaterialIcons) {
+            ensureMaterialIcons(config.materialIconsUrl, config.requestUuid);
+        }
         warmPyodideCache(config);
         updateLoadingStatus(loadingOverlay, "Loading Pyodide…");
         await ensurePyodideLoaded(config);
@@ -576,8 +704,7 @@ async function runTinctureApp(arg1, widgetlib, entrypoint) {
         await installExtraMicropipLibs(pyodide, config.libsSelector);
 
         updateLoadingStatus(loadingOverlay, "Loading widgetset…");
-        const widgetSource = await resolveWidgetSource(config);
-        await installAndLoadWidgetset(pyodide, widgetSource);
+        await installAndLoadWidgetset(pyodide, config);
 
         updateLoadingStatus(loadingOverlay, "Starting app…");
         if (config.mode === "inline") {

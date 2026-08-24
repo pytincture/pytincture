@@ -3,6 +3,8 @@
 ## Overview
 `pyTincture` is a Python framework designed to leverage the capabilities of Pyodide, enabling developers to create sophisticated and user-friendly GUI libraries. This project aims to bridge the gap between Python's powerful backend and intuitive, interactive frontend interfaces.
 
+Development toward a stable 1.0 release is tracked in the [Pytincture 1.0 roadmap](ROADMAP.md) and the [Pytincture 1.0 GitHub milestone](https://github.com/pytincture/pytincture/milestone/1).
+
 ## Features
 - Pyodide Integration: Seamlessly bring Python to the web via Pyodide.
 - GUI Library Support: Simplify the creation and management of GUI components in Python.
@@ -48,6 +50,8 @@ pip install .
 - AUTH_SESSION_CLAIM_KEYS: Optional comma-separated names of additional trusted claims to retain in the signed session. `id`, `role`, `plan`, `next_billing`, `theme`, and `sidebar` are retained by default; passwords, hashes, secrets, and tokens are never retained.
 - AUTH_USER_AUTHENTICATOR: Optional dotted path to a sync or async callable accepting `email`, `password`, and `request`. It must return trusted user claims, `True`, or `False`.
 - ENABLE_DEV_EMAIL_LOGIN: Allow a non-empty `ALLOWED_EMAILS` list without password verification only on loopback hosts. This is intentionally unsafe and must only be set to `true` for local development.
+- LOGIN_HELP_TEXT: Optional plain-text guidance displayed below the login-page introduction. It is HTML-escaped and is suitable for demo credentials or environment-specific login instructions. Do not expose real production passwords.
+   example: "Demo login: demo@example.com / demo-password"
 - ENABLE_GOOGLE_AUTH: Enable the respective authentication mechanisms.
    example: "true"
 - ENABLE_MICROSOFT_AUTH: Enable Microsoft OAuth2 authentication using the shared `common` tenant endpoint.
