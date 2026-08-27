@@ -526,8 +526,11 @@ except Exception as exc:
     return true;
 }
 
-async function installWidgetsetSource(pyodide, source) {
-    const sourceLiteral = JSON.stringify(source);
+async function installWidgetsetSource(pyodide, source, cacheBust = false) {
+    // Only wheels served by this Pytincture backend share the server-instance
+    // cache namespace. PyPI and user-supplied micropip sources stay canonical.
+    const installSource = cacheBust ? withRequestUuid(source, activeRequestUuid) : source;
+    const sourceLiteral = JSON.stringify(installSource);
     await withoutCacheBusting(() => pyodide.runPythonAsync(`
 import micropip
 await micropip.install(${sourceLiteral})
@@ -571,7 +574,7 @@ await micropip.install("python-dotenv")
                     continue;
                 }
                 try {
-                    await installWidgetsetSource(pyodide, source);
+                    await installWidgetsetSource(pyodide, source, true);
                     installedSource = source;
                     break;
                 } catch (error) {

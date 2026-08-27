@@ -1063,14 +1063,16 @@ def test_frontend_runtime_cache_busts_packaged_app_fetch(fresh_client):
     assert "cache_bust_url(cleaned)" in response.text
 
 
-def test_frontend_runtime_does_not_cache_bust_micropip_installs(fresh_client):
+def test_frontend_runtime_cache_busts_only_backend_micropip_installs(fresh_client):
     response = fresh_client.get("/frontend/pytincture.js")
 
     assert response.status_code == 200
     assert "if (cacheBustingSuspensionDepth > 0)" in response.text
     assert "await withoutCacheBusting(() => pyodide.runPythonAsync" in response.text
     assert "withRequestUuid(lib, activeRequestUuid)" not in response.text
-    assert "withRequestUuid(source, activeRequestUuid)" not in response.text
+    assert "cacheBust ? withRequestUuid(source, activeRequestUuid) : source" in response.text
+    assert "await installWidgetsetSource(pyodide, primarySource);" in response.text
+    assert "await installWidgetsetSource(pyodide, source, true);" in response.text
 
 
 def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_client):
@@ -1085,7 +1087,7 @@ def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_cli
         "const backendSources = await resolveBackendWidgetSources(config)"
     )
     assert response.text.index("if (!(await urlExists(source)))") < response.text.index(
-        "await installWidgetsetSource(pyodide, source)"
+        "await installWidgetsetSource(pyodide, source, true)"
     )
     assert "throw lastInstallError" in response.text
     assert 'name === "pytincture_csrf"' in response.text
