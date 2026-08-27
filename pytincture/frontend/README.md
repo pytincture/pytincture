@@ -34,6 +34,10 @@ What happens:
 - The runtime loads Pyodide (default `./frontend/pyodide/0.29.3/full/`).
 - Installs `micropip` and any extra wheels listed in `#micropip-libs`.
 - Installs the default widget library (`dhxpyt`) or another package you configure.
+- For service apps, a failed PyPI widgetset install falls back to the backend wheel
+  for the requested version, then to the `99.99.99` development wheel.
+- Every frontend file request receives the launch's `uuid` query parameter, and
+  UUID-bearing requests bypass the service-worker cache.
 - Auto-detects `<script type="text/python">` blocks, mounts them under `/appcode`, finds a `MainWindow` subclass (or explicit entrypoint), and runs it.
 - Errors are printed to the console and rendered inside `#maindiv` when present.
 

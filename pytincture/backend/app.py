@@ -2971,6 +2971,7 @@ async def login(request: Request, application: str):
     enable_user_login = _resolve_auth_flag("ENABLE_USER_LOGIN", ENABLE_USER_LOGIN)
     enable_saml_auth = _resolve_auth_flag("ENABLE_SAML_AUTH", ENABLE_SAML_AUTH)
     enable_microsoft_auth = _resolve_auth_flag("ENABLE_MICROSOFT_AUTH", ENABLE_MICROSOFT_AUTH)
+    login_help_text = os.getenv("LOGIN_HELP_TEXT", "").strip()
 
     saml_login_buttons = _get_saml_login_buttons() if enable_saml_auth else []
     if enable_saml_auth and not enable_google_auth and not enable_user_login and not enable_microsoft_auth and len(saml_login_buttons) == 1:
@@ -3060,6 +3061,16 @@ async def login(request: Request, application: str):
                 transform: translateX(-50%);
                 color: #777;
             }
+            .login-help-text {
+                margin: 12px 0;
+                padding: 10px 12px;
+                border-radius: 4px;
+                background: #eef4ff;
+                color: #294a7a;
+                font-size: 14px;
+                line-height: 1.4;
+                white-space: pre-line;
+            }
         </style>
     </head>
     <body>
@@ -3067,6 +3078,11 @@ async def login(request: Request, application: str):
             <h2>Welcome</h2>
             <p>Please log in to continue</p>
     """
+
+    if login_help_text:
+        html_content += (
+            f'<p class="login-help-text">{escape(login_help_text)}</p>'
+        )
 
     social_buttons = []
 
@@ -3208,6 +3224,7 @@ async def main_app_route(response: Response, application: str, request: Request)
     appcode_folder = get_modules_path()
     widgetset = get_widgetset(application, appcode_folder)
     safe_application = escape(application)
+    request_uuid = uuid.uuid4().hex
 
     # Modify the index.html to include the application name and widgetset
     index_html = open(f"{STATIC_PATH}/index.html").read()
@@ -3231,12 +3248,23 @@ async def main_app_route(response: Response, application: str, request: Request)
     favicon_markup = ""
     if os.path.exists(app_file_path):
         loading_title = find_app_loading_title(app_file_path, application)
-        favicon_markup = build_app_favicon_markup(application, app_file_path)
+        favicon_markup = build_app_favicon_markup(
+            application,
+            app_file_path,
+            request_uuid=request_uuid,
+        )
     index_html = index_html.replace("***LOADING_TITLE***", escape(loading_title))
     index_html = index_html.replace("***FAVICON_LINK***", favicon_markup)
+    index_html = index_html.replace("***REQUEST_UUID***", request_uuid)
 
     index_html = index_html.replace("***WIDGETSET***", widgetset)
-    return HTMLResponse(content=index_html)
+    return HTMLResponse(
+        content=index_html,
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 def find_main_window_subclass(file_path):
     """
@@ -3452,11 +3480,14 @@ def _build_favicon_tag(
     asset_path: str,
     *,
     asset_route: str = "appcode",
+    request_uuid: Optional[str] = None,
 ) -> Optional[str]:
     favicon_url = (
         f"/{quote(application, safe='')}/{asset_route}/"
         f"{quote(asset_path, safe='/')}"
     )
+    if request_uuid:
+        favicon_url = f"{favicon_url}?uuid={quote(request_uuid, safe='')}"
     safe_url = escape(favicon_url)
     filename = os.path.basename(asset_path).lower()
 
@@ -3488,7 +3519,12 @@ def _build_favicon_tag(
     return f"<link {' '.join(attributes)}>"
 
 
-def build_app_favicon_markup(application: str, file_path) -> str:
+def build_app_favicon_markup(
+    application: str,
+    file_path,
+    *,
+    request_uuid: Optional[str] = None,
+) -> str:
     """Generate browser favicon declarations for an application's assets."""
     configured_directory = None
     if _find_explicit_app_favicon(file_path) is None:
@@ -3503,6 +3539,7 @@ def build_app_favicon_markup(application: str, file_path) -> str:
                     application,
                     asset_path,
                     asset_route="favicon-assets",
+                    request_uuid=request_uuid,
                 )
             ) is not None
         ]
@@ -3512,7 +3549,13 @@ def build_app_favicon_markup(application: str, file_path) -> str:
     tags = [
         tag
         for asset_path in find_app_favicon_assets(file_path)
-        if (tag := _build_favicon_tag(application, asset_path)) is not None
+        if (
+            tag := _build_favicon_tag(
+                application,
+                asset_path,
+                request_uuid=request_uuid,
+            )
+        ) is not None
     ]
     return "\n    ".join(tags)
 
