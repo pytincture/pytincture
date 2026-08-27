@@ -29,6 +29,7 @@ let loggingInstalled = false;
 const originalConsoleMethods = {};
 let nativeFetch = null;
 let activeRequestUuid = null;
+let cacheBustingSuspensionDepth = 0;
 
 function ensureTrailingSlash(value) {
     if (!value) {
@@ -76,6 +77,12 @@ function installCacheBustingFetch(requestUuid) {
 
     nativeFetch = globalThis.fetch.bind(globalThis);
     globalThis.fetch = function (resource, options) {
+        // micropip validates package and wheel URLs. Query-string cache tokens
+        // can make otherwise valid package sources unresolvable, so installs
+        // temporarily use the original fetch implementation.
+        if (cacheBustingSuspensionDepth > 0) {
+            return nativeFetch(resource, options);
+        }
         const requestMethod = String(
             options?.method || (typeof Request !== "undefined" && resource instanceof Request ? resource.method : "GET"),
         ).toUpperCase();
@@ -89,6 +96,15 @@ function installCacheBustingFetch(requestUuid) {
         }
         return nativeFetch(withRequestUuid(String(resource), activeRequestUuid), options);
     };
+}
+
+async function withoutCacheBusting(callback) {
+    cacheBustingSuspensionDepth += 1;
+    try {
+        return await callback();
+    } finally {
+        cacheBustingSuspensionDepth -= 1;
+    }
 }
 
 function normalizeConfig(arg1, widgetlib, entrypoint) {
@@ -387,14 +403,11 @@ async function installExtraMicropipLibs(pyodide, selector) {
     }
 
     for (const lib of libs) {
-        const source = typeof lib === "string" && /(?:\.whl|\.zip|\.tar\.gz)(?:[?#]|$)/i.test(lib)
-            ? withRequestUuid(lib, activeRequestUuid)
-            : lib;
-        const libLiteral = JSON.stringify(source);
-        await pyodide.runPythonAsync(`
+        const libLiteral = JSON.stringify(lib);
+        await withoutCacheBusting(() => pyodide.runPythonAsync(`
 import micropip
 await micropip.install(${libLiteral})
-        `);
+        `));
     }
 }
 
@@ -513,15 +526,15 @@ except Exception as exc:
     return true;
 }
 
-async function installWidgetsetSource(pyodide, source) {
-    const installSource = /(?:\.whl|\.zip|\.tar\.gz)(?:[?#]|$)/i.test(source)
-        ? withRequestUuid(source, activeRequestUuid)
-        : source;
+async function installWidgetsetSource(pyodide, source, cacheBust = false) {
+    // Only wheels served by this Pytincture backend share the server-instance
+    // cache namespace. PyPI and user-supplied micropip sources stay canonical.
+    const installSource = cacheBust ? withRequestUuid(source, activeRequestUuid) : source;
     const sourceLiteral = JSON.stringify(installSource);
-    await pyodide.runPythonAsync(`
+    await withoutCacheBusting(() => pyodide.runPythonAsync(`
 import micropip
 await micropip.install(${sourceLiteral})
-    `);
+    `));
 }
 
 async function installAndLoadWidgetset(pyodide, config) {
@@ -531,10 +544,10 @@ async function installAndLoadWidgetset(pyodide, config) {
     }
 
     try {
-        await pyodide.runPythonAsync(`
+        await withoutCacheBusting(() => pyodide.runPythonAsync(`
 import micropip
 await micropip.install("python-dotenv")
-        `);
+        `));
 
         let installedSource = null;
         let lastInstallError = null;
@@ -561,7 +574,7 @@ await micropip.install("python-dotenv")
                     continue;
                 }
                 try {
-                    await installWidgetsetSource(pyodide, source);
+                    await installWidgetsetSource(pyodide, source, true);
                     installedSource = source;
                     break;
                 } catch (error) {
