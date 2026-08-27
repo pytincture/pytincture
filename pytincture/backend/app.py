@@ -59,6 +59,10 @@ from html import escape
 
 app = FastAPI(title="pyTincture API")
 logger = logging.getLogger("pytincture.security")
+# One cache namespace is shared by every browser served by this process. A
+# service restart creates a new value and invalidates the previous instance's
+# frontend assets without changing application URLs.
+FRONTEND_INSTANCE_UUID = uuid.uuid4().hex
 
 
 class RotatingSessionMiddleware(SessionMiddleware):
@@ -3224,7 +3228,7 @@ async def main_app_route(response: Response, application: str, request: Request)
     appcode_folder = get_modules_path()
     widgetset = get_widgetset(application, appcode_folder)
     safe_application = escape(application)
-    request_uuid = uuid.uuid4().hex
+    request_uuid = FRONTEND_INSTANCE_UUID
 
     # Modify the index.html to include the application name and widgetset
     index_html = open(f"{STATIC_PATH}/index.html").read()

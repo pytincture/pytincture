@@ -1053,7 +1053,7 @@ def test_download_appcode(fresh_client, monkeypatch, tmp_path):
 
 def test_frontend_runtime_cache_busts_packaged_app_fetch(fresh_client):
     """
-    The packaged app fetch should include a per-launch uuid query parameter.
+    The packaged app fetch should include the server instance uuid query parameter.
     """
     response = fresh_client.get("/frontend/pytincture.js")
     assert response.status_code == 200
@@ -1061,6 +1061,16 @@ def test_frontend_runtime_cache_busts_packaged_app_fetch(fresh_client):
     assert 'withRequestUuid(`${config.application}/appcode/appcode.pyt`, config.requestUuid)' in response.text
     assert "loadScript(`${config.pyodideBaseUrl}pyodide.asm.js`, config.requestUuid)" in response.text
     assert "cache_bust_url(cleaned)" in response.text
+
+
+def test_frontend_runtime_does_not_cache_bust_micropip_installs(fresh_client):
+    response = fresh_client.get("/frontend/pytincture.js")
+
+    assert response.status_code == 200
+    assert "if (cacheBustingSuspensionDepth > 0)" in response.text
+    assert "await withoutCacheBusting(() => pyodide.runPythonAsync" in response.text
+    assert "withRequestUuid(lib, activeRequestUuid)" not in response.text
+    assert "withRequestUuid(source, activeRequestUuid)" not in response.text
 
 
 def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_client):
@@ -1688,7 +1698,7 @@ def test_main_app_route_logged_in(fresh_client, monkeypatch, tmp_path):
     del sys.modules["dummywidget"]
 
 
-def test_main_app_frontend_files_share_one_request_uuid(fresh_client, monkeypatch, tmp_path):
+def test_main_app_frontend_files_share_one_instance_uuid(fresh_client, monkeypatch, tmp_path):
     import re
     import pytincture.backend.app as backend_app
 
@@ -1699,18 +1709,21 @@ def test_main_app_frontend_files_share_one_request_uuid(fresh_client, monkeypatc
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
 
-    response = fresh_client.get("/demoapp")
+    first_response = fresh_client.get("/demoapp")
+    second_response = fresh_client.get("/demoapp")
 
-    assert response.status_code == 200
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
     uuid_values = re.findall(
         r'(?:[?&]uuid=|requestUuid:\s*")([a-f0-9]{32})',
-        response.text,
+        first_response.text + second_response.text,
     )
-    assert len(uuid_values) >= 6
-    assert len(set(uuid_values)) == 1
-    assert "***REQUEST_UUID***" not in response.text
-    assert response.headers["cache-control"] == "no-store, max-age=0"
-    assert response.headers["pragma"] == "no-cache"
+    assert len(uuid_values) >= 12
+    assert set(uuid_values) == {backend_app.FRONTEND_INSTANCE_UUID}
+    assert "***REQUEST_UUID***" not in first_response.text
+    assert "***REQUEST_UUID***" not in second_response.text
+    assert first_response.headers["cache-control"] == "no-store, max-age=0"
+    assert first_response.headers["pragma"] == "no-cache"
 
 
 def test_main_app_route_includes_per_app_favicon(fresh_client, monkeypatch, tmp_path):
