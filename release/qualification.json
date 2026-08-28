@@ -18,6 +18,6 @@
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "No 1.0 release candidate has been published yet."
+    "notes": "The signed v1.0.0rc1 GitHub prerelease and PyPI 1.0.0rc1 artifacts were published on 2026-08-28, but npm @pytincture/runtime@1.0.0-rc.1 is still pending. rc1 is not recorded as passed and the observation period has not started."
   }
 }
