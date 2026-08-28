@@ -23,6 +23,9 @@ set when a release is published.
 - Packaged application errors are reported instead of silently switching to
   inline mode.
 - MCP is mounted only when enabled.
+- The supported Starlette range starts at 1.6, removing the temporary
+  dependency-audit exceptions for the patched 1.0 release line; development
+  tests use Starlette's supported `httpx2` client path.
 
 ## 0.10.7
 
