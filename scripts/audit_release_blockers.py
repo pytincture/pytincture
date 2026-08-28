@@ -7,6 +7,7 @@ import json
 import os
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 
 BLOCKING_LABELS = {
@@ -16,6 +17,7 @@ BLOCKING_LABELS = {
     "security:high",
     "release-blocker",
 }
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def main() -> None:
@@ -50,10 +52,22 @@ def main() -> None:
         matched = sorted(labels & BLOCKING_LABELS)
         if matched:
             blockers.append((issue["number"], issue["title"], matched, issue["html_url"]))
+    allowlist = json.loads((ROOT / "security" / "pip-audit-allowlist.json").read_text())
+    advisories = allowlist.get("advisories", [])
+    if advisories:
+        blockers.append(
+            (
+                "dependency-audit",
+                f"{len(advisories)} temporarily ignored Python advisories",
+                ["security:high"],
+                allowlist.get("tracking_issue", "missing tracking issue"),
+            )
+        )
     if blockers:
         print("Pytincture issue audit: NO-GO")
         for number, title, labels, url in blockers:
-            print(f"- #{number} {title} ({', '.join(labels)}): {url}")
+            marker = f"#{number}" if isinstance(number, int) else str(number)
+            print(f"- {marker} {title} ({', '.join(labels)}): {url}")
         raise SystemExit(1)
     print("Pytincture issue audit: GO (zero open labeled release blockers)")
 

@@ -242,6 +242,41 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/audit_release_blockers.py
 
+  security-audit:
+    name: Dependency vulnerability audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install all runtime extras and audit tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install '.[oauth,password,redis,saml,mcp]' 'pip-audit>=2.9,<3'
+
+      - name: Audit Python dependencies
+        run: python scripts/audit_python_dependencies.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: pytincture/frontend/package-lock.json
+
+      - name: Audit npm dependencies
+        working-directory: pytincture/frontend
+        run: |
+          npm ci
+          npm audit --audit-level=high
+
   javascript-runtime:
     name: Validate JavaScript runtime
     runs-on: ubuntu-latest
@@ -401,6 +436,7 @@ jobs:
       - optional-extras
       - upgrade-rollback
       - release-gates
+      - security-audit
       - javascript-runtime
       - browser-e2e
       - production-smoke
@@ -435,6 +471,7 @@ jobs:
       - optional-extras
       - upgrade-rollback
       - release-gates
+      - security-audit
       - javascript-runtime
       - browser-e2e
       - production-smoke

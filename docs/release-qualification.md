@@ -11,7 +11,8 @@ As of 2026-08-28, engineering implementation for the roadmap workstreams is in
 stacked review, but no `1.0.0rc1` or `1.0.0rc2` artifact has been published.
 The 30-day observation clock has therefore not started, representative
 federated-auth production evidence does not exist, and no final approval has
-been recorded. This is an expected release-state blocker, not a test failure.
+been recorded. In addition, #162 tracks high-severity Starlette advisories that
+cannot yet be resolved inside FastAPI's compatible dependency range.
 
 ## Evidence required after each RC
 
@@ -31,6 +32,12 @@ version, and durable evidence URL. Do not use local-only logs as final evidence.
 The repository labels `priority:P0`, `priority:P1`, `security:critical`,
 `security:high`, and `release-blocker` are release-blocking. Release-event CI
 audits open issues for those labels before publishing.
+
+Every pull request audits all Python runtime extras and npm dependencies.
+Starlette advisories listed in `security/pip-audit-allowlist.json` are temporary
+exceptions tied to #162 so unrelated new findings still fail CI. Release-tag
+auditing treats any remaining exception as a blocker even if its issue is
+accidentally closed; the allowlist must be empty before a 1.0 tag.
 
 ## RC sequence
 
