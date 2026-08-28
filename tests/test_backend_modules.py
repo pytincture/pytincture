@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from pytincture.backend.browser_packages import (
 )
 from pytincture.backend.diagnostics import (
     internal_error_payload,
+    request_correlation_id,
     sanitized_validation_errors,
 )
 from pytincture.backend.mcp import FilteredFastAPIApp, exposed_operation_ids
@@ -19,6 +21,7 @@ from pytincture.backend.pages import find_app_string_setting, normalize_app_asse
 from pytincture.backend.saml import SAMLProviderCatalog, allowed_roles
 from pytincture.backend.source_loading import build_dynamic_module_name
 from pytincture.backend.storage import RedisDict
+from pytincture.backend.streaming import limited_async_stream, limited_sync_stream
 
 
 def test_auth_primitives_are_configuration_free():
@@ -162,6 +165,8 @@ def test_diagnostics_never_echo_submitted_validation_values():
         "detail": "Internal server error",
         "correlation_id": "request-1",
     }
+    assert request_correlation_id("edge.request-1") == "edge.request-1"
+    assert request_correlation_id("invalid\nheader") != "invalid\nheader"
 
 
 def test_saml_provider_catalog_is_independent_and_deterministic():
@@ -210,8 +215,104 @@ def test_redis_store_accepts_an_injected_client():
             prefix = match.removesuffix("*")
             return "0", [key for key in self.values if key.startswith(prefix)]
 
-    store = RedisDict(key_prefix="session:", redis_client=FakeRedis())
+        def ping(self):
+            return True
+
+    redis = FakeRedis()
+    store = RedisDict(key_prefix="session:", redis_client=redis)
     store.set_with_ttl("one", {"email": "user@example.com"}, 60)
     assert store["one"] == {"email": "user@example.com"}
     assert store.pop_atomic("one") == {"email": "user@example.com"}
     assert store.get("one") is None
+    assert store.ping() is True
+
+    first_replay_store = RedisDict(
+        key_prefix="replay:", redis_client=redis, cache_reads=False
+    )
+    second_replay_store = RedisDict(
+        key_prefix="replay:", redis_client=redis, cache_reads=False
+    )
+    first_replay_store["token"] = {"session_id": "one"}
+    assert second_replay_store.pop_atomic("token") == {"session_id": "one"}
+    assert first_replay_store.pop_atomic("token") is None
+
+
+def test_sync_stream_closes_source_at_byte_limit():
+    closed = []
+
+    def source():
+        try:
+            yield "first"
+            yield "second"
+        finally:
+            closed.append(True)
+
+    reasons = []
+    assert list(
+        limited_sync_stream(
+            source(),
+            raw=False,
+            max_seconds=10,
+            max_bytes=6,
+            on_finish=lambda reason, size: reasons.append((reason, size)),
+        )
+    ) == ["first\n"]
+    assert closed == [True]
+    assert reasons == [("byte-limit", 13)]
+
+
+def test_async_stream_timeout_closes_source():
+    closed = []
+
+    async def source():
+        try:
+            await __import__("asyncio").sleep(0.05)
+            yield "late"
+        finally:
+            closed.append(True)
+
+    reasons = []
+
+    async def collect():
+        return [
+            chunk
+            async for chunk in limited_async_stream(
+                source(),
+                raw=False,
+                max_seconds=0.001,
+                max_bytes=100,
+                on_finish=lambda reason, size: reasons.append((reason, size)),
+            )
+        ]
+
+    chunks = asyncio.run(collect())
+    assert chunks == []
+    assert closed == [True]
+    assert reasons == [("timeout", 0)]
+
+
+def test_async_stream_disconnect_closes_source():
+    closed = []
+    reasons = []
+
+    async def source():
+        try:
+            yield "first"
+            yield "second"
+        finally:
+            closed.append(True)
+
+    async def consume_one_then_disconnect():
+        stream = limited_async_stream(
+            source(),
+            raw=False,
+            max_seconds=10,
+            max_bytes=100,
+            on_finish=lambda reason, size: reasons.append((reason, size)),
+        )
+        assert await anext(stream) == "first\n"
+        await stream.aclose()
+
+    asyncio.run(consume_one_then_disconnect())
+    assert closed == [True]
+    assert reasons == [("disconnect", 6)]

@@ -1024,6 +1024,33 @@ def test_class_call_streaming(monkeypatch, fresh_client, tmp_path):
     assert '"value": 0' in combined
     assert '"value": 1' in combined
 
+
+def test_class_call_timeout_returns_gateway_timeout(monkeypatch, fresh_client, tmp_path):
+    import pytincture.backend.app as backend_app
+
+    module_code = textwrap.dedent("""
+        import asyncio
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class SlowWidget:
+            async def wait(self):
+                await asyncio.sleep(0.05)
+                return {"status": "late"}
+    """)
+    (tmp_path / "slow_widget.py").write_text(module_code)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "BFF_CALL_TIMEOUT_SECONDS", 0.001)
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: "noauth")
+
+    response = fresh_client.post(
+        "/classcall/slow_widget.py/SlowWidget/wait",
+        json={},
+    )
+    assert response.status_code == 504
+    assert response.json()["detail"] == "Internal server error"
+    assert response.json()["correlation_id"]
+
 # ---------------------------------------------------------------------
 # Additional Tests for Increased Coverage
 # ---------------------------------------------------------------------
@@ -1107,6 +1134,50 @@ def test_service_worker_skips_cache_for_all_uuid_busted_files(fresh_client):
     assert "url.origin === self.location.origin" in response.text
     assert "new Request(withRequestUuid(url), event.request)" in response.text
     assert 'fetch(bustedRequest, { cache: "no-store" })' in response.text
+
+
+def test_health_and_readiness_endpoints(fresh_client):
+    health = fresh_client.get("/healthz", headers={"X-Request-ID": "health-check-1"})
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok", "version": "0.10.7"}
+    assert health.headers["X-Request-ID"] == "health-check-1"
+
+    readiness = fresh_client.get("/readyz")
+    assert readiness.status_code == 200
+    assert readiness.json()["status"] == "ready"
+    assert all(readiness.json()["checks"].values())
+
+
+def test_readiness_fails_when_modules_path_is_unavailable(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(
+        backend_app,
+        "get_modules_path",
+        lambda: str(tmp_path / "missing-modules"),
+    )
+    response = fresh_client.get("/readyz")
+    assert response.status_code == 503
+    assert response.json()["status"] == "not-ready"
+    assert response.json()["checks"]["modules_path"] is False
+
+
+def test_readiness_fails_when_shared_state_is_unavailable(fresh_client, monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    class UnavailableStore:
+        def ping(self):
+            return False
+
+    monkeypatch.setattr(backend_app, "USE_REDIS_INSTANCE", "true")
+    monkeypatch.setattr(backend_app, "USER_SESSION_DICT", UnavailableStore())
+    monkeypatch.setattr(backend_app, "AUTH_SESSION_REVOCATIONS", UnavailableStore())
+    monkeypatch.setattr(backend_app, "BFF_REPLAY_TOKEN_STORE", UnavailableStore())
+    response = fresh_client.get("/readyz")
+    assert response.status_code == 503
+    assert response.json()["checks"]["session_store"] is False
 
 def test_get_widgetset(tmp_path, monkeypatch):
     """

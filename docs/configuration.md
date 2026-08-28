@@ -70,3 +70,4 @@ The contract test checks every row in this table against the dataclass model.
 | `enable_mcp` | `ENABLE_MCP` | Enable the MCP mount. |
 | `mcp_exposed_operations` | `MCP_EXPOSED_OPERATIONS` | FastAPI operation ids exposed through MCP. |
 | `trusted_proxy_headers` | `PYTINCTURE_TRUST_PROXY_HEADERS` | Trust forwarded host/protocol headers. |
+| `log_level` | `PYTINCTURE_LOG_LEVEL` | Structured application log level. |
