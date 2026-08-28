@@ -17,6 +17,8 @@ Deterministic browser startup stages, errors, and callbacks are described in
 the [browser lifecycle guide](docs/browser-lifecycle.md).
 The real Pyodide browser matrix and local commands are in the
 [end-to-end testing guide](docs/e2e-testing.md).
+Backend ownership and dependency boundaries are described in the
+[backend architecture guide](docs/backend-architecture.md).
 
 ## Features
 - Pyodide Integration: Seamlessly bring Python to the web via Pyodide.

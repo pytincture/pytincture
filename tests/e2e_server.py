@@ -1,6 +1,5 @@
 """Authenticated Pytincture service used by Playwright end-to-end tests."""
 
-import sys
 from pathlib import Path
 
 import uvicorn
@@ -9,8 +8,6 @@ from pytincture import PytinctureConfig, create_app
 
 
 ROOT = Path(__file__).resolve().parent / "e2e_apps"
-# Widget metadata discovery imports the same modules the application imports.
-sys.path.insert(0, str(ROOT))
 WIDGET_VERSION = "0.9.16+backend"
 WIDGET_WHEEL = ROOT / f"dhxpyt-{WIDGET_VERSION}-py3-none-any.whl"
 
