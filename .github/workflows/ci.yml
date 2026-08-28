@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
   pull_request:
   workflow_dispatch:
   release:
@@ -167,6 +169,114 @@ jobs:
           python -m pip install "${wheel_path}[${PYTINCTURE_EXTRA}]"
           python scripts/smoke_optional_extra.py "$PYTINCTURE_EXTRA"
 
+  upgrade-rollback:
+    name: Upgrade and rollback from 0.10.7
+    needs: python-package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Download validated candidate wheel
+        uses: actions/download-artifact@v7
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: Exercise upgrade and package rollback
+        shell: bash
+        run: |
+          python -m venv /tmp/pytincture-transition
+          transition_python=/tmp/pytincture-transition/bin/python
+          "$transition_python" -m pip install --upgrade pip
+          "$transition_python" -m pip install 'pytincture==0.10.7' 'httpx>=0.27,<1'
+          "$transition_python" scripts/upgrade_smoke.py --output upgrade-before.json
+          wheel_path=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          "$transition_python" -m pip install --force-reinstall "$wheel_path" 'httpx>=0.27,<1'
+          "$transition_python" scripts/upgrade_smoke.py --output upgrade-candidate.json
+          "$transition_python" -m pip install --force-reinstall 'pytincture==0.10.7' 'httpx>=0.27,<1'
+          "$transition_python" scripts/upgrade_smoke.py --output upgrade-rollback.json
+          python scripts/compare_upgrade_smoke.py \
+            upgrade-before.json upgrade-candidate.json upgrade-rollback.json
+
+      - name: Upload upgrade and rollback evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: upgrade-rollback-results
+          path: upgrade-*.json
+          if-no-files-found: error
+
+  release-gates:
+    name: Release qualification gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Validate qualification record and version alignment
+        run: python scripts/check_release_gates.py
+
+      - name: Validate release tag and RC/final evidence
+        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+        run: python scripts/check_release_gates.py --release-ref "$GITHUB_REF_NAME"
+
+      - name: Audit open release-blocking issues
+        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/audit_release_blockers.py
+
+  security-audit:
+    name: Dependency vulnerability audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install all runtime extras and audit tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install '.[oauth,password,redis,saml,mcp]' 'pip-audit>=2.9,<3'
+
+      - name: Audit Python dependencies
+        run: python scripts/audit_python_dependencies.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: pytincture/frontend/package-lock.json
+
+      - name: Audit npm dependencies
+        working-directory: pytincture/frontend
+        run: |
+          npm ci
+          npm audit --audit-level=high
+
   javascript-runtime:
     name: Validate JavaScript runtime
     runs-on: ubuntu-latest
@@ -203,7 +313,7 @@ jobs:
         run: npm run build
 
       - name: Verify generated bundles are current
-        run: git diff --exit-code -- pytincture/frontend/package.json pytincture/frontend/dist
+        run: git diff --exit-code -- pytincture/frontend/package.json pytincture/frontend/package-lock.json pytincture/frontend/dist
 
       - name: Upload browser failure artifacts
         if: failure()
@@ -275,6 +385,14 @@ jobs:
             tests/e2e-server.log
           if-no-files-found: ignore
 
+      - name: Upload E2E performance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytincture-performance-${{ matrix.browser }}
+          path: pytincture/frontend/test-results
+          if-no-files-found: warn
+
   production-smoke:
     name: Production topology smoke
     runs-on: ubuntu-latest
@@ -303,11 +421,16 @@ jobs:
           python -m uvicorn pytincture.backend.app:app --host 127.0.0.1 --port 8081 > production-smoke.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid"' EXIT
-          python scripts/load_smoke.py \
-            --base-url http://127.0.0.1:8081 \
-            --requests 500 \
-            --concurrency 20 \
-            --p95-budget-ms 500
+          python scripts/run_performance_smoke.py \
+            --base-url http://127.0.0.1:8081
+
+      - name: Upload service performance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytincture-performance-service
+          path: performance-*.json
+          if-no-files-found: warn
 
       - name: Upload production smoke log
         if: failure()
@@ -324,6 +447,9 @@ jobs:
       - python-tests
       - python-package
       - optional-extras
+      - upgrade-rollback
+      - release-gates
+      - security-audit
       - javascript-runtime
       - browser-e2e
       - production-smoke
@@ -356,6 +482,9 @@ jobs:
       - python-tests
       - python-package
       - optional-extras
+      - upgrade-rollback
+      - release-gates
+      - security-audit
       - javascript-runtime
       - browser-e2e
       - production-smoke
@@ -377,4 +506,12 @@ jobs:
       - name: Publish exact validated npm artifact
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish dist/*.tgz --access public
+        shell: bash
+        run: |
+          package_version=$(tar -xOf dist/*.tgz package/package.json | \
+            node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+          dist_tag=latest
+          if [[ "$package_version" == *-* ]]; then
+            dist_tag=next
+          fi
+          npm publish dist/*.tgz --access public --tag "$dist_tag"

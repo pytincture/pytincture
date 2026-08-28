@@ -1,0 +1,11 @@
+{
+  "tracking_issue": "https://github.com/pytincture/pytincture/issues/162",
+  "advisories": [
+    "PYSEC-2026-161",
+    "PYSEC-2026-248",
+    "PYSEC-2026-249",
+    "PYSEC-2026-2280",
+    "PYSEC-2026-2281"
+  ],
+  "notes": "Temporary Starlette exceptions. Remove all entries before any 1.0 release tag."
+}

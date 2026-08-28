@@ -33,8 +33,9 @@ versions for each release candidate.
 
 ## Version compatibility rules
 
-- Python and npm artifacts from one release must have the same Pytincture
-  version.
+- Python and npm artifacts from one release must have semantically equivalent
+  versions. Stable strings match; PEP 440 `1.0.0rc1` maps to npm SemVer
+  `1.0.0-rc.1`.
 - The bundled JavaScript runtime and backend are released together. Mixing
   major versions is unsupported.
 - A 1.x backend accepts the version-1 BFF and appcode contracts documented in

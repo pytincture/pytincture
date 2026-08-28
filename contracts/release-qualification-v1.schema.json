@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pytincture/pytincture/contracts/release-qualification-v1.schema.json",
+  "title": "Pytincture 1.0 release qualification",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "minimum_observation_days",
+    "release_candidates",
+    "representative_applications",
+    "upgrade_exercises",
+    "rollback_exercises",
+    "performance_reviews",
+    "repository_policy_reviews",
+    "security_reviews",
+    "defect_audits",
+    "final_decision"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "minimum_observation_days": { "type": "integer", "minimum": 30 },
+    "release_candidates": { "type": "array" },
+    "representative_applications": {
+      "type": "object",
+      "required": ["standalone", "authenticated_bff", "federated_auth"]
+    },
+    "upgrade_exercises": { "type": "array" },
+    "rollback_exercises": { "type": "array" },
+    "performance_reviews": { "type": "array" },
+    "repository_policy_reviews": { "type": "array" },
+    "security_reviews": { "type": "array" },
+    "defect_audits": { "type": "array" },
+    "final_decision": {
+      "type": "object",
+      "required": ["status", "decided_at", "approvers", "notes"],
+      "properties": {
+        "status": { "enum": ["pending", "go", "no-go"] }
+      }
+    }
+  }
+}

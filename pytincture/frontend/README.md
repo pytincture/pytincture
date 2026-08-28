@@ -132,7 +132,7 @@ The helper script:
 Once published, load from jsDelivr/UNPKG:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@0.9.20/dist/pytincture.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@0.10.7/dist/pytincture.min.js"></script>
 ```
 
 Replace `0.9.20` with the framework version you need, or omit it to use `@latest`.

@@ -61,10 +61,10 @@ Alert on readiness failures, elevated 5xx/401/403 rates, BFF timeouts, stream
 `byte-limit`/`timeout` frequency, and p95 latency budget regressions. Control
 verbosity with `PYTINCTURE_LOG_LEVEL`.
 
-The initial CI budget is 500 `/healthz` requests at concurrency 20, zero
-failures, and p95 latency at or below 500 ms on a GitHub-hosted runner. This is
-a regression gate, not a capacity promise. Re-run against each production
-topology and set service-specific BFF budgets:
+The versioned [performance budgets](performance.md) cover health, generated
+application packages, representative BFF calls, and cold/warm browser startup
+on GitHub-hosted runners. These are regression gates, not capacity promises.
+Re-run against each production topology and set service-specific BFF budgets:
 
 ```bash
 python scripts/load_smoke.py \

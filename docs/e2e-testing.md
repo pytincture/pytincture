@@ -16,7 +16,7 @@ application in Chromium, Firefox, and WebKit. The fixture verifies:
 
 | Component | E2E version |
 | --- | --- |
-| Pytincture runtime | Synchronized from `pytincture.__version__` (currently 0.10.7) |
+| Pytincture runtime | Synchronized from `pytincture.__version__` |
 | Pyodide | 0.29.3 browser distribution |
 | Python in Pyodide | 3.13 |
 | dhxpyt | 0.9.16 |

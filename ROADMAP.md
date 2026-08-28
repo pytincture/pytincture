@@ -98,6 +98,15 @@ documentation, and release artifacts contain only intended dependencies/assets.
 
 ## 1.0 release gates
 
+Engineering gates are enforced by `.github/workflows/ci.yml`; durable RC and
+production evidence is enforced by `release/qualification.json`. See the
+[qualification procedure and current decision](docs/release-qualification.md).
+No unchecked time/external gate is treated as complete merely because the
+implementation is ready.
+
+Known dependency advisories are tracked as release blockers; temporary audit
+exceptions cannot pass the release-tag gate and must be removed before 1.0.
+
 `1.0.0` may be released when all of the following are true:
 
 - Python 3.13 and 3.14 CI is green on the supported operating systems.

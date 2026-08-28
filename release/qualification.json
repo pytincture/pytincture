@@ -1,0 +1,23 @@
+{
+  "$schema": "../contracts/release-qualification-v1.schema.json",
+  "schema_version": 1,
+  "minimum_observation_days": 30,
+  "release_candidates": [],
+  "representative_applications": {
+    "standalone": [],
+    "authenticated_bff": [],
+    "federated_auth": []
+  },
+  "upgrade_exercises": [],
+  "rollback_exercises": [],
+  "performance_reviews": [],
+  "repository_policy_reviews": [],
+  "security_reviews": [],
+  "defect_audits": [],
+  "final_decision": {
+    "status": "pending",
+    "decided_at": null,
+    "approvers": [],
+    "notes": "No 1.0 release candidate has been published yet."
+  }
+}

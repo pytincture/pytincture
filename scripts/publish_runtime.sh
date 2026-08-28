@@ -22,9 +22,10 @@ npm run sync-version
 
 PACKAGE_VERSION="$(node -p "require('./package.json').version")"
 PACKAGE_NAME="$(node -p "require('./package.json').name")"
+EXPECTED_PACKAGE_VERSION="$(python3 "$SCRIPT_DIR/versioning.py" "$FRAMEWORK_VERSION")"
 
-if [[ "$PACKAGE_VERSION" != "$FRAMEWORK_VERSION" ]]; then
-    echo "Version mismatch after sync (package: $PACKAGE_VERSION, framework: $FRAMEWORK_VERSION)"
+if [[ "$PACKAGE_VERSION" != "$EXPECTED_PACKAGE_VERSION" ]]; then
+    echo "Version mismatch after sync (package: $PACKAGE_VERSION, expected: $EXPECTED_PACKAGE_VERSION)"
     exit 1
 fi
 
