@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Pytincture inline E2E</title>
+  <script>
+    window.pytinctureAutoStartConfig = {
+      mode: "inline",
+      entrypoint: "InlineE2E",
+      widgetlib: "dhxpyt==0.9.16",
+      requestUuid: "inline-e2e",
+      pyodideBaseUrl: "/frontend/pyodide/0.29.3/full/",
+      serviceWorkerUrl: "/frontend/sw.js",
+      enableServiceWorker: true,
+      loadingTitle: "Inline E2E"
+    };
+  </script>
+  <script src="/frontend/pytincture.js?uuid=inline-e2e"></script>
+</head>
+<body>
+  <div id="maindiv"></div>
+  <script type="text/python">
+import js
+from dhxpyt.layout import MainWindow
+
+class InlineE2E(MainWindow):
+    def load_ui(self):
+        js.document.getElementById("maindiv").innerHTML = (
+            '<main id="inline-ready"><h1>Inline Pytincture ready</h1></main>'
+        )
+  </script>
+</body>
+</html>

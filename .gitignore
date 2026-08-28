@@ -25,3 +25,5 @@ pytincture/frontend/node_modules
 pytincture/frontend/dist
 pytincture/frontend/playwright-report
 pytincture/frontend/test-results
+tests/e2e-server.log
+tests/e2e_apps/*.whl
