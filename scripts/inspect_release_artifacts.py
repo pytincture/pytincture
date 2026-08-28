@@ -80,8 +80,14 @@ def _requirement_name(value: str) -> str:
 def inspect_wheel(path: Path, contract: dict, version: str) -> None:
     with zipfile.ZipFile(path) as archive:
         names = set(archive.namelist())
-        required = [item for item in contract["required"] if item != "README.md" and item != "pyproject.toml"]
+        required = [
+            item
+            for item in contract["required"]
+            if item not in {"README.md", "LICENSE", "pyproject.toml"}
+        ]
         _check_contents("wheel", names, required, contract["forbidden_prefixes"])
+        if not any(name.endswith(".dist-info/licenses/LICENSE") for name in names):
+            _fail("wheel is missing its MIT license file")
         metadata_names = [name for name in names if name.endswith(".dist-info/METADATA")]
         if len(metadata_names) != 1:
             _fail("wheel must contain exactly one METADATA file")

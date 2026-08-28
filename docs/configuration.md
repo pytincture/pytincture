@@ -71,3 +71,46 @@ The contract test checks every row in this table against the dataclass model.
 | `mcp_exposed_operations` | `MCP_EXPOSED_OPERATIONS` | FastAPI operation ids exposed through MCP. |
 | `trusted_proxy_headers` | `PYTINCTURE_TRUST_PROXY_HEADERS` | Trust forwarded host/protocol headers. |
 | `log_level` | `PYTINCTURE_LOG_LEVEL` | Structured application log level. |
+
+## Pass-through and compatibility settings
+
+These settings remain supported by the backend and can be supplied through
+`PytinctureConfig.environment`. They are not yet typed fields. Secrets should
+come from the deployment secret manager rather than committed files.
+
+| Environment variable | Meaning |
+| --- | --- |
+| `ALLOWED_EMAILS` | Optional comma-separated authorization allowlist applied after identity verification. |
+| `ALLOWED_NOAUTH_CLASSCALLS` | Legacy JSON allowlist for unauthenticated BFF calls; avoid in new deployments. |
+| `AUTH_PASSWORD_HASHES` | JSON email-to-Argon2id/bcrypt map for local login. |
+| `AUTH_SESSION_CLAIM_KEYS` | Additional small trusted user claims retained in signed sessions. |
+| `AUTH_USER_AUTHENTICATOR` | Dotted sync/async local credential verifier. |
+| `AUTH_USER_CLAIMS` | Verified local-user profile claims. |
+| `DEFAULT_APP_USERS` | Compatibility fallback profile source after password verification; prefer `AUTH_USER_CLAIMS`. |
+| `BFF_DOCS_PATH` | Route path for generated BFF API documentation. |
+| `BFF_DOCS_TITLE` | Title for generated BFF API documentation. |
+| `BFF_POLICY_HOOK_PATH` | Dotted sync/async BFF authorization policy callable. |
+| `LOGIN_HELP_TEXT` | Escaped plain-text login guidance. |
+| `PYTINCTURE_BROWSER_FILES` | JSON list or comma-separated globs added to `appcode.pyt`. |
+| `PYTINCTURE_PUBLIC_ASSET_PATHS` | Globs extending directly served public application assets. |
+| `SAML_ALLOWED_ROLES` | Optional comma-separated SAML role allowlist. |
+| `SAML_DEBUG` | Enable OneLogin SAML diagnostic mode; do not expose assertion data in production logs. |
+| `SAML_DEFAULT_REDIRECT` | Safe post-login path/template. |
+| `SAML_EMAIL_ATTRIBUTE` | Preferred assertion attribute for email. |
+| `SAML_IDP_SLO_URL` | Optional identity-provider logout URL. |
+| `SAML_LOGIN_LABEL` | Single-provider login button label. |
+| `SAML_LOGO_URL` | Single-provider login button image URL. |
+| `SAML_NAME_ATTRIBUTE` | Optional assertion attribute for display name. |
+| `SAML_RELAY_STATE_TTL_SECONDS` | Maximum signed RelayState age; default 600. |
+| `SAML_REQUESTED_AUTHN_CONTEXT` | Add RequestedAuthnContext; default false. |
+| `SAML_REQUEST_CACHE_TTL` | Compatibility request-cache lifetime. |
+| `SAML_ROLE_ATTRIBUTE_KEYS` | Candidate assertion attributes containing roles. |
+| `SAML_SP_ASSERTION_CONSUMER_SERVICE_URL` | Service-provider ACS URL/template. |
+| `SAML_SP_ENTITY_ID` | Service-provider entity ID/template. |
+| `SAML_SP_PRIVATE_KEY` | PEM service-provider signing/decryption key. |
+| `SAML_SP_X509_CERT` | PEM service-provider certificate. |
+| `SECRET_KEY` | Legacy fallback for `SAML_SECRET_KEY`; migrate to the typed setting. |
+
+Boolean strings accept `true/false`, `1/0`, `yes/no`, and `on/off` for typed
+configuration. Direct legacy backend settings generally use lowercase
+`"true"`; use the documented spelling to avoid ambiguity.

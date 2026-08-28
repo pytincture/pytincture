@@ -3,6 +3,7 @@
   "python": {
     "required": [
       "README.md",
+      "LICENSE",
       "pyproject.toml",
       "pytincture/__init__.py",
       "pytincture/backend/app.py",

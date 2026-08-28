@@ -12,7 +12,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.13,<3.15"
 authors = [
-    { name = "Your Name", email = "schapman1974@gmail.com" }
+    { name = "Pytincture maintainers", email = "schapman1974@gmail.com" }
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -64,6 +64,10 @@ dev = [
 
 [project.urls]
 Homepage = "https://github.com/pytincture/pytincture"
+Changelog = "https://github.com/pytincture/pytincture/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/pytincture/pytincture/tree/main/docs"
+Issues = "https://github.com/pytincture/pytincture/issues"
+Source = "https://github.com/pytincture/pytincture"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -22,6 +22,18 @@ Backend ownership and dependency boundaries are described in the
 Production topology, probes, monitoring, secret rotation, backup, and rollback
 are covered by the [production deployment runbook](docs/production-deployment.md).
 
+Start with the [five-minute quickstart](docs/quickstart.md), then choose the
+[service](docs/service-mode.md) or [standalone](docs/standalone-mode.md) guide.
+Task guides cover [BFFs](docs/bff-guide.md),
+[browser packaging and dynamic imports](docs/browser-packaging.md),
+[authentication](docs/authentication.md), and
+[troubleshooting](docs/troubleshooting.md). Upgrades are documented from
+[0.9 to 0.10](docs/migrations/0.9-to-0.10.md) and
+[0.10 to 1.0](docs/migrations/0.10-to-1.0.md). Project policies and operations
+are in the [changelog](CHANGELOG.md), [security policy](SECURITY.md),
+[contribution guide](CONTRIBUTING.md), and
+[release procedure](docs/releasing.md).
+
 ## Features
 - Pyodide Integration: Seamlessly bring Python to the web via Pyodide.
 - GUI Library Support: Simplify the creation and management of GUI components in Python.
@@ -352,4 +364,4 @@ The artifact contract and local verification command are documented in the
 [release artifact guide](docs/release-artifacts.md).
 
 ## License
-`pyTincture` is licensed under the MIT License.
+`pyTincture` is licensed under the [MIT License](LICENSE).
