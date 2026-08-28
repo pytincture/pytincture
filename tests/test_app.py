@@ -1137,9 +1137,11 @@ def test_service_worker_skips_cache_for_all_uuid_busted_files(fresh_client):
 
 
 def test_health_and_readiness_endpoints(fresh_client):
+    from pytincture import __version__
+
     health = fresh_client.get("/healthz", headers={"X-Request-ID": "health-check-1"})
     assert health.status_code == 200
-    assert health.json() == {"status": "ok", "version": "0.10.7"}
+    assert health.json() == {"status": "ok", "version": __version__}
     assert health.headers["X-Request-ID"] == "health-check-1"
 
     readiness = fresh_client.get("/readyz")

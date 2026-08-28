@@ -21,7 +21,7 @@ npm test
 npm run test:browser
 npm run build
 cd ../..
-git diff --exit-code -- pytincture/frontend/package.json pytincture/frontend/dist
+git diff --exit-code -- pytincture/frontend/package.json pytincture/frontend/package-lock.json pytincture/frontend/dist
 ```
 
 Changes to browser delivery, Pyodide, widget installation, authentication, or

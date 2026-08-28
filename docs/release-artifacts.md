@@ -1,6 +1,6 @@
 # Release artifacts and dependency extras
 
-Pytincture publishes three artifacts for one synchronized version:
+Pytincture publishes three semantically synchronized artifacts:
 
 - a platform-independent Python wheel;
 - a Python source distribution; and
@@ -55,6 +55,10 @@ The validator applies
 checks source and artifact versions, verifies base dependencies and declared
 extras, rejects development files, confirms required browser/Pyodide assets,
 and prints SHA-256 hashes.
+
+Stable Python and npm versions are identical. For prereleases, the canonical
+PEP 440 version `1.0.0rc1` maps to npm SemVer `1.0.0-rc.1`; the embedded browser
+runtime reports the canonical framework version.
 
 CI derives `SOURCE_DATE_EPOCH` from the release commit. Wheels already honor
 that standard timestamp; the normalization step sorts sdist entries and fixes

@@ -86,7 +86,7 @@ async function callAuthenticatedBff(page) {
     });
 }
 
-test("authenticated packaged and inline apps run through real Pyodide", async ({ page }, testInfo) => {
+test("authenticated packaged and inline apps run through real Pyodide", async ({ page, request }, testInfo) => {
     const diagnostics = collectDiagnostics(page);
     try {
         await loginAndStartPackagedApp(page);
@@ -99,7 +99,8 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
 
         const lifecycle = await page.evaluate(() => window.__pytinctureLifecycle);
         const compatibility = lifecycle.find(event => event.type === "compatibility")?.compatibility;
-        expect(compatibility.runtimeVersion).toBe("0.10.7");
+        const health = await (await request.get("/healthz")).json();
+        expect(compatibility.runtimeVersion).toBe(health.version);
         expect(compatibility.pyodideVersion).toBeTruthy();
         expect(compatibility.pythonVersion).toMatch(/^3\.13\./);
         expect(compatibility.widgetPackage).toBe("dhxpyt");

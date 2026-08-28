@@ -102,6 +102,7 @@ def test_required_user_documentation_is_present_and_linked():
         "CONTRIBUTING.md",
         "LICENSE",
         "docs/releasing.md",
+        "docs/release-qualification.md",
     )
     for relative_path in required:
         assert (ROOT / relative_path).is_file()

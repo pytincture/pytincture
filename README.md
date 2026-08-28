@@ -33,6 +33,8 @@ Task guides cover [BFFs](docs/bff-guide.md),
 are in the [changelog](CHANGELOG.md), [security policy](SECURITY.md),
 [contribution guide](CONTRIBUTING.md), and
 [release procedure](docs/releasing.md).
+The [RC qualification record](docs/release-qualification.md) shows the current
+1.0 go/no-go state and the evidence still required before publication.
 
 ## Features
 - Pyodide Integration: Seamlessly bring Python to the web via Pyodide.
@@ -279,7 +281,7 @@ framework version. Official npm publication occurs from the validated GitHub
 release artifacts described below.
 Once published to npm, CDNs such as jsDelivr and UNPKG will expose the runtime automatically, e.g.:
 ```
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@0.1.0/dist/pytincture.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@0.10.7/dist/pytincture.min.js"></script>
 ```
 You can also point jsDelivr at a Git tag (`https://cdn.jsdelivr.net/gh/<org>/<repo>@<tag>/pytincture/frontend/dist/pytincture.min.js`) if you prefer GitHub releases.
 

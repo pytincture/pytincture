@@ -14,6 +14,8 @@ import tomllib
 import zipfile
 from pathlib import Path
 
+from versioning import npm_version_for_python
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "contracts" / "release-artifacts-v1.json"
@@ -137,8 +139,9 @@ def inspect_npm(path: Path, contract: dict, version: str) -> None:
         _check_contents("npm package", names, contract["required"], contract["forbidden_prefixes"])
         member = archive.extractfile("package/package.json")
         package = json.loads(member.read() if member else b"{}")
-        if package.get("version") != version:
-            _fail(f"npm version {package.get('version')} does not match {version}")
+        npm_version = npm_version_for_python(version)
+        if package.get("version") != npm_version:
+            _fail(f"npm version {package.get('version')} does not match {npm_version}")
         for runtime_path in (
             "package/dist/pytincture.js",
             "package/dist/pytincture.esm.js",
@@ -160,6 +163,7 @@ def main() -> None:
 
     contract = json.loads(CONTRACT.read_text())
     project_version, runtime_version = _source_versions()
+    npm_version = npm_version_for_python(project_version)
     package = json.loads((ROOT / "pytincture" / "frontend" / "package.json").read_text())
     lock = json.loads((ROOT / "pytincture" / "frontend" / "package-lock.json").read_text())
     source_versions = {
@@ -167,8 +171,15 @@ def main() -> None:
         "python": runtime_version,
         "npm": package.get("version"),
         "npm_lock": lock.get("version"),
+        "npm_lock_root": lock.get("packages", {}).get("", {}).get("version"),
     }
-    if len(set(source_versions.values())) != 1:
+    if source_versions != {
+        "pyproject": project_version,
+        "python": project_version,
+        "npm": npm_version,
+        "npm_lock": npm_version,
+        "npm_lock_root": npm_version,
+    }:
         _fail(f"source versions differ: {source_versions}")
 
     inspect_wheel(args.wheel, contract["python"], project_version)
@@ -178,7 +189,13 @@ def main() -> None:
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (args.wheel, args.sdist, args.npm)
     }
-    print(json.dumps({"version": project_version, "sha256": hashes}, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            {"python_version": project_version, "npm_version": npm_version, "sha256": hashes},
+            indent=2,
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":
