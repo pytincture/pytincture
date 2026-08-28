@@ -7,12 +7,37 @@ every gate below has durable evidence.
 
 ## Current decision: NO-GO
 
-As of 2026-08-28, engineering implementation for the roadmap workstreams is on
-`main`, but no `1.0.0rc1` or `1.0.0rc2` artifact has been published. The 30-day
-observation clock has therefore not started, representative federated-auth
-production evidence does not exist, and no final approval has been recorded.
-The Starlette security blocker is resolved by requiring the patched 1.6 release
-line and allowing no dependency-audit exceptions.
+As of 2026-08-28, the signed `v1.0.0rc1` GitHub prerelease and PyPI
+`1.0.0rc1` wheel and source distribution are published. The retained npm
+tarball was validated, but `@pytincture/runtime@1.0.0-rc.1` is not yet
+published because npm authorization failed. The candidate therefore remains
+incomplete: it is not listed as passed in the qualification record and the
+30-day observation clock has not started. No `1.0.0rc2`, representative
+federated-auth production evidence, or final approval exists. The Starlette
+security blocker is resolved by requiring the patched 1.6 release line and
+allowing no dependency-audit exceptions.
+
+Published and retained rc1 evidence:
+
+- signed tag and GitHub prerelease:
+  <https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc1>;
+- green tag qualification run:
+  <https://github.com/pytincture/pytincture/actions/runs/33206734049>;
+- release run, including successful PyPI publication and failed npm
+  publication:
+  <https://github.com/pytincture/pytincture/actions/runs/33206884950>;
+- wheel SHA-256:
+  `aa5e11139f14bf8317bdb77d57c49cd55311533370414506fed79b1a6fc9e64b`;
+- source-distribution SHA-256:
+  `d3546a1109efdee1d61fac15d3a8e7252d3c111d8158c060fd5cac6343187bbb`;
+  and
+- retained npm tarball SHA-256:
+  `085f5fb67a4b6e4878321579159e66e03892d6a7f60740c8421cb61cb3a7b587`.
+
+The npm artifact must be published from that exact retained tarball before rc1
+can be marked `passed`. Once publication is independently verified, record the
+complete candidate in `release/qualification.json` and begin representative
+application qualification.
 
 ## Evidence required after each RC
 

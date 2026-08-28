@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Recorded the partial rc1 publication state without treating the candidate as
+  passed or starting the observation period before the npm artifact is
+  available.
+
 ### Changed
 
 - npm publication uses one OIDC trusted-publisher workflow for normal releases
