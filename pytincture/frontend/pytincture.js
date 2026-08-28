@@ -867,7 +867,7 @@ def replace_font_urls(css_content, search_dirs):
                 return f"url('{data_uri[4:-1]}')" if data_uri.startswith('url(') else data_uri
         return f"url('{cache_bust_url(cleaned)}')"
 
-    return re.sub(r"url\(([^)]+)\)", repl, css_content, flags=re.IGNORECASE)
+    return re.sub(r"url\\(([^)]+)\\)", repl, css_content, flags=re.IGNORECASE)
 
 package_path = site.getsitepackages()[0]
 javascript_assets = 0

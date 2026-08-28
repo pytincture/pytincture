@@ -69,7 +69,9 @@ self.addEventListener("fetch", event => {
         event.respondWith(fetch(event.request, { cache: "no-store" }));
         return;
     }
-    if (REQUEST_UUID && isFrontendFileRequest(event.request, url)) {
+    // Only this backend's assets share its instance UUID. Cross-origin PyPI
+    // and micropip requests must keep their canonical URLs.
+    if (REQUEST_UUID && url.origin === self.location.origin && isFrontendFileRequest(event.request, url)) {
         const bustedRequest = new Request(withRequestUuid(url), event.request);
         event.respondWith(fetch(bustedRequest, { cache: "no-store" }));
         return;

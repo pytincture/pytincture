@@ -15,6 +15,8 @@ Typed service settings and `create_app()` are documented in the
 [configuration guide](docs/configuration.md).
 Deterministic browser startup stages, errors, and callbacks are described in
 the [browser lifecycle guide](docs/browser-lifecycle.md).
+The real Pyodide browser matrix and local commands are in the
+[end-to-end testing guide](docs/e2e-testing.md).
 
 ## Features
 - Pyodide Integration: Seamlessly bring Python to the web via Pyodide.

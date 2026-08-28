@@ -120,3 +120,63 @@ jobs:
             pytincture/frontend/playwright-report
             pytincture/frontend/test-results
           if-no-files-found: ignore
+
+  browser-e2e:
+    name: Pyodide E2E (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser:
+          - chromium
+          - firefox
+          - webkit
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Pytincture and prepare the pinned widget wheel
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --editable .
+          python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.16
+          cp tests/e2e_apps/dhxpyt-0.9.16-py3-none-any.whl tests/e2e_apps/dhxpyt-0.9.16+backend-py3-none-any.whl
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: pytincture/frontend/package-lock.json
+
+      - name: Install browser test dependencies
+        working-directory: pytincture/frontend
+        run: npm ci
+
+      - name: Install ${{ matrix.browser }}
+        working-directory: pytincture/frontend
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Run real Pyodide tests in ${{ matrix.browser }}
+        working-directory: pytincture/frontend
+        env:
+          PYTINCTURE_E2E_PYTHON: python
+        run: npx playwright test --config playwright.e2e.config.mjs --project ${{ matrix.browser }}
+
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytincture-e2e-${{ matrix.browser }}
+          path: |
+            pytincture/frontend/playwright-report
+            pytincture/frontend/test-results
+            tests/e2e-server.log
+          if-no-files-found: ignore

@@ -1104,6 +1104,7 @@ def test_service_worker_skips_cache_for_all_uuid_busted_files(fresh_client):
     assert response.headers["service-worker-allowed"] == "/"
     assert response.headers["cache-control"] == "no-store, max-age=0"
     assert 'url.searchParams.has("uuid")' in response.text
+    assert "url.origin === self.location.origin" in response.text
     assert "new Request(withRequestUuid(url), event.request)" in response.text
     assert 'fetch(bustedRequest, { cache: "no-store" })' in response.text
 
