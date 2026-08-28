@@ -11,12 +11,11 @@ does not yet have automated qualification.
 | --- | --- | --- | --- |
 | CPython | 3.13 | CI | Unit tests, package build, and wheel smoke test. |
 | CPython | 3.14 | CI | Unit tests and editable installation. |
-| Pyodide | 0.29.3 browser distribution | Supported, browser CI pending | Bundled service/standalone runtime; Python 3.13. |
-| `pyodide-py` | 0.29.4 | CI | Backend/build dependency; not the browser asset version. |
-| dhxpyt | application-declared version | Provisional | PyPI first, matching backend wheel second, `99.99.99` development wheel last. A qualified version range will be recorded by browser tests. |
-| Chromium | current stable | Planned gate | Service and standalone modes under issue #136. |
-| Firefox | current stable | Planned gate | Service and standalone modes under issue #136. |
-| WebKit | current Playwright build | Planned gate | Service and standalone modes under issue #136. |
+| Pyodide | 0.29.3 browser distribution | CI | Bundled service/standalone runtime; Python 3.13. `pyodide-py` is not a backend dependency. |
+| dhxpyt | 0.9.16 browser fixture | CI | PyPI first, matching backend wheel second, `99.99.99` development wheel last. Applications may declare another compatible widgetset version. |
+| Chromium | current Playwright build | CI | Authenticated service and standalone modes. |
+| Firefox | current Playwright build | CI | Authenticated service and standalone modes. |
+| WebKit | current Playwright build | CI | Authenticated service and standalone modes. |
 
 Pytincture does not claim support for Python versions outside the range in
 `pyproject.toml`. A browser becomes release-qualified only when its automated
@@ -27,10 +26,10 @@ versions for each release candidate.
 
 | Mode | Supported scope | Qualification |
 | --- | --- | --- |
-| Service | FastAPI delivery, packaged browser app, BFF, auth, public assets, optional MCP | Python CI now; browser, proxy, and multi-worker gates pending. |
-| Standalone | `pytincture.js`, inline Python, Pyodide, micropip, configurable widgetset | Runtime build CI now; cross-browser gate pending. |
-| Multiple workers | Shared signing key; Redis required for shared revocation/replay state | Planned production integration gate. |
-| Reverse proxy | Forwarded HTTPS scheme and stable host configuration | Supported configuration; integration gate pending. |
+| Service | FastAPI delivery, packaged browser app, BFF, auth, public assets, optional MCP | Python and cross-browser CI. |
+| Standalone | `pytincture.js`, inline Python, Pyodide, micropip, configurable widgetset | Cross-browser CI. |
+| Multiple workers | Shared signing key; Redis required for shared revocation/replay state | Simulated multi-worker shared-state CI. |
+| Reverse proxy | Forwarded HTTPS scheme and stable host configuration | Header/topology integration CI and deployment runbook. |
 
 ## Version compatibility rules
 

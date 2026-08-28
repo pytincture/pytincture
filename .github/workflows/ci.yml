@@ -6,6 +6,8 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -38,13 +40,13 @@ jobs:
       - name: Install project
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --editable .
+          python -m pip install --editable '.[dev]'
 
       - name: Run tests
         run: python -m pytest -q
 
   python-package:
-    name: Validate Python package
+    name: Validate release artifacts
     runs-on: ubuntu-latest
 
     steps:
@@ -57,21 +59,113 @@ jobs:
           python-version: "3.13"
           cache: pip
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: pytincture/frontend/package-lock.json
+
+      - name: Set reproducible build timestamp
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+
+      - name: Build npm runtime package
+        working-directory: pytincture/frontend
+        run: |
+          npm ci
+          npm run build
+          mkdir -p ../../dist
+          npm pack --pack-destination ../../dist
+
       - name: Build distributions
         run: |
           python -m pip install --upgrade pip
           python -m pip install build twine
           python -m build
+          python scripts/normalize_sdist.py dist/*.tar.gz "$SOURCE_DATE_EPOCH"
 
       - name: Validate distributions
-        run: python -m twine check dist/*
+        run: python -m twine check dist/*.whl dist/*.tar.gz
 
-      - name: Smoke-test wheel installation
+      - name: Inspect release contents and versions
+        shell: bash
+        run: |
+          wheel_path=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          sdist_path=$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)
+          npm_path=$(find dist -maxdepth 1 -name '*.tgz' -print -quit)
+          python scripts/inspect_release_artifacts.py \
+            --wheel "$wheel_path" \
+            --sdist "$sdist_path" \
+            --npm "$npm_path" | tee dist/SHA256SUMS.json
+
+      - name: Verify reproducible artifact bytes
+        run: |
+          mkdir -p .reproducible
+          python -m build --outdir .reproducible
+          python scripts/normalize_sdist.py .reproducible/*.tar.gz "$SOURCE_DATE_EPOCH"
+          (
+            cd pytincture/frontend
+            npm pack --pack-destination "$GITHUB_WORKSPACE/.reproducible"
+          )
+          cmp dist/*.whl .reproducible/*.whl
+          cmp dist/*.tar.gz .reproducible/*.tar.gz
+          cmp dist/*.tgz .reproducible/*.tgz
+
+      - name: Smoke-test wheel and source distribution installations
         shell: bash
         run: |
           python -m venv /tmp/pytincture-wheel-smoke
           /tmp/pytincture-wheel-smoke/bin/python -m pip install dist/*.whl
-          /tmp/pytincture-wheel-smoke/bin/python -c "import pytincture; print(pytincture.__version__)"
+          /tmp/pytincture-wheel-smoke/bin/python scripts/smoke_optional_extra.py base
+          python -m venv /tmp/pytincture-sdist-smoke
+          /tmp/pytincture-sdist-smoke/bin/python -m pip install dist/*.tar.gz
+          /tmp/pytincture-sdist-smoke/bin/python scripts/smoke_optional_extra.py base
+
+      - name: Upload validated release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-artifacts
+          path: dist/*
+          if-no-files-found: error
+
+  optional-extras:
+    name: Clean install (${{ matrix.extra }})
+    needs: python-package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        extra:
+          - oauth
+          - password
+          - redis
+          - saml
+          - mcp
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Download validated artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: Install and smoke-test ${{ matrix.extra }} extra
+        shell: bash
+        env:
+          PYTINCTURE_EXTRA: ${{ matrix.extra }}
+        run: |
+          wheel_path=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          python -m pip install "${wheel_path}[${PYTINCTURE_EXTRA}]"
+          python scripts/smoke_optional_extra.py "$PYTINCTURE_EXTRA"
 
   javascript-runtime:
     name: Validate JavaScript runtime
@@ -145,7 +239,7 @@ jobs:
       - name: Install Pytincture and prepare the pinned widget wheel
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --editable .
+          python -m pip install --editable '.[dev]'
           python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.16
           cp tests/e2e_apps/dhxpyt-0.9.16-py3-none-any.whl tests/e2e_apps/dhxpyt-0.9.16+backend-py3-none-any.whl
 
@@ -222,3 +316,65 @@ jobs:
           name: production-smoke-log
           path: production-smoke.log
           if-no-files-found: ignore
+
+  publish-python:
+    name: Publish validated Python artifacts
+    if: github.event_name == 'release'
+    needs:
+      - python-tests
+      - python-package
+      - optional-extras
+      - javascript-runtime
+      - browser-e2e
+      - production-smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download validated artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Publish exact validated Python artifacts
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+        run: |
+          python -m pip install 'twine>=6,<7'
+          python -m twine upload --verbose dist/*.whl dist/*.tar.gz
+
+  publish-npm:
+    name: Publish validated npm artifact
+    if: github.event_name == 'release'
+    needs:
+      - python-tests
+      - python-package
+      - optional-extras
+      - javascript-runtime
+      - browser-e2e
+      - production-smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download validated artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish exact validated npm artifact
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish dist/*.tgz --access public

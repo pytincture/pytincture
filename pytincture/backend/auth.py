@@ -44,8 +44,14 @@ def verify_password(email: str, password: str, raw_hashes: str) -> bool:
     encoded_hash = configured_hash if known_user else _DUMMY_PASSWORD_HASH
     try:
         if encoded_hash.startswith("$argon2id$"):
-            from argon2 import PasswordHasher
-            from argon2.exceptions import VerificationError
+            try:
+                from argon2 import PasswordHasher
+                from argon2.exceptions import VerificationError
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Local password authentication requires optional dependencies; "
+                    "install pytincture[password]"
+                ) from exc
 
             try:
                 verified = PasswordHasher().verify(encoded_hash, password)
@@ -53,7 +59,13 @@ def verify_password(email: str, password: str, raw_hashes: str) -> bool:
             except VerificationError:
                 return False
         if encoded_hash.startswith(("$2a$", "$2b$", "$2y$")):
-            import bcrypt
+            try:
+                import bcrypt
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Local password authentication requires optional dependencies; "
+                    "install pytincture[password]"
+                ) from exc
 
             verified = bcrypt.checkpw(
                 password.encode("utf-8"), encoded_hash.encode("utf-8")

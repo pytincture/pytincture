@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""Validate Pytincture release contents, versions, dependencies, and hashes."""
+
+from __future__ import annotations
+
+import argparse
+import email.parser
+import fnmatch
+import hashlib
+import json
+import re
+import tarfile
+import tomllib
+import zipfile
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CONTRACT = ROOT / "contracts" / "release-artifacts-v1.json"
+
+
+def _fail(message: str) -> None:
+    raise SystemExit(f"release artifact validation failed: {message}")
+
+
+def _source_versions() -> tuple[str, str]:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    project_version = project["project"]["version"]
+    init_text = (ROOT / "pytincture" / "__init__.py").read_text()
+    match = re.search(r'^__version__\s*=\s*["\']([^"\']+)', init_text, re.MULTILINE)
+    if not match:
+        _fail("pytincture.__version__ is missing")
+    runtime_text = (ROOT / "pytincture" / "frontend" / "pytincture.js").read_text()
+    runtime_match = re.search(
+        r'^const PYTINCTURE_RUNTIME_VERSION = ["\']([^"\']+)',
+        runtime_text,
+        re.MULTILINE,
+    )
+    if not runtime_match or runtime_match.group(1) != project_version:
+        _fail("pytincture.js runtime version does not match pyproject.toml")
+    return project_version, match.group(1)
+
+
+def _normalized_tar_names(path: Path) -> tuple[set[str], tarfile.TarFile]:
+    archive = tarfile.open(path, "r:gz")
+    raw_names = {member.name.rstrip("/") for member in archive.getmembers() if member.name}
+    roots = {name.split("/", 1)[0] for name in raw_names}
+    if len(roots) != 1:
+        archive.close()
+        _fail(f"{path.name} must contain exactly one root directory")
+    root = next(iter(roots))
+    names = {
+        name[len(root) + 1 :]
+        for name in raw_names
+        if name.startswith(root + "/") and name != root
+    }
+    return names, archive
+
+
+def _check_contents(
+    artifact: str,
+    names: set[str],
+    required: list[str],
+    forbidden_prefixes: list[str],
+) -> None:
+    missing = [pattern for pattern in required if not any(fnmatch.fnmatch(name, pattern) for name in names)]
+    forbidden = sorted(
+        name for name in names if any(name.startswith(prefix) for prefix in forbidden_prefixes)
+    )
+    if missing:
+        _fail(f"{artifact} is missing: {', '.join(missing)}")
+    if forbidden:
+        _fail(f"{artifact} contains forbidden files: {', '.join(forbidden[:10])}")
+
+
+def _requirement_name(value: str) -> str:
+    return re.split(r"[ (<>=!~;\[]", value, maxsplit=1)[0].lower().replace("_", "-")
+
+
+def inspect_wheel(path: Path, contract: dict, version: str) -> None:
+    with zipfile.ZipFile(path) as archive:
+        names = set(archive.namelist())
+        required = [item for item in contract["required"] if item != "README.md" and item != "pyproject.toml"]
+        _check_contents("wheel", names, required, contract["forbidden_prefixes"])
+        metadata_names = [name for name in names if name.endswith(".dist-info/METADATA")]
+        if len(metadata_names) != 1:
+            _fail("wheel must contain exactly one METADATA file")
+        metadata = email.parser.Parser().parsestr(archive.read(metadata_names[0]).decode())
+        if metadata["Version"] != version:
+            _fail(f"wheel version {metadata['Version']} does not match {version}")
+        requirements = metadata.get_all("Requires-Dist", [])
+        base = sorted(
+            _requirement_name(item)
+            for item in requirements
+            if "extra ==" not in item and "extra == " not in item
+        )
+        if base != sorted(contract["base_dependencies"]):
+            _fail(f"wheel base dependencies differ: {base}")
+        extras = sorted(set(metadata.get_all("Provides-Extra", [])))
+        if extras != sorted(contract["extras"]):
+            _fail(f"wheel extras differ: {extras}")
+        for runtime_path in (
+            "pytincture/frontend/pytincture.js",
+            "pytincture/frontend/dist/pytincture.js",
+            "pytincture/frontend/dist/pytincture.esm.js",
+            "pytincture/frontend/dist/pytincture.min.js",
+        ):
+            if version.encode() not in archive.read(runtime_path):
+                _fail(f"wheel runtime {runtime_path} does not embed version {version}")
+
+
+def inspect_sdist(path: Path, contract: dict, version: str) -> None:
+    names, archive = _normalized_tar_names(path)
+    try:
+        _check_contents("sdist", names, contract["required"], contract["forbidden_prefixes"])
+        pkg_info = next((name for name in names if name == "PKG-INFO"), None)
+        if pkg_info is None:
+            _fail("sdist has no PKG-INFO")
+        root = archive.getmembers()[0].name.split("/", 1)[0]
+        member = archive.extractfile(f"{root}/PKG-INFO")
+        metadata = email.parser.Parser().parsestr(member.read().decode() if member else "")
+        if metadata["Version"] != version:
+            _fail(f"sdist version {metadata['Version']} does not match {version}")
+    finally:
+        archive.close()
+
+
+def inspect_npm(path: Path, contract: dict, version: str) -> None:
+    names, archive = _normalized_tar_names(path)
+    try:
+        _check_contents("npm package", names, contract["required"], contract["forbidden_prefixes"])
+        member = archive.extractfile("package/package.json")
+        package = json.loads(member.read() if member else b"{}")
+        if package.get("version") != version:
+            _fail(f"npm version {package.get('version')} does not match {version}")
+        for runtime_path in (
+            "package/dist/pytincture.js",
+            "package/dist/pytincture.esm.js",
+            "package/dist/pytincture.min.js",
+        ):
+            member = archive.extractfile(runtime_path)
+            if member is None or version.encode() not in member.read():
+                _fail(f"npm runtime {runtime_path} does not embed version {version}")
+    finally:
+        archive.close()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--wheel", type=Path, required=True)
+    parser.add_argument("--sdist", type=Path, required=True)
+    parser.add_argument("--npm", type=Path, required=True)
+    args = parser.parse_args()
+
+    contract = json.loads(CONTRACT.read_text())
+    project_version, runtime_version = _source_versions()
+    package = json.loads((ROOT / "pytincture" / "frontend" / "package.json").read_text())
+    lock = json.loads((ROOT / "pytincture" / "frontend" / "package-lock.json").read_text())
+    source_versions = {
+        "pyproject": project_version,
+        "python": runtime_version,
+        "npm": package.get("version"),
+        "npm_lock": lock.get("version"),
+    }
+    if len(set(source_versions.values())) != 1:
+        _fail(f"source versions differ: {source_versions}")
+
+    inspect_wheel(args.wheel, contract["python"], project_version)
+    inspect_sdist(args.sdist, contract["python"], project_version)
+    inspect_npm(args.npm, contract["npm"], project_version)
+    hashes = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (args.wheel, args.sdist, args.npm)
+    }
+    print(json.dumps({"version": project_version, "sha256": hashes}, indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

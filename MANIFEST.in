@@ -11,4 +11,7 @@ exclude pytincture/frontend/sync-version.mjs
 prune pytincture/frontend/node_modules
 prune pytincture/frontend/__pycache__
 prune build
+prune fastmcp_stub
+prune scripts
+prune tests
 global-exclude *.py[cod]

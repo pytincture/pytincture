@@ -25,9 +25,6 @@ from typing import (
 from urllib.parse import parse_qsl, quote, urlparse, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
-# Google OAuth via Authlib
-from authlib.integrations.starlette_client import OAuth, OAuthError
-
 # FastAPI / Starlette
 from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -40,14 +37,8 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from fastmcp import FastMCP
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from markupsafe import escape
-
-# SAML Toolkit (OneLogin)
-from onelogin.saml2.auth import OneLogin_Saml2_Auth
-from onelogin.saml2.errors import OneLogin_Saml2_ValidationError
-from onelogin.saml2.settings import OneLogin_Saml2_Settings
 
 # Pydantic for JSON validation
 from pydantic import BaseModel
@@ -146,6 +137,65 @@ TRUST_PROXY_HEADERS = os.getenv("PYTINCTURE_TRUST_PROXY_HEADERS", "true").lower(
 FRONTEND_INSTANCE_UUID = uuid.uuid4().hex
 
 
+class _OptionalOAuthError(Exception):
+    """Placeholder used until the OAuth extra is loaded."""
+
+
+class _OptionalSamlValidationError(Exception):
+    """Placeholder used until the SAML extra is loaded."""
+
+
+class _DisabledMCP:
+    """Compatibility surface when MCP is intentionally not installed/enabled."""
+
+    async def list_tools(self):
+        return []
+
+
+OAuth = None
+OAuthError = _OptionalOAuthError
+FastMCP = None
+OneLogin_Saml2_Auth = None
+OneLogin_Saml2_Settings = None
+OneLogin_Saml2_ValidationError = _OptionalSamlValidationError
+
+# Discover installed extras without making them mandatory for a base import.
+try:
+    from authlib.integrations.starlette_client import OAuth as _InstalledOAuth
+    from authlib.integrations.starlette_client import OAuthError as _InstalledOAuthError
+
+    OAuth = _InstalledOAuth
+    OAuthError = _InstalledOAuthError
+except ImportError:
+    pass
+
+try:
+    from fastmcp import FastMCP as _InstalledFastMCP
+
+    FastMCP = _InstalledFastMCP
+except ImportError:
+    pass
+
+try:
+    from onelogin.saml2.auth import OneLogin_Saml2_Auth as _InstalledSamlAuth
+    from onelogin.saml2.errors import (
+        OneLogin_Saml2_ValidationError as _InstalledSamlValidationError,
+    )
+    from onelogin.saml2.settings import OneLogin_Saml2_Settings as _InstalledSamlSettings
+
+    OneLogin_Saml2_Auth = _InstalledSamlAuth
+    OneLogin_Saml2_ValidationError = _InstalledSamlValidationError
+    OneLogin_Saml2_Settings = _InstalledSamlSettings
+except ImportError:
+    pass
+
+
+def _optional_dependency_error(feature: str, extra: str, exc: ImportError) -> RuntimeError:
+    return RuntimeError(
+        f"{feature} requires optional dependencies; install pytincture[{extra}]"
+    )
+
+
 def _build_streamable_mcp_app(mcp_server, path: str = "/"):
     return build_streamable_app(mcp_server, path)
 
@@ -177,7 +227,7 @@ def _mcp_operation_ids() -> Set[str]:
 
 
 def reload_mcp_tools():
-    global mcp, mcp_http_app  # Use globals or pass as needed if in a class/module
+    global FastMCP, mcp, mcp_http_app
     
     # Step 1: Remove existing MCP-mounted routes to avoid duplicates
     # Filter out routes starting with "/mcp" to avoid duplicate mounts.
@@ -187,6 +237,17 @@ def reload_mcp_tools():
     ]
     
     operation_ids = _mcp_operation_ids()
+    if os.getenv("ENABLE_MCP", "false").lower() != "true":
+        mcp = _DisabledMCP()
+        mcp_http_app = None
+        return
+
+    if FastMCP is None:
+        try:
+            from fastmcp import FastMCP as _FastMCP
+        except ImportError as exc:
+            raise _optional_dependency_error("MCP", "mcp", exc) from exc
+        FastMCP = _FastMCP
     if operation_ids:
         mcp_source = _FilteredFastAPIApp(app, operation_ids)
         mcp = FastMCP.from_fastapi(app=mcp_source, name="pytincture")
@@ -1482,6 +1543,31 @@ if _authentication_enabled():
 else:
     # An unauthenticated development service still gets an unpredictable cookie signer.
     SAML_SECRET_KEY = SAML_SECRET_KEY or secrets.token_urlsafe(32)
+
+
+if ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH:
+    try:
+        from authlib.integrations.starlette_client import OAuth as _OAuth
+        from authlib.integrations.starlette_client import OAuthError as _OAuthError
+    except ImportError as exc:
+        raise _optional_dependency_error("OAuth", "oauth", exc) from exc
+    OAuth = _OAuth
+    OAuthError = _OAuthError
+
+if ENABLE_SAML_AUTH:
+    try:
+        from onelogin.saml2.auth import OneLogin_Saml2_Auth as _OneLogin_Saml2_Auth
+        from onelogin.saml2.errors import (
+            OneLogin_Saml2_ValidationError as _OneLogin_Saml2_ValidationError,
+        )
+        from onelogin.saml2.settings import (
+            OneLogin_Saml2_Settings as _OneLogin_Saml2_Settings,
+        )
+    except ImportError as exc:
+        raise _optional_dependency_error("SAML", "saml", exc) from exc
+    OneLogin_Saml2_Auth = _OneLogin_Saml2_Auth
+    OneLogin_Saml2_ValidationError = _OneLogin_Saml2_ValidationError
+    OneLogin_Saml2_Settings = _OneLogin_Saml2_Settings
 
 _previous_secret_value = os.getenv("AUTH_SESSION_PREVIOUS_SECRET_KEYS", "").strip()
 if _previous_secret_value:
