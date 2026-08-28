@@ -18,6 +18,8 @@
     "sync-version": "node sync-version.mjs",
     "build": "npm run sync-version && node build.mjs",
     "build:watch": "node build.mjs --watch",
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "playwright test",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -28,6 +30,7 @@
   "author": "schapman1974",
   "license": "MIT",
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "esbuild": "^0.28.1"
   }
 }

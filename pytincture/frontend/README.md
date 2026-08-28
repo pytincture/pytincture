@@ -2,13 +2,24 @@
 
 Standalone build of `pytincture.js`, the Pyodide bootstrapper used by the pytincture framework. It can be loaded directly from a CDN to run embedded Python snippets (or zipped pytincture apps) with no backend.
 
+## Validation
+
+Run `npm test` for lifecycle unit tests, `npm run test:browser` for the
+Chromium lifecycle harness, and `npm run build` to regenerate the distributable
+IIFE, minified, and ESM bundles. Playwright retains traces, screenshots, and
+videos for browser failures; CI uploads those artifacts.
+
+See [`../../docs/browser-lifecycle.md`](../../docs/browser-lifecycle.md) for
+the public startup stages, callback events, compatibility report, and typed
+error fields.
+
 ## Usage
 
 ```html
 <!DOCTYPE html>
 <html>
   <head>
-    <script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@0.9.20/dist/pytincture.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@0.10.7/dist/pytincture.min.js"></script>
   </head>
   <body>
     <div id="maindiv" style="width:100%;height:100vh;"></div>
@@ -41,7 +52,8 @@ What happens:
   cache. PyPI/micropip resolution stays canonical; only backend-hosted
   widgetset wheel candidates receive the instance UUID.
 - Auto-detects `<script type="text/python">` blocks, mounts them under `/appcode`, finds a `MainWindow` subclass (or explicit entrypoint), and runs it.
-- Errors are printed to the console and rendered inside `#maindiv` when present.
+- Startup rejects with a stage-specific `PytinctureLifecycleError`; inline
+  auto-start failures are also rendered inside `#maindiv` when present.
 
 ## Configuration
 

@@ -1,4 +1,5 @@
 const FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
+const PYTINCTURE_RUNTIME_VERSION = "0.10.7";
 
 const DEFAULT_CONFIG = {
     application: null,
@@ -23,13 +24,132 @@ const DEFAULT_CONFIG = {
     showLoadingOverlay: true,
     loadingOverlayId: "pytincture-loading",
     loadingTitle: "Starting PyTincture",
+    onLifecycleEvent: null,
 };
+
+const LIFECYCLE_STAGES = Object.freeze({
+    PREFLIGHT: "preflight",
+    RUNTIME_LOAD: "runtime-load",
+    PACKAGE_INSTALL: "package-install",
+    WIDGETSET_INSTALL: "widgetset-install",
+    WIDGETSET_LOAD: "widgetset-load",
+    ARCHIVE_DOWNLOAD: "archive-download",
+    ARCHIVE_UNPACK: "archive-unpack",
+    ENTRYPOINT_EXECUTION: "entrypoint-execution",
+    READY: "ready",
+});
 
 let loggingInstalled = false;
 const originalConsoleMethods = {};
 let nativeFetch = null;
 let activeRequestUuid = null;
 let cacheBustingSuspensionDepth = 0;
+
+function sanitizeDiagnostic(value) {
+    if (value === null || value === undefined) {
+        return "";
+    }
+    return String(value)
+        .replace(/([?&](?:token|secret|password|authorization|code)=)[^&#\s]*/gi, "$1[redacted]")
+        .replace(/\b(token|secret|password|authorization|api[_-]?key|access[_-]?token|id[_-]?token)(\s*[:=]\s*)[^\s,;]+/gi, "$1$2[redacted]")
+        .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]")
+        .slice(0, 800);
+}
+
+function sanitizeResource(value) {
+    if (!value) {
+        return null;
+    }
+    const rawValue = String(value);
+    if (rawValue.startsWith("#") || (!rawValue.includes("/") && !rawValue.includes(":"))) {
+        return sanitizeDiagnostic(rawValue);
+    }
+    try {
+        const base = typeof window !== "undefined" && window.location
+            ? window.location.href
+            : "http://localhost/";
+        const parsed = new URL(rawValue, base);
+        parsed.search = "";
+        parsed.hash = "";
+        return parsed.toString();
+    } catch (_error) {
+        return sanitizeDiagnostic(value).replace(/\?.*$/, "");
+    }
+}
+
+class PytinctureLifecycleError extends Error {
+    constructor({ stage, code = "startup_failed", resource = null, requestId = null, correlationId = null, cause = null }) {
+        const rootCause = sanitizeDiagnostic(cause?.message || cause || "Unknown startup failure");
+        const safeResource = sanitizeResource(resource);
+        super(`Pytincture startup failed during ${stage}${safeResource ? ` (${safeResource})` : ""}: ${rootCause}`);
+        this.name = "PytinctureLifecycleError";
+        this.stage = stage;
+        this.code = code;
+        this.resource = safeResource;
+        this.requestId = requestId || null;
+        this.correlationId = correlationId || null;
+        this.rootCause = rootCause;
+    }
+
+    toJSON() {
+        return {
+            name: this.name,
+            message: this.message,
+            stage: this.stage,
+            code: this.code,
+            resource: this.resource,
+            requestId: this.requestId,
+            correlationId: this.correlationId,
+            rootCause: this.rootCause,
+        };
+    }
+}
+
+function emitLifecycleEvent(config, type, stage, details = {}) {
+    const event = Object.freeze({
+        type,
+        stage,
+        requestId: config.requestUuid || null,
+        timestamp: new Date().toISOString(),
+        ...details,
+    });
+    if (typeof config.onLifecycleEvent === "function") {
+        try {
+            config.onLifecycleEvent(event);
+        } catch (callbackError) {
+            console.warn("Pytincture lifecycle callback failed:", callbackError);
+        }
+    }
+    if (typeof window !== "undefined" && typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+        window.dispatchEvent(new CustomEvent("pytincture:lifecycle", { detail: event }));
+    }
+    return event;
+}
+
+async function runLifecycleStage(config, stage, resource, callback, metadata = {}) {
+    const safeResource = sanitizeResource(resource);
+    emitLifecycleEvent(config, "stage-start", stage, { resource: safeResource });
+    try {
+        const result = await callback();
+        emitLifecycleEvent(config, "stage-complete", stage, { resource: safeResource });
+        return result;
+    } catch (error) {
+        const lifecycleError = error instanceof PytinctureLifecycleError
+            ? error
+            : new PytinctureLifecycleError({
+                stage,
+                resource,
+                requestId: config.requestUuid,
+                correlationId: metadata.correlationId || null,
+                cause: error,
+            });
+        emitLifecycleEvent(config, "error", lifecycleError.stage, {
+            resource: lifecycleError.resource,
+            error: lifecycleError.toJSON(),
+        });
+        throw lifecycleError;
+    }
+}
 
 function ensureTrailingSlash(value) {
     if (!value) {
@@ -127,6 +247,9 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
         merged.requestUuid = merged.requestUuid || makeRequestId();
         merged.entrypoint = merged.entrypoint || merged.application;
         merged.devWidgetHost = resolveDevWidgetHost(merged.devWidgetHost);
+        if (merged.application && merged.serviceWorkerUrl === DEFAULT_CONFIG.serviceWorkerUrl) {
+            merged.serviceWorkerUrl = "/frontend/sw.js";
+        }
         if (!("enableBackendLogging" in arg1)) {
             merged.enableBackendLogging = !!merged.application;
         }
@@ -147,12 +270,59 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
     config.pyodideBaseUrl = ensureTrailingSlash(config.pyodideBaseUrl);
     config.requestUuid = config.requestUuid || makeRequestId();
     config.devWidgetHost = resolveDevWidgetHost(config.devWidgetHost);
+    if (config.application && config.serviceWorkerUrl === DEFAULT_CONFIG.serviceWorkerUrl) {
+        config.serviceWorkerUrl = "/frontend/sw.js";
+    }
     config.enableBackendLogging = !!application;
     if (config.application && (config.pyodideBaseUrl.startsWith("frontend/") || config.pyodideBaseUrl.startsWith("./frontend/"))) {
         const cleanPath = config.pyodideBaseUrl.replace(/^\.\//, "");
         config.pyodideBaseUrl = ensureTrailingSlash(`${config.application}/${cleanPath}`);
     }
     return config;
+}
+
+function preflightConfig(config) {
+    if (typeof document === "undefined" || typeof fetch !== "function") {
+        throw new Error("A browser document and Fetch API are required.");
+    }
+    if (!new Set(["auto", "package", "inline"]).has(config.mode)) {
+        throw new Error(`Unsupported startup mode: ${config.mode}`);
+    }
+    if (config.mode === "package" && !config.application) {
+        throw new Error("Packaged mode requires an application name.");
+    }
+    const pythonIdentifier = /^[A-Za-z_]\w*$/;
+    if (config.application && !pythonIdentifier.test(config.application)) {
+        throw new Error("Application must be a valid Python module identifier.");
+    }
+    if (config.entrypoint && !pythonIdentifier.test(config.entrypoint)) {
+        throw new Error("Entrypoint must be a valid Python identifier.");
+    }
+    if (!config.pyodideBaseUrl) {
+        throw new Error("pyodideBaseUrl is required.");
+    }
+    return {
+        runtime: "pytincture",
+        runtimeVersion: PYTINCTURE_RUNTIME_VERSION,
+        pyodideBaseUrl: sanitizeResource(config.pyodideBaseUrl),
+        widgetset: sanitizeDiagnostic(config.widgetSource || config.widgetlib || "none"),
+    };
+}
+
+function preflightPyodide(pyodide) {
+    const requiredMethods = ["loadPackage", "runPython", "runPythonAsync", "unpackArchive"];
+    const missing = requiredMethods.filter(name => typeof pyodide?.[name] !== "function");
+    if (!pyodide?.FS || missing.length) {
+        throw new Error(`Incompatible Pyodide runtime; missing: ${[...missing, ...(!pyodide?.FS ? ["FS"] : [])].join(", ")}`);
+    }
+    return {
+        pyodideVersion: sanitizeDiagnostic(pyodide.version || "unknown"),
+        pythonVersion: sanitizeDiagnostic(
+            typeof pyodide.runPython === "function"
+                ? pyodide.runPython("import platform; platform.python_version()")
+                : "unknown",
+        ),
+    };
 }
 
 function loadScript(url, requestUuid) {
@@ -398,8 +568,10 @@ async function installExtraMicropipLibs(pyodide, selector) {
     try {
         libs = JSON.parse(script.textContent || script.text || "[]");
     } catch (err) {
-        console.warn("Failed to parse micropip-libs JSON:", err);
-        return;
+        throw new Error(`micropip-libs must contain valid JSON: ${sanitizeDiagnostic(err.message)}`);
+    }
+    if (!Array.isArray(libs) || libs.some(lib => typeof lib !== "string" || !lib.trim())) {
+        throw new Error("micropip-libs must be a JSON array of non-empty package strings.");
     }
 
     for (const lib of libs) {
@@ -451,19 +623,45 @@ async function resolveBackendWidgetSources(config) {
     return sources;
 }
 
-async function runPackagedApp(pyodide, config) {
-    if (!config.application) {
-        throw new Error("No application supplied for packaged mode.");
-    }
+async function downloadPackagedApp(config) {
     const archiveUrl = withRequestUuid(`${config.application}/appcode/appcode.pyt`, config.requestUuid);
     const response = await fetch(archiveUrl);
+    const correlationId = response.headers?.get?.("x-request-id") || null;
     if (!response.ok) {
-        throw new Error(`Failed to fetch packaged app from ${archiveUrl}`);
+        throw new PytinctureLifecycleError({
+            stage: LIFECYCLE_STAGES.ARCHIVE_DOWNLOAD,
+            code: [404, 410].includes(response.status) ? "package_unavailable" : "archive_download_failed",
+            resource: archiveUrl,
+            requestId: config.requestUuid,
+            correlationId,
+            cause: `HTTP ${response.status}`,
+        });
     }
-    const appBinary = await response.arrayBuffer();
-    pyodide.unpackArchive(appBinary, "zip");
+    try {
+        return {
+            binary: await response.arrayBuffer(),
+            resource: archiveUrl,
+            correlationId,
+        };
+    } catch (error) {
+        throw new PytinctureLifecycleError({
+            stage: LIFECYCLE_STAGES.ARCHIVE_DOWNLOAD,
+            code: "archive_read_failed",
+            resource: archiveUrl,
+            requestId: config.requestUuid,
+            correlationId,
+            cause: error,
+        });
+    }
+}
+
+function unpackPackagedApp(pyodide, downloaded) {
+    pyodide.unpackArchive(downloaded.binary, "zip");
+}
+
+async function executePackagedApp(pyodide, config) {
     const entrypoint = config.entrypoint || config.application;
-    pyodide.runPython(`from ${config.application} import ${entrypoint} as app\napp()`);
+    await pyodide.runPythonAsync(`from ${config.application} import ${entrypoint} as app\napp()`);
 }
 
 async function runInlineApp(pyodide, config) {
@@ -537,64 +735,69 @@ await micropip.install(${sourceLiteral})
     `));
 }
 
-async function installAndLoadWidgetset(pyodide, config) {
+async function installWidgetset(pyodide, config) {
     const primarySource = config.widgetSource || config.widgetlib;
     if (!primarySource) {
-        return;
+        return null;
     }
 
+    let installedSource = null;
+    let lastInstallError = null;
     try {
-        await withoutCacheBusting(() => pyodide.runPythonAsync(`
-import micropip
-await micropip.install("python-dotenv")
-        `));
-
-        let installedSource = null;
-        let lastInstallError = null;
-        try {
-            // PyPI (or an explicit widgetSource) remains the primary source.
-            await installWidgetsetSource(pyodide, primarySource);
-            installedSource = primarySource;
-        } catch (error) {
-            lastInstallError = error;
-            if (config.widgetSource) {
-                throw error;
-            }
-            console.info(
-                `Widgetset ${primarySource} is not available from PyPI; checking backend wheels.`,
-            );
+        // PyPI (or an explicit widgetSource) remains the primary source.
+        await installWidgetsetSource(pyodide, primarySource);
+        installedSource = primarySource;
+    } catch (error) {
+        lastInstallError = error;
+        if (config.widgetSource) {
+            throw error;
         }
+        console.info(
+            `Widgetset ${primarySource} is not available from PyPI; checking backend wheels.`,
+        );
+    }
 
-        if (!installedSource) {
-            // Backend order is the real pinned version first, then 99.99.99.
-            const backendSources = await resolveBackendWidgetSources(config);
-            for (const source of backendSources) {
-                if (!(await urlExists(source))) {
-                    continue;
-                }
-                try {
-                    await installWidgetsetSource(pyodide, source, true);
-                    installedSource = source;
-                    break;
-                } catch (error) {
-                    lastInstallError = error;
-                    console.warn(`Failed to install widgetset from ${source}.`, error);
-                }
+    if (!installedSource) {
+        // Backend order is the real pinned version first, then 99.99.99.
+        const backendSources = await resolveBackendWidgetSources(config);
+        for (const source of backendSources) {
+            if (!(await urlExists(source))) {
+                continue;
+            }
+            try {
+                await installWidgetsetSource(pyodide, source, true);
+                installedSource = source;
+                break;
+            } catch (error) {
+                lastInstallError = error;
+                console.warn(`Failed to install widgetset from ${sanitizeResource(source)}.`);
             }
         }
+    }
 
-        if (!installedSource) {
-            throw lastInstallError || new Error(`No installable widgetset source found for ${primarySource}.`);
-        }
+    if (!installedSource) {
+        throw lastInstallError || new Error(`No installable widgetset source found for ${primarySource}.`);
+    }
+    return installedSource;
+}
 
-        const requestUuidLiteral = JSON.stringify(config.requestUuid);
-        const loadFilesCode = `
+async function loadWidgetsetAssets(pyodide, config, installedSource) {
+    if (!installedSource) {
+        return { installedSource: null, javascriptAssets: 0, cssAssets: 0 };
+    }
+    const requestUuidLiteral = JSON.stringify(config.requestUuid);
+    const widgetPackageLiteral = JSON.stringify(
+        String(config.widgetlib || "").match(/^[A-Za-z0-9_.\-]+/)?.[0] || "",
+    );
+    const loadFilesCode = `
 import os
 import pyodide
 import js
 import site
 import base64
 import re
+import json
+import importlib.metadata
 
 REQUEST_UUID = ${requestUuidLiteral}
 
@@ -667,6 +870,8 @@ def replace_font_urls(css_content, search_dirs):
     return re.sub(r"url\(([^)]+)\)", repl, css_content, flags=re.IGNORECASE)
 
 package_path = site.getsitepackages()[0]
+javascript_assets = 0
+css_assets = 0
 
 for root, _, files in os.walk(package_path):
     for file in files:
@@ -675,6 +880,7 @@ for root, _, files in os.walk(package_path):
         if file_extension == '.js':
             with open(file_path) as f:
                 js.eval(f.read())
+            javascript_assets += 1
         elif file_extension == '.css':
             with open(file_path) as f:
                 css_dir = os.path.dirname(file_path)
@@ -683,12 +889,206 @@ for root, _, files in os.walk(package_path):
             style = js.document.createElement('style')
             style.innerHTML = style_content
             js.document.head.appendChild(style)
-        `;
-        await pyodide.runPythonAsync(loadFilesCode);
-    } catch (error) {
-        console.error(`Error installing and loading ${primarySource}:`, error);
-        throw error;
+            css_assets += 1
+
+widget_package = ${widgetPackageLiteral}
+try:
+    widget_version = importlib.metadata.version(widget_package) if widget_package else None
+except importlib.metadata.PackageNotFoundError:
+    widget_version = None
+
+json.dumps({
+    "widgetPackage": widget_package or None,
+    "widgetVersion": widget_version,
+    "javascriptAssets": javascript_assets,
+    "cssAssets": css_assets,
+    "dhxAvailable": bool(hasattr(js, "dhx")),
+})
+    `;
+    const rawReport = await pyodide.runPythonAsync(loadFilesCode);
+    const report = typeof rawReport === "string" ? JSON.parse(rawReport) : rawReport;
+    if (report?.widgetPackage?.replace(/-/g, "_") === "dhxpyt" && !report.dhxAvailable) {
+        throw new Error("dhxpyt installed but its DHTMLX JavaScript assets did not expose window.dhx.");
     }
+    return { installedSource: sanitizeResource(installedSource) || installedSource, ...report };
+}
+
+const DEFAULT_RUNTIME_OPERATIONS = Object.freeze({
+    preflightConfig,
+    ensureServiceWorker,
+    ensureMaterialIcons,
+    warmPyodideCache,
+    ensurePyodideLoaded,
+    loadPyodideRuntime: options => globalThis.loadPyodide(options),
+    preflightPyodide,
+    installExtraMicropipLibs,
+    installWidgetset,
+    loadWidgetsetAssets,
+    downloadPackagedApp,
+    unpackPackagedApp,
+    executePackagedApp,
+    runInlineApp,
+});
+
+async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_OPERATIONS) {
+    updateLoadingStatus(loadingOverlay, "Checking compatibility…");
+    const configReport = await runLifecycleStage(
+        config,
+        LIFECYCLE_STAGES.PREFLIGHT,
+        config.pyodideBaseUrl,
+        () => operations.preflightConfig(config),
+    );
+
+    await operations.ensureServiceWorker(config);
+    if (config.loadMaterialIcons) {
+        operations.ensureMaterialIcons(config.materialIconsUrl, config.requestUuid);
+    }
+    Promise.resolve(operations.warmPyodideCache(config)).catch(error => {
+        console.warn("Pyodide cache warm failed:", sanitizeDiagnostic(error?.message || error));
+    });
+
+    updateLoadingStatus(loadingOverlay, "Loading Pyodide…");
+    const runtimeResult = await runLifecycleStage(
+        config,
+        LIFECYCLE_STAGES.RUNTIME_LOAD,
+        `${config.pyodideBaseUrl}pyodide.js`,
+        async () => {
+            await operations.ensurePyodideLoaded(config);
+            const pyodide = await operations.loadPyodideRuntime({ indexURL: config.pyodideBaseUrl });
+            const report = await operations.preflightPyodide(pyodide);
+            return { pyodide, report };
+        },
+    );
+    const { pyodide } = runtimeResult;
+
+    updateLoadingStatus(loadingOverlay, "Installing packages…");
+    await runLifecycleStage(
+        config,
+        LIFECYCLE_STAGES.PACKAGE_INSTALL,
+        "micropip",
+        async () => {
+            await pyodide.loadPackage("micropip");
+            await withoutCacheBusting(() => pyodide.runPythonAsync(`
+import micropip
+await micropip.install("python-dotenv")
+            `));
+            await operations.installExtraMicropipLibs(pyodide, config.libsSelector);
+        },
+    );
+
+    updateLoadingStatus(loadingOverlay, "Installing widgetset…");
+    const installedSource = await runLifecycleStage(
+        config,
+        LIFECYCLE_STAGES.WIDGETSET_INSTALL,
+        config.widgetSource || config.widgetlib,
+        () => operations.installWidgetset(pyodide, config),
+    );
+    updateLoadingStatus(loadingOverlay, "Loading widget assets…");
+    const widgetReport = await runLifecycleStage(
+        config,
+        LIFECYCLE_STAGES.WIDGETSET_LOAD,
+        installedSource,
+        () => operations.loadWidgetsetAssets(pyodide, config, installedSource),
+    );
+    emitLifecycleEvent(config, "compatibility", LIFECYCLE_STAGES.WIDGETSET_LOAD, {
+        compatibility: { ...configReport, ...runtimeResult.report, ...widgetReport },
+    });
+
+    updateLoadingStatus(loadingOverlay, "Starting app…");
+    if (config.mode === "inline") {
+        await runLifecycleStage(
+            config,
+            LIFECYCLE_STAGES.ENTRYPOINT_EXECUTION,
+            config.inlineSelector,
+            async () => {
+                if (!(await operations.runInlineApp(pyodide, config))) {
+                    throw new PytinctureLifecycleError({
+                        stage: LIFECYCLE_STAGES.ENTRYPOINT_EXECUTION,
+                        code: "inline_app_unavailable",
+                        resource: config.inlineSelector,
+                        requestId: config.requestUuid,
+                        cause: "No inline application scripts were found.",
+                    });
+                }
+            },
+        );
+    } else if (config.mode === "package" || config.application) {
+        let downloaded;
+        try {
+            downloaded = await runLifecycleStage(
+                config,
+                LIFECYCLE_STAGES.ARCHIVE_DOWNLOAD,
+                `${config.application}/appcode/appcode.pyt`,
+                () => operations.downloadPackagedApp(config),
+            );
+        } catch (error) {
+            if (!(error instanceof PytinctureLifecycleError)
+                || error.code !== "package_unavailable"
+                || config.mode === "package") {
+                throw error;
+            }
+            emitLifecycleEvent(config, "fallback", LIFECYCLE_STAGES.ARCHIVE_DOWNLOAD, {
+                from: "package",
+                to: "inline",
+                reason: error.toJSON(),
+            });
+            await runLifecycleStage(
+                config,
+                LIFECYCLE_STAGES.ENTRYPOINT_EXECUTION,
+                config.inlineSelector,
+                async () => {
+                    if (!(await operations.runInlineApp(pyodide, config))) {
+                        throw new PytinctureLifecycleError({
+                            stage: LIFECYCLE_STAGES.ENTRYPOINT_EXECUTION,
+                            code: "inline_app_unavailable",
+                            resource: config.inlineSelector,
+                            requestId: config.requestUuid,
+                            cause: "The package was unavailable and no inline application scripts were found.",
+                        });
+                    }
+                },
+            );
+            downloaded = null;
+        }
+        if (downloaded) {
+            await runLifecycleStage(
+                config,
+                LIFECYCLE_STAGES.ARCHIVE_UNPACK,
+                downloaded.resource,
+                () => operations.unpackPackagedApp(pyodide, downloaded),
+                { correlationId: downloaded.correlationId },
+            );
+            await runLifecycleStage(
+                config,
+                LIFECYCLE_STAGES.ENTRYPOINT_EXECUTION,
+                `${config.application}:${config.entrypoint || config.application}`,
+                () => operations.executePackagedApp(pyodide, config),
+                { correlationId: downloaded.correlationId },
+            );
+        }
+    } else {
+        await runLifecycleStage(
+            config,
+            LIFECYCLE_STAGES.ENTRYPOINT_EXECUTION,
+            config.inlineSelector,
+            async () => {
+                if (!(await operations.runInlineApp(pyodide, config))) {
+                    throw new PytinctureLifecycleError({
+                        stage: LIFECYCLE_STAGES.ENTRYPOINT_EXECUTION,
+                        code: "application_unavailable",
+                        resource: config.inlineSelector,
+                        requestId: config.requestUuid,
+                        cause: "No packaged or inline application was available.",
+                    });
+                }
+            },
+        );
+    }
+
+    emitLifecycleEvent(config, "ready", LIFECYCLE_STAGES.READY, {
+        compatibility: { ...configReport, ...runtimeResult.report, ...widgetReport },
+    });
+    return pyodide;
 }
 
 async function runTinctureApp(arg1, widgetlib, entrypoint) {
@@ -700,57 +1100,26 @@ async function runTinctureApp(arg1, widgetlib, entrypoint) {
         enableBackendLogging(config.logEndpoint);
     }
     try {
-        updateLoadingStatus(loadingOverlay, "Preparing runtime…");
-        await ensureServiceWorker(config);
-        if (config.loadMaterialIcons) {
-            ensureMaterialIcons(config.materialIconsUrl, config.requestUuid);
-        }
-        warmPyodideCache(config);
-        updateLoadingStatus(loadingOverlay, "Loading Pyodide…");
-        await ensurePyodideLoaded(config);
-
-        const pyodide = await loadPyodide({ indexURL: config.pyodideBaseUrl });
-        updateLoadingStatus(loadingOverlay, "Loading micropip…");
-        await pyodide.loadPackage("micropip");
-        updateLoadingStatus(loadingOverlay, "Installing extra packages…");
-        await installExtraMicropipLibs(pyodide, config.libsSelector);
-
-        updateLoadingStatus(loadingOverlay, "Loading widgetset…");
-        await installAndLoadWidgetset(pyodide, config);
-
-        updateLoadingStatus(loadingOverlay, "Starting app…");
-        if (config.mode === "inline") {
-            await runInlineApp(pyodide, config);
-            removeLoadingOverlay(loadingOverlay);
-            return;
-        }
-
-        if (config.mode === "package" || config.application) {
-            try {
-                await runPackagedApp(pyodide, config);
-                removeLoadingOverlay(loadingOverlay);
-                return;
-            } catch (err) {
-                console.error("Failed to run packaged app:", err);
-                if (config.mode === "package") {
-                    throw err;
-                }
-                console.warn("Falling back to inline mode.");
-            }
-        }
-
-        const inlineStarted = await runInlineApp(pyodide, config);
-        if (!inlineStarted) {
-            throw new Error("No application could be started: packaged app missing and no inline scripts found.");
-        }
+        const pyodide = await runStartup(config, loadingOverlay);
         removeLoadingOverlay(loadingOverlay);
-    } catch (err) {
-        updateLoadingStatus(loadingOverlay, "Failed to start. Check console for details.");
-        throw err;
+        return pyodide;
+    } catch (error) {
+        const lifecycleError = error instanceof PytinctureLifecycleError
+            ? error
+            : new PytinctureLifecycleError({
+                stage: LIFECYCLE_STAGES.PREFLIGHT,
+                requestId: config.requestUuid,
+                cause: error,
+            });
+        updateLoadingStatus(loadingOverlay, `Failed during ${lifecycleError.stage}. Check console for details.`);
+        throw lifecycleError;
     }
 }
 
-window.runTinctureApp = runTinctureApp;
+if (typeof window !== "undefined") {
+    window.runTinctureApp = runTinctureApp;
+    window.PytinctureLifecycleError = PytinctureLifecycleError;
+}
 
 function autoStartInlineApp() {
     if (typeof window === "undefined") {
@@ -777,8 +1146,20 @@ function autoStartInlineApp() {
     });
 }
 
-if (document.readyState === "complete" || document.readyState === "interactive") {
-    setTimeout(autoStartInlineApp, 0);
-} else {
-    document.addEventListener("DOMContentLoaded", autoStartInlineApp);
+if (typeof document !== "undefined") {
+    if (document.readyState === "complete" || document.readyState === "interactive") {
+        setTimeout(autoStartInlineApp, 0);
+    } else {
+        document.addEventListener("DOMContentLoaded", autoStartInlineApp);
+    }
 }
+
+globalThis.__pytinctureTesting = Object.freeze({
+    DEFAULT_RUNTIME_OPERATIONS,
+    LIFECYCLE_STAGES,
+    PytinctureLifecycleError,
+    normalizeConfig,
+    runLifecycleStage,
+    runStartup,
+    runTinctureApp,
+});

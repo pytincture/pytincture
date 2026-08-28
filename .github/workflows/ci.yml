@@ -92,9 +92,31 @@ jobs:
         working-directory: pytincture/frontend
         run: npm ci
 
+      - name: Run JavaScript unit tests
+        working-directory: pytincture/frontend
+        run: npm test
+
+      - name: Install Chromium
+        working-directory: pytincture/frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run lifecycle browser tests
+        working-directory: pytincture/frontend
+        run: npm run test:browser
+
       - name: Build runtime bundles
         working-directory: pytincture/frontend
         run: npm run build
 
       - name: Verify generated bundles are current
         run: git diff --exit-code -- pytincture/frontend/package.json pytincture/frontend/dist
+
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-lifecycle-report
+          path: |
+            pytincture/frontend/playwright-report
+            pytincture/frontend/test-results
+          if-no-files-found: ignore

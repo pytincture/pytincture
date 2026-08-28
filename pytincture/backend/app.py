@@ -832,6 +832,20 @@ except json.JSONDecodeError as e:
     raise RuntimeError("Invalid JSON in ALLOWED_NOAUTH_CLASSCALLS environment variable") from e
 
 
+@app.get("/frontend/sw.js", include_in_schema=False)
+def service_worker_script():
+    """Serve the shared worker with permission to control service application paths."""
+
+    return FileResponse(
+        os.path.join(STATIC_PATH, "sw.js"),
+        media_type="text/javascript",
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Service-Worker-Allowed": "/",
+        },
+    )
+
+
 app.mount("/{application}/frontend", StaticFiles(directory=STATIC_PATH), name="static")
 app.mount("/frontend", StaticFiles(directory=STATIC_PATH), name="static_frontend")
 

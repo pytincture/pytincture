@@ -13,6 +13,8 @@ The proposed 1.0 stability contract is documented in the
 contract drift.
 Typed service settings and `create_app()` are documented in the
 [configuration guide](docs/configuration.md).
+Deterministic browser startup stages, errors, and callbacks are described in
+the [browser lifecycle guide](docs/browser-lifecycle.md).
 
 ## Features
 - Pyodide Integration: Seamlessly bring Python to the web via Pyodide.

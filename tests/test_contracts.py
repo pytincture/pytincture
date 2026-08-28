@@ -40,6 +40,7 @@ def test_javascript_globals_and_config_keys_match_contract(contract):
     assert actual_config_keys == contract["javascript"]["run_tincture_app_config"]
 
     assert "window.runTinctureApp = runTinctureApp" in runtime_source
+    assert "window.PytinctureLifecycleError = PytinctureLifecycleError" in runtime_source
     assert "window.pytinctureAutoStartConfig" in runtime_source
     assert "window.pytinctureAutoStartDisabled" in runtime_source
 
