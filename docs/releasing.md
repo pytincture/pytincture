@@ -16,9 +16,11 @@ Only a maintained release commit with green required CI is publishable.
 5. Create and push a signed `v<version>` tag at the green commit. Wait for the
    tag-triggered CI, version/qualification gate, and blocker audit to pass.
 6. Publish a GitHub release from that qualified tag. The release event rebuilds
-   artifacts with the commit timestamp, verifies
-   byte reproducibility/content/hashes, then publishes those exact wheel,
-   sdist, and npm files after every dependency job succeeds.
+   artifacts with the commit timestamp, verifies byte
+   reproducibility/content/hashes, and publishes the exact wheel and sdist.
+   After release CI succeeds, `npm-publish.yml` downloads that run's retained
+   artifact and publishes the exact npm tarball through npm trusted-publisher
+   OIDC. The same workflow supports an idempotent manual retry by source run ID.
 7. Verify PyPI/npm metadata and install each artifact from the public index in
    a new environment. Attach the generated `SHA256SUMS.json` to the release.
 
