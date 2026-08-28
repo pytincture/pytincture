@@ -1,57 +1,132 @@
-import os
-import ast
-import re
-from signal import raise_signal
-import sys
-import json
-import inspect
-import io
-import zipfile
-import importlib
 import asyncio
 import base64
+import fnmatch
 import hashlib
 import hmac
+import importlib
+import inspect
+import io
+import json
 import logging
+import os
+import re
 import secrets
 import time
 import uuid
-import fnmatch
-import copy
+import zipfile
+from typing import (
+    Any,
+    AsyncIterable,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+)
+from urllib.parse import parse_qsl, quote, urlparse, urlsplit, urlunsplit
 from xml.etree import ElementTree
-# FastAPI / Starlette
-from fastapi import Depends, FastAPI, Request, Response, HTTPException, Body
-from fastapi.exceptions import RequestValidationError
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, HTMLResponse, RedirectResponse
-from fastapi.middleware.cors import CORSMiddleware
-from fastmcp import FastMCP
-
-# Pytincture
-from pytincture import get_modules_path
-from pytincture.dataclass import get_parsed_output, add_bff_docs_to_app, get_bff_manifest
-from importlib.machinery import SourceFileLoader
 
 # Google OAuth via Authlib
 from authlib.integrations.starlette_client import OAuth, OAuthError
-from itsdangerous import BadSignature, SignatureExpired, TimestampSigner, URLSafeTimedSerializer
-from starlette.middleware.sessions import SessionMiddleware
-from starlette.datastructures import MutableHeaders
-from starlette.requests import HTTPConnection
-from starlette.concurrency import run_in_threadpool
-from starlette.config import Config
 
-from typing import Any, Union, Dict, List, Optional, Iterable, AsyncIterable, Set, Callable
-
-# Pydantic for JSON validation
-from pydantic import BaseModel
+# FastAPI / Starlette
+from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
+from fastapi.staticfiles import StaticFiles
+from fastmcp import FastMCP
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from markupsafe import escape
 
 # SAML Toolkit (OneLogin)
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
-from onelogin.saml2.settings import OneLogin_Saml2_Settings
 from onelogin.saml2.errors import OneLogin_Saml2_ValidationError
-from urllib.parse import parse_qsl, quote, urlparse, urlsplit, urlunsplit
-from html import escape
+from onelogin.saml2.settings import OneLogin_Saml2_Settings
+
+# Pydantic for JSON validation
+from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
+from starlette.config import Config
+
+# Pytincture
+from pytincture import get_modules_path
+from pytincture.backend.auth import (
+    SENSITIVE_USER_CLAIM_KEYS,
+    allowed_email,
+    local_user_claims,
+    normalize_roles,
+    verify_password,
+)
+from pytincture.backend.bff import BFFRegistry
+from pytincture.backend.bff import build_bff_registry as _build_bff_registry
+from pytincture.backend.browser_packages import (
+    browser_package_files,
+    configured_browser_files,
+    create_appcode_archive,
+    discover_widgetset,
+    local_python_imports,
+)
+from pytincture.backend.diagnostics import (
+    internal_error_payload,
+    request_correlation_id,
+    sanitized_validation_errors,
+)
+from pytincture.backend.mcp import (
+    FilteredFastAPIApp,
+    build_streamable_app,
+    exposed_operation_ids,
+)
+from pytincture.backend.middleware import (
+    RequestBodyLimitMiddleware,
+    RotatingSessionMiddleware,
+)
+from pytincture.backend.pages import (
+    find_app_favicon as _find_app_favicon_metadata,
+)
+from pytincture.backend.pages import (
+    find_app_string_setting,
+    normalize_app_asset_path,
+)
+from pytincture.backend.pages import (
+    find_main_window_subclass as _find_main_window,
+)
+from pytincture.backend.saml import (
+    SAMLProviderCatalog,
+    split_csv,
+)
+from pytincture.backend.saml import (
+    allowed_roles as saml_allowed_roles,
+)
+from pytincture.backend.saml import (
+    normalize_provider as normalize_saml_provider,
+)
+from pytincture.backend.saml import (
+    normalize_provider_id as normalize_saml_provider_id,
+)
+from pytincture.backend.saml import (
+    provider_value as saml_provider_value,
+)
+from pytincture.backend.saml import (
+    role_attribute_keys as saml_role_attribute_keys,
+)
+from pytincture.backend.source_loading import (
+    build_dynamic_module_name,
+    load_source_module,
+)
+from pytincture.backend.storage import RedisDict
+from pytincture.dataclass import (
+    add_bff_docs_to_app,
+    get_bff_manifest,
+    get_parsed_output,
+)
 
 # ========================
 #  FASTAPI SETUP
@@ -68,116 +143,8 @@ TRUST_PROXY_HEADERS = os.getenv("PYTINCTURE_TRUST_PROXY_HEADERS", "true").lower(
 FRONTEND_INSTANCE_UUID = uuid.uuid4().hex
 
 
-class RotatingSessionMiddleware(SessionMiddleware):
-    """Starlette sessions that accept old signing keys and re-sign with the current key."""
-
-    def __init__(self, app, secret_key, previous_secret_keys=None, **kwargs):
-        super().__init__(app, secret_key=secret_key, **kwargs)
-        self.previous_signers = [
-            TimestampSigner(str(key)) for key in (previous_secret_keys or []) if str(key)
-        ]
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] not in ("http", "websocket"):
-            await self.app(scope, receive, send)
-            return
-
-        connection = HTTPConnection(scope)
-        initial_session_was_empty = True
-        if self.session_cookie in connection.cookies:
-            signed_data = connection.cookies[self.session_cookie].encode("utf-8")
-            for signer in (self.signer, *self.previous_signers):
-                try:
-                    decoded = signer.unsign(signed_data, max_age=self.max_age)
-                    scope["session"] = json.loads(base64.b64decode(decoded))
-                    initial_session_was_empty = False
-                    break
-                except (BadSignature, ValueError, json.JSONDecodeError):
-                    continue
-            else:
-                scope["session"] = {}
-        else:
-            scope["session"] = {}
-
-        async def send_wrapper(message):
-            if message["type"] == "http.response.start":
-                headers = MutableHeaders(scope=message)
-                if scope["session"]:
-                    data = base64.b64encode(json.dumps(scope["session"]).encode("utf-8"))
-                    signed = self.signer.sign(data).decode("utf-8")
-                    max_age = f"Max-Age={self.max_age}; " if self.max_age else ""
-                    headers.append(
-                        "Set-Cookie",
-                        f"{self.session_cookie}={signed}; path={self.path}; "
-                        f"{max_age}{self.security_flags}",
-                    )
-                elif not initial_session_was_empty:
-                    headers.append(
-                        "Set-Cookie",
-                        f"{self.session_cookie}=null; path={self.path}; "
-                        f"expires=Thu, 01 Jan 1970 00:00:00 GMT; {self.security_flags}",
-                    )
-            await send(message)
-
-        await self.app(scope, receive, send_wrapper)
-
-
-class RequestBodyLimitMiddleware:
-    """Reject request bodies that exceed the configured byte limit."""
-
-    def __init__(self, app, max_bytes: int):
-        self.app = app
-        self.max_bytes = max_bytes
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-        headers = dict(scope.get("headers") or [])
-        content_length = headers.get(b"content-length")
-        if content_length:
-            try:
-                if int(content_length) > self.max_bytes:
-                    response = JSONResponse(
-                        {"detail": "Request body too large"}, status_code=413
-                    )
-                    await response(scope, receive, send)
-                    return
-            except ValueError:
-                response = JSONResponse({"detail": "Invalid Content-Length"}, status_code=400)
-                await response(scope, receive, send)
-                return
-
-        received = 0
-
-        async def limited_receive():
-            nonlocal received
-            message = await receive()
-            if message.get("type") == "http.request":
-                received += len(message.get("body", b""))
-                if received > self.max_bytes:
-                    raise HTTPException(status_code=413, detail="Request body too large")
-            return message
-
-        try:
-            await self.app(scope, limited_receive, send)
-        except HTTPException as exc:
-            if exc.status_code != 413:
-                raise
-            response = JSONResponse({"detail": "Request body too large"}, status_code=413)
-            await response(scope, receive, send)
-
-
 def _build_streamable_mcp_app(mcp_server, path: str = "/"):
-    http_builder = getattr(mcp_server, "http_app", None)
-    if callable(http_builder):
-        return http_builder(path=path, transport="streamable-http")
-
-    streamable_builder = getattr(mcp_server, "streamable_http_app", None)
-    if callable(streamable_builder):
-        return streamable_builder(path=path)
-
-    raise AttributeError("FastMCP server does not expose streamable_http_app() or http_app()")
+    return build_streamable_app(mcp_server, path)
 
 
 def _build_dynamic_module_name(file_path: str, name_hint: str) -> str:
@@ -187,100 +154,23 @@ def _build_dynamic_module_name(file_path: str, name_hint: str) -> str:
     The name includes a sanitized hint for readability and a path hash to avoid
     collisions between different files that share a class name or basename.
     """
-    absolute_path = os.path.abspath(file_path)
-    modules_root = os.path.abspath(get_modules_path() or os.getcwd())
-
-    try:
-        relative_path = os.path.relpath(absolute_path, modules_root)
-    except ValueError:
-        relative_path = os.path.basename(absolute_path)
-
-    if relative_path.startswith(".."):
-        relative_path = os.path.basename(absolute_path)
-
-    sanitized_hint = re.sub(r"[^0-9a-zA-Z_]+", "_", name_hint).strip("_") or "module"
-    sanitized_path = re.sub(r"[^0-9a-zA-Z_]+", "_", relative_path.replace("\\", "/")).strip("_") or "source"
-    path_hash = hashlib.sha1(absolute_path.encode("utf-8")).hexdigest()[:12]
-    return f"pytincture_dynamic_{sanitized_hint}_{sanitized_path}_{path_hash}"
+    return build_dynamic_module_name(file_path, name_hint, get_modules_path())
 
 
 def _load_source_module(file_path: str, name_hint: str):
     """
     Load a Python source file using importlib-compatible sys.modules registration.
     """
-    module_name = _build_dynamic_module_name(file_path, name_hint)
-    loader = SourceFileLoader(module_name, file_path)
-    spec = importlib.util.spec_from_loader(module_name, loader)
-    if spec is None:
-        raise ImportError(f"Unable to create import spec for {file_path}")
+    return load_source_module(file_path, name_hint, get_modules_path())
 
-    module = importlib.util.module_from_spec(spec)
-    previous_module = sys.modules.get(spec.name)
-    sys.modules[spec.name] = module
-
-    try:
-        loader.exec_module(module)
-    except Exception:
-        if previous_module is None:
-            sys.modules.pop(spec.name, None)
-        else:
-            sys.modules[spec.name] = previous_module
-        raise
-
-    return module
-
-class _FilteredFastAPIApp:
-    def __init__(self, source_app: FastAPI, operation_ids: Set[str]):
-        self.source_app = source_app
-        self.operation_ids = operation_ids
-        self.title = source_app.title
-
-    def openapi(self):
-        schema = copy.deepcopy(self.source_app.openapi())
-        filtered_paths = {}
-        for path, path_item in schema.get("paths", {}).items():
-            selected = {
-                key: value
-                for key, value in path_item.items()
-                if key not in {"get", "post", "put", "patch", "delete", "options", "head"}
-                or value.get("operationId") in self.operation_ids
-            }
-            if any(key in selected for key in {"get", "post", "put", "patch", "delete"}):
-                filtered_paths[path] = selected
-        schema["paths"] = filtered_paths
-        return schema
-
-    async def __call__(self, scope, receive, send):
-        await self.source_app(scope, receive, send)
+_FilteredFastAPIApp = FilteredFastAPIApp
 
 
 def _mcp_operation_ids() -> Set[str]:
-    if os.getenv("ENABLE_MCP", "false").lower() != "true":
-        return set()
-    raw = os.getenv("MCP_EXPOSED_OPERATIONS", "[]")
-    try:
-        configured = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("MCP_EXPOSED_OPERATIONS must be a JSON list") from exc
-    if not isinstance(configured, list) or any(not isinstance(value, str) for value in configured):
-        raise RuntimeError("MCP_EXPOSED_OPERATIONS must be a JSON list")
-    forbidden = {
-        "handleUserAuth", "mcpAuth", "logoutUser", "postLogs",
-        "downloadAppcodePackage", "getLoginPage", "getMainApp",
-        "issueBffReplayTokens",
-        "initiateGoogleAuth", "handleGoogleAuthCallback",
-        "initiateMicrosoftAuth", "handleMicrosoftAuthCallback",
-        "initiateSamlAuth", "initiateSamlProviderAuth",
-        "handleSamlAuthCallback", "handleSamlProviderAuthCallback",
-    }
-    requested = set(configured)
-    disallowed = requested & forbidden
-    if disallowed:
-        raise RuntimeError(
-            "MCP_EXPOSED_OPERATIONS contains session/login/application routes: "
-            + ", ".join(sorted(disallowed))
-        )
-    return requested
+    return exposed_operation_ids(
+        os.getenv("ENABLE_MCP", "false").lower() == "true",
+        os.getenv("MCP_EXPOSED_OPERATIONS", "[]"),
+    )
 
 
 def reload_mcp_tools():
@@ -309,97 +199,35 @@ def reload_mcp_tools():
 
 def _local_python_imports(file_path: str, modules_root: str) -> Set[str]:
     """Return local Python files directly imported by a browser module."""
-    try:
-        with open(file_path, "r", encoding="utf-8") as source_file:
-            tree = ast.parse(source_file.read(), filename=file_path)
-    except (OSError, SyntaxError):
-        return set()
-    discovered: Set[str] = set()
-    for node in ast.walk(tree):
-        candidates: List[str] = []
-        if isinstance(node, ast.Import):
-            candidates.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            candidates.append(node.module)
-        for module_name in candidates:
-            relative = module_name.replace(".", os.sep)
-            for candidate in (
-                os.path.join(modules_root, f"{relative}.py"),
-                os.path.join(modules_root, relative, "__init__.py"),
-            ):
-                if os.path.isfile(candidate):
-                    discovered.add(os.path.abspath(candidate))
-    return discovered
+    return local_python_imports(file_path, modules_root)
 
 
 def _configured_browser_files(modules_root: str) -> Set[str]:
-    raw_patterns = os.getenv("PYTINCTURE_BROWSER_FILES", "").strip()
-    if not raw_patterns:
-        return set()
-    try:
-        patterns = json.loads(raw_patterns)
-    except json.JSONDecodeError:
-        patterns = [value.strip() for value in raw_patterns.split(",") if value.strip()]
-    if not isinstance(patterns, list) or any(not isinstance(value, str) for value in patterns):
-        raise RuntimeError("PYTINCTURE_BROWSER_FILES must be a JSON list or comma-separated globs")
-    selected: Set[str] = set()
-    for root, dirs, files in os.walk(modules_root):
-        dirs[:] = [
-            directory
-            for directory in dirs
-            if not directory.startswith(".")
-            and directory
-            not in {"__pycache__", ".venv", "venv", "node_modules", "build", "dist"}
-        ]
-        for filename in files:
-            absolute = os.path.abspath(os.path.join(root, filename))
-            relative = os.path.relpath(absolute, modules_root).replace(os.sep, "/")
-            if any(fnmatch.fnmatch(relative, pattern) for pattern in patterns):
-                selected.add(absolute)
-    return selected
+    return configured_browser_files(
+        modules_root,
+        os.getenv("PYTINCTURE_BROWSER_FILES", ""),
+    )
 
 
 def _browser_package_files(application: str) -> Set[str]:
-    modules_root = os.path.abspath(get_modules_path())
-    entrypoint = os.path.abspath(os.path.join(modules_root, f"{application}.py"))
-    if os.path.commonpath((modules_root, entrypoint)) != modules_root or not os.path.isfile(entrypoint):
-        raise HTTPException(status_code=404, detail="Application entrypoint not found")
-    selected = {entrypoint}
-    pending = [entrypoint]
-    while pending:
-        for imported in _local_python_imports(pending.pop(), modules_root):
-            if imported not in selected:
-                selected.add(imported)
-                pending.append(imported)
-    for python_file in tuple(selected):
-        parent = os.path.dirname(python_file)
-        while parent != modules_root and os.path.commonpath((modules_root, parent)) == modules_root:
-            package_init = os.path.join(parent, "__init__.py")
-            if os.path.isfile(package_init):
-                selected.add(os.path.abspath(package_init))
-            parent = os.path.dirname(parent)
-    return selected | _configured_browser_files(modules_root)
+    return browser_package_files(
+        application,
+        get_modules_path(),
+        os.getenv("PYTINCTURE_BROWSER_FILES", ""),
+    )
 
 
 def create_appcode_pkg_in_memory(host, protocol, application, replay_client=None):
     """Generate an explicit browser-safe app package in memory."""
-    appcode_folder = os.path.abspath(get_modules_path())
-    in_memory_zip = io.BytesIO()
-    with zipfile.ZipFile(in_memory_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for file_path in sorted(_browser_package_files(application)):
-            arcname = os.path.relpath(file_path, appcode_folder).replace(os.sep, "/")
-            if file_path.endswith('.py'):
-                file_contents = get_parsed_output(
-                    file_path,
-                    host,
-                    protocol,
-                    replay_client=replay_client,
-                )
-                zipf.writestr(arcname, file_contents or "")
-            else:
-                zipf.write(file_path, arcname)
-    in_memory_zip.seek(0)
-    return in_memory_zip
+    return create_appcode_archive(
+        host,
+        protocol,
+        application,
+        get_modules_path(),
+        get_parsed_output,
+        replay_client,
+        os.getenv("PYTINCTURE_BROWSER_FILES", ""),
+    )
 
 
 def _get_default_application() -> Optional[str]:
@@ -434,23 +262,15 @@ async def favicon():
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
-    sanitized_errors = [
-        {
-            key: value
-            for key, value in error.items()
-            if key in {"loc", "msg", "type"}
-        }
-        for error in exc.errors()
-    ]
     return JSONResponse(
         status_code=422,
-        content={"detail": sanitized_errors},
+        content={"detail": sanitized_validation_errors(exc.errors())},
     )
 
 
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
-    correlation_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    correlation_id = request_correlation_id(request.headers.get("x-request-id"))
     request.state.correlation_id = correlation_id
     response = await call_next(request)
     response.headers["X-Request-ID"] = correlation_id
@@ -470,7 +290,11 @@ async def correlation_id_middleware(request: Request, call_next):
 @app.exception_handler(HTTPException)
 async def sanitized_http_exception_handler(request: Request, exc: HTTPException):
     if exc.status_code >= 500:
-        correlation_id = getattr(request.state, "correlation_id", uuid.uuid4().hex)
+        correlation_id = getattr(
+            request.state,
+            "correlation_id",
+            request_correlation_id(),
+        )
         logger.error(
             "HTTP failure correlation_id=%s status=%s",
             correlation_id,
@@ -478,7 +302,7 @@ async def sanitized_http_exception_handler(request: Request, exc: HTTPException)
             exc_info=exc,
         )
         return JSONResponse(
-            {"detail": "Internal server error", "correlation_id": correlation_id},
+            internal_error_payload(correlation_id),
             status_code=exc.status_code,
         )
     return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
@@ -486,10 +310,14 @@ async def sanitized_http_exception_handler(request: Request, exc: HTTPException)
 
 @app.exception_handler(Exception)
 async def sanitized_exception_handler(request: Request, exc: Exception):
-    correlation_id = getattr(request.state, "correlation_id", uuid.uuid4().hex)
+    correlation_id = getattr(
+        request.state,
+        "correlation_id",
+        request_correlation_id(),
+    )
     logger.exception("Unhandled request failure correlation_id=%s", correlation_id)
     return JSONResponse(
-        {"detail": "Internal server error", "correlation_id": correlation_id},
+        internal_error_payload(correlation_id),
         status_code=500,
     )
 
@@ -497,35 +325,7 @@ def get_widgetset(application, static_path):
     """
     Scan the application file and its imports to find the widgetset.
     """
-    import_pattern = re.compile(r'^\s*(import|from)\s+([a-zA-Z0-9_]+)')
-    sanitized_application = os.path.basename(application.replace("\\", "/"))
-    if sanitized_application in ("", ".", ".."):
-        return ""
-    app_file_path = os.path.join(static_path, f"{sanitized_application}.py")
-    imports = []
-    widgetset = None
-
-    if os.path.exists(app_file_path):
-        with open(app_file_path, 'r') as app_file:
-            for line in app_file:
-                match = import_pattern.match(line)
-                if match:
-                    module_name = match.group(2)
-                    imports.append(module_name)
-
-    for module_name in imports:
-        try:
-            module = importlib.import_module(module_name)
-            if hasattr(module, '__widgetset__'):
-                version = ""
-                if hasattr(module, '__version__'):
-                    version = "==" + getattr(module, '__version__')
-                widgetset = getattr(module, '__widgetset__') + version
-                break
-        except ModuleNotFoundError:
-            continue
-
-    return widgetset if widgetset else ""
+    return discover_widgetset(application, static_path)
 
 def create_pytincture_pkg_in_memory():
     """Generate a pytincture widgetset package in memory."""
@@ -568,188 +368,6 @@ if allowed_origins:
 else:
     logger.info("CORS middleware disabled; set CORS_ALLOWED_ORIGINS to enable it")
 
-from upstash_redis import Redis
-
-import json
-from upstash_redis import Redis  # or whatever your actual import is
-from markupsafe import escape
-
-class RedisDict:
-    """
-    A dict-like interface backed by a Redis database (via Upstash), with
-    a local in-memory cache to reduce the number of Redis lookups.
-    """
-
-    def __init__(self, redis_url: str, redis_token: str, key_prefix: str = ""):
-        self._redis = Redis(url=redis_url, token=redis_token)
-        self._prefix = key_prefix  # Optional prefix to avoid collisions
-        self._cache = {}           # Local in-memory cache: { key: decoded_value }
-
-    def __getitem__(self, key):
-        """
-        Gets the item from the local cache if present; otherwise fetch from Redis.
-        Returns None if the key is missing in Redis.
-        """
-        if key in self._cache:
-            return self._cache[key]
-
-        full_key = self._prefix + key
-        value = self._redis.get(full_key)
-
-        if not value:
-            # Key doesn't exist in Redis (or empty string?), store None in cache
-            self._cache[key] = None
-            return None
-
-        # If it looks like JSON, decode it
-        if value.startswith("{") and value.endswith("}"):
-            value = json.loads(value)
-
-        self._cache[key] = value
-        return value
-
-    def __setitem__(self, key, value):
-        """Sets the item in Redis and updates the local cache."""
-        full_key = self._prefix + key
-
-        # If it's a dict, store as JSON
-        if isinstance(value, dict):
-            serialized = json.dumps(value)
-        else:
-            serialized = str(value)  # Ensure it's a string
-
-        # Write to Redis
-        self._redis.set(full_key, serialized)
-        # Update local cache with the *decoded* form
-        self._cache[key] = value
-
-    def set_with_ttl(self, key, value, ttl_seconds: int):
-        """Set a value that Redis removes automatically after the TTL."""
-        full_key = self._prefix + key
-        serialized = json.dumps(value) if isinstance(value, dict) else str(value)
-        self._redis.set(full_key, serialized, ex=ttl_seconds)
-        self._cache[key] = value
-
-    def __delitem__(self, key):
-        """Deletes the item from Redis and the local cache. Raises KeyError if missing."""
-        full_key = self._prefix + key
-        deleted = self._redis.delete(full_key)
-        if deleted == 0:
-            raise KeyError(key)
-
-        # Also remove from local cache if present
-        if key in self._cache:
-            del self._cache[key]
-
-    def pop_atomic(self, key, default=None):
-        """Atomically fetch and delete a value, for one-time token consumption."""
-        full_key = self._prefix + key
-        value = self._redis.getdel(full_key)
-        self._cache.pop(key, None)
-        if value is None:
-            return default
-        if isinstance(value, str) and value.startswith("{") and value.endswith("}"):
-            return json.loads(value)
-        return value
-
-    def __contains__(self, key):
-        """
-        Return True if `key` is in Redis (or in the cache), otherwise False.
-
-        This version uses the local cache first to avoid extra round-trips.
-        If we have the key cached as None, that means we already checked
-        Redis and it did not exist.
-        """
-        if key is None:
-            return False
-
-        # If we've already cached a value (even if it's None), return based on cache
-        if key in self._cache:
-            # If cache says None, that means Redis didn't have it
-            return self._cache[key] is not None
-
-        # Otherwise, check Redis
-        full_key = self._prefix + key
-        exists_in_redis = (self._redis.exists(full_key) == 1)
-
-        # If it does not exist, also store None so we won't check again
-        if not exists_in_redis:
-            self._cache[key] = None
-
-        return exists_in_redis
-
-    def __len__(self):
-        """
-        Return the number of *cached* keys that are not None.
-        This does NOT scan Redis, so it won't show items that never hit the cache
-        or that changed in Redis outside this instance.
-        
-        If you want a fully accurate count from Redis every time,
-        you'd need to revert to scanning (expensive) or do something like:
-        
-            count = 0
-            cursor = "0"
-            while True:
-                cursor, keys = self._redis.scan(cursor=cursor, match=self._prefix + "*", count=100)
-                count += len(keys)
-                if cursor == "0":
-                    break
-            return count
-        """
-        # Count how many cached items are not None
-        return sum(1 for val in self._cache.values() if val is not None)
-
-    def __iter__(self):
-        """
-        Iterate over keys in Redis. 
-        NOTE: This does a SCAN, so each iteration can trigger extra calls if repeated.
-        If you need a local-only iteration (no new keys from Redis), you'd have to 
-        iterate self._cache. But that may skip keys not yet read from Redis.
-        """
-        cursor = "0"
-        while True:
-            cursor, keys = self._redis.scan(cursor=cursor, match=self._prefix + "*", count=100)
-            for k in keys:
-                # Strip the prefix from the Redis key
-                yield k[len(self._prefix):]
-            if cursor == "0":
-                break
-
-    def keys(self):
-        """Return a generator of all keys in Redis matching our prefix."""
-        return self.__iter__()
-
-    def items(self):
-        """
-        Return a generator of (key, value) pairs.
-
-        NOTE: This will still scan Redis for keys. Values will be fetched from cache if present,
-        otherwise from Redis. 
-        """
-        for k in self:
-            yield (k, self[k])
-
-    def values(self):
-        """
-        Return a generator of all values.
-
-        NOTE: Still scans Redis for the keys, then fetches each value 
-        (from cache or Redis).
-        """
-        for k in self:
-            yield self[k]
-
-    def get(self, key, default=None):
-        """
-        Returns the value if present, otherwise `default`.
-        Uses the local cache or fetches from Redis.
-        """
-        val = self.__getitem__(key)
-        if val is None:
-            return default
-        return val
-    
-
 # Mount the frontend static files
 STATIC_PATH = os.path.join(os.path.dirname(__file__), "../frontend/")
 USE_REDIS_INSTANCE = os.environ.get("USE_REDIS_INSTANCE", "false").lower()
@@ -781,50 +399,42 @@ MODULE_PATH = get_modules_path()
 
 def build_bff_registry(modules_root: Optional[str] = None) -> Dict[tuple[str, str, str], Dict[str, Any]]:
     """Build the complete exported BFF registry without importing application code."""
-    root_path = os.path.abspath(modules_root or get_modules_path())
-    registry: Dict[tuple[str, str, str], Dict[str, Any]] = {}
-    if not os.path.isdir(root_path):
-        return registry
-    for root, dirs, files in os.walk(root_path):
-        dirs[:] = [
-            directory
-            for directory in dirs
-            if not directory.startswith(".")
-            and directory
-            not in {"__pycache__", ".venv", "venv", "node_modules", "build", "dist"}
-        ]
-        for filename in files:
-            if not filename.endswith(".py") or filename.startswith("."):
-                continue
-            file_path = os.path.join(root, filename)
-            relative_path = os.path.relpath(file_path, root_path).replace(os.sep, "/")
-            try:
-                file_manifest = get_bff_manifest(file_path)
-            except (OSError, SyntaxError, ValueError) as exc:
-                raise RuntimeError(f"Unable to build BFF manifest for {relative_path}") from exc
-            for (class_name, function_name), operation in file_manifest.items():
-                registry[(relative_path, class_name, function_name)] = operation
-    return registry
+    return _build_bff_registry(
+        modules_root or get_modules_path(),
+        manifest_loader=get_bff_manifest,
+    )
 
 
 BFF_REGISTRY_ROOT = os.path.abspath(MODULE_PATH)
-BFF_REGISTRY = build_bff_registry(BFF_REGISTRY_ROOT)
+_BFF_REGISTRY_STATE = BFFRegistry(
+    BFF_REGISTRY_ROOT,
+    get_bff_manifest,
+    autoload=False,
+)
+BFF_REGISTRY = _BFF_REGISTRY_STATE.operations
 
 
 def reload_bff_registry(modules_root: Optional[str] = None):
     """Rebuild exported BFF operations, for example after development-time file changes."""
     global BFF_REGISTRY_ROOT, BFF_REGISTRY
-    BFF_REGISTRY_ROOT = os.path.abspath(modules_root or get_modules_path())
-    BFF_REGISTRY = build_bff_registry(BFF_REGISTRY_ROOT)
+    BFF_REGISTRY = _BFF_REGISTRY_STATE.reload(modules_root or get_modules_path())
+    BFF_REGISTRY_ROOT = _BFF_REGISTRY_STATE.root
     return BFF_REGISTRY
 
 
 def _registered_bff_operation(
     modules_root: str, relative_path: str, class_name: str, function_name: str
 ) -> Optional[Dict[str, Any]]:
-    if os.path.abspath(modules_root) != BFF_REGISTRY_ROOT:
-        reload_bff_registry(modules_root)
-    return BFF_REGISTRY.get((relative_path.replace(os.sep, "/"), class_name, function_name))
+    global BFF_REGISTRY_ROOT, BFF_REGISTRY
+    operation = _BFF_REGISTRY_STATE.operation(
+        modules_root,
+        relative_path,
+        class_name,
+        function_name,
+    )
+    BFF_REGISTRY_ROOT = _BFF_REGISTRY_STATE.root
+    BFF_REGISTRY = _BFF_REGISTRY_STATE.operations
+    return operation
 
 try:
     ALLOWED_NOAUTH_CLASSCALLS = json.loads(os.environ.get("ALLOWED_NOAUTH_CLASSCALLS", "[]"))
@@ -934,12 +544,7 @@ def _configured_user_authenticator() -> Optional[Callable[..., Any]]:
 
 
 def _allowed_email(email: str) -> bool:
-    configured = {
-        value.strip().casefold()
-        for value in os.getenv("ALLOWED_EMAILS", "").split(",")
-        if value.strip()
-    }
-    return not configured or email.casefold() in configured
+    return allowed_email(email, os.getenv("ALLOWED_EMAILS", ""))
 
 
 def _is_loopback_development_request(request: Request) -> bool:
@@ -955,50 +560,10 @@ def _is_loopback_development_request(request: Request) -> bool:
 
 
 def _verify_configured_password(email: str, password: str) -> bool:
-    raw_hashes = os.getenv("AUTH_PASSWORD_HASHES", "").strip()
-    if not raw_hashes:
-        return False
-    try:
-        password_hashes = json.loads(raw_hashes)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("AUTH_PASSWORD_HASHES must be a JSON object") from exc
-    if not isinstance(password_hashes, dict):
-        raise RuntimeError("AUTH_PASSWORD_HASHES must be a JSON object")
-    configured_hash = password_hashes.get(email) or password_hashes.get(email.casefold())
-    known_user = isinstance(configured_hash, str)
-    encoded_hash = configured_hash if known_user else (
-        "$argon2id$v=19$m=65536,t=3,p=4$afcNkBX8goR7Ng5icg3p9w$"
-        "UZsHTGXyFb9XrYQnpjpUvFRKKrc3WdWdH8oKTuGhX8M"
-    )
-    try:
-        if encoded_hash.startswith("$argon2id$"):
-            from argon2 import PasswordHasher
-            from argon2.exceptions import VerificationError
-
-            try:
-                verified = PasswordHasher().verify(encoded_hash, password)
-                return known_user and verified
-            except VerificationError:
-                return False
-        if encoded_hash.startswith(("$2a$", "$2b$", "$2y$")):
-            import bcrypt
-
-            verified = bcrypt.checkpw(password.encode("utf-8"), encoded_hash.encode("utf-8"))
-            return known_user and verified
-    except (ValueError, TypeError):
-        return False
-    raise RuntimeError("AUTH_PASSWORD_HASHES values must be Argon2id or bcrypt hashes")
+    return verify_password(email, password, os.getenv("AUTH_PASSWORD_HASHES", ""))
 
 
-_SENSITIVE_USER_CLAIM_KEYS = {
-    "password",
-    "password_hash",
-    "secret",
-    "token",
-    "access_token",
-    "refresh_token",
-    "id_token",
-}
+_SENSITIVE_USER_CLAIM_KEYS = SENSITIVE_USER_CLAIM_KEYS
 
 
 def _configured_local_user_claims(email: str) -> Dict[str, Any]:
@@ -1012,39 +577,7 @@ def _configured_local_user_claims(email: str) -> Dict[str, Any]:
     if not raw_claims:
         raw_claims = os.getenv("DEFAULT_APP_USERS", "").strip()
         source_name = "DEFAULT_APP_USERS"
-    if not raw_claims:
-        return {"email": email}
-    try:
-        configured = json.loads(raw_claims)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"{source_name} must contain valid JSON") from exc
-
-    matched: Optional[Dict[str, Any]] = None
-    if isinstance(configured, list):
-        for candidate in configured:
-            if (
-                isinstance(candidate, dict)
-                and str(candidate.get("email") or "").strip().casefold() == email
-            ):
-                matched = candidate
-                break
-    elif isinstance(configured, dict):
-        for configured_email, candidate in configured.items():
-            if str(configured_email).strip().casefold() == email and isinstance(candidate, dict):
-                matched = candidate
-                break
-    else:
-        raise RuntimeError(f"{source_name} must be a user list or email-to-claims object")
-
-    if matched is None:
-        return {"email": email}
-    claims = {
-        str(key): value
-        for key, value in matched.items()
-        if str(key).casefold() not in _SENSITIVE_USER_CLAIM_KEYS
-    }
-    claims["email"] = email
-    return claims
+    return local_user_claims(email, raw_claims, source_name)
 
 
 async def _authenticate_local_user(
@@ -1166,19 +699,7 @@ def _clear_auth_session(request: Request) -> None:
 
 
 def _normalize_auth_roles(value: Any) -> List[str]:
-    if isinstance(value, str):
-        candidates = value.split(",")
-    elif isinstance(value, (list, tuple, set)):
-        candidates = value
-    else:
-        candidates = []
-
-    roles = {
-        str(role).strip().lower()
-        for role in candidates
-        if str(role).strip()
-    }
-    return sorted(roles)
+    return normalize_roles(value)
 
 
 _DEFAULT_AUTH_SESSION_CLAIM_KEYS = {
@@ -2051,120 +1572,52 @@ if SAML_RELAY_STATE_TTL_SECONDS <= 0:
 
 
 def _split_csv(value: Any) -> List[str]:
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    if isinstance(value, str):
-        return [item.strip() for item in value.split(",") if item.strip()]
-    return []
+    return split_csv(value)
 
 
 def _provider_value(provider: Optional[Dict[str, Any]], *keys: str, default: Any = "") -> Any:
-    if provider:
-        for key in keys:
-            value = provider.get(key)
-            if value not in (None, ""):
-                return value
-    return default
+    return saml_provider_value(provider, *keys, default=default)
 
 
 def _normalize_saml_provider_id(value: str) -> str:
-    normalized = re.sub(r"[^0-9a-zA-Z_-]+", "-", value.strip()).strip("-")
-    return normalized.lower()
+    return normalize_saml_provider_id(value)
 
 
 def _normalize_saml_provider(raw_provider: Dict[str, Any], fallback_id: str) -> Dict[str, Any]:
-    provider = dict(raw_provider)
-    provider_id = _normalize_saml_provider_id(str(provider.get("id") or fallback_id))
-    if not provider_id:
-        raise RuntimeError("SAML provider id cannot be empty")
-    provider["id"] = provider_id
-    provider["label"] = str(provider.get("label") or provider.get("name") or f"Login with {provider_id}")
-    logo_url = provider.get("logo_url") or provider.get("logo") or provider.get("logoUrl") or ""
-    provider["logo_url"] = str(logo_url)
-    return provider
+    return normalize_saml_provider(raw_provider, fallback_id)
 
 
 def _load_saml_providers() -> List[Dict[str, Any]]:
-    configured = SAML_PROVIDERS
-    if isinstance(configured, str):
-        configured = configured.strip()
-        if configured:
-            try:
-                configured = json.loads(configured)
-            except json.JSONDecodeError as exc:
-                raise RuntimeError("Invalid JSON in SAML_PROVIDERS environment variable") from exc
-        else:
-            configured = None
-
-    providers: List[Dict[str, Any]] = []
-    if isinstance(configured, dict):
-        for provider_id, provider_data in configured.items():
-            if not isinstance(provider_data, dict):
-                raise RuntimeError("Each SAML_PROVIDERS entry must be an object")
-            providers.append(_normalize_saml_provider(provider_data, str(provider_id)))
-    elif isinstance(configured, list):
-        for index, provider_data in enumerate(configured):
-            if not isinstance(provider_data, dict):
-                raise RuntimeError("Each SAML_PROVIDERS entry must be an object")
-            providers.append(_normalize_saml_provider(provider_data, f"provider-{index + 1}"))
-    elif configured is not None:
-        raise RuntimeError("SAML_PROVIDERS must be a JSON object or array")
-
-    if providers:
-        seen_ids: Set[str] = set()
-        for provider in providers:
-            provider_id = provider["id"]
-            if provider_id in seen_ids:
-                raise RuntimeError(f"Duplicate SAML provider id: {provider_id}")
-            seen_ids.add(provider_id)
-        return providers
-
-    return [{
-        "id": "default",
-        "label": SAML_LOGIN_LABEL or "Login with SAML",
-        "logo_url": SAML_LOGO_URL,
-    }]
+    return SAMLProviderCatalog(
+        SAML_PROVIDERS,
+        default_label=SAML_LOGIN_LABEL,
+        default_logo_url=SAML_LOGO_URL,
+    ).providers
 
 
 def _get_saml_provider(provider_id: Optional[str] = None) -> Dict[str, Any]:
-    providers = _load_saml_providers()
-    if provider_id is None:
-        if len(providers) == 1:
-            return providers[0]
-        raise HTTPException(status_code=400, detail="SAML provider id is required")
-
-    normalized_id = _normalize_saml_provider_id(provider_id)
-    for provider in providers:
-        if provider["id"] == normalized_id:
-            return provider
-    raise HTTPException(status_code=404, detail=f"SAML provider '{provider_id}' not found")
+    catalog = SAMLProviderCatalog(
+        SAML_PROVIDERS,
+        default_label=SAML_LOGIN_LABEL,
+        default_logo_url=SAML_LOGO_URL,
+    )
+    return catalog.get(provider_id)
 
 
 def _get_saml_login_buttons() -> List[Dict[str, str]]:
-    providers = _load_saml_providers()
-    use_provider_routes = len(providers) > 1 or providers[0]["id"] != "default"
-    buttons = []
-    for provider in providers:
-        href = "auth/saml/login"
-        if use_provider_routes:
-            href = f"auth/saml/{provider['id']}/login"
-        buttons.append({
-            "href": href,
-            "label": provider.get("label") or "Login with SAML",
-            "logo_url": provider.get("logo_url") or "",
-        })
-    return buttons
+    return SAMLProviderCatalog(
+        SAML_PROVIDERS,
+        default_label=SAML_LOGIN_LABEL,
+        default_logo_url=SAML_LOGO_URL,
+    ).login_buttons()
 
 
 def _get_saml_allowed_roles(provider: Optional[Dict[str, Any]] = None) -> List[str]:
-    provider_roles = _provider_value(provider, "allowed_roles", "allowedRoles", default=None)
-    roles = _split_csv(provider_roles) if provider_roles is not None else SAML_ALLOWED_ROLES
-    return [role.lower() for role in roles]
+    return saml_allowed_roles(provider, SAML_ALLOWED_ROLES)
 
 
 def _get_saml_role_attribute_keys(provider: Optional[Dict[str, Any]] = None) -> List[str]:
-    provider_keys = _provider_value(provider, "role_attribute_keys", "roleAttributeKeys", default=None)
-    return _split_csv(provider_keys) if provider_keys is not None else SAML_ROLE_ATTRIBUTE_KEYS
+    return saml_role_attribute_keys(provider, SAML_ROLE_ATTRIBUTE_KEYS)
 
 
 _SAML_RELAY_STATE_SALT = "pytincture-saml-relay-state-v1"
@@ -3307,57 +2760,13 @@ def find_main_window_subclass(file_path):
     Scans a Python file for a class that subclasses MainWindow.
     Returns the name of the first such class found, or None if no match.
     """
-    try:
-        # Load the module
-        module_name = os.path.basename(file_path).replace('.py', '')
-        module = _load_source_module(file_path, module_name)
-        
-        # Inspect all classes in the module
-        for name, obj in inspect.getmembers(module):
-            # Check if it's a class and if it's a subclass of MainWindow
-            if inspect.isclass(obj) and hasattr(obj, '__bases__'):
-                for base in obj.__bases__:
-                    if base.__name__ == 'MainWindow':
-                        return name  # Return the name of the MainWindow subclass
-        
-        return None  # No MainWindow subclass found
-    except Exception as e:
-        logger.warning("Unable to find MainWindow subclass", exc_info=e)
-        return None
+    return _find_main_window(file_path, _load_source_module)
 
 def _find_app_string_setting(file_path, assignment_names, config_keys):
     """
     Read a string setting from app source without importing the application.
     """
-    try:
-        with open(file_path, "r") as f:
-            source = f.read()
-        tree = ast.parse(source)
-    except Exception as e:
-        logger.warning("Unable to read app configuration", exc_info=e)
-        return None
-
-    def extract_string(node):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            return node.value
-        return None
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    if target.id in assignment_names:
-                        value = extract_string(node.value)
-                        if value:
-                            return value
-                    if target.id == "APP_CONFIG" and isinstance(node.value, ast.Dict):
-                        for key, value_node in zip(node.value.keys, node.value.values):
-                            key_str = extract_string(key)
-                            if key_str in config_keys:
-                                value = extract_string(value_node)
-                                if value:
-                                    return value
-    return None
+    return find_app_string_setting(file_path, assignment_names, config_keys)
 
 
 def find_app_loading_title(file_path, default_title):
@@ -3372,27 +2781,7 @@ def find_app_loading_title(file_path, default_title):
 
 
 def _normalize_app_asset_path(value: Optional[str]) -> Optional[str]:
-    if not value:
-        return None
-
-    candidate = value.strip()
-    if candidate.startswith("/appcode/"):
-        candidate = candidate[len("/appcode/"):]
-    elif candidate.startswith("appcode/"):
-        candidate = candidate[len("appcode/"):]
-    elif candidate.startswith("/"):
-        return None
-
-    parsed = urlsplit(candidate)
-    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
-        return None
-    if "\\" in candidate:
-        return None
-
-    segments = candidate.split("/")
-    if any(not segment or segment in (".", "..") for segment in segments):
-        return None
-    return "/".join(segments)
+    return normalize_app_asset_path(value)
 
 
 def _find_explicit_app_favicon(file_path) -> Optional[str]:
@@ -3408,17 +2797,7 @@ def find_app_favicon(file_path) -> Optional[str]:
     """
     Resolve an explicit favicon file/folder or a conventional favicon directory.
     """
-    configured = _find_explicit_app_favicon(file_path)
-    if configured:
-        return configured
-
-    app_root = os.path.dirname(os.fspath(file_path))
-    application = os.path.splitext(os.path.basename(os.fspath(file_path)))[0]
-    for candidate in (f"favicon/{application}", "favicon"):
-        candidate_path = os.path.join(app_root, *candidate.split("/"))
-        if os.path.isdir(candidate_path):
-            return candidate
-    return None
+    return _find_app_favicon_metadata(file_path)
 
 
 _FAVICON_MIME_TYPES = {
