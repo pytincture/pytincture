@@ -26,6 +26,7 @@
   },
   "javascript": {
     "globals": [
+      "PytinctureLifecycleError",
       "pytinctureAutoStartConfig",
       "pytinctureAutoStartDisabled",
       "runTinctureApp"
@@ -45,6 +46,7 @@
       "logEndpoint",
       "materialIconsUrl",
       "mode",
+      "onLifecycleEvent",
       "pyodideBaseUrl",
       "requestUuid",
       "serviceWorkerScope",

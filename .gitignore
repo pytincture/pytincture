@@ -23,3 +23,5 @@ pytincture/backend/.env
 fastmcp_stub/*
 pytincture/frontend/node_modules
 pytincture/frontend/dist
+pytincture/frontend/playwright-report
+pytincture/frontend/test-results

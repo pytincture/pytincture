@@ -72,7 +72,10 @@ Pytincture exposes one function on `window`:
 
 - `runTinctureApp(config)` starts one packaged or inline browser application
   and returns a promise that resolves after the entrypoint starts or rejects
-  with the startup error.
+  with a `PytinctureLifecycleError`.
+
+`window.PytinctureLifecycleError` exposes the stable `stage`, `code`,
+`resource`, `requestId`, `correlationId`, and sanitized `rootCause` fields.
 
 The legacy positional form `runTinctureApp(application, widgetlib,
 entrypoint)` remains supported through 1.x but object configuration is the
@@ -94,6 +97,7 @@ Two pre-load globals are public:
 | `widgetSource` | `null` | Explicit micropip source; disables backend fallback. |
 | `requestUuid` | generated | Cache namespace; service mode supplies one per server process. |
 | `mode` | `"auto"` | `"package"`, `"inline"`, or automatic selection. |
+| `onLifecycleEvent` | `null` | Callback for stage, compatibility, fallback, error, and ready events. |
 | `pyodideBaseUrl` | bundled path | Trailing-slash base for Pyodide assets. |
 | `loadMaterialIcons` | `true` | Load the Material Design icon stylesheet. |
 | `materialIconsUrl` | CDN URL | Icon stylesheet source. |
