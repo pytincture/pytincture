@@ -514,4 +514,4 @@ jobs:
           if [[ "$package_version" == *-* ]]; then
             dist_tag=next
           fi
-          npm publish dist/*.tgz --access public --tag "$dist_tag"
+          npm publish ./dist/*.tgz --access public --tag "$dist_tag"

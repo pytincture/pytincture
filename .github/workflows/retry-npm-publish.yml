@@ -1,0 +1,84 @@
+name: Retry npm publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Workflow run containing the validated release-artifacts artifact
+        required: true
+        type: string
+      expected_version:
+        description: Exact npm SemVer expected inside the retained tarball
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  publish-npm:
+    name: Publish retained npm artifact
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download retained validated artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: release-artifacts
+          path: dist
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify retained npm artifact
+        id: verify
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        shell: bash
+        run: |
+          mapfile -t npm_paths < <(find dist -maxdepth 1 -name '*.tgz' -print)
+          if [[ "${#npm_paths[@]}" -ne 1 ]]; then
+            echo "Expected exactly one retained npm tarball; found ${#npm_paths[@]}" >&2
+            exit 1
+          fi
+          npm_path="${npm_paths[0]}"
+          package_name=$(tar -xOf "$npm_path" package/package.json | \
+            node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).name")
+          package_version=$(tar -xOf "$npm_path" package/package.json | \
+            node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+          if [[ "$package_name" != "@pytincture/runtime" ]]; then
+            echo "Unexpected retained package: $package_name" >&2
+            exit 1
+          fi
+          if [[ "$package_version" != "$EXPECTED_VERSION" ]]; then
+            echo "Retained version $package_version does not match $EXPECTED_VERSION" >&2
+            exit 1
+          fi
+          echo "npm_path=$npm_path" >> "$GITHUB_OUTPUT"
+          if npm view "$package_name@$package_version" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "$package_name@$package_version is already published; retry is a no-op."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish exact retained npm artifact
+        if: steps.verify.outputs.already_published != 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          package_version="${{ inputs.expected_version }}"
+          dist_tag=latest
+          if [[ "$package_version" == *-* ]]; then
+            dist_tag=next
+          fi
+          npm publish "./${{ steps.verify.outputs.npm_path }}" \
+            --access public \
+            --tag "$dist_tag"
