@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "target_release": "1.0",
+  "python": {
+    "modules": {
+      "pytincture": [
+        "__version__",
+        "get_modules_path",
+        "launch_service",
+        "set_modules_path"
+      ],
+      "pytincture.backend.app": [
+        "revoke_session",
+        "set_bff_policy_hook",
+        "set_user_authenticator"
+      ],
+      "pytincture.dataclass": [
+        "backend_for_frontend",
+        "bff_http_methods",
+        "bff_policy",
+        "bff_stream"
+      ]
+    }
+  },
+  "javascript": {
+    "globals": [
+      "pytinctureAutoStartConfig",
+      "pytinctureAutoStartDisabled",
+      "runTinctureApp"
+    ],
+    "run_tincture_app_config": [
+      "application",
+      "devWheelVersion",
+      "devWidgetHost",
+      "enableBackendLogging",
+      "enableServiceWorker",
+      "entrypoint",
+      "inlineSelector",
+      "libsSelector",
+      "loadMaterialIcons",
+      "loadingOverlayId",
+      "loadingTitle",
+      "logEndpoint",
+      "materialIconsUrl",
+      "mode",
+      "pyodideBaseUrl",
+      "requestUuid",
+      "serviceWorkerScope",
+      "serviceWorkerUrl",
+      "showLoadingOverlay",
+      "warmPyodideCache",
+      "widgetSource",
+      "widgetlib"
+    ]
+  },
+  "bff": {
+    "contract_version": 1,
+    "route": "/classcall/{file_path:path}/{class_name}/{function_name}",
+    "http_methods": [
+      "DELETE",
+      "GET",
+      "PATCH",
+      "POST",
+      "PUT"
+    ],
+    "default_http_method": "POST",
+    "request_body_keys": [
+      "args",
+      "kwargs"
+    ],
+    "request_headers": [
+      "X-CSRF-Token",
+      "X-Pytincture-BFF-Token"
+    ],
+    "response_headers": [
+      "X-Pytincture-Replay",
+      "X-Request-ID"
+    ],
+    "default_stream_media_type": "text/event-stream",
+    "default_stream_framing": "newline-delimited-json"
+  },
+  "appcode": {
+    "contract_version": 1,
+    "route": "/{application}/appcode/appcode.pyt",
+    "media_type": "application/zip",
+    "download_filename": "appcode.pyt",
+    "entrypoint": "{application}.py",
+    "path_format": "relative-posix"
+  }
+}

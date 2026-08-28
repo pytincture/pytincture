@@ -36,8 +36,10 @@ What happens:
 - Installs the default widget library (`dhxpyt`) or another package you configure.
 - For service apps, a failed PyPI widgetset install falls back to the backend wheel
   for the requested version, then to the `99.99.99` development wheel.
-- Every frontend file request receives the launch's `uuid` query parameter, and
-  UUID-bearing requests bypass the service-worker cache.
+- Frontend assets share the service instance's `uuid` query parameter, which
+  rotates on restart, and UUID-bearing requests bypass the service-worker
+  cache. PyPI/micropip resolution stays canonical; only backend-hosted
+  widgetset wheel candidates receive the instance UUID.
 - Auto-detects `<script type="text/python">` blocks, mounts them under `/appcode`, finds a `MainWindow` subclass (or explicit entrypoint), and runs it.
 - Errors are printed to the console and rendered inside `#maindiv` when present.
 
