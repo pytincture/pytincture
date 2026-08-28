@@ -5,6 +5,13 @@
 
 Development toward a stable 1.0 release is tracked in the [Pytincture 1.0 roadmap](ROADMAP.md) and the [Pytincture 1.0 GitHub milestone](https://github.com/pytincture/pytincture/milestone/1).
 
+The proposed 1.0 stability contract is documented in the
+[public API reference](docs/public-api.md), [compatibility matrix](docs/compatibility.md),
+[BFF v1 contract](docs/contracts/bff-v1.md), and
+[`appcode.pyt` v1 contract](docs/contracts/appcode-v1.md). CI checks the
+[machine-readable API inventory](contracts/public-api-v1.json) for accidental
+contract drift.
+
 ## Features
 - Pyodide Integration: Seamlessly bring Python to the web via Pyodide.
 - GUI Library Support: Simplify the creation and management of GUI components in Python.
