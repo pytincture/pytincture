@@ -37,6 +37,13 @@ def get_modules_path():
     """
     Retrieve the active modules path, falling back to the environment or CWD.
     """
+    # An application created with create_app() owns its module root. The
+    # context-local value takes priority without changing legacy globals.
+    from .configuration import get_active_config
+
+    active_config = get_active_config()
+    if active_config is not None:
+        return active_config.modules_path
     if MODULES_PATH is not None:
         return MODULES_PATH
     return os.environ.get("MODULES_PATH") or os.getcwd()
@@ -98,7 +105,7 @@ def launch_service(
     port=8070, 
     ssl_keyfile=None, 
     ssl_certfile=None, 
-    env_vars: dict = {},
+    env_vars: dict | None = None,
     bff_docs_path: str = "/bff-docs",
     bff_docs_title: str = "pyTincture BFF API",
     default_application=None,
@@ -111,7 +118,7 @@ def launch_service(
     os.environ["BFF_DOCS_PATH"] = bff_docs_path.lstrip('/')  # Remove leading slash if present
     os.environ["BFF_DOCS_TITLE"] = bff_docs_title
         
-    for akey, value in env_vars.items():
+    for akey, value in (env_vars or {}).items():
         if akey == "MODULES_PATH":
             continue
         os.environ[akey] = value
@@ -139,3 +146,9 @@ def launch_service(
 
     # wait for main application death
     main_application.join()
+
+
+# Imported last so the backend can continue importing launcher helpers while
+# create_app() loads an isolated copy of the backend module.
+from .configuration import PytinctureConfig
+from .factory import create_app

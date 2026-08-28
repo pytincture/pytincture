@@ -9,6 +9,7 @@ from fastapi.openapi.docs import get_swagger_ui_html
 import inspect
 from typing import Dict, Any
 from pytincture import get_modules_path
+from pytincture.configuration import get_runtime_env
 
 # Global set to track BFF endpoints
 bff_routes: Dict[str, Dict] = {}
@@ -613,7 +614,7 @@ def generate_stub_classes(file_path, return_url, return_protocol, replay_client=
     replay_enabled = bool(replay_client)
     replay_capsule = str((replay_client or {}).get("capsule", ""))
     replay_key = tuple((replay_client or {}).get("key", b""))
-    replay_low_watermark = int(os.getenv("BFF_REPLAY_TOKEN_LOW_WATERMARK", "3"))
+    replay_low_watermark = int(get_runtime_env("BFF_REPLAY_TOKEN_LOW_WATERMARK", "3"))
     replay_state_url = f"{return_protocol}://{return_url}/_pytincture/state"
 
     decorated_class_nodes = [
