@@ -1,5 +1,5 @@
 const FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
-const PYTINCTURE_RUNTIME_VERSION = "0.10.7";
+const PYTINCTURE_RUNTIME_VERSION = "1.0.0rc1";
 
 const DEFAULT_CONFIG = {
     application: null,

@@ -1329,7 +1329,7 @@ wheels = [
 
 [[package]]
 name = "pytincture"
-version = "0.10.7"
+version = "1.0.0rc1"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
