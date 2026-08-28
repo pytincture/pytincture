@@ -1,11 +1,17 @@
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 
-from pytincture.backend.auth import allowed_email, local_user_claims, normalize_roles
+from pytincture.backend.auth import (
+    allowed_email,
+    local_user_claims,
+    normalize_roles,
+    verify_password,
+)
 from pytincture.backend.bff import BFFRegistry
 from pytincture.backend.browser_packages import (
     browser_package_files,
@@ -42,6 +48,22 @@ def test_auth_primitives_are_configuration_free():
         "AUTH_USER_CLAIMS",
     )
     assert claims == {"email": "user@example.com", "name": "User"}
+
+
+def test_password_extra_has_actionable_install_hint(monkeypatch):
+    monkeypatch.setitem(sys.modules, "argon2", None)
+    with pytest.raises(RuntimeError, match=r"pytincture\[password\]"):
+        verify_password(
+            "user@example.com",
+            "password",
+            json.dumps({"user@example.com": "$argon2id$placeholder"}),
+        )
+
+
+def test_redis_extra_has_actionable_install_hint(monkeypatch):
+    monkeypatch.setitem(sys.modules, "upstash_redis", None)
+    with pytest.raises(RuntimeError, match=r"pytincture\[redis\]"):
+        RedisDict(redis_url="https://example.invalid", redis_token="token")
 
 
 def test_bff_registry_owns_root_and_reload_state(tmp_path: Path):

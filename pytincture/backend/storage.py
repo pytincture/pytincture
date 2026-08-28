@@ -17,7 +17,13 @@ class RedisDict:
         cache_reads: bool = True,
     ):
         if redis_client is None:
-            from upstash_redis import Redis
+            try:
+                from upstash_redis import Redis
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Redis support requires optional dependencies; "
+                    "install pytincture[redis]"
+                ) from exc
 
             redis_client = Redis(url=redis_url, token=redis_token)
         self._redis = redis_client

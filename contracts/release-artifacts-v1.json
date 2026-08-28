@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "python": {
+    "required": [
+      "README.md",
+      "pyproject.toml",
+      "pytincture/__init__.py",
+      "pytincture/backend/app.py",
+      "pytincture/frontend/index.html",
+      "pytincture/frontend/pytincture.js",
+      "pytincture/frontend/sw.js",
+      "pytincture/frontend/dist/pytincture.js",
+      "pytincture/frontend/dist/pytincture.esm.js",
+      "pytincture/frontend/dist/pytincture.min.js",
+      "pytincture/frontend/pyodide/0.29.3/full/pyodide.js",
+      "pytincture/frontend/pyodide/0.29.3/full/pyodide.asm.wasm",
+      "pytincture/frontend/pyodide/0.29.3/full/python_stdlib.zip",
+      "pytincture/frontend/pyodide/0.29.3/full/pyodide-lock.json"
+    ],
+    "forbidden_prefixes": [
+      "tests/",
+      "scripts/",
+      "fastmcp_stub/",
+      "pytincture/frontend/node_modules/",
+      "pytincture/frontend/tests/",
+      "pytincture/frontend/e2e-tests/"
+    ],
+    "base_dependencies": [
+      "fastapi",
+      "itsdangerous",
+      "markupsafe",
+      "pydantic",
+      "python-multipart",
+      "starlette",
+      "uvicorn"
+    ],
+    "extras": [
+      "dev",
+      "mcp",
+      "oauth",
+      "password",
+      "redis",
+      "saml"
+    ]
+  },
+  "npm": {
+    "required": [
+      "README.md",
+      "package.json",
+      "dist/pytincture.js",
+      "dist/pytincture.esm.js",
+      "dist/pytincture.min.js"
+    ],
+    "forbidden_prefixes": [
+      "node_modules/",
+      "tests/",
+      "e2e-tests/",
+      "pyodide/"
+    ]
+  }
+}

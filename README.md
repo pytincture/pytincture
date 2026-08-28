@@ -42,6 +42,19 @@ From PyPI:
 pip install pytincture
 ~~~
 
+The base install serves unauthenticated applications and local development
+without pulling optional identity-provider, Redis, or MCP stacks. Install only
+the features a deployment enables:
+
+```bash
+pip install "pytincture[password]"  # Argon2/bcrypt local login
+pip install "pytincture[oauth]"     # Google/Microsoft OAuth
+pip install "pytincture[saml]"      # SAML 2.0
+pip install "pytincture[redis]"     # shared Upstash state
+pip install "pytincture[mcp]"       # MCP endpoint
+pip install "pytincture[dev]"       # contributors: all features and test/build tools
+```
+
 From Source:
   1. Clone the repository:
 ~~~
@@ -51,7 +64,7 @@ cd pyTincture
 
   2. Install dependencies:
 ~~~
-pip install .
+pip install ".[dev]"
 ~~~
    (Alternatively, follow the instructions in pyproject.toml.)
 
@@ -242,18 +255,16 @@ The file under `pytincture/frontend/pytincture.js` can be bundled and published 
 
 You can run `npm run build:watch` while editing `pytincture/frontend/pytincture.js` to regenerate the bundles automatically.
 
-### Publishing to a CDN
-The frontend directory is wired like a normal npm package (`name: @pytincture/runtime`). After bumping the version in `pytincture/frontend/package.json`:
+### Packaging for a CDN
+The frontend directory is wired like a normal npm package (`name: @pytincture/runtime`). To inspect the package locally:
 ```
 cd pytincture/frontend
 npm run build
-npm publish --access public
+npm pack --dry-run
 ```
-The publish script reuses the synchronized version, so npm releases always match the Python `__version__`.
-Alternatively, you can run the helper script from the repo root and let it handle version syncing, bundling, and publishing (it skips publishing if that version already exists on npm):
-```
-bash scripts/publish_runtime.sh
-```
+The build synchronizes the npm and browser runtime versions with the Python
+framework version. Official npm publication occurs from the validated GitHub
+release artifacts described below.
 Once published to npm, CDNs such as jsDelivr and UNPKG will expose the runtime automatically, e.g.:
 ```
 <script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@0.1.0/dist/pytincture.min.js"></script>
@@ -327,16 +338,18 @@ Version 0.10 intentionally removes insecure legacy behavior:
 Pytincture does not currently provide rate limiting. Production deployments should enforce suitable login and request rates at the application gateway or reverse proxy.
 
 ### CI/CD release flow
-Python and JavaScript publishing use separate GitHub Actions workflows. Publishing a GitHub release triggers both independently, and either workflow can also be run manually:
-
-1. `Publish to PyPI` builds and uploads only the Python package via `twine`.
-2. `Publish JavaScript Runtime` builds and publishes only `@pytincture/runtime` to npm, using the version from `pytincture/__init__.__version__`.
+Publishing a GitHub release runs the complete CI workflow. CI builds the wheel,
+source distribution, and npm tarball once; verifies their contents, versions,
+and hashes; clean-installs every optional feature; and publishes those exact
+validated files only after the Python, JavaScript, browser, and production
+gates pass. Manual publish workflows are intentionally not provided.
 
 Required GitHub secrets:
 - `PYPI_PASSWORD`: a PyPI API token (formatted `pypi-***`) with publish rights to `pytincture`.
 - `NPM_TOKEN`: an npm access token with publish rights to `@pytincture/runtime`.
 
-Each secret is required only by its corresponding workflow, so a missing or failed npm publication does not affect the PyPI publication, and vice versa.
+The artifact contract and local verification command are documented in the
+[release artifact guide](docs/release-artifacts.md).
 
 ## License
 `pyTincture` is licensed under the MIT License.
