@@ -57,6 +57,7 @@ def validate_static(record: dict) -> list[str]:
         "upgrade_exercises",
         "rollback_exercises",
         "performance_reviews",
+        "repository_policy_reviews",
         "security_reviews",
         "defect_audits",
         "final_decision",
@@ -200,6 +201,14 @@ def validate_final(record: dict) -> list[str]:
         passed_evidence(
             record.get("performance_reviews", []),
             "performance_reviews",
+            latest_version,
+            latest_published_at,
+        )
+    )
+    failures.extend(
+        passed_evidence(
+            record.get("repository_policy_reviews", []),
+            "repository_policy_reviews",
             latest_version,
             latest_published_at,
         )

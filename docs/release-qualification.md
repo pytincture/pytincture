@@ -24,6 +24,7 @@ For every release candidate, record:
   acceptance results for the latest RC;
 - upgrade from 0.10.7 and package/deployment rollback results;
 - browser and service performance evidence satisfying the versioned budgets;
+- an administrator-run release branch-protection audit;
 - a security review reporting zero open critical/high findings; and
 - a defect audit reporting zero open P0/P1 issues.
 
@@ -34,12 +35,14 @@ The repository labels `priority:P0`, `priority:P1`, `security:critical`,
 `security:high`, and `release-blocker` are release-blocking. Release-event CI
 audits open issues for those labels before publishing.
 
-Release-tag CI also audits `main` against
-`contracts/repository-policy-v1.json`. The bootstrap profile protects the
-current stack with its available checks. After the final CI workflow reaches
-`main`, the release profile must be applied; it requires every Python,
-JavaScript, browser, artifact, optional-extra, security, production, and
-upgrade/rollback check.
+The versioned `contracts/repository-policy-v1.json` defines branch protection.
+The bootstrap profile protects the current stack with its available checks.
+After the final CI workflow reaches `main`, an administrator applies and audits
+the release profile, which requires every Python, JavaScript, browser,
+artifact, optional-extra, security, production, and upgrade/rollback check.
+The built-in Actions token cannot read administration policy, so the resulting
+audit URL is recorded under `repository_policy_reviews` rather than relying on
+an under-privileged CI API call.
 
 Every pull request audits all Python runtime extras and npm dependencies.
 Starlette advisories listed in `security/pip-audit-allowlist.json` are temporary

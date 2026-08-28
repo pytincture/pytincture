@@ -242,17 +242,6 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/audit_release_blockers.py
 
-      - name: Audit branch protection
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          profile=bootstrap
-          if [[ "${GITHUB_EVENT_NAME}" == "release" || "${GITHUB_REF}" == refs/tags/v* ]]; then
-            profile=release
-          fi
-          python scripts/repository_policy.py --profile "$profile"
-
   security-audit:
     name: Dependency vulnerability audit
     runs-on: ubuntu-latest

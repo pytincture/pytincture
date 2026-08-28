@@ -50,6 +50,7 @@ def complete_record():
         "upgrade_exercises": [evidence(version)],
         "rollback_exercises": [evidence(version)],
         "performance_reviews": [evidence(version)],
+        "repository_policy_reviews": [evidence(version)],
         "security_reviews": [evidence(version, open_critical=0, open_high=0)],
         "defect_audits": [evidence(version, open_p0=0, open_p1=0)],
         "final_decision": {
