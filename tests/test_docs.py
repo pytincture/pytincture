@@ -1,15 +1,13 @@
 import ast
 import importlib.util
 import io
+import json
 import re
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from pytincture import __version__
-
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -57,7 +55,10 @@ def test_standalone_quickstart_contains_compilable_browser_python():
     parser.feed(page)
     assert parser.python
     compile("\n".join(parser.python), "standalone-quickstart", "exec")
-    assert any(f"@pytincture/runtime@{__version__}" in source for source in parser.runtime_sources)
+    npm_version = json.loads(
+        (ROOT / "pytincture" / "frontend" / "package.json").read_text()
+    )["version"]
+    assert any(f"@pytincture/runtime@{npm_version}" in source for source in parser.runtime_sources)
 
 
 def test_configuration_reference_covers_every_backend_environment_setting():

@@ -3,7 +3,7 @@
 This project follows semantic versioning from 1.0. Dates and final entries are
 set when a release is published.
 
-## Unreleased — 1.0 development
+## 1.0.0rc1 — 2026-08-28
 
 ### Added
 
