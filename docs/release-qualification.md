@@ -7,12 +7,12 @@ every gate below has durable evidence.
 
 ## Current decision: NO-GO
 
-As of 2026-08-28, engineering implementation for the roadmap workstreams is in
-stacked review, but no `1.0.0rc1` or `1.0.0rc2` artifact has been published.
-The 30-day observation clock has therefore not started, representative
-federated-auth production evidence does not exist, and no final approval has
-been recorded. In addition, #162 tracks high-severity Starlette advisories that
-cannot yet be resolved inside FastAPI's compatible dependency range.
+As of 2026-08-28, engineering implementation for the roadmap workstreams is on
+`main`, but no `1.0.0rc1` or `1.0.0rc2` artifact has been published. The 30-day
+observation clock has therefore not started, representative federated-auth
+production evidence does not exist, and no final approval has been recorded.
+The Starlette security blocker is resolved by requiring the patched 1.6 release
+line and allowing no dependency-audit exceptions.
 
 ## Evidence required after each RC
 
@@ -44,11 +44,10 @@ The built-in Actions token cannot read administration policy, so the resulting
 audit URL is recorded under `repository_policy_reviews` rather than relying on
 an under-privileged CI API call.
 
-Every pull request audits all Python runtime extras and npm dependencies.
-Starlette advisories listed in `security/pip-audit-allowlist.json` are temporary
-exceptions tied to #162 so unrelated new findings still fail CI. Release-tag
-auditing treats any remaining exception as a blocker even if its issue is
-accidentally closed; the allowlist must be empty before a 1.0 tag.
+Every pull request audits all Python runtime extras and npm dependencies. The
+`security/pip-audit-allowlist.json` advisory list is empty; any new finding fails
+CI. Release-tag auditing also treats any future exception as a blocker even if
+its tracking issue is accidentally closed.
 
 ## RC sequence
 
