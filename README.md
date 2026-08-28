@@ -11,6 +11,8 @@ The proposed 1.0 stability contract is documented in the
 [`appcode.pyt` v1 contract](docs/contracts/appcode-v1.md). CI checks the
 [machine-readable API inventory](contracts/public-api-v1.json) for accidental
 contract drift.
+Typed service settings and `create_app()` are documented in the
+[configuration guide](docs/configuration.md).
 
 ## Features
 - Pyodide Integration: Seamlessly bring Python to the web via Pyodide.

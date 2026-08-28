@@ -4,7 +4,9 @@
   "python": {
     "modules": {
       "pytincture": [
+        "PytinctureConfig",
         "__version__",
+        "create_app",
         "get_modules_path",
         "launch_service",
         "set_modules_path"

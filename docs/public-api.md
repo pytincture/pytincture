@@ -15,9 +15,13 @@ project will use the deprecation process whenever practical.
 
 Import these names from `pytincture`:
 
+- `PytinctureConfig` is the typed, validated configuration for one ASGI app.
+- `create_app(config=None)` creates an isolated FastAPI application. It accepts
+  a `PytinctureConfig`, a mapping of field overrides, or the process
+  environment when omitted.
 - `__version__` reports the installed framework/runtime release.
 - `launch_service(modules_folder, port=8070, ssl_keyfile=None,
-  ssl_certfile=None, env_vars={}, bff_docs_path="/bff-docs",
+  ssl_certfile=None, env_vars=None, bff_docs_path="/bff-docs",
   bff_docs_title="pyTincture BFF API", default_application=None,
   favicon_folder=None)` starts the Pytincture service. The existing call forms
   remain supported when the planned application factory is introduced.
@@ -124,6 +128,3 @@ not compatibility promises:
 - generated bundle internals and helper functions other than
   `runTinctureApp()`; and
 - exact log text, HTML markup, CSS class names, or archive compression details.
-
-The planned `create_app(config)` API is not public until it is implemented and
-added to the contract fixture.

@@ -59,6 +59,9 @@ from html import escape
 
 app = FastAPI(title="pyTincture API")
 logger = logging.getLogger("pytincture.security")
+# Preserve legacy launcher behavior unless explicitly configured. The typed
+# create_app() configuration defaults this to false for a secure ASGI default.
+TRUST_PROXY_HEADERS = os.getenv("PYTINCTURE_TRUST_PROXY_HEADERS", "true").lower() == "true"
 # One cache namespace is shared by every browser served by this process. A
 # service restart creates a new value and invalidates the previous instance's
 # frontend assets without changing application URLs.
@@ -928,7 +931,11 @@ def _allowed_email(email: str) -> bool:
 def _is_loopback_development_request(request: Request) -> bool:
     allowed_hosts = {"localhost", "127.0.0.1", "::1", "testserver"}
     hostname = (request.url.hostname or "").casefold()
-    forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0]
+    forwarded_host = (
+        request.headers.get("x-forwarded-host", "").split(",", 1)[0]
+        if TRUST_PROXY_HEADERS
+        else ""
+    )
     forwarded_hostname = forwarded_host.rsplit(":", 1)[0].strip("[]").casefold()
     return hostname in allowed_hosts and (not forwarded_host or forwarded_hostname in allowed_hosts)
 
@@ -1321,8 +1328,11 @@ def require_authenticated_user(request: Request):
 
 
 def _request_origin(request: Request) -> str:
-    scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",", 1)[0]
-    host = request.headers.get("x-forwarded-host", request.headers.get("host", "")).split(",", 1)[0]
+    scheme = request.url.scheme
+    host = request.headers.get("host", "")
+    if TRUST_PROXY_HEADERS:
+        scheme = request.headers.get("x-forwarded-proto", scheme).split(",", 1)[0]
+        host = request.headers.get("x-forwarded-host", host).split(",", 1)[0]
     return f"{scheme}://{host}".rstrip("/")
 
 
@@ -1538,9 +1548,10 @@ async def issue_bff_replay_tokens(
 @app.get("/{application}/appcode/appcode.pyt", operation_id="downloadAppcodePackage", responses={200: {"description": "StreamingResponse (ZIP file stream, media_type=\"application/zip\")"}, 401: {"description": "HTTPException (if authentication fails when required)"}})
 def download_appcode(request: Request, application: str, user=Depends(require_authenticated_user)):
     host = request.headers["host"]
-    # Get the protocol from X-Forwarded-Proto header (if set)
-    forwarded_proto = request.headers.get("x-forwarded-proto")
-    protocol = forwarded_proto or request.url.scheme
+    protocol = request.url.scheme
+    if TRUST_PROXY_HEADERS:
+        host = request.headers.get("x-forwarded-host", host).split(",", 1)[0]
+        protocol = request.headers.get("x-forwarded-proto", protocol).split(",", 1)[0]
     replay_client = _register_bff_replay_client(request, user)
     file_like = create_appcode_pkg_in_memory(
         host,
@@ -2270,8 +2281,11 @@ def _extract_request_origin(request: Request) -> Dict[str, Any]:
     """
     Resolve protocol, host, and port taking reverse proxy headers into account.
     """
-    protocol = request.headers.get("x-forwarded-proto") or request.url.scheme
-    forwarded_host = request.headers.get("x-forwarded-host")
+    protocol = request.url.scheme
+    forwarded_host = None
+    if TRUST_PROXY_HEADERS:
+        protocol = request.headers.get("x-forwarded-proto") or protocol
+        forwarded_host = request.headers.get("x-forwarded-host")
     host_header = forwarded_host or request.headers.get("host")
     hostname = request.url.hostname or "localhost"
     host = hostname
@@ -2291,7 +2305,7 @@ def _extract_request_origin(request: Request) -> Dict[str, Any]:
         else:
             host = host_header.strip() or hostname
 
-    forwarded_port = request.headers.get("x-forwarded-port")
+    forwarded_port = request.headers.get("x-forwarded-port") if TRUST_PROXY_HEADERS else None
     if forwarded_port:
         try:
             port = int(forwarded_port)
@@ -2844,9 +2858,11 @@ async def auth_google(request: Request, application: str):
     Redirect the user to Google's OAuth2 screen.
     """
 
-    forwarded_proto = request.headers.get("x-forwarded-proto")
     host = request.headers["host"]
-    protocol = forwarded_proto or request.url.scheme
+    protocol = request.url.scheme
+    if TRUST_PROXY_HEADERS:
+        host = request.headers.get("x-forwarded-host", host).split(",", 1)[0]
+        protocol = request.headers.get("x-forwarded-proto", protocol).split(",", 1)[0]
     redirect_uri = f"{protocol}://{host}/{application}/auth/google/callback"
 
     return await oauth.google.authorize_redirect(request, redirect_uri)
@@ -2896,9 +2912,11 @@ async def auth_microsoft(request: Request, application: str):
     if oauth is None or not ENABLE_MICROSOFT_AUTH:
         raise HTTPException(status_code=404, detail="Microsoft authentication not enabled")
 
-    forwarded_proto = request.headers.get("x-forwarded-proto")
     host = request.headers["host"]
-    protocol = forwarded_proto or request.url.scheme
+    protocol = request.url.scheme
+    if TRUST_PROXY_HEADERS:
+        host = request.headers.get("x-forwarded-host", host).split(",", 1)[0]
+        protocol = request.headers.get("x-forwarded-proto", protocol).split(",", 1)[0]
     redirect_uri = f"{protocol}://{host}/{application}/auth/microsoft/callback"
 
     return await oauth.microsoft.authorize_redirect(request, redirect_uri)
