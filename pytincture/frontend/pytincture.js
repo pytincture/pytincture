@@ -560,9 +560,8 @@ await micropip.install("python-dotenv")
             if (config.widgetSource) {
                 throw error;
             }
-            console.warn(
-                `Failed to install widgetset from ${primarySource}; checking backend wheels.`,
-                error,
+            console.info(
+                `Widgetset ${primarySource} is not available from PyPI; checking backend wheels.`,
             );
         }
 

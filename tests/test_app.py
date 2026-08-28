@@ -1086,6 +1086,8 @@ def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_cli
     assert response.text.index("await installWidgetsetSource(pyodide, primarySource)") < response.text.index(
         "const backendSources = await resolveBackendWidgetSources(config)"
     )
+    assert "is not available from PyPI; checking backend wheels" in response.text
+    assert "Failed to install widgetset from ${primarySource}" not in response.text
     assert response.text.index("if (!(await urlExists(source)))") < response.text.index(
         "await installWidgetsetSource(pyodide, source, true)"
     )
