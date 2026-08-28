@@ -3,6 +3,13 @@
 This project follows semantic versioning from 1.0. Dates and final entries are
 set when a release is published.
 
+## Unreleased — 1.0 development
+
+### Changed
+
+- npm publication uses one OIDC trusted-publisher workflow for normal releases
+  and exact retained-artifact retries, replacing the expired long-lived token.
+
 ## 1.0.0rc1 — 2026-08-28
 
 ### Added

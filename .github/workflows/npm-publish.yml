@@ -1,10 +1,15 @@
-name: Retry npm publication
+name: Publish npm artifact
 
 on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       source_run_id:
-        description: Workflow run containing the validated release-artifacts artifact
+        description: CI run containing the retained release-artifacts artifact
         required: true
         type: string
       expected_version:
@@ -15,10 +20,15 @@ on:
 permissions:
   actions: read
   contents: read
+  id-token: write
 
 jobs:
   publish-npm:
     name: Publish retained npm artifact
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'release' &&
+      github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
 
     steps:
@@ -27,7 +37,9 @@ jobs:
         with:
           name: release-artifacts
           path: dist
-          run-id: ${{ inputs.source_run_id }}
+          run-id: >-
+            ${{ github.event_name == 'workflow_dispatch' &&
+            inputs.source_run_id || github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Node.js
@@ -35,6 +47,7 @@ jobs:
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
       - name: Verify retained npm artifact
         id: verify
@@ -56,11 +69,12 @@ jobs:
             echo "Unexpected retained package: $package_name" >&2
             exit 1
           fi
-          if [[ "$package_version" != "$EXPECTED_VERSION" ]]; then
+          if [[ -n "$EXPECTED_VERSION" && "$package_version" != "$EXPECTED_VERSION" ]]; then
             echo "Retained version $package_version does not match $EXPECTED_VERSION" >&2
             exit 1
           fi
           echo "npm_path=$npm_path" >> "$GITHUB_OUTPUT"
+          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
           if npm view "$package_name@$package_version" version >/dev/null 2>&1; then
             echo "already_published=true" >> "$GITHUB_OUTPUT"
             echo "$package_name@$package_version is already published; retry is a no-op."
@@ -68,13 +82,11 @@ jobs:
             echo "already_published=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish exact retained npm artifact
+      - name: Publish exact retained npm artifact with OIDC
         if: steps.verify.outputs.already_published != 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         shell: bash
         run: |
-          package_version="${{ inputs.expected_version }}"
+          package_version="${{ steps.verify.outputs.package_version }}"
           dist_tag=latest
           if [[ "$package_version" == *-* ]]; then
             dist_tag=next

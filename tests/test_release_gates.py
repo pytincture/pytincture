@@ -33,15 +33,17 @@ def candidate(version, published_at):
     }
 
 
-def test_npm_publish_paths_are_explicit_local_tarballs():
-    release_workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
-    retry_workflow = (
-        ROOT / ".github" / "workflows" / "retry-npm-publish.yml"
+def test_npm_publish_uses_one_oidc_workflow_and_explicit_local_tarball():
+    release_workflow = (
+        ROOT / ".github" / "workflows" / "npm-publish.yml"
     ).read_text()
+    ci_workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
 
-    assert "npm publish ./dist/*.tgz" in release_workflow
-    assert "run-id: ${{ inputs.source_run_id }}" in retry_workflow
-    assert 'npm publish "./${{ steps.verify.outputs.npm_path }}"' in retry_workflow
+    assert "id-token: write" in release_workflow
+    assert "NODE_AUTH_TOKEN" not in release_workflow
+    assert "run-id:" in release_workflow
+    assert 'npm publish "./${{ steps.verify.outputs.npm_path }}"' in release_workflow
+    assert "Publish validated npm artifact" not in ci_workflow
 
 
 def complete_record():
