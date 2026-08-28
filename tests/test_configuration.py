@@ -174,3 +174,9 @@ def test_configuration_reference_document_matches_typed_model():
     for field_name, environment_name, description in PytinctureConfig.reference():
         expected_row = f"| `{field_name}` | `{environment_name}` | {description} |"
         assert expected_row in documentation
+
+
+def test_log_level_is_normalized_and_validated(tmp_path):
+    assert PytinctureConfig(modules_path=str(tmp_path), log_level="warning").log_level == "WARNING"
+    with pytest.raises(ValueError, match="log_level"):
+        PytinctureConfig(modules_path=str(tmp_path), log_level="verbose")

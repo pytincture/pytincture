@@ -143,6 +143,9 @@ class PytinctureConfig:
     trusted_proxy_headers: bool = _setting(
         False, "PYTINCTURE_TRUST_PROXY_HEADERS", "Trust forwarded host/protocol headers."
     )
+    log_level: str = _setting(
+        "INFO", "PYTINCTURE_LOG_LEVEL", "Structured application log level."
+    )
     environment: Mapping[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self):
@@ -263,6 +266,10 @@ class PytinctureConfig:
                 raise ValueError(f"invalid CORS origin: {origin}")
         if "*" in self.cors_allowed_origins:
             raise ValueError("cors_allowed_origins cannot use '*' with credentialed requests")
+        normalized_log_level = self.log_level.strip().upper()
+        if normalized_log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            raise ValueError("log_level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
+        object.__setattr__(self, "log_level", normalized_log_level)
 
     @classmethod
     def from_env(

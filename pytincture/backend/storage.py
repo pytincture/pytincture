@@ -14,6 +14,7 @@ class RedisDict:
         key_prefix: str = "",
         *,
         redis_client: Any = None,
+        cache_reads: bool = True,
     ):
         if redis_client is None:
             from upstash_redis import Redis
@@ -21,6 +22,7 @@ class RedisDict:
             redis_client = Redis(url=redis_url, token=redis_token)
         self._redis = redis_client
         self._prefix = key_prefix
+        self._cache_reads = cache_reads
         self._cache: dict[str, Any] = {}
 
     @staticmethod
@@ -30,25 +32,29 @@ class RedisDict:
         return value
 
     def __getitem__(self, key):
-        if key in self._cache:
+        if self._cache_reads and key in self._cache:
             return self._cache[key]
         value = self._redis.get(self._prefix + key)
         if not value:
-            self._cache[key] = None
+            if self._cache_reads:
+                self._cache[key] = None
             return None
         value = self._decode(value)
-        self._cache[key] = value
+        if self._cache_reads:
+            self._cache[key] = value
         return value
 
     def __setitem__(self, key, value):
         serialized = json.dumps(value) if isinstance(value, dict) else str(value)
         self._redis.set(self._prefix + key, serialized)
-        self._cache[key] = value
+        if self._cache_reads:
+            self._cache[key] = value
 
     def set_with_ttl(self, key, value, ttl_seconds: int):
         serialized = json.dumps(value) if isinstance(value, dict) else str(value)
         self._redis.set(self._prefix + key, serialized, ex=ttl_seconds)
-        self._cache[key] = value
+        if self._cache_reads:
+            self._cache[key] = value
 
     def __delitem__(self, key):
         if self._redis.delete(self._prefix + key) == 0:
@@ -63,10 +69,10 @@ class RedisDict:
     def __contains__(self, key):
         if key is None:
             return False
-        if key in self._cache:
+        if self._cache_reads and key in self._cache:
             return self._cache[key] is not None
         exists = self._redis.exists(self._prefix + key) == 1
-        if not exists:
+        if not exists and self._cache_reads:
             self._cache[key] = None
         return exists
 
@@ -100,3 +106,11 @@ class RedisDict:
     def get(self, key, default=None):
         value = self.__getitem__(key)
         return default if value is None else value
+
+    def ping(self) -> bool:
+        """Check the configured Redis dependency without changing stored data."""
+        ping = getattr(self._redis, "ping", None)
+        if not callable(ping):
+            return False
+        result = ping()
+        return result is True or result == "PONG"

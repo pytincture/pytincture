@@ -16,10 +16,8 @@ import uuid
 import zipfile
 from typing import (
     Any,
-    AsyncIterable,
     Callable,
     Dict,
-    Iterable,
     List,
     Optional,
     Set,
@@ -57,7 +55,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.config import Config
 
 # Pytincture
-from pytincture import get_modules_path
+from pytincture import __version__, get_modules_path
 from pytincture.backend.auth import (
     SENSITIVE_USER_CLAIM_KEYS,
     allowed_email,
@@ -76,8 +74,10 @@ from pytincture.backend.browser_packages import (
 )
 from pytincture.backend.diagnostics import (
     internal_error_payload,
+    readiness_report,
     request_correlation_id,
     sanitized_validation_errors,
+    structured_log,
 )
 from pytincture.backend.mcp import (
     FilteredFastAPIApp,
@@ -122,6 +122,7 @@ from pytincture.backend.source_loading import (
     load_source_module,
 )
 from pytincture.backend.storage import RedisDict
+from pytincture.backend.streaming import as_streaming_response
 from pytincture.dataclass import (
     add_bff_docs_to_app,
     get_bff_manifest,
@@ -134,6 +135,8 @@ from pytincture.dataclass import (
 
 app = FastAPI(title="pyTincture API")
 logger = logging.getLogger("pytincture.security")
+_configured_log_level = os.getenv("PYTINCTURE_LOG_LEVEL", "INFO").strip().upper()
+logger.setLevel(getattr(logging, _configured_log_level, logging.INFO))
 # Preserve legacy launcher behavior unless explicitly configured. The typed
 # create_app() configuration defaults this to false for a secure ASGI default.
 TRUST_PROXY_HEADERS = os.getenv("PYTINCTURE_TRUST_PROXY_HEADERS", "true").lower() == "true"
@@ -253,6 +256,29 @@ async def default_application_redirect():
     return RedirectResponse(url=f"/{application_path}", status_code=302)
 
 
+@app.get("/healthz", include_in_schema=False)
+async def health_check():
+    """Process liveness: successful while the ASGI worker can answer requests."""
+    return {"status": "ok", "version": __version__}
+
+
+@app.get("/readyz", include_in_schema=False)
+async def readiness_check():
+    """Traffic readiness for application files, frontend assets, and shared stores."""
+    stores = {}
+    if USE_REDIS_INSTANCE == "true":
+        stores = {
+            "session_store": USER_SESSION_DICT,
+            "revocation_store": AUTH_SESSION_REVOCATIONS,
+            "replay_store": BFF_REPLAY_TOKEN_STORE,
+        }
+    ready, checks = readiness_report(get_modules_path(), STATIC_PATH, stores)
+    return JSONResponse(
+        {"status": "ready" if ready else "not-ready", "checks": checks},
+        status_code=200 if ready else 503,
+    )
+
+
 @app.get("/favicon.ico", operation_id="getFavicon", responses={200: {"description": "Response (binary content for favicon.ico, or empty if not implemented)"}, 404: {"description": "JSONResponse (if file not found, but currently not handled)"}})
 async def favicon():
     """
@@ -270,6 +296,7 @@ async def validation_exception_handler(request, exc):
 
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
+    started = time.monotonic()
     correlation_id = request_correlation_id(request.headers.get("x-request-id"))
     request.state.correlation_id = correlation_id
     response = await call_next(request)
@@ -284,6 +311,16 @@ async def correlation_id_middleware(request: Request, call_next):
             httponly=False,
             samesite=AUTH_SESSION_SAME_SITE,
         )
+    structured_log(
+        logger,
+        logging.INFO,
+        "request.complete",
+        correlation_id=correlation_id,
+        method=request.method,
+        path=request.url.path,
+        status_code=response.status_code,
+        duration_ms=round((time.monotonic() - started) * 1000, 3),
+    )
     return response
 
 
@@ -295,11 +332,14 @@ async def sanitized_http_exception_handler(request: Request, exc: HTTPException)
             "correlation_id",
             request_correlation_id(),
         )
-        logger.error(
-            "HTTP failure correlation_id=%s status=%s",
-            correlation_id,
-            exc.status_code,
-            exc_info=exc,
+        structured_log(
+            logger,
+            logging.ERROR,
+            "request.error",
+            exc_info=True,
+            correlation_id=correlation_id,
+            status_code=exc.status_code,
+            error_type=type(exc).__name__,
         )
         return JSONResponse(
             internal_error_payload(correlation_id),
@@ -315,7 +355,15 @@ async def sanitized_exception_handler(request: Request, exc: Exception):
         "correlation_id",
         request_correlation_id(),
     )
-    logger.exception("Unhandled request failure correlation_id=%s", correlation_id)
+    structured_log(
+        logger,
+        logging.ERROR,
+        "request.error",
+        exc_info=True,
+        correlation_id=correlation_id,
+        status_code=500,
+        error_type=type(exc).__name__,
+    )
     return JSONResponse(
         internal_error_payload(correlation_id),
         status_code=500,
@@ -383,11 +431,13 @@ if  USE_REDIS_INSTANCE == "true":
         redis_url=REDIS_UPSTASH_INSTANCE_URL,
         redis_token=REDIS_UPSTASH_INSTANCE_TOKEN,
         key_prefix="revoked-session:",
+        cache_reads=False,
     )
     BFF_REPLAY_TOKEN_STORE = RedisDict(
         redis_url=REDIS_UPSTASH_INSTANCE_URL,
         redis_token=REDIS_UPSTASH_INSTANCE_TOKEN,
         key_prefix="bff-replay-token:",
+        cache_reads=False,
     )
 else:
     USER_SESSION_DICT = {}
@@ -1239,6 +1289,16 @@ async def class_call(
     )
     if operation is None:
         raise HTTPException(status_code=404, detail="BFF operation not exported")
+    structured_log(
+        logger,
+        logging.INFO,
+        "bff.start",
+        correlation_id=getattr(request.state, "correlation_id", ""),
+        module=request_identifier_with_ext,
+        class_name=class_name,
+        function_name=function_name,
+        method=request.method,
+    )
     allowed_methods = tuple(operation["http_methods"])
     if request.method not in allowed_methods:
         raise HTTPException(
@@ -1304,71 +1364,28 @@ async def class_call(
         elif "args" not in data and "kwargs" not in data:
             kwargs = data
 
-        def _serialize_stream_item(item, raw: bool = False):
-            # Ensure each streamed chunk is JSON encoded and newline-delimited unless raw passthrough is requested.
-            if isinstance(item, (bytes, bytearray)):
-                data_bytes = bytes(item)
-                if not raw and not data_bytes.endswith(b"\n"):
-                    data_bytes += b"\n"
-                return data_bytes
-            if isinstance(item, str):
-                data_text = item
-            else:
-                data_text = json.dumps(item)
-            if not raw and not data_text.endswith("\n"):
-                data_text += "\n"
-            return data_text
-
-        def _sync_iterable(iterable: Iterable, raw: bool = False):
-            started = time.monotonic()
-            output_bytes = 0
-            for item in iterable:
-                if time.monotonic() - started > BFF_STREAM_MAX_SECONDS:
-                    return
-                serialized = _serialize_stream_item(item, raw)
-                output_bytes += len(serialized.encode("utf-8") if isinstance(serialized, str) else serialized)
-                if output_bytes > BFF_STREAM_MAX_BYTES:
-                    return
-                yield serialized
-
-        async def _async_iterable(iterable: AsyncIterable, raw: bool = False):
-            started = time.monotonic()
-            output_bytes = 0
-            iterator = iterable.__aiter__()
-            while True:
-                remaining = BFF_STREAM_MAX_SECONDS - (time.monotonic() - started)
-                if remaining <= 0:
-                    return
-                try:
-                    item = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
-                except (StopAsyncIteration, asyncio.TimeoutError):
-                    return
-                serialized = _serialize_stream_item(item, raw)
-                output_bytes += len(serialized.encode("utf-8") if isinstance(serialized, str) else serialized)
-                if output_bytes > BFF_STREAM_MAX_BYTES:
-                    return
-                yield serialized
-
         def _as_streaming_response(result_obj):
-            if isinstance(result_obj, StreamingResponse):
-                return result_obj
+            def log_stream_finish(reason, output_bytes):
+                structured_log(
+                    logger,
+                    logging.INFO,
+                    "bff.stream.finish",
+                    correlation_id=getattr(request.state, "correlation_id", ""),
+                    module=request_identifier_with_ext,
+                    class_name=class_name,
+                    function_name=function_name,
+                    reason=reason,
+                    output_bytes=output_bytes,
+                )
 
-            if inspect.isasyncgen(result_obj) or hasattr(result_obj, "__aiter__"):
-                async_iter = result_obj if inspect.isasyncgen(result_obj) else result_obj
-                return StreamingResponse(_async_iterable(async_iter, streaming_raw), media_type=streaming_media_type)
-
-            if isinstance(result_obj, (str, bytes, bytearray)):
-                return StreamingResponse(_sync_iterable([result_obj], streaming_raw), media_type=streaming_media_type)
-
-            if isinstance(result_obj, dict):
-                return StreamingResponse(_sync_iterable([result_obj], streaming_raw), media_type=streaming_media_type)
-
-            if inspect.isgenerator(result_obj) or isinstance(result_obj, Iterable):
-                iterable_obj = result_obj if inspect.isgenerator(result_obj) else result_obj
-                return StreamingResponse(_sync_iterable(iterable_obj, streaming_raw), media_type=streaming_media_type)
-
-            # Fallback: stream single value
-            return StreamingResponse(_sync_iterable([result_obj], streaming_raw), media_type=streaming_media_type)
+            return as_streaming_response(
+                result_obj,
+                raw=streaming_raw,
+                media_type=streaming_media_type,
+                max_seconds=BFF_STREAM_MAX_SECONDS,
+                max_bytes=BFF_STREAM_MAX_BYTES,
+                on_finish=log_stream_finish,
+            )
 
         # Execute the target callable
         if is_async_gen_function:

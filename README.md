@@ -19,6 +19,8 @@ The real Pyodide browser matrix and local commands are in the
 [end-to-end testing guide](docs/e2e-testing.md).
 Backend ownership and dependency boundaries are described in the
 [backend architecture guide](docs/backend-architecture.md).
+Production topology, probes, monitoring, secret rotation, backup, and rollback
+are covered by the [production deployment runbook](docs/production-deployment.md).
 
 ## Features
 - Pyodide Integration: Seamlessly bring Python to the web via Pyodide.
@@ -149,6 +151,7 @@ pip install .
 - BFF_REPLAY_TOKEN_TTL_SECONDS: Lifetime of an unused proof. Defaults to `300` seconds.
 - ENABLE_MCP: Enable the MCP mount. MCP exports no tools by default.
 - MCP_EXPOSED_OPERATIONS: JSON list of explicitly allowed FastAPI operation IDs. Login, session, logging, application delivery, and appcode download operations cannot be exported.
+- PYTINCTURE_LOG_LEVEL: Structured Pytincture application log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`). Defaults to `INFO`.
 
 Authenticated browser cookies contain only stable identity claims plus opaque session and CSRF identifiers. Passwords, complete SAML attributes, SAML assertions, and changing SAML session indexes are not stored in the cookie. Logout revokes the current session; Upstash-backed services share revocations between replicas.
 
