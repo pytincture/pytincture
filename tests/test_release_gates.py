@@ -33,6 +33,17 @@ def candidate(version, published_at):
     }
 
 
+def test_npm_publish_paths_are_explicit_local_tarballs():
+    release_workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    retry_workflow = (
+        ROOT / ".github" / "workflows" / "retry-npm-publish.yml"
+    ).read_text()
+
+    assert "npm publish ./dist/*.tgz" in release_workflow
+    assert "run-id: ${{ inputs.source_run_id }}" in retry_workflow
+    assert 'npm publish "./${{ steps.verify.outputs.npm_path }}"' in retry_workflow
+
+
 def complete_record():
     version = "1.0.0rc2"
     return {
