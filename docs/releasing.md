@@ -8,15 +8,18 @@ Only a maintained release commit with green required CI is publishable.
    refreshes the lockfile.
 2. Update `CHANGELOG.md`, compatibility versions, migration notes, and the
    release qualification record.
-3. Run Python 3.13/3.14, JavaScript, browser lifecycle, Chromium/Firefox/WebKit
+3. After the complete 1.0 CI workflow is on `main`, apply and verify the full
+   branch-protection contract with an administration token:
+   `GITHUB_TOKEN=... python scripts/repository_policy.py --profile release --apply`.
+4. Run Python 3.13/3.14, JavaScript, browser lifecycle, Chromium/Firefox/WebKit
    Pyodide E2E, clean artifact/extras, and production topology gates.
-4. Create and push a signed `v<version>` tag at the green commit. Wait for the
+5. Create and push a signed `v<version>` tag at the green commit. Wait for the
    tag-triggered CI, version/qualification gate, and blocker audit to pass.
-5. Publish a GitHub release from that qualified tag. The release event rebuilds
+6. Publish a GitHub release from that qualified tag. The release event rebuilds
    artifacts with the commit timestamp, verifies
    byte reproducibility/content/hashes, then publishes those exact wheel,
    sdist, and npm files after every dependency job succeeds.
-6. Verify PyPI/npm metadata and install each artifact from the public index in
+7. Verify PyPI/npm metadata and install each artifact from the public index in
    a new environment. Attach the generated `SHA256SUMS.json` to the release.
 
 Prerelease npm artifacts are published under the `next` dist-tag; only stable

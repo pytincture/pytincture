@@ -242,6 +242,17 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/audit_release_blockers.py
 
+      - name: Audit branch protection
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          profile=bootstrap
+          if [[ "${GITHUB_EVENT_NAME}" == "release" || "${GITHUB_REF}" == refs/tags/v* ]]; then
+            profile=release
+          fi
+          python scripts/repository_policy.py --profile "$profile"
+
   security-audit:
     name: Dependency vulnerability audit
     runs-on: ubuntu-latest
@@ -385,6 +396,14 @@ jobs:
             tests/e2e-server.log
           if-no-files-found: ignore
 
+      - name: Upload E2E performance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytincture-performance-${{ matrix.browser }}
+          path: pytincture/frontend/test-results
+          if-no-files-found: warn
+
   production-smoke:
     name: Production topology smoke
     runs-on: ubuntu-latest
@@ -413,11 +432,16 @@ jobs:
           python -m uvicorn pytincture.backend.app:app --host 127.0.0.1 --port 8081 > production-smoke.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid"' EXIT
-          python scripts/load_smoke.py \
-            --base-url http://127.0.0.1:8081 \
-            --requests 500 \
-            --concurrency 20 \
-            --p95-budget-ms 500
+          python scripts/run_performance_smoke.py \
+            --base-url http://127.0.0.1:8081
+
+      - name: Upload service performance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytincture-performance-service
+          path: performance-*.json
+          if-no-files-found: warn
 
       - name: Upload production smoke log
         if: failure()

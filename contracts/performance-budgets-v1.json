@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "environment": "GitHub-hosted Ubuntu runner; regression thresholds, not capacity guarantees",
+  "browser": {
+    "cold_authenticated_start_ms": 120000,
+    "warm_authenticated_start_ms": 60000,
+    "authenticated_bff_p95_ms": 1000,
+    "bff_samples": 20
+  },
+  "service": {
+    "health_p95_ms": 500,
+    "appcode_p95_ms": 1500,
+    "bff_p95_ms": 500,
+    "health_requests": 500,
+    "appcode_requests": 40,
+    "bff_requests": 200,
+    "health_concurrency": 20,
+    "appcode_concurrency": 5,
+    "bff_concurrency": 10
+  }
+}

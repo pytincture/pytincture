@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "branch": "main",
+  "strict": true,
+  "enforce_admins": true,
+  "required_conversation_resolution": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "profiles": {
+    "bootstrap": {
+      "required_checks": [
+        "Python 3.13 tests",
+        "Python 3.14 tests",
+        "Validate Python package",
+        "Validate JavaScript runtime"
+      ]
+    },
+    "release": {
+      "required_checks": [
+        "Python 3.13 tests",
+        "Python 3.14 tests",
+        "Validate release artifacts",
+        "Release qualification gates",
+        "Dependency vulnerability audit",
+        "Validate JavaScript runtime",
+        "Pyodide E2E (chromium)",
+        "Pyodide E2E (firefox)",
+        "Pyodide E2E (webkit)",
+        "Production topology smoke",
+        "Clean install (oauth)",
+        "Clean install (password)",
+        "Clean install (redis)",
+        "Clean install (saml)",
+        "Clean install (mcp)",
+        "Upgrade and rollback from 0.10.7"
+      ]
+    }
+  }
+}

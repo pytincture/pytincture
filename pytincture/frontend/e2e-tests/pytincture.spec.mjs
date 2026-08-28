@@ -1,7 +1,16 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync, writeFileSync } from "node:fs";
 
 
 const WIDGET_WHEEL = "dhxpyt-0.9.16+backend-py3-none-any.whl";
+const PERFORMANCE_BUDGETS = JSON.parse(readFileSync(
+    new URL("../../../contracts/performance-budgets-v1.json", import.meta.url),
+));
+
+function percentile(values, percent) {
+    const ordered = [...values].sort((left, right) => left - right);
+    return ordered[Math.max(0, Math.ceil(percent * ordered.length) - 1)];
+}
 
 function collectDiagnostics(page) {
     const consoleEntries = [];
@@ -86,10 +95,44 @@ async function callAuthenticatedBff(page) {
     });
 }
 
+async function measureAuthenticatedBff(page, sampleCount) {
+    return page.evaluate(async count => {
+        const csrfToken = document.cookie
+            .split(";")
+            .map(value => value.trim().split("="))
+            .find(([name]) => name === "pytincture_csrf")
+            ?.slice(1).join("=") || "";
+        const measurements = [];
+        for (let index = 0; index < count; index += 1) {
+            const startedAt = performance.now();
+            const response = await fetch("/classcall/e2e_data.py/E2EData/sync_call", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": csrfToken,
+                },
+                body: JSON.stringify({ kwargs: { value: index } }),
+            });
+            if (!response.ok) {
+                throw new Error(`BFF performance sample failed with HTTP ${response.status}`);
+            }
+            await response.text();
+            measurements.push(performance.now() - startedAt);
+        }
+        return measurements;
+    }, sampleCount);
+}
+
 test("authenticated packaged and inline apps run through real Pyodide", async ({ page, request }, testInfo) => {
     const diagnostics = collectDiagnostics(page);
+    const performanceEvidence = { browser: testInfo.project.name };
     try {
+        const coldStartedAt = Date.now();
         await loginAndStartPackagedApp(page);
+        performanceEvidence.cold_authenticated_start_ms = Date.now() - coldStartedAt;
+        expect(performanceEvidence.cold_authenticated_start_ms).toBeLessThanOrEqual(
+            PERFORMANCE_BUDGETS.browser.cold_authenticated_start_ms,
+        );
 
         await expect(page).toHaveURL("/e2e_app");
         expect(new URL(page.url()).search).toBe("");
@@ -112,6 +155,14 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         expect(await page.locator("style").evaluateAll(styles => (
             styles.some(style => style.textContent.includes("data:font/woff2;base64,"))
         ))).toBe(true);
+
+        const warmStartedAt = Date.now();
+        await page.goto("/e2e_app");
+        await expect(page.locator("#e2e-ready")).toBeVisible();
+        performanceEvidence.warm_authenticated_start_ms = Date.now() - warmStartedAt;
+        expect(performanceEvidence.warm_authenticated_start_ms).toBeLessThanOrEqual(
+            PERFORMANCE_BUDGETS.browser.warm_authenticated_start_ms,
+        );
 
         const widgetRequest = diagnostics.requests.find(entry => new URL(entry.url).pathname.endsWith(WIDGET_WHEEL));
         expect(widgetRequest).toBeTruthy();
@@ -141,6 +192,20 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
             { kind: "stream", value: 2 },
         ]);
 
+        const bffMeasurements = await measureAuthenticatedBff(
+            page,
+            PERFORMANCE_BUDGETS.browser.bff_samples,
+        );
+        performanceEvidence.authenticated_bff_samples_ms = bffMeasurements.map(value => (
+            Math.round(value * 1000) / 1000
+        ));
+        performanceEvidence.authenticated_bff_p95_ms = Math.round(
+            percentile(bffMeasurements, 0.95) * 1000,
+        ) / 1000;
+        expect(performanceEvidence.authenticated_bff_p95_ms).toBeLessThanOrEqual(
+            PERFORMANCE_BUDGETS.browser.authenticated_bff_p95_ms,
+        );
+
         const worker = await page.evaluate(async () => {
             const registration = await navigator.serviceWorker.ready;
             return { scope: registration.scope, scriptURL: registration.active?.scriptURL || "" };
@@ -156,6 +221,12 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         const inlineLifecycle = await page.evaluate(() => window.__pytinctureLifecycle);
         expect(inlineLifecycle.at(-1).type).toBe("ready");
     } finally {
+        const performancePath = testInfo.outputPath("performance.json");
+        writeFileSync(performancePath, `${JSON.stringify(performanceEvidence, null, 2)}\n`);
+        await testInfo.attach("performance.json", {
+            path: performancePath,
+            contentType: "application/json",
+        });
         await attachFailureDiagnostics(testInfo, diagnostics);
     }
 });

@@ -35,6 +35,8 @@ are in the [changelog](CHANGELOG.md), [security policy](SECURITY.md),
 [release procedure](docs/releasing.md).
 The [RC qualification record](docs/release-qualification.md) shows the current
 1.0 go/no-go state and the evidence still required before publication.
+The [performance budgets](docs/performance.md) define and retain regression
+evidence for browser startup, package generation, health, and BFF calls.
 
 ## Features
 - Pyodide Integration: Seamlessly bring Python to the web via Pyodide.

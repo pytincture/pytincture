@@ -10,6 +10,7 @@
     "representative_applications",
     "upgrade_exercises",
     "rollback_exercises",
+    "performance_reviews",
     "security_reviews",
     "defect_audits",
     "final_decision"
@@ -24,6 +25,7 @@
     },
     "upgrade_exercises": { "type": "array" },
     "rollback_exercises": { "type": "array" },
+    "performance_reviews": { "type": "array" },
     "security_reviews": { "type": "array" },
     "defect_audits": { "type": "array" },
     "final_decision": {

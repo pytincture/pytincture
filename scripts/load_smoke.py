@@ -9,12 +9,25 @@ import statistics
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 
-def request_once(url: str, timeout: float) -> tuple[float, int]:
+def request_once(
+    url: str,
+    timeout: float,
+    *,
+    method: str = "GET",
+    body: bytes | None = None,
+) -> tuple[float, int]:
     started = time.perf_counter()
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        request = urllib.request.Request(
+            url,
+            data=body,
+            method=method,
+            headers={"Content-Type": "application/json"} if body is not None else {},
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             response.read()
             status = response.status
     except urllib.error.HTTPError as exc:
@@ -51,7 +64,16 @@ def main() -> int:
     parser.add_argument("--timeout-seconds", type=float, default=5)
     parser.add_argument("--wait-seconds", type=float, default=15)
     parser.add_argument("--p95-budget-ms", type=float, default=500)
+    parser.add_argument("--method", choices=("GET", "POST"), default="GET")
+    parser.add_argument("--body-json")
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+
+    body = None
+    if args.body_json is not None:
+        body = json.dumps(json.loads(args.body_json), separators=(",", ":")).encode()
+        if args.method == "GET":
+            parser.error("--body-json requires --method POST")
 
     url = args.base_url.rstrip("/") + "/" + args.path.lstrip("/")
     wait_until_ready(args.base_url.rstrip("/") + "/readyz", args.wait_seconds)
@@ -59,7 +81,12 @@ def main() -> int:
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as pool:
         results = list(
             pool.map(
-                lambda _: request_once(url, args.timeout_seconds),
+                lambda _: request_once(
+                    url,
+                    args.timeout_seconds,
+                    method=args.method,
+                    body=body,
+                ),
                 range(args.requests),
             )
         )
@@ -69,6 +96,7 @@ def main() -> int:
     failures = sum(status < 200 or status >= 300 for status in statuses)
     report = {
         "url": url,
+        "method": args.method,
         "requests": args.requests,
         "concurrency": args.concurrency,
         "failures": failures,
@@ -81,7 +109,10 @@ def main() -> int:
         },
         "p95_budget_ms": args.p95_budget_ms,
     }
-    print(json.dumps(report, sort_keys=True))
+    rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    if args.output:
+        args.output.write_text(rendered)
+    print(rendered, end="")
     return int(failures > 0 or report["latency_ms"]["p95"] > args.p95_budget_ms)
 
 
