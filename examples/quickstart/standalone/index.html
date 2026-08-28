@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pytincture standalone quickstart</title>
+  <script>
+    window.pytinctureAutoStartConfig = {
+      mode: "inline",
+      entrypoint: "Hello",
+      widgetlib: "dhxpyt==0.9.16",
+      pyodideBaseUrl: "https://cdn.jsdelivr.net/pyodide/v0.29.3/full/"
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@0.10.7/dist/pytincture.min.js"></script>
+</head>
+<body>
+  <div id="maindiv"></div>
+  <script type="text/python">
+import js
+from dhxpyt.layout import MainWindow
+
+class Hello(MainWindow):
+    def load_ui(self):
+        js.document.getElementById("maindiv").innerHTML = (
+            "<main><h1>Hello from standalone Pytincture</h1></main>"
+        )
+  </script>
+</body>
+</html>

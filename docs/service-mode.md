@@ -1,0 +1,62 @@
+# Service mode
+
+Service mode is the supported choice when an application needs server-side
+Python, BFF methods, authentication, private configuration, or backend-hosted
+widget wheels.
+
+## Application layout
+
+```text
+my_service/
+├── service.py          # ASGI process code; never sent to the browser
+├── dashboard.py        # browser entrypoint: class dashboard(...)
+├── widget.py           # literal __widgetset__/__version__ metadata
+├── dashboard_data.py   # decorated BFF class; replaced by a browser stub
+├── helpers.py          # statically imported browser code
+└── dashboard.css       # add through PYTINCTURE_BROWSER_FILES
+```
+
+The URL application name selects `<application>.py`, and the default
+entrypoint is a class or callable with the same name. Keep secrets and database
+clients in BFF/server modules; never put them in browser files.
+
+## ASGI factory
+
+```python
+from pytincture import PytinctureConfig, create_app
+
+config = PytinctureConfig(
+    modules_path="./apps",
+    default_application="dashboard",
+    cors_allowed_origins=("https://dashboard.example.com",),
+)
+app = create_app(config)
+```
+
+Run `uvicorn service:app --host 127.0.0.1 --port 8070`. `create_app()` owns its
+configuration, BFF registry, and state, so tests and multi-app processes do not
+need to mutate global environment settings. `launch_service()` remains the
+supported compatibility launcher for existing code.
+
+## Browser delivery
+
+`GET /{application}` returns the loader page. It fetches
+`/{application}/appcode/appcode.pyt`, a ZIP archive containing only the
+entrypoint, reachable local imports, configured browser files, and generated
+BFF stubs. Frontend and backend-hosted files receive the service-instance UUID
+as a query parameter for cache invalidation; navigation URLs remain clean.
+
+The widgetset resolution order is:
+
+1. install the application-declared real version from the package index;
+2. request that same real version from the Pytincture backend;
+3. request backend version `99.99.99` only as an explicit development fallback.
+
+Micropip/package-index URLs are not modified with the backend cache UUID.
+
+## Production
+
+Use a stable signing key for authentication, Redis for shared revocations and
+replay tokens across workers, and a trusted TLS reverse proxy. See
+[configuration](configuration.md), [authentication](authentication.md), and
+[production deployment](production-deployment.md).

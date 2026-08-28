@@ -1,3 +1,4 @@
+include LICENSE
 include pytincture/frontend/index.html
 include pytincture/frontend/pytincture.js
 include pytincture/frontend/sw.js
