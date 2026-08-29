@@ -22,11 +22,18 @@ def test_performance_budget_contract_covers_roadmap_targets():
         assert service[f"{name}_p95_ms"] > 0
         assert service[f"{name}_requests"] > 0
         assert service[f"{name}_concurrency"] > 0
+    assert service["saturation_requests"] > 0
+    assert service["saturation_concurrency"] > 0
+    assert service["saturation_min_rejections"] > 0
+    assert service["saturation_recovery_ms"] > 0
 
 
 def test_ci_runs_and_retains_every_performance_profile():
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
     assert "python scripts/run_performance_smoke.py" in workflow
+    runner = (ROOT / "scripts" / "run_performance_smoke.py").read_text()
+    assert "adversarial_load_smoke.py" in runner
+    assert "performance-saturation.json" in workflow
     assert "pytincture-performance-service" in workflow
     assert "pytincture-performance-${{ matrix.browser }}" in workflow
 

@@ -68,9 +68,30 @@ The contract test checks every row in this table against the dataclass model.
 | `session_https_only` | `AUTH_SESSION_HTTPS_ONLY` | Secure-cookie requirement; derived when omitted. |
 | `session_same_site` | `AUTH_SESSION_SAME_SITE` | Cookie SameSite policy. |
 | `max_request_body_bytes` | `MAX_REQUEST_BODY_BYTES` | Maximum request body size. |
+| `login_rate_limit_attempts` | `AUTH_LOGIN_RATE_LIMIT_ATTEMPTS` | Password attempts per peer and window. |
+| `login_rate_limit_window_seconds` | `AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS` | Password rate-limit window. |
+| `login_email_max_chars` | `AUTH_LOGIN_EMAIL_MAX_CHARS` | Maximum submitted email length. |
+| `login_password_max_chars` | `AUTH_LOGIN_PASSWORD_MAX_CHARS` | Maximum submitted password length. |
+| `password_hash_max_concurrency` | `AUTH_PASSWORD_HASH_MAX_CONCURRENCY` | Concurrent password hash checks per worker. |
+| `password_hash_queue_timeout_seconds` | `AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS` | Password hash admission wait. |
+| `password_hash_timeout_seconds` | `AUTH_PASSWORD_HASH_TIMEOUT_SECONDS` | Maximum credential-verifier runtime. |
 | `bff_call_timeout_seconds` | `BFF_CALL_TIMEOUT_SECONDS` | Non-streaming BFF timeout. |
+| `bff_max_concurrency` | `BFF_MAX_CONCURRENCY` | Concurrent admitted BFF calls per worker. |
+| `bff_max_queue` | `BFF_MAX_QUEUE` | Maximum queued BFF calls per worker. |
+| `bff_queue_timeout_seconds` | `BFF_QUEUE_TIMEOUT_SECONDS` | Maximum BFF admission wait. |
 | `bff_stream_max_seconds` | `BFF_STREAM_MAX_SECONDS` | Maximum BFF stream duration. |
 | `bff_stream_max_bytes` | `BFF_STREAM_MAX_BYTES` | Maximum BFF stream bytes. |
+| `bff_stream_max_items` | `BFF_STREAM_MAX_ITEMS` | Maximum BFF stream items. |
+| `bff_stream_idle_timeout_seconds` | `BFF_STREAM_IDLE_TIMEOUT_SECONDS` | Maximum wait between stream items. |
+| `appcode_max_files` | `APPCODE_MAX_FILES` | Maximum files in one browser archive. |
+| `appcode_max_file_bytes` | `APPCODE_MAX_FILE_BYTES` | Maximum source file size in an archive. |
+| `appcode_max_total_bytes` | `APPCODE_MAX_TOTAL_BYTES` | Maximum aggregate source bytes per archive. |
+| `appcode_cache_entries` | `APPCODE_CACHE_ENTRIES` | Per-worker bounded browser archive cache entries. |
+| `appcode_build_max_concurrency` | `APPCODE_BUILD_MAX_CONCURRENCY` | Concurrent archive builds per worker. |
+| `appcode_build_queue_timeout_seconds` | `APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS` | Maximum archive build admission wait. |
+| `remote_store_timeout_seconds` | `REMOTE_STORE_TIMEOUT_SECONDS` | Optional remote-store HTTP deadline. |
+| `remote_store_failure_threshold` | `REMOTE_STORE_FAILURE_THRESHOLD` | Failures before opening the store circuit. |
+| `remote_store_cooldown_seconds` | `REMOTE_STORE_COOLDOWN_SECONDS` | Open-circuit cooldown. |
 | `enable_bff_replay_tokens` | `ENABLE_BFF_REPLAY_TOKENS` | Enable one-time BFF request proofs. |
 | `bff_replay_token_batch_size` | `BFF_REPLAY_TOKEN_BATCH_SIZE` | Proofs issued per refill. |
 | `bff_replay_token_low_watermark` | `BFF_REPLAY_TOKEN_LOW_WATERMARK` | Proof-pool refill threshold. |

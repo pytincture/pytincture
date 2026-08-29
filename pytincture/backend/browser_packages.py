@@ -6,7 +6,9 @@ import importlib
 import io
 import json
 import os
+import threading
 import zipfile
+from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
@@ -20,6 +22,31 @@ _EXCLUDED_DIRECTORIES = {
     "build",
     "dist",
 }
+
+
+class AppcodeArchiveCache:
+    """Bounded per-worker cache for public, non-session-specific archives."""
+
+    def __init__(self, max_entries: int):
+        if max_entries <= 0:
+            raise ValueError("archive cache size must be greater than zero")
+        self.max_entries = max_entries
+        self._entries: OrderedDict[tuple[Any, ...], bytes] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key: tuple[Any, ...]) -> bytes | None:
+        with self._lock:
+            value = self._entries.get(key)
+            if value is not None:
+                self._entries.move_to_end(key)
+            return value
+
+    def put(self, key: tuple[Any, ...], value: bytes) -> None:
+        with self._lock:
+            self._entries[key] = value
+            self._entries.move_to_end(key)
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
 
 
 def local_python_imports(file_path: str, modules_root: str) -> set[str]:
@@ -118,6 +145,7 @@ def discover_widgetset(
 def configured_browser_files(
     modules_root: str,
     raw_patterns: str | None = None,
+    max_files: int | None = None,
 ) -> set[str]:
     """Resolve explicitly configured browser-file globs inside ``modules_root``."""
     raw = (
@@ -139,6 +167,7 @@ def configured_browser_files(
         )
 
     selected: set[str] = set()
+    scanned_files = 0
     for root, dirs, files in os.walk(modules_root):
         dirs[:] = [
             directory
@@ -146,10 +175,21 @@ def configured_browser_files(
             if not directory.startswith(".") and directory not in _EXCLUDED_DIRECTORIES
         ]
         for filename in files:
+            scanned_files += 1
+            if max_files is not None and scanned_files > max_files * 100:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Appcode configured-file scan limit exceeded",
+                )
             absolute = os.path.abspath(os.path.join(root, filename))
             relative = os.path.relpath(absolute, modules_root).replace(os.sep, "/")
             if any(fnmatch.fnmatch(relative, pattern) for pattern in patterns):
                 selected.add(absolute)
+                if max_files is not None and len(selected) > max_files:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Appcode file-count limit exceeded",
+                    )
     return selected
 
 
@@ -157,6 +197,7 @@ def browser_package_files(
     application: str,
     modules_root: str,
     raw_patterns: str | None = None,
+    max_files: int | None = None,
 ) -> set[str]:
     """Return the transitive local imports and explicit files for an app."""
     root = os.path.abspath(modules_root)
@@ -170,6 +211,8 @@ def browser_package_files(
         for imported in local_python_imports(pending.pop(), root):
             if imported not in selected:
                 selected.add(imported)
+                if max_files is not None and len(selected) > max_files:
+                    raise HTTPException(status_code=413, detail="Appcode file-count limit exceeded")
                 pending.append(imported)
     for python_file in tuple(selected):
         parent = os.path.dirname(python_file)
@@ -178,7 +221,10 @@ def browser_package_files(
             if os.path.isfile(package_init):
                 selected.add(os.path.abspath(package_init))
             parent = os.path.dirname(parent)
-    return selected | configured_browser_files(root, raw_patterns)
+    selected |= configured_browser_files(root, raw_patterns, max_files=max_files)
+    if max_files is not None and len(selected) > max_files:
+        raise HTTPException(status_code=413, detail="Appcode file-count limit exceeded")
+    return selected
 
 
 def create_appcode_archive(
@@ -189,12 +235,44 @@ def create_appcode_archive(
     parser: Callable[..., Any],
     replay_client: Any = None,
     raw_patterns: str | None = None,
+    *,
+    max_files: int = 512,
+    max_file_bytes: int = 4 * 1024 * 1024,
+    max_total_bytes: int = 32 * 1024 * 1024,
+    cache: AppcodeArchiveCache | None = None,
 ) -> io.BytesIO:
     """Build an explicit browser-safe application archive in memory."""
     root = os.path.abspath(modules_root)
+    selected = sorted(
+        browser_package_files(application, root, raw_patterns, max_files=max_files)
+    )
+    fingerprint: list[tuple[str, int, int]] = []
+    aggregate_bytes = 0
+    for file_path in selected:
+        stat = os.stat(file_path)
+        if stat.st_size > max_file_bytes:
+            raise HTTPException(status_code=413, detail="Appcode file-size limit exceeded")
+        aggregate_bytes += stat.st_size
+        if aggregate_bytes > max_total_bytes:
+            raise HTTPException(status_code=413, detail="Appcode aggregate-size limit exceeded")
+        fingerprint.append((os.path.relpath(file_path, root), stat.st_size, stat.st_mtime_ns))
+
+    cache_key = (
+        application,
+        host,
+        protocol,
+        raw_patterns or "",
+        tuple(fingerprint),
+    )
+    if cache is not None and replay_client is None:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return io.BytesIO(cached)
+
     in_memory_zip = io.BytesIO()
     with zipfile.ZipFile(in_memory_zip, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for file_path in sorted(browser_package_files(application, root, raw_patterns)):
+        output_bytes = 0
+        for file_path in selected:
             arcname = os.path.relpath(file_path, root).replace(os.sep, "/")
             if file_path.endswith(".py"):
                 file_contents = parser(
@@ -204,8 +282,17 @@ def create_appcode_archive(
                     application=application,
                     replay_client=replay_client,
                 )
-                zip_file.writestr(arcname, file_contents or "")
+                payload = (file_contents or "").encode("utf-8")
             else:
-                zip_file.write(file_path, arcname)
+                with open(file_path, "rb") as source_file:
+                    payload = source_file.read(max_file_bytes + 1)
+            if len(payload) > max_file_bytes:
+                raise HTTPException(status_code=413, detail="Appcode generated file-size limit exceeded")
+            output_bytes += len(payload)
+            if output_bytes > max_total_bytes:
+                raise HTTPException(status_code=413, detail="Appcode generated-size limit exceeded")
+            zip_file.writestr(arcname, payload)
     in_memory_zip.seek(0)
+    if cache is not None and replay_client is None:
+        cache.put(cache_key, in_memory_zip.getvalue())
     return in_memory_zip

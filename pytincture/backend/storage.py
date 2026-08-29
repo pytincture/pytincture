@@ -3,6 +3,8 @@
 import json
 from typing import Any
 
+from pytincture.backend.limits import CircuitBreaker
+
 
 class RedisDict:
     """A small mapping facade over Upstash Redis with a read-through cache."""
@@ -15,7 +17,12 @@ class RedisDict:
         *,
         redis_client: Any = None,
         cache_reads: bool = True,
+        timeout_seconds: float = 2.0,
+        failure_threshold: int = 3,
+        cooldown_seconds: float = 15.0,
     ):
+        if timeout_seconds <= 0:
+            raise ValueError("remote store timeout must be greater than zero")
         if redis_client is None:
             try:
                 from upstash_redis import Redis
@@ -25,11 +32,39 @@ class RedisDict:
                     "install pytincture[redis]"
                 ) from exc
 
-            redis_client = Redis(url=redis_url, token=redis_token)
+            redis_client = Redis(
+                url=redis_url,
+                token=redis_token,
+                rest_retries=0,
+                rest_retry_interval=0,
+            )
+            # Upstash currently constructs an httpx client with no deadline.
+            # Replace only that transport detail while keeping its public Redis
+            # API, so every network operation has a hard connect/read/write cap.
+            try:
+                import httpx
+
+                previous_client = redis_client._http._client
+                redis_client._http._client = httpx.Client(timeout=timeout_seconds)
+                previous_client.close()
+            except (AttributeError, ImportError):
+                # Custom/future clients can supply their own transport deadline.
+                pass
         self._redis = redis_client
         self._prefix = key_prefix
         self._cache_reads = cache_reads
         self._cache: dict[str, Any] = {}
+        self._circuit = CircuitBreaker(failure_threshold, cooldown_seconds)
+
+    def _call(self, method: str, *args, **kwargs):
+        self._circuit.before_call()
+        try:
+            result = getattr(self._redis, method)(*args, **kwargs)
+        except Exception:
+            self._circuit.failure()
+            raise
+        self._circuit.success()
+        return result
 
     @staticmethod
     def _decode(value):
@@ -40,7 +75,7 @@ class RedisDict:
     def __getitem__(self, key):
         if self._cache_reads and key in self._cache:
             return self._cache[key]
-        value = self._redis.get(self._prefix + key)
+        value = self._call("get", self._prefix + key)
         if not value:
             if self._cache_reads:
                 self._cache[key] = None
@@ -52,23 +87,23 @@ class RedisDict:
 
     def __setitem__(self, key, value):
         serialized = json.dumps(value) if isinstance(value, dict) else str(value)
-        self._redis.set(self._prefix + key, serialized)
+        self._call("set", self._prefix + key, serialized)
         if self._cache_reads:
             self._cache[key] = value
 
     def set_with_ttl(self, key, value, ttl_seconds: int):
         serialized = json.dumps(value) if isinstance(value, dict) else str(value)
-        self._redis.set(self._prefix + key, serialized, ex=ttl_seconds)
+        self._call("set", self._prefix + key, serialized, ex=ttl_seconds)
         if self._cache_reads:
             self._cache[key] = value
 
     def __delitem__(self, key):
-        if self._redis.delete(self._prefix + key) == 0:
+        if self._call("delete", self._prefix + key) == 0:
             raise KeyError(key)
         self._cache.pop(key, None)
 
     def pop_atomic(self, key, default=None):
-        value = self._redis.getdel(self._prefix + key)
+        value = self._call("getdel", self._prefix + key)
         self._cache.pop(key, None)
         return default if value is None else self._decode(value)
 
@@ -77,7 +112,7 @@ class RedisDict:
             return False
         if self._cache_reads and key in self._cache:
             return self._cache[key] is not None
-        exists = self._redis.exists(self._prefix + key) == 1
+        exists = self._call("exists", self._prefix + key) == 1
         if not exists and self._cache_reads:
             self._cache[key] = None
         return exists
@@ -88,7 +123,8 @@ class RedisDict:
     def __iter__(self):
         cursor = "0"
         while True:
-            cursor, keys = self._redis.scan(
+            cursor, keys = self._call(
+                "scan",
                 cursor=cursor,
                 match=self._prefix + "*",
                 count=100,
@@ -118,5 +154,11 @@ class RedisDict:
         ping = getattr(self._redis, "ping", None)
         if not callable(ping):
             return False
-        result = ping()
+        self._circuit.before_call()
+        try:
+            result = ping()
+        except Exception:
+            self._circuit.failure()
+            raise
+        self._circuit.success()
         return result is True or result == "PONG"

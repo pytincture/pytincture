@@ -25,6 +25,12 @@ Pytincture transforms Python source as it packages it. Exported BFF classes
 become browser proxies while ordinary browser code and required imports remain
 available. Archive member ordering and compression level are not contractual.
 
+Construction is subject to configured file-count, individual-file,
+aggregate-source, build-concurrency, and admission-wait limits. Public archives
+without session-specific replay material may be served from a bounded
+per-worker cache keyed by selected-file metadata. Limit failures return `413`;
+temporary build saturation returns `503` with `Retry-After`.
+
 ## Security boundary
 
 The archive is delivered under the application's authentication policy. Its

@@ -658,6 +658,9 @@ jobs:
         env:
           MODULES_PATH: tests/e2e_apps
           PYTINCTURE_DEFAULT_APPLICATION: e2e_app
+          BFF_MAX_CONCURRENCY: "2"
+          BFF_MAX_QUEUE: "20"
+          BFF_QUEUE_TIMEOUT_SECONDS: "0.05"
         run: |
           python -m uvicorn pytincture.backend.app:app --host 127.0.0.1 --port 8081 > production-smoke.log 2>&1 &
           server_pid=$!
@@ -675,6 +678,7 @@ jobs:
             --result health=performance-health.json \
             --result appcode=performance-appcode.json \
             --result bff=performance-bff.json \
+            --result saturation=performance-saturation.json \
             --output qualification-evidence-performance-service.json
 
       - name: Upload service performance evidence

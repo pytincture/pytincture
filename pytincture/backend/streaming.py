@@ -8,6 +8,7 @@ from collections.abc import AsyncIterable, Callable, Iterable
 from typing import Any
 
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import iterate_in_threadpool
 
 
 def serialize_stream_item(item: Any, raw: bool = False) -> str | bytes:
@@ -28,10 +29,12 @@ def limited_sync_stream(
     raw: bool,
     max_seconds: float,
     max_bytes: int,
+    max_items: int = 10_000,
     on_finish: Callable[[str, int], None] | None = None,
 ):
     started = time.monotonic()
     output_bytes = 0
+    output_items = 0
     reason = "complete"
     iterator = iter(iterable)
     try:
@@ -40,6 +43,10 @@ def limited_sync_stream(
                 reason = "timeout"
                 return
             serialized = serialize_stream_item(item, raw)
+            output_items += 1
+            if output_items > max_items:
+                reason = "item-limit"
+                return
             output_bytes += _serialized_size(serialized)
             if output_bytes > max_bytes:
                 reason = "byte-limit"
@@ -49,11 +56,13 @@ def limited_sync_stream(
         reason = "disconnect"
         raise
     finally:
-        close = getattr(iterator, "close", None)
-        if callable(close):
-            close()
-        if on_finish is not None:
-            on_finish(reason, output_bytes)
+        try:
+            close = getattr(iterator, "close", None)
+            if callable(close):
+                close()
+        finally:
+            if on_finish is not None:
+                on_finish(reason, output_bytes)
 
 
 async def limited_async_stream(
@@ -62,10 +71,13 @@ async def limited_async_stream(
     raw: bool,
     max_seconds: float,
     max_bytes: int,
+    max_items: int = 10_000,
+    idle_timeout_seconds: float = 30.0,
     on_finish: Callable[[str, int], None] | None = None,
 ):
     started = time.monotonic()
     output_bytes = 0
+    output_items = 0
     reason = "complete"
     iterator = iterable.__aiter__()
     try:
@@ -74,14 +86,26 @@ async def limited_async_stream(
             if remaining <= 0:
                 reason = "timeout"
                 return
+            wait_seconds = min(remaining, idle_timeout_seconds)
             try:
-                item = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
+                item = await asyncio.wait_for(
+                    iterator.__anext__(),
+                    timeout=wait_seconds,
+                )
             except StopAsyncIteration:
                 return
             except asyncio.TimeoutError:
-                reason = "timeout"
+                reason = (
+                    "idle-timeout"
+                    if idle_timeout_seconds < remaining
+                    else "timeout"
+                )
                 return
             serialized = serialize_stream_item(item, raw)
+            output_items += 1
+            if output_items > max_items:
+                reason = "item-limit"
+                return
             output_bytes += _serialized_size(serialized)
             if output_bytes > max_bytes:
                 reason = "byte-limit"
@@ -94,11 +118,13 @@ async def limited_async_stream(
         reason = "disconnect"
         raise
     finally:
-        close = getattr(iterator, "aclose", None)
-        if callable(close):
-            await close()
-        if on_finish is not None:
-            on_finish(reason, output_bytes)
+        try:
+            close = getattr(iterator, "aclose", None)
+            if callable(close):
+                await close()
+        finally:
+            if on_finish is not None:
+                on_finish(reason, output_bytes)
 
 
 def as_streaming_response(
@@ -108,16 +134,29 @@ def as_streaming_response(
     media_type: str,
     max_seconds: float,
     max_bytes: int,
+    max_items: int,
+    idle_timeout_seconds: float,
     on_finish: Callable[[str, int], None] | None = None,
 ) -> StreamingResponse:
+    status_code = 200
+    headers = None
+    background = None
     if isinstance(result, StreamingResponse):
-        return result
+        status_code = result.status_code
+        headers = dict(result.headers)
+        headers.pop("content-length", None)
+        media_type = result.media_type or media_type
+        background = result.background
+        result = result.body_iterator
+        raw = True
     if inspect.isasyncgen(result) or hasattr(result, "__aiter__"):
         content = limited_async_stream(
             result,
             raw=raw,
             max_seconds=max_seconds,
             max_bytes=max_bytes,
+            max_items=max_items,
+            idle_timeout_seconds=idle_timeout_seconds,
             on_finish=on_finish,
         )
     else:
@@ -125,11 +164,19 @@ def as_streaming_response(
             result = [result]
         elif not inspect.isgenerator(result) and not isinstance(result, Iterable):
             result = [result]
-        content = limited_sync_stream(
-            result,
+        content = limited_async_stream(
+            iterate_in_threadpool(iter(result)),
             raw=raw,
             max_seconds=max_seconds,
             max_bytes=max_bytes,
+            max_items=max_items,
+            idle_timeout_seconds=idle_timeout_seconds,
             on_finish=on_finish,
         )
-    return StreamingResponse(content, media_type=media_type)
+    return StreamingResponse(
+        content,
+        status_code=status_code,
+        headers=headers,
+        media_type=media_type,
+        background=background,
+    )

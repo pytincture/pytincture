@@ -2,11 +2,14 @@ import asyncio
 import base64
 import json
 import sys
+import time
+import io
+import zipfile
 from importlib.metadata import version
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from pytincture.backend.auth import (
     allowed_email,
@@ -16,7 +19,9 @@ from pytincture.backend.auth import (
 )
 from pytincture.backend.bff import BFFRegistry
 from pytincture.backend.browser_packages import (
+    AppcodeArchiveCache,
     browser_package_files,
+    create_appcode_archive,
     discover_widgetset,
 )
 from pytincture.backend.diagnostics import (
@@ -35,7 +40,12 @@ from pytincture.backend.saml import (
 )
 from pytincture.backend.source_loading import build_dynamic_module_name
 from pytincture.backend.storage import RedisDict
-from pytincture.backend.streaming import limited_async_stream, limited_sync_stream
+from pytincture.backend.streaming import (
+    as_streaming_response,
+    limited_async_stream,
+    limited_sync_stream,
+)
+from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate, CircuitOpen
 
 
 def test_auth_primitives_are_configuration_free():
@@ -440,3 +450,134 @@ def test_async_stream_disconnect_closes_source():
     asyncio.run(consume_one_then_disconnect())
     assert closed == [True]
     assert reasons == [("disconnect", 6)]
+
+
+def test_admission_gate_rejects_saturation_then_recovers():
+    async def exercise():
+        gate = AsyncAdmissionGate(1, 0, 0.01)
+        await gate.acquire()
+        with pytest.raises(AdmissionRejected):
+            await gate.acquire()
+        gate.release()
+        await gate.acquire()
+        gate.release()
+
+    asyncio.run(exercise())
+
+
+def test_async_stream_enforces_item_and_idle_limits():
+    reasons = []
+
+    async def many_items():
+        for value in range(4):
+            yield value
+
+    async def idle_item():
+        await asyncio.sleep(0.03)
+        yield "late"
+
+    async def collect(source, **limits):
+        return [
+            item
+            async for item in limited_async_stream(
+                source,
+                raw=False,
+                max_seconds=1,
+                max_bytes=100,
+                on_finish=lambda reason, size: reasons.append((reason, size)),
+                **limits,
+            )
+        ]
+
+    assert asyncio.run(collect(many_items(), max_items=2, idle_timeout_seconds=1)) == [
+        "0\n",
+        "1\n",
+    ]
+    assert reasons[-1][0] == "item-limit"
+    assert asyncio.run(collect(idle_item(), max_items=2, idle_timeout_seconds=0.001)) == []
+    assert reasons[-1] == ("idle-timeout", 0)
+
+
+def test_existing_streaming_response_is_wrapped_by_limits():
+    from fastapi.responses import StreamingResponse
+
+    original = StreamingResponse(iter([b"one", b"two", b"three"]), status_code=206)
+    bounded = as_streaming_response(
+        original,
+        raw=False,
+        media_type="text/plain",
+        max_seconds=1,
+        max_bytes=100,
+        max_items=2,
+        idle_timeout_seconds=1,
+    )
+
+    async def collect():
+        return [chunk async for chunk in bounded.body_iterator]
+
+    assert bounded is not original
+    assert bounded.status_code == 206
+    assert asyncio.run(collect()) == [b"one", b"two"]
+
+
+def test_appcode_archive_limits_and_cache(tmp_path):
+    (tmp_path / "demo.py").write_text("value = 1\n", encoding="utf-8")
+    calls = []
+
+    def parser(path, host, protocol, **kwargs):
+        calls.append(path)
+        return Path(path).read_text(encoding="utf-8")
+
+    cache = AppcodeArchiveCache(1)
+    first = create_appcode_archive(
+        "", "", "demo", str(tmp_path), parser, cache=cache
+    )
+    second = create_appcode_archive(
+        "", "", "demo", str(tmp_path), parser, cache=cache
+    )
+    assert zipfile.ZipFile(io.BytesIO(first.getvalue())).read("demo.py") == b"value = 1\n"
+    assert second.getvalue() == first.getvalue()
+    assert len(calls) == 1
+
+    with pytest.raises(HTTPException, match="file-size limit"):
+        create_appcode_archive(
+            "", "", "demo", str(tmp_path), parser, max_file_bytes=2
+        )
+
+    (tmp_path / "helper.py").write_text("helper = 2\n", encoding="utf-8")
+    (tmp_path / "demo.py").write_text("import helper\nvalue = 1\n", encoding="utf-8")
+    with pytest.raises(HTTPException, match="file-count limit"):
+        create_appcode_archive(
+            "", "", "demo", str(tmp_path), parser, max_files=1
+        )
+    with pytest.raises(HTTPException, match="aggregate-size limit"):
+        create_appcode_archive(
+            "", "", "demo", str(tmp_path), parser, max_total_bytes=20
+        )
+
+
+def test_remote_store_circuit_opens_and_recovers():
+    class FailingRedis:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, key):
+            self.calls += 1
+            if self.calls == 1:
+                raise TimeoutError("remote deadline")
+            return "ok"
+
+    redis = FailingRedis()
+    store = RedisDict(
+        redis_client=redis,
+        cache_reads=False,
+        failure_threshold=1,
+        cooldown_seconds=0.01,
+    )
+    with pytest.raises(TimeoutError):
+        store.get("key")
+    with pytest.raises(CircuitOpen):
+        store.get("key")
+    assert redis.calls == 1
+    time.sleep(0.02)
+    assert store.get("key") == "ok"

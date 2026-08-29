@@ -58,6 +58,26 @@ def main() -> None:
             command.extend(("--body-json", profile["body_json"]))
         subprocess.run(command, check=True)
 
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "adversarial_load_smoke.py"),
+            "--base-url",
+            args.base_url,
+            "--requests",
+            str(budgets["saturation_requests"]),
+            "--concurrency",
+            str(budgets["saturation_concurrency"]),
+            "--min-rejections",
+            str(budgets["saturation_min_rejections"]),
+            "--recovery-budget-ms",
+            str(budgets["saturation_recovery_ms"]),
+            "--output",
+            str(args.output_dir / "performance-saturation.json"),
+        ],
+        check=True,
+    )
+
 
 if __name__ == "__main__":
     main()

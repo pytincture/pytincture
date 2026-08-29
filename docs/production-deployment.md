@@ -35,6 +35,16 @@ signing secret. Redis is only an optional enhancement for immediate
 cross-worker logout revocation and configured one-time BFF replay tokens; it is
 not required to run Pytincture or load balance normal authenticated traffic.
 
+Resource admission counters and the appcode cache are bounded, disposable, and
+local to each worker. They do not contain durable login/session state and do
+not require sticky routing. Size concurrency settings per worker, then apply a
+gateway-wide request-rate and connection limit across the deployment. Local
+password login has independent peer/account limits per worker, so the gateway
+should provide the coordinated outer limit when multiple workers are exposed.
+Optional Upstash operations use short deadlines and a per-worker circuit
+breaker; Redis remains optional and is not used by the default signed-cookie
+session path.
+
 ## Private-network exposure
 
 State-changing BFF routes require JSON and reject browser requests unless

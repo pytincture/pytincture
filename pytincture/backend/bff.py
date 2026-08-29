@@ -1,6 +1,7 @@
 """Backend-for-frontend operation discovery and registry state."""
 
 import os
+import threading
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -69,15 +70,17 @@ class BFFRegistry:
         self.root = os.path.abspath(modules_root)
         self.operations: dict[BFFKey, BFFOperation] = {}
         self.loaded = False
+        self._lock = threading.RLock()
         if autoload:
             self.reload()
 
     def reload(self, modules_root: str | None = None) -> dict[BFFKey, BFFOperation]:
-        if modules_root is not None:
-            self.root = os.path.abspath(modules_root)
-        self.operations = build_bff_registry(self.root, self._manifest_loader)
-        self.loaded = True
-        return self.operations
+        with self._lock:
+            if modules_root is not None:
+                self.root = os.path.abspath(modules_root)
+            self.operations = build_bff_registry(self.root, self._manifest_loader)
+            self.loaded = True
+            return self.operations
 
     def operation(
         self,
@@ -86,9 +89,10 @@ class BFFRegistry:
         class_name: str,
         function_name: str,
     ) -> BFFOperation | None:
-        root = os.path.abspath(modules_root)
-        if root != self.root or not self.loaded:
-            self.reload(root)
-        return self.operations.get(
-            (relative_path.replace(os.sep, "/"), class_name, function_name)
-        )
+        with self._lock:
+            root = os.path.abspath(modules_root)
+            if root != self.root or not self.loaded:
+                self.reload(root)
+            return self.operations.get(
+                (relative_path.replace(os.sep, "/"), class_name, function_name)
+            )
