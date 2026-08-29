@@ -2,8 +2,15 @@
 
 Standalone mode serves ordinary static HTML. `@pytincture/runtime` loads
 Pyodide, installs the configured widgetset and micropip libraries, executes
-inline Python, and starts the selected entrypoint. There is no Pytincture
-service, BFF, server authentication, backend wheel fallback, or private Python.
+inline Python, and starts the selected entrypoint. It does not require a
+Pytincture service and provides no BFF, server authentication, or private
+Python.
+
+A static companion origin may optionally expose a widget wheel using the
+`/{application}/appcode/{package}-{version}-py3-none-any.whl` convention. Set
+`application` and `devWidgetHost` in the inline runtime configuration to enable
+that package fallback without enabling a Pytincture service, BFF, or server
+authentication. The runtime checks the pinned version before `99.99.99`.
 
 ## Minimal page
 

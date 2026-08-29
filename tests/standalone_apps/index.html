@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pytincture standalone wheel acceptance</title>
+  <style>
+    html, body, #maindiv { height: 100%; margin: 0; }
+  </style>
+  <script>
+    window.__standaloneLifecycle = [];
+    window.addEventListener("pytincture:lifecycle", event => {
+      window.__standaloneLifecycle.push(event.detail);
+    });
+    window.__standaloneRequestUuid = "__INSTANCE_UUID__";
+    window.pytinctureAutoStartConfig = {
+      mode: "inline",
+      application: "standalone_fixture",
+      entrypoint: "StandaloneAcceptance",
+      widgetlib: "dhxpyt==0.9.16+backend",
+      requestUuid: window.__standaloneRequestUuid,
+      devWidgetHost: window.location.origin,
+      pyodideBaseUrl: "/runtime/pyodide/0.29.3/full/",
+      loadMaterialIcons: false,
+      enableBackendLogging: false,
+      enableServiceWorker: false
+    };
+  </script>
+  <script src="/runtime/dist/pytincture.min.js?uuid=__INSTANCE_UUID__"></script>
+</head>
+<body>
+  <div id="maindiv"></div>
+  <script type="text/python">
+import js
+from dhxpyt.layout import MainWindow
+
+
+class StandaloneAcceptance(MainWindow):
+    def load_ui(self):
+        self.set_theme("dark")
+        self.attach_html(
+            "mainwindow",
+            "<main id='standalone-ready'>"
+            "<h1>Standalone wheel runtime ready</h1>"
+            "<p id='widget-proof'>dhxpyt layout loaded</p>"
+            "</main>",
+        )
+        js.document.documentElement.dataset.standaloneReady = "true"
+  </script>
+</body>
+</html>
