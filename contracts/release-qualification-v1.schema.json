@@ -6,6 +6,8 @@
   "required": [
     "schema_version",
     "minimum_observation_days",
+    "observation_started_at",
+    "observation_approval_url",
     "release_candidates",
     "representative_applications",
     "upgrade_exercises",
@@ -19,6 +21,8 @@
   "properties": {
     "schema_version": { "const": 1 },
     "minimum_observation_days": { "type": "integer", "minimum": 30 },
+    "observation_started_at": { "type": "string", "format": "date-time" },
+    "observation_approval_url": { "type": "string", "format": "uri" },
     "release_candidates": { "type": "array" },
     "representative_applications": {
       "type": "object",

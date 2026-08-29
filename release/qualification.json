@@ -2,15 +2,58 @@
   "$schema": "../contracts/release-qualification-v1.schema.json",
   "schema_version": 1,
   "minimum_observation_days": 30,
-  "release_candidates": [],
+  "observation_started_at": "2026-08-29T02:08:06Z",
+  "observation_approval_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5459957268",
+  "release_candidates": [
+    {
+      "version": "1.0.0rc1",
+      "published_at": "2026-08-28T20:09:58Z",
+      "commit_sha": "e4feb231ab674e85c2e162fb935b6e2e45da5f8a",
+      "ci_url": "https://github.com/pytincture/pytincture/actions/runs/33206734049",
+      "artifacts": {
+        "wheel": "aa5e11139f14bf8317bdb77d57c49cd55311533370414506fed79b1a6fc9e64b",
+        "sdist": "d3546a1109efdee1d61fac15d3a8e7252d3c111d8158c060fd5cac6343187bbb",
+        "npm": "085f5fb67a4b6e4878321579159e66e03892d6a7f60740c8421cb61cb3a7b587"
+      },
+      "status": "passed",
+      "notes": "Signed GitHub prerelease and PyPI artifacts are published. The matching retained npm tarball is integrity-checked; npm registry publication is deferred and does not block the approved observation track."
+    }
+  ],
   "representative_applications": {
     "standalone": [],
-    "authenticated_bff": [],
+    "authenticated_bff": [
+      {
+        "application": "pytincture_example",
+        "version": "1.0.0rc1",
+        "tested_at": "2026-08-29T02:08:06Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture_example/actions/runs/33228136035",
+        "commit_sha": "00ca6e5e8545b9aba1ce79b509461870429ffda8",
+        "widgetset": "dhxpyt==0.9.16",
+        "findings": []
+      }
+    ],
     "federated_auth": []
   },
   "upgrade_exercises": [],
   "rollback_exercises": [],
-  "performance_reviews": [],
+  "performance_reviews": [
+    {
+      "application": "pytincture_example",
+      "version": "1.0.0rc1",
+      "tested_at": "2026-08-29T02:08:06Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture_example/actions/runs/33228136035",
+      "profile": "50/100/250 authenticated sessions, four paginated BFF calls per session, 100 records per response",
+      "largest_stage": {
+        "users": 250,
+        "requests": 1000,
+        "p95_ms": 785.629,
+        "requests_per_second": 396.106,
+        "errors": 0
+      }
+    }
+  ],
   "repository_policy_reviews": [],
   "security_reviews": [],
   "defect_audits": [],
@@ -18,6 +61,6 @@
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "The signed v1.0.0rc1 GitHub prerelease and PyPI 1.0.0rc1 artifacts were published on 2026-08-28, but npm @pytincture/runtime@1.0.0-rc.1 is still pending. rc1 is not recorded as passed and the observation period has not started."
+    "notes": "RC1 and the approved pytincture_example observation are recorded. The 30-day observation period began at 2026-08-29T02:08:06Z and cannot complete before 2026-09-28T02:08:06Z. The release remains NO-GO pending RC2 and all latest-RC final gates."
   }
 }
