@@ -6,6 +6,12 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from pytincture.dataclass import get_bff_manifest
+from pytincture.backend.safe_paths import (
+    UnsafePath,
+    canonical_root,
+    decode_python_source,
+    read_contained_file,
+)
 
 _EXCLUDED_DIRECTORIES = {
     "__pycache__",
@@ -27,7 +33,7 @@ def build_bff_registry(
     ] = get_bff_manifest,
 ) -> dict[BFFKey, BFFOperation]:
     """Discover exported BFF operations without importing application code."""
-    root_path = os.path.abspath(modules_root)
+    root_path = canonical_root(modules_root)
     registry: dict[BFFKey, BFFOperation] = {}
     if not os.path.isdir(root_path):
         return registry
@@ -37,20 +43,32 @@ def build_bff_registry(
             directory
             for directory in dirs
             if not directory.startswith(".") and directory not in _EXCLUDED_DIRECTORIES
+            and not os.path.islink(os.path.join(root, directory))
         ]
         for filename in files:
             if not filename.endswith(".py") or filename.startswith("."):
                 continue
             file_path = os.path.join(root, filename)
+            if os.path.islink(file_path):
+                continue
             relative_path = os.path.relpath(file_path, root_path).replace(os.sep, "/")
             try:
-                file_manifest = manifest_loader(file_path)
-            except (OSError, SyntaxError, ValueError) as exc:
+                secure_file = read_contained_file(root_path, relative_path)
+                if manifest_loader is get_bff_manifest:
+                    source = decode_python_source(secure_file.content)
+                    file_manifest = manifest_loader(file_path, source=source)
+                else:
+                    file_manifest = manifest_loader(file_path)
+            except (OSError, SyntaxError, UnicodeDecodeError, UnsafePath, ValueError) as exc:
                 raise RuntimeError(
                     f"Unable to build BFF manifest for {relative_path}"
                 ) from exc
             for (class_name, function_name), operation in file_manifest.items():
-                registry[(relative_path, class_name, function_name)] = operation
+                registry[(relative_path, class_name, function_name)] = {
+                    **operation,
+                    "_source_path": secure_file.path,
+                    "_source_digest": secure_file.digest,
+                }
     return registry
 
 
@@ -67,7 +85,7 @@ class BFFRegistry:
         autoload: bool = True,
     ):
         self._manifest_loader = manifest_loader
-        self.root = os.path.abspath(modules_root)
+        self.root = canonical_root(modules_root)
         self.operations: dict[BFFKey, BFFOperation] = {}
         self.loaded = False
         self._lock = threading.RLock()
@@ -77,7 +95,7 @@ class BFFRegistry:
     def reload(self, modules_root: str | None = None) -> dict[BFFKey, BFFOperation]:
         with self._lock:
             if modules_root is not None:
-                self.root = os.path.abspath(modules_root)
+                self.root = canonical_root(modules_root)
             self.operations = build_bff_registry(self.root, self._manifest_loader)
             self.loaded = True
             return self.operations
@@ -90,9 +108,18 @@ class BFFRegistry:
         function_name: str,
     ) -> BFFOperation | None:
         with self._lock:
-            root = os.path.abspath(modules_root)
+            root = canonical_root(modules_root)
             if root != self.root or not self.loaded:
                 self.reload(root)
-            return self.operations.get(
-                (relative_path.replace(os.sep, "/"), class_name, function_name)
-            )
+            key = (relative_path.replace(os.sep, "/"), class_name, function_name)
+            operation = self.operations.get(key)
+            if operation is None:
+                return None
+            try:
+                current = read_contained_file(root, key[0])
+            except UnsafePath:
+                return None
+            if current.digest != operation.get("_source_digest"):
+                self.reload(root)
+                operation = self.operations.get(key)
+            return operation

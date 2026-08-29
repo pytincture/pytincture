@@ -48,6 +48,11 @@ finishes. Streaming responses—including a `StreamingResponse` returned by app
 code—are wrapped with item, byte, idle, and wall-time limits. Tune the
 `BFF_*` settings for the worker count and expected page-sized payloads.
 
+Discovery records the canonical regular source file and its SHA-256 digest.
+Execution reopens that file without following symlinks and requires the digest
+to match, so a traversal, symlink, or discovery-to-import replacement is
+rejected before browser or backend code executes.
+
 ## Authorization
 
 `@bff_policy` records literal metadata. Policy-bearing exports fail startup

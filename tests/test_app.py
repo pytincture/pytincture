@@ -766,7 +766,9 @@ def test_main_route_with_auth_enabled_no_user_session(fresh_client, monkeypatch)
     assert f"/{application_name}/login" in response.headers.get("location", "")
 
 
-def test_main_route_ignores_backend_session_snapshot(fresh_client, monkeypatch):
+def test_main_route_ignores_backend_session_snapshot(
+    fresh_client, monkeypatch, tmp_path
+):
     """
     Stateless browser sessions must not depend on an email-keyed backend snapshot.
     """
@@ -778,6 +780,8 @@ def test_main_route_ignores_backend_session_snapshot(fresh_client, monkeypatch):
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {})
     monkeypatch.setenv("ALLOWED_EMAILS", "stale@example.com")
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    (tmp_path / "demoapp.py").write_text("value = 1\n", encoding="utf-8")
 
     response = fresh_client.post(
         "/demoapp/auth/user",
@@ -795,7 +799,7 @@ def test_main_route_ignores_backend_session_snapshot(fresh_client, monkeypatch):
     response = fresh_client.get("/demoapp", follow_redirects=False)
     assert response.status_code == 200
 
-def test_main_route_no_auth_when_disabled(fresh_client, monkeypatch):
+def test_main_route_no_auth_when_disabled(fresh_client, monkeypatch, tmp_path):
     """
     If both ENABLE_GOOGLE_AUTH and ENABLE_USER_LOGIN are disabled,
     the main route should serve the index page (HTTP 200).
@@ -804,7 +808,11 @@ def test_main_route_no_auth_when_disabled(fresh_client, monkeypatch):
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
     application_name = "demoapp"
+    (tmp_path / f"{application_name}.py").write_text(
+        "value = 1\n", encoding="utf-8"
+    )
     response = fresh_client.get(f"/{application_name}")
     assert response.status_code == 200
 
@@ -958,6 +966,67 @@ def test_noauth_bff_accepts_trusted_non_browser_json_client(
     )
 
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    (
+        ("GET", "/bad-name"),
+        ("GET", "/bad-name/login"),
+        ("POST", "/bad-name/auth/user"),
+        ("GET", "/bad-name/appcode/appcode.pyt"),
+        ("POST", "/bad-name/classcall/worker.py/Worker/ping"),
+        ("GET", "/bad-name/frontend/pytincture.js"),
+        ("GET", "/bad%5Cname/login"),
+        ("GET", "/healthz/login"),
+    ),
+)
+def test_every_application_route_rejects_invalid_or_reserved_names(
+    fresh_client, method, path
+):
+    response = fresh_client.request(method, path, json={} if method == "POST" else None)
+    assert response.status_code == 404
+
+
+def test_bff_rejects_windows_separator_path(fresh_client, monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: "noauth")
+    response = fresh_client.post(
+        "/classcall/pkg%5Cworker.py/Worker/ping",
+        json={},
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlinks unavailable")
+def test_appcode_bff_and_public_assets_reject_symlinks(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (outside / "worker.py").write_text(
+        "from pytincture.dataclass import backend_for_frontend\n"
+        "@backend_for_frontend\n"
+        "class Worker:\n"
+        "    def ping(self): return 'outside'\n",
+        encoding="utf-8",
+    )
+    (outside / "secret.png").write_bytes(b"outside-secret")
+    (tmp_path / "worker.py").symlink_to(outside / "worker.py")
+    (tmp_path / "secret.png").symlink_to(outside / "secret.png")
+    (tmp_path / "demoapp.py").write_text("import worker\n", encoding="utf-8")
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: "noauth")
+
+    archive = fresh_client.get("/demoapp/appcode/appcode.pyt")
+    bff = fresh_client.post("/classcall/worker.py/Worker/ping", json={})
+    asset = fresh_client.get("/demoapp/appcode/secret.png")
+    assert archive.status_code == 404
+    assert bff.status_code == 404
+    assert asset.status_code == 404
 
 
 def test_class_call_policy_hook(monkeypatch, fresh_client, tmp_path):

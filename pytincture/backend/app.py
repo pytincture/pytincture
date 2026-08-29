@@ -9,6 +9,7 @@ import io
 import ipaddress
 import json
 import logging
+import mimetypes
 import os
 import re
 import secrets
@@ -47,6 +48,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 from starlette.config import Config
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.routing import Match
 
 # Pytincture
 from pytincture import __version__, get_modules_path
@@ -111,6 +113,14 @@ from pytincture.backend.saml import (
 )
 from pytincture.backend.saml import (
     provider_value as saml_provider_value,
+)
+from pytincture.backend.safe_paths import (
+    UnsafePath,
+    decode_python_source,
+    normalize_relative_path,
+    read_contained_file,
+    resolve_contained_path,
+    validate_application_name,
 )
 from pytincture.backend.saml import (
     role_attribute_keys as saml_role_attribute_keys,
@@ -240,11 +250,21 @@ def _build_dynamic_module_name(file_path: str, name_hint: str) -> str:
     return build_dynamic_module_name(file_path, name_hint, get_modules_path())
 
 
-def _load_source_module(file_path: str, name_hint: str):
+def _load_source_module(
+    file_path: str,
+    name_hint: str,
+    *,
+    expected_digest: str | None = None,
+):
     """
     Load a Python source file using importlib-compatible sys.modules registration.
     """
-    return load_source_module(file_path, name_hint, get_modules_path())
+    return load_source_module(
+        file_path,
+        name_hint,
+        get_modules_path(),
+        expected_digest=expected_digest,
+    )
 
 _FilteredFastAPIApp = FilteredFastAPIApp
 
@@ -304,6 +324,7 @@ def _configured_browser_files(modules_root: str) -> Set[str]:
 
 
 def _browser_package_files(application: str) -> Set[str]:
+    validate_application_name(application)
     return browser_package_files(
         application,
         get_modules_path(),
@@ -313,6 +334,7 @@ def _browser_package_files(application: str) -> Set[str]:
 
 def create_appcode_pkg_in_memory(host, protocol, application, replay_client=None):
     """Generate an explicit browser-safe app package in memory."""
+    validate_application_name(application)
     return create_appcode_archive(
         host,
         protocol,
@@ -329,16 +351,13 @@ def create_appcode_pkg_in_memory(host, protocol, application, replay_client=None
 
 
 def _get_default_application() -> Optional[str]:
-    configured = os.getenv("PYTINCTURE_DEFAULT_APPLICATION", "").strip().strip("/")
+    configured = os.getenv("PYTINCTURE_DEFAULT_APPLICATION", "").strip()
     if not configured:
         return None
-    if (
-        configured in (".", "..")
-        or not all(char.isalnum() or char in "._-" for char in configured)
-    ):
-        raise RuntimeError(
-            "PYTINCTURE_DEFAULT_APPLICATION must be a single application name without a path"
-        )
+    try:
+        validate_application_name(configured)
+    except ValueError as exc:
+        raise RuntimeError("PYTINCTURE_DEFAULT_APPLICATION is invalid") from exc
     return configured
 
 
@@ -387,6 +406,25 @@ async def validation_exception_handler(request, exc):
         status_code=422,
         content={"detail": sanitized_validation_errors(exc.errors())},
     )
+
+
+@app.middleware("http")
+async def application_name_middleware(request: Request, call_next):
+    """Apply one application identifier policy to every matching route."""
+    for route in request.app.router.routes:
+        match, child_scope = route.matches(request.scope)
+        if match is not Match.FULL:
+            continue
+        application = child_scope.get("path_params", {}).get("application")
+        if application is not None:
+            try:
+                validate_application_name(application)
+            except ValueError:
+                return JSONResponse(
+                    {"detail": "Application not found"}, status_code=404
+                )
+        break
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -565,7 +603,7 @@ def build_bff_registry(modules_root: Optional[str] = None) -> Dict[tuple[str, st
     )
 
 
-BFF_REGISTRY_ROOT = os.path.abspath(MODULE_PATH)
+BFF_REGISTRY_ROOT = os.path.realpath(MODULE_PATH)
 _BFF_REGISTRY_STATE = BFFRegistry(
     BFF_REGISTRY_ROOT,
     get_bff_manifest,
@@ -866,10 +904,10 @@ async def _authenticate_local_user(
 
 
 def _normalize_file_identifier(value: str) -> str:
-    normalized = (value or "").replace("\\", "/")
-    normalized = normalized.strip("/")
-    normalized = normalized.lstrip("./")
-    return normalized
+    try:
+        return normalize_relative_path(value)
+    except UnsafePath:
+        return ""
 
 
 def _canonical_bff_identifier(value: str) -> str:
@@ -924,7 +962,8 @@ def _assert_application_audience(user: Any, application: Optional[str]) -> None:
 
 def _application_bff_identifiers(application: str, modules_root: str) -> Set[str]:
     """Return exact modules delivered to one browser application."""
-    root = os.path.abspath(modules_root)
+    validate_application_name(application)
+    root = os.path.realpath(modules_root)
     try:
         files = _browser_package_files(application)
     except HTTPException:
@@ -1474,6 +1513,10 @@ async def issue_bff_replay_tokens(
 
 @app.get("/{application}/appcode/appcode.pyt", operation_id="downloadAppcodePackage", responses={200: {"description": "StreamingResponse (ZIP file stream, media_type=\"application/zip\")"}, 401: {"description": "HTTPException (if authentication fails when required)"}})
 def download_appcode(request: Request, application: str, user=Depends(require_authenticated_user)):
+    try:
+        validate_application_name(application)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Application not found")
     _assert_application_audience(user, application)
     replay_client = _register_bff_replay_client(request, user)
     if not APPCODE_BUILD_GATE.acquire(timeout=APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS):
@@ -1560,24 +1603,32 @@ def _application_widget_wheel_allowed(
     methods=["GET", "HEAD"],
     include_in_schema=False,
 )
-async def public_app_asset(application: str, asset_path: str):
-    normalized = asset_path.replace("\\", "/").strip("/")
-    if not normalized or any(part in {"", ".", ".."} or part.startswith(".") for part in normalized.split("/")):
+async def public_app_asset(request: Request, application: str, asset_path: str):
+    try:
+        validate_application_name(application)
+        normalized = normalize_relative_path(asset_path)
+    except (UnsafePath, ValueError):
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if any(part.startswith(".") for part in normalized.split("/")):
         raise HTTPException(status_code=404, detail="Asset not found")
     modules_root = os.path.realpath(get_modules_path())
-    absolute_path = os.path.realpath(os.path.join(modules_root, *normalized.split("/")))
-    try:
-        within_root = os.path.commonpath((modules_root, absolute_path)) == modules_root
-    except ValueError:
-        within_root = False
     asset_allowed = _public_asset_allowed(normalized) or _application_widget_wheel_allowed(
         application,
         normalized,
         modules_root,
     )
-    if not within_root or not os.path.isfile(absolute_path) or not asset_allowed:
+    if not asset_allowed:
         raise HTTPException(status_code=404, detail="Asset not found")
-    return FileResponse(absolute_path)
+    try:
+        secure_file = read_contained_file(modules_root, normalized)
+    except UnsafePath:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    media_type = mimetypes.guess_type(secure_file.path)[0] or "application/octet-stream"
+    return Response(
+        content=b"" if request.method == "HEAD" else secure_file.content,
+        media_type=media_type,
+        headers={"Content-Length": str(secure_file.size)},
+    )
 
 @app.get("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="getApplicationClassCall", response_model=Any)
 @app.post("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="postApplicationClassCall", response_model=Any)
@@ -1597,7 +1648,12 @@ async def class_call(
     application: Optional[str] = None,
     _admission=Depends(_admit_bff_call),
 ):
-    
+    if application is not None:
+        try:
+            validate_application_name(application)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Application not found")
+
     # Determine if this call is allowed without auth.
     normalized_identifier = _normalize_file_identifier(file_path)
     if not normalized_identifier:
@@ -1651,17 +1707,12 @@ async def class_call(
     if os.path.basename(fs_relative).startswith("."):
         raise HTTPException(status_code=400, detail="Invalid file name")
 
-    module_file_path = os.path.abspath(os.path.join(modules_root, fs_relative))
-
     try:
-        common_root = os.path.commonpath([module_file_path, modules_root])
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid module path")
-
-    if common_root != modules_root:
-        raise HTTPException(status_code=400, detail="Invalid file path")
-
-    if not os.path.isfile(module_file_path):
+        module_file_path = resolve_contained_path(
+            modules_root,
+            request_identifier_with_ext,
+        )
+    except UnsafePath:
         raise HTTPException(status_code=404, detail=f"File {request_identifier_with_ext} not found in appcode folder")
 
     operation = await _run_bff_thread_stage(
@@ -1674,6 +1725,8 @@ async def class_call(
     )
     if operation is None:
         raise HTTPException(status_code=404, detail="BFF operation not exported")
+    module_file_path = str(operation.get("_source_path") or module_file_path)
+    source_digest = str(operation.get("_source_digest") or "")
     structured_log(
         logger,
         logging.INFO,
@@ -1740,7 +1793,11 @@ async def class_call(
                 raise HTTPException(status_code=504, detail="BFF policy timed out") from exc
 
     def prepare_call():
-        module = _load_source_module(module_file_path, class_name)
+        module = _load_source_module(
+            module_file_path,
+            class_name,
+            expected_digest=source_digest or None,
+        )
         cls = getattr(module, class_name)
         instance = cls(_user=user)
         return getattr(instance, function_name)
@@ -3398,6 +3455,11 @@ async def main_app_route(response: Response, application: str, request: Request)
     2) If not, store this path in session, redirect to /login.
     3) If yes, serve the index.html with the relevant widgetset replaced.
     """
+    try:
+        validate_application_name(application)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Application not found")
+
     # Check session
     try:
         user_session = require_auth(request)
@@ -3427,6 +3489,12 @@ async def main_app_route(response: Response, application: str, request: Request)
 
     # Already logged in, proceed normally
     appcode_folder = get_modules_path()
+    try:
+        secure_entrypoint = read_contained_file(
+            appcode_folder, f"{application}.py"
+        )
+    except UnsafePath:
+        raise HTTPException(status_code=404, detail="Application not found")
     widgetset = get_widgetset(application, appcode_folder)
     safe_application = escape(application)
     request_uuid = FRONTEND_INSTANCE_UUID
@@ -3436,28 +3504,32 @@ async def main_app_route(response: Response, application: str, request: Request)
     index_html = index_html.replace("***APPLICATION***", safe_application)
     
     # Find the proper entrypoint class (MainWindow subclass)
-    app_file_path = f"{appcode_folder}/{application}.py"
-    if os.path.exists(app_file_path):
-        main_window_class = find_main_window_subclass(app_file_path)
-        if main_window_class:
-            # Use the discovered MainWindow subclass name as the entrypoint
-            index_html = index_html.replace("***ENTRYPOINT***", main_window_class)
-        else:
-            # If no MainWindow subclass is found, fallback to using application name
-            index_html = index_html.replace("***ENTRYPOINT***", safe_application)
+    app_file_path = secure_entrypoint.path
+    main_window_class = find_main_window_subclass(
+        app_file_path,
+        expected_digest=secure_entrypoint.digest,
+    )
+    if main_window_class:
+        # Use the discovered MainWindow subclass name as the entrypoint
+        index_html = index_html.replace("***ENTRYPOINT***", main_window_class)
     else:
-        # If file doesn't exist, just use the application name as-is
+        # If no MainWindow subclass is found, fallback to using application name
         index_html = index_html.replace("***ENTRYPOINT***", safe_application)
     
     loading_title = application
     favicon_markup = ""
-    if os.path.exists(app_file_path):
-        loading_title = find_app_loading_title(app_file_path, application)
-        favicon_markup = build_app_favicon_markup(
-            application,
-            app_file_path,
-            request_uuid=request_uuid,
-        )
+    entrypoint_source = decode_python_source(secure_entrypoint.content)
+    loading_title = find_app_loading_title(
+        app_file_path,
+        application,
+        source_code=entrypoint_source,
+    )
+    favicon_markup = build_app_favicon_markup(
+        application,
+        app_file_path,
+        request_uuid=request_uuid,
+        source_code=entrypoint_source,
+    )
     index_html = index_html.replace("***LOADING_TITLE***", escape(loading_title))
     index_html = index_html.replace("***FAVICON_LINK***", favicon_markup)
     index_html = index_html.replace("***REQUEST_UUID***", request_uuid)
@@ -3471,21 +3543,33 @@ async def main_app_route(response: Response, application: str, request: Request)
         },
     )
 
-def find_main_window_subclass(file_path):
+def find_main_window_subclass(file_path, *, expected_digest=None):
     """
     Scans a Python file for a class that subclasses MainWindow.
     Returns the name of the first such class found, or None if no match.
     """
-    return _find_main_window(file_path, _load_source_module)
+    return _find_main_window(
+        file_path,
+        lambda path, hint: _load_source_module(
+            path, hint, expected_digest=expected_digest
+        ),
+    )
 
-def _find_app_string_setting(file_path, assignment_names, config_keys):
+def _find_app_string_setting(
+    file_path, assignment_names, config_keys, *, source_code=None
+):
     """
     Read a string setting from app source without importing the application.
     """
-    return find_app_string_setting(file_path, assignment_names, config_keys)
+    return find_app_string_setting(
+        file_path,
+        assignment_names,
+        config_keys,
+        source_code=source_code,
+    )
 
 
-def find_app_loading_title(file_path, default_title):
+def find_app_loading_title(file_path, default_title, *, source_code=None):
     """
     Read APP_TITLE, APP_LOADING_TITLE, or the matching APP_CONFIG value.
     """
@@ -3493,6 +3577,7 @@ def find_app_loading_title(file_path, default_title):
         file_path,
         assignment_names=("APP_TITLE", "APP_LOADING_TITLE"),
         config_keys=("title", "loading_title"),
+        source_code=source_code,
     ) or default_title
 
 
@@ -3500,20 +3585,21 @@ def _normalize_app_asset_path(value: Optional[str]) -> Optional[str]:
     return normalize_app_asset_path(value)
 
 
-def _find_explicit_app_favicon(file_path) -> Optional[str]:
+def _find_explicit_app_favicon(file_path, *, source_code=None) -> Optional[str]:
     configured = _find_app_string_setting(
         file_path,
         assignment_names=("APP_FAVICON",),
         config_keys=("favicon",),
+        source_code=source_code,
     )
     return _normalize_app_asset_path(configured)
 
 
-def find_app_favicon(file_path) -> Optional[str]:
+def find_app_favicon(file_path, *, source_code=None) -> Optional[str]:
     """
     Resolve an explicit favicon file/folder or a conventional favicon directory.
     """
-    return _find_app_favicon_metadata(file_path)
+    return _find_app_favicon_metadata(file_path, source_code=source_code)
 
 
 _FAVICON_MIME_TYPES = {
@@ -3558,17 +3644,11 @@ def _get_configured_favicon_directory(application: str) -> Optional[str]:
     if not root or not os.path.isdir(root):
         return None
 
-    if (
-        application not in ("", ".", "..")
-        and all(char.isalnum() or char in "._-" for char in application)
-    ):
-        application_folder = os.path.realpath(os.path.join(root, application))
-        try:
-            is_within_root = os.path.commonpath((root, application_folder)) == root
-        except ValueError:
-            is_within_root = False
-        if is_within_root and os.path.isdir(application_folder):
-            return application_folder
+    try:
+        validate_application_name(application)
+        return resolve_contained_path(root, application, require_file=False)
+    except (UnsafePath, ValueError):
+        pass
 
     return root
 
@@ -3582,15 +3662,20 @@ def _find_favicon_assets_in_directory(directory: str) -> List[str]:
     return assets
 
 
-def find_app_favicon_assets(file_path) -> List[str]:
+def find_app_favicon_assets(file_path, *, source_code=None) -> List[str]:
     """Return the declared favicon file or supported files in its directory."""
-    favicon_path = find_app_favicon(file_path)
+    favicon_path = find_app_favicon(file_path, source_code=source_code)
     if not favicon_path:
         return []
 
     app_root = os.path.dirname(os.fspath(file_path))
-    local_path = os.path.join(app_root, *favicon_path.split("/"))
-    if not os.path.isdir(local_path):
+    try:
+        local_path = resolve_contained_path(
+            app_root,
+            favicon_path,
+            require_file=False,
+        )
+    except UnsafePath:
         return [favicon_path]
 
     return [
@@ -3655,10 +3740,11 @@ def build_app_favicon_markup(
     file_path,
     *,
     request_uuid: Optional[str] = None,
+    source_code=None,
 ) -> str:
     """Generate browser favicon declarations for an application's assets."""
     configured_directory = None
-    if _find_explicit_app_favicon(file_path) is None:
+    if _find_explicit_app_favicon(file_path, source_code=source_code) is None:
         configured_directory = _get_configured_favicon_directory(application)
 
     if configured_directory is not None:
@@ -3679,7 +3765,9 @@ def build_app_favicon_markup(
 
     tags = [
         tag
-        for asset_path in find_app_favicon_assets(file_path)
+        for asset_path in find_app_favicon_assets(
+            file_path, source_code=source_code
+        )
         if (
             tag := _build_favicon_tag(
                 application,
@@ -3695,7 +3783,9 @@ def build_app_favicon_markup(
     "/{application}/favicon-assets/{asset_name}",
     include_in_schema=False,
 )
-async def configured_favicon_asset(application: str, asset_name: str):
+async def configured_favicon_asset(
+    request: Request, application: str, asset_name: str
+):
     """Serve a browser favicon asset from the launcher-configured directory."""
     if asset_name != os.path.basename(asset_name) or not _is_favicon_asset(asset_name):
         raise HTTPException(status_code=404, detail="Favicon asset not found")
@@ -3704,17 +3794,16 @@ async def configured_favicon_asset(application: str, asset_name: str):
     if favicon_directory is None:
         raise HTTPException(status_code=404, detail="Favicon asset not found")
 
-    asset_path = os.path.realpath(os.path.join(favicon_directory, asset_name))
     try:
-        is_within_directory = (
-            os.path.commonpath((favicon_directory, asset_path)) == favicon_directory
-        )
-    except ValueError:
-        is_within_directory = False
-
-    if not is_within_directory or not os.path.isfile(asset_path):
+        secure_file = read_contained_file(favicon_directory, asset_name)
+    except UnsafePath:
         raise HTTPException(status_code=404, detail="Favicon asset not found")
-    return FileResponse(asset_path)
+    media_type = mimetypes.guess_type(secure_file.path)[0] or "application/octet-stream"
+    return Response(
+        content=b"" if request.method == "HEAD" else secure_file.content,
+        media_type=media_type,
+        headers={"Content-Length": str(secure_file.size)},
+    )
 
 
 add_bff_docs_to_app(app)

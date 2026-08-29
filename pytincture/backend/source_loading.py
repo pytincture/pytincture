@@ -7,6 +7,12 @@ import re
 import sys
 from importlib.machinery import SourceFileLoader
 
+from pytincture.backend.safe_paths import (
+    canonical_root,
+    decode_python_source,
+    read_contained_file,
+)
+
 
 def build_dynamic_module_name(
     file_path: str,
@@ -32,10 +38,22 @@ def build_dynamic_module_name(
     return f"pytincture_dynamic_{sanitized_hint}_{sanitized_path}_{path_hash}"
 
 
-def load_source_module(file_path: str, name_hint: str, modules_root: str):
+def load_source_module(
+    file_path: str,
+    name_hint: str,
+    modules_root: str,
+    *,
+    expected_digest: str | None = None,
+):
     """Load source with import-compatible temporary ``sys.modules`` registration."""
-    module_name = build_dynamic_module_name(file_path, name_hint, modules_root)
-    loader = SourceFileLoader(module_name, file_path)
+    root = canonical_root(modules_root or os.getcwd())
+    relative_path = os.path.relpath(os.path.abspath(file_path), root).replace(os.sep, "/")
+    secure_file = read_contained_file(root, relative_path)
+    if expected_digest is not None and secure_file.digest != expected_digest:
+        raise ImportError("BFF source changed after registry discovery")
+
+    module_name = build_dynamic_module_name(secure_file.path, name_hint, root)
+    loader = SourceFileLoader(module_name, secure_file.path)
     spec = importlib.util.spec_from_loader(module_name, loader)
     if spec is None:
         raise ImportError(f"Unable to create import spec for {file_path}")
@@ -44,7 +62,8 @@ def load_source_module(file_path: str, name_hint: str, modules_root: str):
     previous_module = sys.modules.get(spec.name)
     sys.modules[spec.name] = module
     try:
-        loader.exec_module(module)
+        source = decode_python_source(secure_file.content)
+        exec(compile(source, secure_file.path, "exec"), module.__dict__)
     except Exception:
         if previous_module is None:
             sys.modules.pop(spec.name, None)

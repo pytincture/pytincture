@@ -92,6 +92,8 @@ def test_legacy_secret_key_is_an_environment_fallback(tmp_path):
     ("overrides", "message"),
     [
         ({"max_request_body_bytes": 0}, "max_request_body_bytes"),
+        ({"default_application": "bad-name"}, "Python identifier"),
+        ({"default_application": "classcall"}, "Python identifier"),
         ({"bff_max_queue": -1}, "bff_max_queue"),
         ({"password_hash_max_concurrency": 0}, "resource limits"),
         ({"saml_response_max_bytes": 0}, "saml_response_max_bytes"),

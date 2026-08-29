@@ -14,6 +14,15 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from pytincture.backend.safe_paths import (
+    UnsafePath,
+    canonical_root,
+    decode_python_source,
+    read_contained_file,
+    resolve_contained_path,
+    validate_application_name,
+)
+
 _EXCLUDED_DIRECTORIES = {
     "__pycache__",
     ".venv",
@@ -52,9 +61,15 @@ class AppcodeArchiveCache:
 def local_python_imports(file_path: str, modules_root: str) -> set[str]:
     """Return local Python files directly imported by a browser module."""
     try:
-        with open(file_path, encoding="utf-8") as source_file:
-            tree = ast.parse(source_file.read(), filename=file_path)
-    except (OSError, SyntaxError):
+        root = canonical_root(modules_root)
+        relative = os.path.relpath(file_path, root).replace(os.sep, "/")
+        source_file = read_contained_file(root, relative)
+        tree = ast.parse(
+            decode_python_source(source_file.content), filename=source_file.path
+        )
+    except UnsafePath:
+        raise
+    except (OSError, SyntaxError, UnicodeDecodeError):
         return set()
 
     discovered: set[str] = set()
@@ -70,16 +85,27 @@ def local_python_imports(file_path: str, modules_root: str) -> set[str]:
                 os.path.join(modules_root, f"{relative}.py"),
                 os.path.join(modules_root, relative, "__init__.py"),
             ):
-                if os.path.isfile(candidate):
-                    discovered.add(os.path.abspath(candidate))
+                candidate_relative = os.path.relpath(candidate, root).replace(os.sep, "/")
+                try:
+                    discovered.add(resolve_contained_path(root, candidate_relative))
+                except UnsafePath:
+                    if os.path.lexists(candidate):
+                        raise
+                    continue
     return discovered
 
 
-def _literal_module_metadata(file_path: str) -> tuple[str | None, str | None]:
+def _literal_module_metadata(
+    file_path: str,
+    modules_root: str,
+) -> tuple[str | None, str | None]:
     try:
-        with open(file_path, encoding="utf-8") as source_file:
-            tree = ast.parse(source_file.read(), filename=file_path)
-    except (OSError, SyntaxError):
+        relative = os.path.relpath(file_path, modules_root).replace(os.sep, "/")
+        source_file = read_contained_file(modules_root, relative)
+        tree = ast.parse(
+            decode_python_source(source_file.content), filename=source_file.path
+        )
+    except (OSError, SyntaxError, UnicodeDecodeError, UnsafePath):
         return None, None
     values: dict[str, str] = {}
     for node in tree.body:
@@ -102,14 +128,18 @@ def discover_widgetset(
     importer: Callable[[str], Any] = importlib.import_module,
 ) -> str:
     """Discover widget metadata while avoiding imports for local application modules."""
-    sanitized_application = os.path.basename(application.replace("\\", "/"))
-    if sanitized_application in ("", ".", ".."):
-        return ""
-    app_file_path = os.path.join(modules_root, f"{sanitized_application}.py")
     try:
-        with open(app_file_path, encoding="utf-8") as source_file:
-            tree = ast.parse(source_file.read(), filename=app_file_path)
-    except (OSError, SyntaxError):
+        sanitized_application = validate_application_name(application)
+    except ValueError:
+        return ""
+    root = canonical_root(modules_root)
+    try:
+        source_file = read_contained_file(root, f"{sanitized_application}.py")
+        app_file_path = source_file.path
+        tree = ast.parse(
+            decode_python_source(source_file.content), filename=app_file_path
+        )
+    except (OSError, SyntaxError, UnicodeDecodeError, UnsafePath):
         return ""
 
     imports: list[str] = []
@@ -121,16 +151,24 @@ def discover_widgetset(
 
     for module_name in imports:
         local_candidates = (
-            os.path.join(modules_root, f"{module_name}.py"),
-            os.path.join(modules_root, module_name, "__init__.py"),
+            os.path.join(root, f"{module_name}.py"),
+            os.path.join(root, module_name, "__init__.py"),
         )
+        has_local_candidate = any(os.path.lexists(path) for path in local_candidates)
         for candidate in local_candidates:
+            try:
+                candidate = resolve_contained_path(
+                    root,
+                    os.path.relpath(candidate, root).replace(os.sep, "/"),
+                )
+            except UnsafePath:
+                continue
             if os.path.isfile(candidate):
-                widgetset, version = _literal_module_metadata(candidate)
+                widgetset, version = _literal_module_metadata(candidate, root)
                 if widgetset:
                     return widgetset + (f"=={version}" if version else "")
                 break
-        else:
+        if not has_local_candidate:
             try:
                 module = importer(module_name)
             except ModuleNotFoundError:
@@ -148,6 +186,7 @@ def configured_browser_files(
     max_files: int | None = None,
 ) -> set[str]:
     """Resolve explicitly configured browser-file globs inside ``modules_root``."""
+    modules_root = canonical_root(modules_root)
     raw = (
         os.getenv("PYTINCTURE_BROWSER_FILES", "")
         if raw_patterns is None
@@ -173,6 +212,7 @@ def configured_browser_files(
             directory
             for directory in dirs
             if not directory.startswith(".") and directory not in _EXCLUDED_DIRECTORIES
+            and not os.path.islink(os.path.join(root, directory))
         ]
         for filename in files:
             scanned_files += 1
@@ -182,6 +222,8 @@ def configured_browser_files(
                     detail="Appcode configured-file scan limit exceeded",
                 )
             absolute = os.path.abspath(os.path.join(root, filename))
+            if os.path.islink(absolute):
+                continue
             relative = os.path.relpath(absolute, modules_root).replace(os.sep, "/")
             if any(fnmatch.fnmatch(relative, pattern) for pattern in patterns):
                 selected.add(absolute)
@@ -200,15 +242,23 @@ def browser_package_files(
     max_files: int | None = None,
 ) -> set[str]:
     """Return the transitive local imports and explicit files for an app."""
-    root = os.path.abspath(modules_root)
-    entrypoint = os.path.abspath(os.path.join(root, f"{application}.py"))
-    if os.path.commonpath((root, entrypoint)) != root or not os.path.isfile(entrypoint):
+    try:
+        application = validate_application_name(application)
+        root = canonical_root(modules_root)
+        entrypoint = resolve_contained_path(root, f"{application}.py")
+    except (UnsafePath, ValueError):
         raise HTTPException(status_code=404, detail="Application entrypoint not found")
 
     selected = {entrypoint}
     pending = [entrypoint]
     while pending:
-        for imported in local_python_imports(pending.pop(), root):
+        try:
+            imported_files = local_python_imports(pending.pop(), root)
+        except UnsafePath as exc:
+            raise HTTPException(
+                status_code=404, detail="Application import path is unsafe"
+            ) from exc
+        for imported in imported_files:
             if imported not in selected:
                 selected.add(imported)
                 if max_files is not None and len(selected) > max_files:
@@ -218,8 +268,15 @@ def browser_package_files(
         parent = os.path.dirname(python_file)
         while parent != root and os.path.commonpath((root, parent)) == root:
             package_init = os.path.join(parent, "__init__.py")
-            if os.path.isfile(package_init):
-                selected.add(os.path.abspath(package_init))
+            try:
+                selected.add(
+                    resolve_contained_path(
+                        root,
+                        os.path.relpath(package_init, root).replace(os.sep, "/"),
+                    )
+                )
+            except UnsafePath:
+                pass
             parent = os.path.dirname(parent)
     selected |= configured_browser_files(root, raw_patterns, max_files=max_files)
     if max_files is not None and len(selected) > max_files:
@@ -242,20 +299,42 @@ def create_appcode_archive(
     cache: AppcodeArchiveCache | None = None,
 ) -> io.BytesIO:
     """Build an explicit browser-safe application archive in memory."""
-    root = os.path.abspath(modules_root)
+    try:
+        application = validate_application_name(application)
+        root = canonical_root(modules_root)
+    except (UnsafePath, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="Application entrypoint not found") from exc
     selected = sorted(
         browser_package_files(application, root, raw_patterns, max_files=max_files)
     )
-    fingerprint: list[tuple[str, int, int]] = []
+    fingerprint: list[tuple[str, int, int, str]] = []
+    secure_files = []
     aggregate_bytes = 0
     for file_path in selected:
-        stat = os.stat(file_path)
-        if stat.st_size > max_file_bytes:
-            raise HTTPException(status_code=413, detail="Appcode file-size limit exceeded")
-        aggregate_bytes += stat.st_size
+        relative_path = os.path.relpath(file_path, root).replace(os.sep, "/")
+        try:
+            secure_file = read_contained_file(
+                root, relative_path, max_bytes=max_file_bytes
+            )
+        except UnsafePath as exc:
+            detail = (
+                "Appcode file-size limit exceeded"
+                if "size limit" in str(exc)
+                else "Appcode file is unsafe"
+            )
+            raise HTTPException(status_code=413, detail=detail) from exc
+        aggregate_bytes += secure_file.size
         if aggregate_bytes > max_total_bytes:
             raise HTTPException(status_code=413, detail="Appcode aggregate-size limit exceeded")
-        fingerprint.append((os.path.relpath(file_path, root), stat.st_size, stat.st_mtime_ns))
+        fingerprint.append(
+            (
+                secure_file.relative_path,
+                secure_file.size,
+                secure_file.modified_ns,
+                secure_file.digest,
+            )
+        )
+        secure_files.append(secure_file)
 
     cache_key = (
         application,
@@ -272,20 +351,20 @@ def create_appcode_archive(
     in_memory_zip = io.BytesIO()
     with zipfile.ZipFile(in_memory_zip, "w", zipfile.ZIP_DEFLATED) as zip_file:
         output_bytes = 0
-        for file_path in selected:
-            arcname = os.path.relpath(file_path, root).replace(os.sep, "/")
-            if file_path.endswith(".py"):
+        for secure_file in secure_files:
+            arcname = secure_file.relative_path
+            if secure_file.path.endswith(".py"):
                 file_contents = parser(
-                    file_path,
+                    secure_file.path,
                     host,
                     protocol,
                     application=application,
                     replay_client=replay_client,
+                    source_code=decode_python_source(secure_file.content),
                 )
                 payload = (file_contents or "").encode("utf-8")
             else:
-                with open(file_path, "rb") as source_file:
-                    payload = source_file.read(max_file_bytes + 1)
+                payload = secure_file.content
             if len(payload) > max_file_bytes:
                 raise HTTPException(status_code=413, detail="Appcode generated file-size limit exceeded")
             output_bytes += len(payload)
