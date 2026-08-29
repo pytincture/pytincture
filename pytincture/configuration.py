@@ -67,6 +67,14 @@ class PytinctureConfig:
     cors_allowed_origins: tuple[str, ...] = _setting(
         (), "CORS_ALLOWED_ORIGINS", "Allowed browser origins."
     )
+    allowed_hosts: tuple[str, ...] = _setting(
+        (), "PYTINCTURE_ALLOWED_HOSTS", "Allowed HTTP Host header names."
+    )
+    canonical_origin: Optional[str] = _setting(
+        None,
+        "PYTINCTURE_CANONICAL_ORIGIN",
+        "Canonical external HTTP(S) origin for authentication callbacks.",
+    )
     enable_user_login: bool = _setting(False, "ENABLE_USER_LOGIN", "Enable local user login.")
     enable_dev_email_login: bool = _setting(
         False, "ENABLE_DEV_EMAIL_LOGIN", "Enable loopback-only development email login."
@@ -158,6 +166,7 @@ class PytinctureConfig:
         )
         for name in (
             "cors_allowed_origins",
+            "allowed_hosts",
             "previous_session_secrets",
             "mcp_exposed_operations",
         ):
@@ -266,6 +275,46 @@ class PytinctureConfig:
                 raise ValueError(f"invalid CORS origin: {origin}")
         if "*" in self.cors_allowed_origins:
             raise ValueError("cors_allowed_origins cannot use '*' with credentialed requests")
+        for host in self.allowed_hosts:
+            if (
+                not host
+                or host == "*"
+                or "/" in host
+                or "://" in host
+                or "*" in host[1:]
+                or (host.startswith("*") and host != "*" and not host.startswith("*."))
+            ):
+                raise ValueError(f"invalid allowed host: {host}")
+        if self.canonical_origin is not None:
+            origin = self.canonical_origin.strip().rstrip("/")
+            parsed_origin = urlparse(origin)
+            if (
+                parsed_origin.scheme not in {"http", "https"}
+                or not parsed_origin.netloc
+                or not parsed_origin.hostname
+                or parsed_origin.username is not None
+                or parsed_origin.password is not None
+                or parsed_origin.path
+                or parsed_origin.params
+                or parsed_origin.query
+                or parsed_origin.fragment
+            ):
+                raise ValueError("canonical_origin must be an HTTP(S) origin without a path")
+            try:
+                parsed_origin.port
+            except ValueError as exc:
+                raise ValueError("canonical_origin contains an invalid port") from exc
+            object.__setattr__(self, "canonical_origin", origin)
+            canonical_host = parsed_origin.hostname or ""
+            if self.allowed_hosts and not any(
+                canonical_host == pattern
+                or (
+                    pattern.startswith("*.")
+                    and canonical_host.endswith(pattern[1:])
+                )
+                for pattern in self.allowed_hosts
+            ):
+                raise ValueError("canonical_origin host must be included in allowed_hosts")
         normalized_log_level = self.log_level.strip().upper()
         if normalized_log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError("log_level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
@@ -290,7 +339,10 @@ class PytinctureConfig:
             "bff_replay_token_ttl_seconds",
         }
         float_fields = {"bff_call_timeout_seconds", "bff_stream_max_seconds"}
-        tuple_fields = {"cors_allowed_origins", "previous_session_secrets", "mcp_exposed_operations"}
+        tuple_fields = {
+            "cors_allowed_origins", "allowed_hosts", "previous_session_secrets",
+            "mcp_exposed_operations",
+        }
         for definition in fields(cls):
             env_name = definition.metadata.get("env")
             if not env_name or env_name not in source:
@@ -342,7 +394,7 @@ class PytinctureConfig:
             elif isinstance(value, tuple):
                 result[env_name] = (
                     ",".join(value)
-                    if definition.name == "cors_allowed_origins"
+                    if definition.name in {"cors_allowed_origins", "allowed_hosts"}
                     else json.dumps(list(value))
                 )
             else:

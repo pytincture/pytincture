@@ -1093,20 +1093,43 @@ def test_download_appcode(fresh_client, monkeypatch, tmp_path):
     # Create a dummy modules folder with a file.
     dummy_dir = tmp_path / "dummy_modules"
     dummy_dir.mkdir()
-    (dummy_dir / "demoapp.py").write_text("class Demo: pass\n")
+    (dummy_dir / "demoapp.py").write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class Demo:
+            def ping(self):
+                return "pong"
+    """))
     (dummy_dir / "dummy.txt").write_text("dummy content")
     monkeypatch.setenv("MODULES_PATH", str(dummy_dir))
     # Override require_auth to simulate a valid user.
     monkeypatch.setattr(backend_app, "require_auth", lambda req: {"email": "dummy@example.com"})
     application_name = "demoapp"
-    response = fresh_client.get(f"/{application_name}/appcode/appcode.pyt")
+    hostile_host = "host-with-'quote.example"
+    response = fresh_client.get(
+        f"/{application_name}/appcode/appcode.pyt",
+        headers={
+            "Host": hostile_host,
+            "X-Forwarded-Host": hostile_host,
+            "X-Forwarded-Proto": "protocol-with-'quote",
+        },
+    )
     assert response.status_code == 200
     # Verify content type and disposition.
     assert response.headers.get("content-type") == "application/zip"
     cd = response.headers.get("content-disposition", "")
     assert "filename=appcode.pyt" in cd
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["vary"] == "Cookie, Authorization"
     # Check that the content appears to be a zip archive (starts with PK).
     assert response.content.startswith(b"PK")
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        generated_app = archive.read("demoapp.py").decode("utf-8")
+    assert hostile_host not in generated_app
+    assert "protocol-with-" not in generated_app
+    assert "url = '/classcall/demoapp.py/Demo/ping'" in generated_app
+    compile(generated_app, "demoapp.py", "exec")
 
 def test_frontend_runtime_cache_busts_packaged_app_fetch(fresh_client):
     """

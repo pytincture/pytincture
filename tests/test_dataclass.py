@@ -184,7 +184,7 @@ def test_generate_stub_classes_returns_stub(tmp_path, monkeypatch):
     assert "def foo(self, *args, **kwargs):" in stub
     assert "response = self.fetch_sync(url, payload, 'POST')" in stub
     assert "async def foo(self, *args, **kwargs):" not in stub
-    expected_url = f"https://example.com/classcall/service.py/MyService/foo"
+    expected_url = "/classcall/service.py/MyService/foo"
     assert expected_url in stub
     # Also check that required imports are added.
     assert "import json" in stub
@@ -283,7 +283,7 @@ def test_generate_stub_classes_nested_path(tmp_path, monkeypatch):
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
 
     stub = generate_stub_classes(str(file_path), "example.com", "https")
-    expected_url = "https://example.com/classcall/api/v1/service.py/NestedService/ping"
+    expected_url = "/classcall/api/v1/service.py/NestedService/ping"
     assert expected_url in stub
 
 
@@ -328,10 +328,37 @@ def test_generated_stub_injects_opaque_replay_state_client(tmp_path, monkeypatch
 
     assert "_pytincture_replay_enabled = True" in stub
     assert "_pytincture_replay_capsule = 'opaque-capsule'" in stub
-    assert "https://example.com/_pytincture/state" in stub
+    assert "'/_pytincture/state'" in stub
     assert "X-Pytincture-BFF-Token" in stub
     assert "X-Pytincture-Client" in stub
     assert "_decode_pytincture_state" in stub
+    compile(stub, str(file_path), "exec")
+
+
+def test_generated_stub_never_embeds_request_origin(tmp_path, monkeypatch):
+    file_path = tmp_path / "service.py"
+    file_path.write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class Service:
+            def read(self):
+                return True
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    hostile_host = "host-with-'quote.example"
+
+    stub = generate_stub_classes(
+        str(file_path),
+        hostile_host,
+        "protocol-with-'quote",
+        replay_client={"capsule": "opaque", "key": bytes(range(32))},
+    )
+
+    assert hostile_host not in stub
+    assert "protocol-with-" not in stub
+    assert "url = '/classcall/service.py/Service/read'" in stub
+    assert "'/_pytincture/state'" in stub
     compile(stub, str(file_path), "exec")
 
 def test_get_parsed_output_returns_stub(tmp_path):

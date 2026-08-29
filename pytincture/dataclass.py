@@ -601,6 +601,9 @@ def get_imports_used_in_class(file_path, class_name):
     return import_lines, imports_used
 
 def generate_stub_classes(file_path, return_url, return_protocol, replay_client=None):
+    # Keep these parameters for parser compatibility, but never turn an HTTP
+    # request's Host or forwarded headers into executable browser Python.
+    del return_url, return_protocol
     with open(file_path, 'r') as file:
         code = file.read()
     
@@ -615,7 +618,7 @@ def generate_stub_classes(file_path, return_url, return_protocol, replay_client=
     replay_capsule = str((replay_client or {}).get("capsule", ""))
     replay_key = tuple((replay_client or {}).get("key", b""))
     replay_low_watermark = int(get_runtime_env("BFF_REPLAY_TOKEN_LOW_WATERMARK", "3"))
-    replay_state_url = f"{return_protocol}://{return_url}/_pytincture/state"
+    replay_state_url = "/_pytincture/state"
 
     decorated_class_nodes = [
         node for node in class_nodes
@@ -842,9 +845,10 @@ def generate_stub_classes(file_path, return_url, return_protocol, replay_client=
                     request_method = declared_methods[0]
                     if is_streaming:
                         stub_class_code += f"    async def {node.name}(self, *args, **kwargs):\n"
-                        stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_identifier}/{class_name}/{node.name}'\n"
+                        call_url = f"/classcall/{file_identifier}/{class_name}/{node.name}"
+                        stub_class_code += f"        url = {call_url!r}\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
-                        stub_class_code += f"        stream_iter = self.fetch_stream(url, payload, '{request_method}')\n"
+                        stub_class_code += f"        stream_iter = self.fetch_stream(url, payload, {request_method!r})\n"
                         if stream_config.get("raw"):
                             stub_class_code +=  "        async for chunk in stream_iter:\n"
                             stub_class_code +=  "            if chunk:\n"
@@ -865,15 +869,17 @@ def generate_stub_classes(file_path, return_url, return_protocol, replay_client=
                             stub_class_code +=  "            yield json.loads(buffer)\n"
                     elif is_async_method:
                         stub_class_code += f"    async def {node.name}(self, *args, **kwargs):\n"
-                        stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_identifier}/{class_name}/{node.name}'\n"
+                        call_url = f"/classcall/{file_identifier}/{class_name}/{node.name}"
+                        stub_class_code += f"        url = {call_url!r}\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
-                        stub_class_code += f"        response = await self.fetch(url, payload, '{request_method}')\n"
+                        stub_class_code += f"        response = await self.fetch(url, payload, {request_method!r})\n"
                         stub_class_code +=  "        return json.loads(response)\n"
                     else:
                         stub_class_code += f"    def {node.name}(self, *args, **kwargs):\n"
-                        stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_identifier}/{class_name}/{node.name}'\n"
+                        call_url = f"/classcall/{file_identifier}/{class_name}/{node.name}"
+                        stub_class_code += f"        url = {call_url!r}\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
-                        stub_class_code += f"        response = self.fetch_sync(url, payload, '{request_method}')\n"
+                        stub_class_code += f"        response = self.fetch_sync(url, payload, {request_method!r})\n"
                         stub_class_code +=  "        return json.loads(response)\n"
                 elif isinstance(node, ast.Assign):
                     for target in node.targets:
@@ -881,7 +887,8 @@ def generate_stub_classes(file_path, return_url, return_protocol, replay_client=
                             property_name = target.id
                             stub_class_code +=  "    @property\n"
                             stub_class_code += f"    def {property_name}(self):\n"
-                            stub_class_code += f"        url = '{return_protocol}://{return_url}/classcall/{file_identifier}/{class_name}/{property_name}'\n"
+                            call_url = f"/classcall/{file_identifier}/{class_name}/{property_name}"
+                            stub_class_code += f"        url = {call_url!r}\n"
                             stub_class_code +=  "        response = self.fetch_sync(url)\n"
                             stub_class_code +=  "        return json.loads(response)\n"
     all_imports.add("import json")

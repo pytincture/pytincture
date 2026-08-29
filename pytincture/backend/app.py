@@ -45,6 +45,7 @@ from markupsafe import escape
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 from starlette.config import Config
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 # Pytincture
 from pytincture import __version__, get_modules_path
@@ -129,9 +130,32 @@ app = FastAPI(title="pyTincture API")
 logger = logging.getLogger("pytincture.security")
 _configured_log_level = os.getenv("PYTINCTURE_LOG_LEVEL", "INFO").strip().upper()
 logger.setLevel(getattr(logging, _configured_log_level, logging.INFO))
-# Preserve legacy launcher behavior unless explicitly configured. The typed
-# create_app() configuration defaults this to false for a secure ASGI default.
-TRUST_PROXY_HEADERS = os.getenv("PYTINCTURE_TRUST_PROXY_HEADERS", "true").lower() == "true"
+TRUST_PROXY_HEADERS = os.getenv("PYTINCTURE_TRUST_PROXY_HEADERS", "false").lower() == "true"
+CANONICAL_ORIGIN = os.getenv("PYTINCTURE_CANONICAL_ORIGIN", "").strip().rstrip("/")
+ALLOWED_HOSTS = tuple(
+    host.strip()
+    for host in os.getenv("PYTINCTURE_ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+)
+if CANONICAL_ORIGIN:
+    _canonical_parts = urlsplit(CANONICAL_ORIGIN)
+    if (
+        _canonical_parts.scheme not in {"http", "https"}
+        or not _canonical_parts.netloc
+        or not _canonical_parts.hostname
+        or _canonical_parts.username is not None
+        or _canonical_parts.password is not None
+        or _canonical_parts.path
+        or _canonical_parts.query
+        or _canonical_parts.fragment
+    ):
+        raise RuntimeError(
+            "PYTINCTURE_CANONICAL_ORIGIN must be an HTTP(S) origin without a path"
+        )
+    try:
+        _canonical_parts.port
+    except ValueError as exc:
+        raise RuntimeError("PYTINCTURE_CANONICAL_ORIGIN contains an invalid port") from exc
 # One cache namespace is shared by every browser served by this process. A
 # service restart creates a new value and invalidates the previous instance's
 # frontend assets without changing application URLs.
@@ -477,6 +501,13 @@ if allowed_origins:
     )
 else:
     logger.info("CORS middleware disabled; set CORS_ALLOWED_ORIGINS to enable it")
+
+if ALLOWED_HOSTS:
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=ALLOWED_HOSTS,
+        www_redirect=False,
+    )
 
 # Mount the frontend static files
 STATIC_PATH = os.path.join(os.path.dirname(__file__), "../frontend/")
@@ -979,6 +1010,8 @@ def require_authenticated_user(request: Request):
 
 
 def _request_origin(request: Request) -> str:
+    if CANONICAL_ORIGIN:
+        return CANONICAL_ORIGIN
     scheme = request.url.scheme
     host = request.headers.get("host", "")
     if TRUST_PROXY_HEADERS:
@@ -1198,22 +1231,21 @@ async def issue_bff_replay_tokens(
 
 @app.get("/{application}/appcode/appcode.pyt", operation_id="downloadAppcodePackage", responses={200: {"description": "StreamingResponse (ZIP file stream, media_type=\"application/zip\")"}, 401: {"description": "HTTPException (if authentication fails when required)"}})
 def download_appcode(request: Request, application: str, user=Depends(require_authenticated_user)):
-    host = request.headers["host"]
-    protocol = request.url.scheme
-    if TRUST_PROXY_HEADERS:
-        host = request.headers.get("x-forwarded-host", host).split(",", 1)[0]
-        protocol = request.headers.get("x-forwarded-proto", protocol).split(",", 1)[0]
     replay_client = _register_bff_replay_client(request, user)
     file_like = create_appcode_pkg_in_memory(
-        host,
-        protocol,
+        "",
+        "",
         application,
         replay_client=replay_client,
     )
     return StreamingResponse(
         file_like,
         media_type="application/zip",
-        headers={"Content-Disposition": "attachment; filename=appcode.pyt"}
+        headers={
+            "Content-Disposition": "attachment; filename=appcode.pyt",
+            "Cache-Control": "private, no-store",
+            "Vary": "Cookie, Authorization",
+        },
     )
 
 
@@ -1856,6 +1888,17 @@ def _extract_request_origin(request: Request) -> Dict[str, Any]:
     """
     Resolve protocol, host, and port taking reverse proxy headers into account.
     """
+    if CANONICAL_ORIGIN:
+        canonical = urlsplit(CANONICAL_ORIGIN)
+        port = canonical.port or (443 if canonical.scheme == "https" else 80)
+        return {
+            "protocol": canonical.scheme,
+            "host": canonical.hostname,
+            "host_with_port": canonical.netloc,
+            "port": port,
+            "base_url": CANONICAL_ORIGIN,
+        }
+
     protocol = request.url.scheme
     forwarded_host = None
     if TRUST_PROXY_HEADERS:
@@ -2433,12 +2476,7 @@ async def auth_google(request: Request, application: str):
     Redirect the user to Google's OAuth2 screen.
     """
 
-    host = request.headers["host"]
-    protocol = request.url.scheme
-    if TRUST_PROXY_HEADERS:
-        host = request.headers.get("x-forwarded-host", host).split(",", 1)[0]
-        protocol = request.headers.get("x-forwarded-proto", protocol).split(",", 1)[0]
-    redirect_uri = f"{protocol}://{host}/{application}/auth/google/callback"
+    redirect_uri = f"{_request_origin(request)}/{application}/auth/google/callback"
 
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
@@ -2487,12 +2525,7 @@ async def auth_microsoft(request: Request, application: str):
     if oauth is None or not ENABLE_MICROSOFT_AUTH:
         raise HTTPException(status_code=404, detail="Microsoft authentication not enabled")
 
-    host = request.headers["host"]
-    protocol = request.url.scheme
-    if TRUST_PROXY_HEADERS:
-        host = request.headers.get("x-forwarded-host", host).split(",", 1)[0]
-        protocol = request.headers.get("x-forwarded-proto", protocol).split(",", 1)[0]
-    redirect_uri = f"{protocol}://{host}/{application}/auth/microsoft/callback"
+    redirect_uri = f"{_request_origin(request)}/{application}/auth/microsoft/callback"
 
     return await oauth.microsoft.authorize_redirect(request, redirect_uri)
 
