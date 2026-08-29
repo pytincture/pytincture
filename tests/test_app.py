@@ -80,6 +80,13 @@ def override_env(monkeypatch):
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {})
     monkeypatch.setattr(backend_app, "AUTH_SESSION_REVOCATIONS", {})
     monkeypatch.setattr(backend_app, "BFF_REPLAY_TOKEN_STORE", {})
+    monkeypatch.setattr(
+        backend_app,
+        "SAML_TRANSACTION_STORE",
+        __import__(
+            "pytincture.backend.saml", fromlist=["InMemorySAMLTransactionStore"]
+        ).InMemorySAMLTransactionStore(),
+    )
     set_user_authenticator(None)
     ALLOWED_NOAUTH_CLASSCALLS.clear()
     yield
@@ -1444,11 +1451,8 @@ def test_saml_relay_state_is_signed_and_expires(monkeypatch):
     import pytincture.backend.app as backend_app
 
     payload = {
-        "version": 1,
-        "application": "demoapp",
-        "provider_id": "default",
-        "request_id": "ONELOGIN_request",
-        "return_to": "/demoapp",
+        "version": 2,
+        "transaction_id": "opaque-transaction-id",
     }
     token = backend_app._sign_saml_relay_state(payload)
     assert backend_app._load_saml_relay_state(token) == payload
@@ -1508,13 +1512,24 @@ def test_saml_login_embeds_replica_safe_relay_state(fresh_client, monkeypatch):
     assert response.status_code in (302, 307)
     query = parse_qs(urlsplit(response.headers["location"]).query)
     relay_state = backend_app._load_saml_relay_state(query["RelayState"][0])
-    assert relay_state == {
+    assert relay_state["version"] == 2
+    transaction = backend_app.SAML_TRANSACTION_STORE.peek(
+        relay_state["transaction_id"]
+    )
+    assert transaction == {
         "version": 1,
         "application": "demoapp",
         "provider_id": "default",
         "request_id": FakeSamlAuth.request_id,
+        "browser_binding": backend_app._saml_browser_binding(
+            fresh_client.cookies[backend_app._SAML_HANDSHAKE_COOKIE]
+        ),
         "return_to": "/demoapp/work",
     }
+    set_cookie = response.headers["set-cookie"].lower()
+    assert "httponly" in set_cookie
+    assert "secure" in set_cookie
+    assert "samesite=none" in set_cookie
 
 
 def test_saml_relay_state_replacement_resigns_authn_request():
@@ -1604,6 +1619,15 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
         def is_authenticated(self):
             return True
 
+        def get_last_response_in_response_to(self):
+            return "ONELOGIN_original_request"
+
+        def get_last_message_id(self):
+            return "ONELOGIN_response"
+
+        def get_last_assertion_id(self):
+            return "ONELOGIN_assertion"
+
         def get_nameid(self):
             return "person@example.com"
 
@@ -1635,12 +1659,28 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
         lambda request, application, provider=None, post_data=None: fake_saml_auth,
     )
 
+    browser_secret = "browser-bound-secret"
+    transaction_id = "opaque-transaction"
+    assert backend_app.SAML_TRANSACTION_STORE.create(
+        transaction_id,
+        {
+            "version": 1,
+            "application": "demoapp",
+            "provider_id": "default",
+            "request_id": "ONELOGIN_original_request",
+            "browser_binding": backend_app._saml_browser_binding(browser_secret),
+            "return_to": "/demoapp",
+        },
+        backend_app.SAML_RELAY_STATE_TTL_SECONDS,
+    )
+    fresh_client.cookies.set(
+        backend_app._SAML_HANDSHAKE_COOKIE,
+        browser_secret,
+        path="/demoapp/auth/saml",
+    )
     relay_state = backend_app._sign_saml_relay_state({
-        "version": 1,
-        "application": "demoapp",
-        "provider_id": "default",
-        "request_id": "ONELOGIN_original_request",
-        "return_to": "/demoapp",
+        "version": 2,
+        "transaction_id": transaction_id,
     })
     response = fresh_client.post(
         "/demoapp/auth/saml/acs",
@@ -1671,6 +1711,110 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
         headers=_csrf_headers(fresh_client),
     )
     assert bff_response.status_code == 200
+
+
+def test_saml_acs_rejects_relay_state_copied_to_another_browser(
+    fresh_client, monkeypatch
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", "")
+    transaction_id = "victim-transaction"
+    assert backend_app.SAML_TRANSACTION_STORE.create(
+        transaction_id,
+        {
+            "version": 1,
+            "application": "demoapp",
+            "provider_id": "default",
+            "request_id": "request-one",
+            "browser_binding": backend_app._saml_browser_binding("victim-secret"),
+            "return_to": "/demoapp",
+        },
+        60,
+    )
+    relay_state = backend_app._sign_saml_relay_state(
+        {"version": 2, "transaction_id": transaction_id}
+    )
+    # A second browser may have its own valid handshake cookie, but it must not
+    # be able to submit the victim browser's copied RelayState.
+    fresh_client.cookies.set(
+        backend_app._SAML_HANDSHAKE_COOKIE,
+        "attacker-secret",
+        path="/demoapp/auth/saml",
+    )
+    response = fresh_client.post(
+        "/demoapp/auth/saml/acs",
+        data={
+            "SAMLResponse": base64.b64encode(b"<Response/>").decode("ascii"),
+            "RelayState": relay_state,
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid or expired SAML login"}
+    assert backend_app.SAML_TRANSACTION_STORE.peek(transaction_id) is not None
+
+
+def test_saml_acs_requires_exact_in_response_to(fresh_client, monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    class FakeSamlAuth:
+        def process_response(self, request_id=None):
+            assert request_id == "request-one"
+
+        def get_errors(self):
+            return []
+
+        def is_authenticated(self):
+            return True
+
+        def get_last_response_in_response_to(self):
+            return "different-request"
+
+        def get_last_message_id(self):
+            return "response-one"
+
+        def get_last_assertion_id(self):
+            return "assertion-one"
+
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", "")
+    monkeypatch.setattr(
+        backend_app,
+        "_init_saml_auth",
+        lambda request, application, provider=None, post_data=None: FakeSamlAuth(),
+    )
+    browser_secret = "browser-secret"
+    transaction_id = "correlation-transaction"
+    record = {
+        "version": 1,
+        "application": "demoapp",
+        "provider_id": "default",
+        "request_id": "request-one",
+        "browser_binding": backend_app._saml_browser_binding(browser_secret),
+        "return_to": "/demoapp",
+    }
+    assert backend_app.SAML_TRANSACTION_STORE.create(transaction_id, record, 60)
+    fresh_client.cookies.set(
+        backend_app._SAML_HANDSHAKE_COOKIE,
+        browser_secret,
+        path="/demoapp/auth/saml",
+    )
+    relay_state = backend_app._sign_saml_relay_state(
+        {"version": 2, "transaction_id": transaction_id}
+    )
+    response = fresh_client.post(
+        "/demoapp/auth/saml/acs",
+        data={
+            "SAMLResponse": base64.b64encode(b"<Response/>").decode("ascii"),
+            "RelayState": relay_state,
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid SAML response correlation"}
+    assert backend_app.SAML_TRANSACTION_STORE.peek(transaction_id) == record
 
 
 def test_saml_acs_rejects_disallowed_transforms_before_toolkit_and_rate_limits(

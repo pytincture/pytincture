@@ -58,6 +58,7 @@ The contract test checks every row in this table against the dataclass model.
 | `saml_idp_entity_id` | `SAML_IDP_ENTITY_ID` | Default SAML identity-provider entity id. |
 | `saml_idp_sso_url` | `SAML_IDP_SSO_URL` | Default SAML identity-provider sign-in URL. |
 | `saml_idp_x509_cert` | `SAML_IDP_X509_CERT` | Default SAML identity-provider certificate. |
+| `saml_transaction_ttl_seconds` | `SAML_RELAY_STATE_TTL_SECONDS` | Maximum lifetime of a browser-bound one-time SAML transaction. |
 | `saml_response_max_bytes` | `SAML_RESPONSE_MAX_BYTES` | Maximum decoded SAML response size before signature processing. |
 | `saml_acs_rate_limit_attempts` | `SAML_ACS_RATE_LIMIT_ATTEMPTS` | Maximum SAML ACS attempts per peer in one window. |
 | `saml_acs_rate_limit_window_seconds` | `SAML_ACS_RATE_LIMIT_WINDOW_SECONDS` | SAML ACS rate-limit window in seconds. |
@@ -111,9 +112,8 @@ come from the deployment secret manager rather than committed files.
 | `SAML_LOGIN_LABEL` | Single-provider login button label. |
 | `SAML_LOGO_URL` | Single-provider login button image URL. |
 | `SAML_NAME_ATTRIBUTE` | Optional assertion attribute for display name. |
-| `SAML_RELAY_STATE_TTL_SECONDS` | Maximum signed RelayState age; default 600. |
 | `SAML_REQUESTED_AUTHN_CONTEXT` | Add RequestedAuthnContext; default false. |
-| `SAML_REQUEST_CACHE_TTL` | Compatibility request-cache lifetime. |
+| `SAML_REQUEST_CACHE_TTL` | Legacy fallback for the SAML transaction lifetime. |
 | `SAML_ROLE_ATTRIBUTE_KEYS` | Candidate assertion attributes containing roles. |
 | `SAML_SP_ASSERTION_CONSUMER_SERVICE_URL` | Service-provider ACS URL/template. |
 | `SAML_SP_ENTITY_ID` | Service-provider entity ID/template. |

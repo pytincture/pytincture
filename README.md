@@ -121,7 +121,7 @@ pip install ".[dev]"
 - AUTH_SESSION_MAX_AGE_SECONDS: Signed authentication cookie lifetime in seconds. Defaults to `28800` (8 hours).
 - AUTH_SESSION_HTTPS_ONLY: Require HTTPS for authentication and CSRF cookies. Defaults to `true`; loopback development login defaults it to `false` unless explicitly overridden.
 - AUTH_SESSION_SAME_SITE: Cookie SameSite policy: `lax`, `strict`, or `none`. Defaults to `lax`.
-- SAML_RELAY_STATE_TTL_SECONDS: Maximum SAML login handshake age in seconds. Defaults to `600` (10 minutes).
+- SAML_RELAY_STATE_TTL_SECONDS: Maximum browser-bound, one-time SAML login transaction age in seconds. Defaults to `600` (10 minutes).
 - SAML_DEFAULT_REDIRECT: Optional redirect path or URL template after SAML login (defaults to `/{application}` when unset).
    example: "/{application}"
 - SAML_SP_ENTITY_ID: Optional template for the SP entity ID (supports {application}, {base_url}, {host}); defaults to `/{application}/auth/saml/metadata`.

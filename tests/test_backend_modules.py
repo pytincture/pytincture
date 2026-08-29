@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import sys
+import threading
 from importlib.metadata import version
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from pytincture.backend.mcp import FilteredFastAPIApp, exposed_operation_ids
 from pytincture.backend.pages import find_app_string_setting, normalize_app_asset_path
 from pytincture.backend.saml import (
     ALLOWED_XML_SIGNATURE_TRANSFORMS,
+    InMemorySAMLTransactionStore,
+    RedisSAMLTransactionStore,
     SAMLProviderCatalog,
     SlidingWindowRateLimiter,
     allowed_roles,
@@ -298,6 +301,143 @@ def test_saml_mitigation_evidence_matches_the_enforced_runtime():
     assert "http://www.w3.org/TR/1999/REC-xslt-19991116" not in (
         ALLOWED_XML_SIGNATURE_TRANSFORMS
     )
+
+
+def test_saml_replay_mitigation_evidence_matches_the_enforced_runtime():
+    root = Path(__file__).resolve().parents[1]
+    evidence = json.loads(
+        (root / "security" / "saml-replay-mitigation.json").read_text()
+    )
+    assert evidence["status"] == "passed"
+    assert all(evidence["mitigations"].values())
+    assert (
+        "tests/test_backend_modules.py::test_redis_saml_transaction_is_atomic_across_workers"
+        in evidence["regression_tests"]
+    )
+
+
+def test_in_memory_saml_transaction_is_bound_expiring_and_single_use():
+    now = [100.0]
+    store = InMemorySAMLTransactionStore(clock=lambda: now[0])
+    record = {
+        "application": "demo",
+        "provider_id": "default",
+        "request_id": "request-one",
+        "browser_binding": "browser-one",
+    }
+    assert store.create("transaction", record, 10)
+    assert store.peek("transaction") == record
+    assert store.consume(
+        "transaction",
+        {**record, "browser_binding": "another-browser"},
+        "response-one",
+        "assertion-one",
+        10,
+    ) is None
+    assert store.consume(
+        "transaction", record, "response-one", "assertion-one", 10
+    ) == record
+    assert store.consume(
+        "transaction", record, "response-one", "assertion-one", 10
+    ) is None
+    assert store.create("assertion-replay", record, 10)
+    assert store.consume(
+        "assertion-replay", record, "response-two", "assertion-one", 10
+    ) is None
+    assert store.create("response-replay", record, 10)
+    assert store.consume(
+        "response-replay", record, "response-one", "assertion-two", 10
+    ) is None
+
+    assert store.create("expired", record, 10)
+    now[0] += 11
+    assert store.peek("expired") is None
+
+
+def test_in_memory_saml_transaction_rejects_concurrent_replay():
+    store = InMemorySAMLTransactionStore()
+    record = {
+        "application": "demo",
+        "provider_id": "default",
+        "request_id": "request-one",
+        "browser_binding": "browser-one",
+    }
+    assert store.create("transaction", record, 60)
+    barrier = threading.Barrier(3)
+    results = []
+
+    def consume():
+        barrier.wait()
+        results.append(
+            store.consume(
+                "transaction", record, "response-one", "assertion-one", 60
+            )
+        )
+
+    threads = [threading.Thread(target=consume) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    barrier.wait()
+    for thread in threads:
+        thread.join()
+    assert sum(result is not None for result in results) == 1
+
+
+def test_redis_saml_transaction_is_atomic_across_workers():
+    class FakeRedis:
+        def __init__(self):
+            self.values = {}
+            self.lock = threading.Lock()
+
+        def set(self, key, value, nx=None, ex=None):
+            with self.lock:
+                if nx and key in self.values:
+                    return False
+                self.values[key] = value
+                return True
+
+        def get(self, key):
+            with self.lock:
+                return self.values.get(key)
+
+        def eval(self, script, keys=None, args=None):
+            del script
+            with self.lock:
+                value = self.values.get(keys[0])
+                if value is None:
+                    return [0, "missing"]
+                record = json.loads(value)
+                expected = json.loads(args[0])
+                if any(str(record.get(key, "")) != str(item) for key, item in expected.items()):
+                    return [0, "mismatch"]
+                if keys[1] in self.values or keys[2] in self.values:
+                    return [0, "replay"]
+                del self.values[keys[0]]
+                self.values[keys[1]] = "1"
+                self.values[keys[2]] = "1"
+                return [1, value]
+
+        def ping(self):
+            return True
+
+    redis = FakeRedis()
+    first = RedisSAMLTransactionStore(redis_client=redis)
+    second = RedisSAMLTransactionStore(redis_client=redis)
+    record = {
+        "application": "demo",
+        "provider_id": "default",
+        "request_id": "request-one",
+        "browser_binding": "browser-one",
+    }
+    assert first.create("transaction", record, 60)
+    assert second.peek("transaction") == record
+    assert second.consume(
+        "transaction", record, "response-one", "assertion-one", 60
+    ) == record
+    assert first.consume(
+        "transaction", record, "response-one", "assertion-one", 60
+    ) is None
+    assert first.ping() is True
 
 
 def test_redis_store_accepts_an_injected_client():

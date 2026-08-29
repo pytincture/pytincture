@@ -2,6 +2,8 @@
 
 import base64
 import binascii
+import hashlib
+import hmac
 import json
 import re
 import threading
@@ -25,6 +27,194 @@ ALLOWED_XML_SIGNATURE_TRANSFORMS = frozenset(
     }
 )
 _FORBIDDEN_XML_DECLARATION = re.compile(br"<!\s*(?:DOCTYPE|ENTITY)\b", re.IGNORECASE)
+
+
+def _replay_marker(identifier: str) -> str:
+    if not isinstance(identifier, str) or not identifier:
+        raise ValueError("SAML response and assertion IDs are required")
+    return hashlib.sha256(identifier.encode("utf-8")).hexdigest()
+
+
+class InMemorySAMLTransactionStore:
+    """Thread-safe one-time SAML state for a single-worker deployment."""
+
+    def __init__(
+        self,
+        *,
+        clock=time.monotonic,
+        max_transactions: int = 10_000,
+        max_replay_markers: int = 20_000,
+    ):
+        if max_transactions <= 0 or max_replay_markers < 2:
+            raise ValueError("SAML store bounds must allow transactions and replay IDs")
+        self.clock = clock
+        self.max_transactions = max_transactions
+        self.max_replay_markers = max_replay_markers
+        self._transactions: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._replay_markers: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def _prune(self, now: float) -> None:
+        self._transactions = {
+            key: value for key, value in self._transactions.items() if value[0] > now
+        }
+        self._replay_markers = {
+            key: expires_at
+            for key, expires_at in self._replay_markers.items()
+            if expires_at > now
+        }
+
+    def create(self, transaction_id: str, record: dict[str, Any], ttl_seconds: int) -> bool:
+        now = self.clock()
+        with self._lock:
+            self._prune(now)
+            if transaction_id in self._transactions:
+                return False
+            if len(self._transactions) >= self.max_transactions:
+                del self._transactions[next(iter(self._transactions))]
+            self._transactions[transaction_id] = (
+                now + ttl_seconds,
+                dict(record),
+            )
+            return True
+
+    def peek(self, transaction_id: str) -> dict[str, Any] | None:
+        now = self.clock()
+        with self._lock:
+            self._prune(now)
+            stored = self._transactions.get(transaction_id)
+            return dict(stored[1]) if stored else None
+
+    def consume(
+        self,
+        transaction_id: str,
+        expected: dict[str, Any],
+        response_id: str,
+        assertion_id: str,
+        marker_ttl_seconds: int,
+    ) -> dict[str, Any] | None:
+        response_marker = f"response:{_replay_marker(response_id)}"
+        assertion_marker = f"assertion:{_replay_marker(assertion_id)}"
+        now = self.clock()
+        with self._lock:
+            self._prune(now)
+            stored = self._transactions.get(transaction_id)
+            if stored is None:
+                return None
+            record = stored[1]
+            if any(
+                not hmac.compare_digest(str(record.get(key, "")), str(value))
+                for key, value in expected.items()
+            ):
+                return None
+            if (
+                response_marker in self._replay_markers
+                or assertion_marker in self._replay_markers
+            ):
+                return None
+            del self._transactions[transaction_id]
+            expires_at = now + marker_ttl_seconds
+            while len(self._replay_markers) > self.max_replay_markers - 2:
+                del self._replay_markers[next(iter(self._replay_markers))]
+            self._replay_markers[response_marker] = expires_at
+            self._replay_markers[assertion_marker] = expires_at
+            return dict(record)
+
+
+class RedisSAMLTransactionStore:
+    """Redis-backed atomic SAML state shared by workers and replicas."""
+
+    _CONSUME_SCRIPT = """
+local value = redis.call('GET', KEYS[1])
+if not value then return {0, 'missing'} end
+local record = cjson.decode(value)
+local expected = cjson.decode(ARGV[1])
+for key, expected_value in pairs(expected) do
+    if tostring(record[key] or '') ~= tostring(expected_value) then
+        return {0, 'mismatch'}
+    end
+end
+if redis.call('EXISTS', KEYS[2]) == 1 or redis.call('EXISTS', KEYS[3]) == 1 then
+    return {0, 'replay'}
+end
+redis.call('DEL', KEYS[1])
+redis.call('SET', KEYS[2], '1', 'EX', ARGV[2])
+redis.call('SET', KEYS[3], '1', 'EX', ARGV[2])
+return {1, value}
+"""
+
+    def __init__(
+        self,
+        redis_url: str = "",
+        redis_token: str = "",
+        *,
+        redis_client: Any = None,
+        key_prefix: str = "saml-handshake:",
+    ):
+        if redis_client is None:
+            try:
+                from upstash_redis import Redis
+            except ImportError as exc:  # pragma: no cover - guarded by redis extra
+                raise RuntimeError(
+                    "Shared SAML transactions require pytincture[redis]"
+                ) from exc
+            redis_client = Redis(url=redis_url, token=redis_token)
+        self._redis = redis_client
+        self._prefix = key_prefix
+
+    def _transaction_key(self, transaction_id: str) -> str:
+        return f"{self._prefix}transaction:{transaction_id}"
+
+    def ping(self) -> bool:
+        result = self._redis.ping()
+        return result is True or result == "PONG"
+
+    def create(self, transaction_id: str, record: dict[str, Any], ttl_seconds: int) -> bool:
+        result = self._redis.set(
+            self._transaction_key(transaction_id),
+            json.dumps(record, separators=(",", ":"), sort_keys=True),
+            nx=True,
+            ex=ttl_seconds,
+        )
+        return result is True or result == "OK"
+
+    def peek(self, transaction_id: str) -> dict[str, Any] | None:
+        value = self._redis.get(self._transaction_key(transaction_id))
+        if not value:
+            return None
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        decoded = json.loads(value)
+        return decoded if isinstance(decoded, dict) else None
+
+    def consume(
+        self,
+        transaction_id: str,
+        expected: dict[str, Any],
+        response_id: str,
+        assertion_id: str,
+        marker_ttl_seconds: int,
+    ) -> dict[str, Any] | None:
+        keys = [
+            self._transaction_key(transaction_id),
+            f"{self._prefix}response:{_replay_marker(response_id)}",
+            f"{self._prefix}assertion:{_replay_marker(assertion_id)}",
+        ]
+        result = self._redis.eval(
+            self._CONSUME_SCRIPT,
+            keys=keys,
+            args=[
+                json.dumps(expected, separators=(",", ":"), sort_keys=True),
+                str(marker_ttl_seconds),
+            ],
+        )
+        if not isinstance(result, (list, tuple)) or not result or int(result[0]) != 1:
+            return None
+        value = result[1]
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        decoded = json.loads(value)
+        return decoded if isinstance(decoded, dict) else None
 
 
 def validate_saml_response_xml(encoded_response: str, max_decoded_bytes: int) -> bytes:

@@ -21,6 +21,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "PYTINCTURE_ALLOWED_HOSTS": "app.example.test,api.example.test",
             "PYTINCTURE_CANONICAL_ORIGIN": "https://app.example.test/",
             "SAML_RESPONSE_MAX_BYTES": "262144",
+            "SAML_RELAY_STATE_TTL_SECONDS": "480",
             "SAML_ACS_RATE_LIMIT_ATTEMPTS": "30",
             "SAML_ACS_RATE_LIMIT_WINDOW_SECONDS": "45",
             "APP_SPECIFIC_VALUE": "kept",
@@ -36,6 +37,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.canonical_origin == "https://app.example.test"
     assert config.trusted_proxy_headers is False
     assert config.saml_response_max_bytes == 262144
+    assert config.saml_transaction_ttl_seconds == 480
     assert config.saml_acs_rate_limit_attempts == 30
     assert config.saml_acs_rate_limit_window_seconds == 45
     assert config.environment == {"APP_SPECIFIC_VALUE": "kept"}
@@ -83,6 +85,7 @@ def test_legacy_secret_key_is_an_environment_fallback(tmp_path):
     [
         ({"max_request_body_bytes": 0}, "max_request_body_bytes"),
         ({"saml_response_max_bytes": 0}, "saml_response_max_bytes"),
+        ({"saml_transaction_ttl_seconds": 0}, "saml_transaction_ttl_seconds"),
         ({"saml_acs_rate_limit_attempts": 0}, "rate-limit"),
         (
             {

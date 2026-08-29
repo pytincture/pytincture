@@ -106,6 +106,11 @@ class PytinctureConfig:
     saml_idp_x509_cert: str = _setting(
         "", "SAML_IDP_X509_CERT", "Default SAML identity-provider certificate."
     )
+    saml_transaction_ttl_seconds: int = _setting(
+        600,
+        "SAML_RELAY_STATE_TTL_SECONDS",
+        "Maximum lifetime of a browser-bound one-time SAML transaction.",
+    )
     saml_response_max_bytes: int = _setting(
         512 * 1024,
         "SAML_RESPONSE_MAX_BYTES",
@@ -218,6 +223,8 @@ class PytinctureConfig:
             raise ValueError("session_same_site='none' requires session_https_only=true")
         if self.max_request_body_bytes <= 0:
             raise ValueError("max_request_body_bytes must be greater than zero")
+        if self.saml_transaction_ttl_seconds <= 0:
+            raise ValueError("saml_transaction_ttl_seconds must be greater than zero")
         if self.saml_response_max_bytes <= 0:
             raise ValueError("saml_response_max_bytes must be greater than zero")
         if self.enable_saml_auth and self.saml_response_max_bytes > self.max_request_body_bytes:
@@ -362,6 +369,7 @@ class PytinctureConfig:
             "bff_replay_token_batch_size", "bff_replay_token_low_watermark",
             "bff_replay_token_ttl_seconds", "saml_response_max_bytes",
             "saml_acs_rate_limit_attempts", "saml_acs_rate_limit_window_seconds",
+            "saml_transaction_ttl_seconds",
         }
         float_fields = {"bff_call_timeout_seconds", "bff_stream_max_seconds"}
         tuple_fields = {
@@ -391,6 +399,13 @@ class PytinctureConfig:
                 values[definition.name] = (
                     None if definition.default is None and raw == "" else raw
                 )
+        if (
+            "saml_transaction_ttl_seconds" not in values
+            and source.get("SAML_REQUEST_CACHE_TTL")
+        ):
+            values["saml_transaction_ttl_seconds"] = int(
+                source["SAML_REQUEST_CACHE_TTL"]
+            )
         if "session_secret" not in values and source.get("SECRET_KEY"):
             values["session_secret"] = source["SECRET_KEY"]
         values.update(overrides)
