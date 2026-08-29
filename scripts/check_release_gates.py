@@ -52,6 +52,8 @@ def validate_static(record: dict) -> list[str]:
     required = {
         "schema_version",
         "minimum_observation_days",
+        "observation_started_at",
+        "observation_approval_url",
         "release_candidates",
         "representative_applications",
         "upgrade_exercises",
@@ -69,6 +71,14 @@ def validate_static(record: dict) -> list[str]:
         failures.append("qualification schema_version must be 1")
     if record.get("minimum_observation_days", 0) < 30:
         failures.append("minimum_observation_days must be at least 30")
+    try:
+        parse_time(record.get("observation_started_at"), "observation_started_at")
+    except ValueError as exc:
+        failures.append(str(exc))
+    if not str(record.get("observation_approval_url", "")).startswith(
+        ("https://", "http://")
+    ):
+        failures.append("observation_approval_url must be an absolute HTTP(S) URL")
     apps = record.get("representative_applications", {})
     for mode in ("standalone", "authenticated_bff", "federated_auth"):
         if not isinstance(apps.get(mode), list):
@@ -122,22 +132,33 @@ def passed_evidence(
     failures = []
     if not entries:
         return [f"{name} requires at least one recorded exercise"]
+    required_version_found = required_version is None
     for index, entry in enumerate(entries):
         prefix = f"{name}[{index}]"
         if entry.get("status") != "passed":
             failures.append(f"{prefix}.status must be passed")
         if not entry.get("evidence_url"):
             failures.append(f"{prefix}.evidence_url is required")
-        if required_version is not None and entry.get("version") != required_version:
-            failures.append(f"{prefix}.version must qualify {required_version}")
+        is_required_version = (
+            required_version is not None
+            and entry.get("version") == required_version
+        )
+        if is_required_version:
+            required_version_found = True
         try:
             tested_at = parse_time(entry.get("tested_at"), f"{prefix}.tested_at")
-            if not_before is not None and tested_at < not_before:
+            if (
+                is_required_version
+                and not_before is not None
+                and tested_at < not_before
+            ):
                 failures.append(
                     f"{prefix}.tested_at must not predate {required_version} publication"
                 )
         except ValueError as exc:
             failures.append(str(exc))
+    if not required_version_found:
+        failures.append(f"{name} must qualify {required_version} at least once")
     return failures
 
 
@@ -241,7 +262,16 @@ def validate_final(record: dict) -> list[str]:
                 parse_time(candidate["published_at"], "release candidate published_at")
                 for candidate in candidates
             )
-            observed_days = (decision_time - first_rc).total_seconds() / 86400
+            observation_started_at = parse_time(
+                record.get("observation_started_at"), "observation_started_at"
+            )
+            if observation_started_at < first_rc:
+                failures.append(
+                    "observation_started_at must not predate the first release candidate"
+                )
+            observed_days = (
+                decision_time - observation_started_at
+            ).total_seconds() / 86400
             if observed_days < record.get("minimum_observation_days", 30):
                 failures.append(
                     f"RC observation period is {observed_days:.1f} days; at least "

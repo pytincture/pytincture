@@ -51,6 +51,10 @@ def complete_record():
     return {
         "schema_version": 1,
         "minimum_observation_days": 30,
+        "observation_started_at": "2026-01-02T00:00:00Z",
+        "observation_approval_url": (
+            "https://github.com/pytincture/pytincture/issues/143#approval"
+        ),
         "release_candidates": [
             candidate("1.0.0rc1", "2026-01-01T00:00:00Z"),
             candidate(version, "2026-01-20T00:00:00Z"),
@@ -113,6 +117,16 @@ def test_final_gate_rejects_short_observation_and_stale_latest_evidence():
     assert any("must qualify 1.0.0rc2" in failure for failure in failures)
 
 
+def test_final_gate_measures_observation_from_explicit_approved_start():
+    record = complete_record()
+    record["observation_started_at"] = "2026-01-10T00:00:00Z"
+    record["final_decision"]["decided_at"] = "2026-02-05T00:00:00Z"
+
+    failures = gates.validate_final(record)
+
+    assert any("observation period is 26.0 days" in failure for failure in failures)
+
+
 def test_final_gate_rejects_evidence_recorded_before_latest_rc():
     record = complete_record()
     record["representative_applications"]["standalone"][0]["tested_at"] = (
@@ -120,6 +134,16 @@ def test_final_gate_rejects_evidence_recorded_before_latest_rc():
     )
     failures = gates.validate_final(record)
     assert any("must not predate 1.0.0rc2 publication" in failure for failure in failures)
+
+
+def test_final_gate_preserves_historical_rc_evidence():
+    record = complete_record()
+    record["performance_reviews"].insert(
+        0,
+        evidence("1.0.0rc1", tested_at="2026-01-02T00:00:00Z"),
+    )
+
+    assert gates.validate_final(record) == []
 
 
 def test_rc2_release_requires_valid_rc1_evidence(monkeypatch):

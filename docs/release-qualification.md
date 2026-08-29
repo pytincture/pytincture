@@ -5,17 +5,20 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## Current decision: NO-GO
+## Current decision: NO-GO; observation active
 
-As of 2026-08-28, the signed `v1.0.0rc1` GitHub prerelease and PyPI
-`1.0.0rc1` wheel and source distribution are published. The retained npm
-tarball was validated, but `@pytincture/runtime@1.0.0-rc.1` is not yet
-published because npm authorization failed. The candidate therefore remains
-incomplete: it is not listed as passed in the qualification record and the
-30-day observation clock has not started. No `1.0.0rc2`, representative
-federated-auth production evidence, or final approval exists. The Starlette
-security blocker is resolved by requiring the patched 1.6 release line and
-allowing no dependency-audit exceptions.
+As of 2026-08-29, the signed `v1.0.0rc1` GitHub prerelease and PyPI
+`1.0.0rc1` wheel and source distribution are published. The matching retained
+npm tarball is validated and integrity-checked; npm registry publication is
+deferred and does not block the approved observation track.
+
+The release manager approved the successful `pytincture_example` run, so the
+formal 30-day observation period began at `2026-08-29T02:08:06Z` and cannot
+complete before `2026-09-28T02:08:06Z`. The release remains NO-GO: no
+`1.0.0rc2`, complete latest-RC evidence, final security/defect and repository
+policy audits, or final approval exists. The Starlette security blocker is
+resolved by requiring the patched 1.6 release line and allowing no
+dependency-audit exceptions.
 
 Published and retained rc1 evidence:
 
@@ -30,14 +33,17 @@ Published and retained rc1 evidence:
   `aa5e11139f14bf8317bdb77d57c49cd55311533370414506fed79b1a6fc9e64b`;
 - source-distribution SHA-256:
   `d3546a1109efdee1d61fac15d3a8e7252d3c111d8158c060fd5cac6343187bbb`;
-  and
 - retained npm tarball SHA-256:
-  `085f5fb67a4b6e4878321579159e66e03892d6a7f60740c8421cb61cb3a7b587`.
+  `085f5fb67a4b6e4878321579159e66e03892d6a7f60740c8421cb61cb3a7b587`;
+- approved representative-application observation:
+  <https://github.com/pytincture/pytincture_example/actions/runs/33228136035>;
+  and
+- durable observation-start approval:
+  <https://github.com/pytincture/pytincture/issues/143#issuecomment-5459957268>.
 
-The npm artifact must be published from that exact retained tarball before rc1
-can be marked `passed`. Once publication is independently verified, record the
-complete candidate in `release/qualification.json` and begin representative
-application qualification.
+The npm registry publication remains a distribution task before the final
+release; the retained tarball hash is sufficient to keep its tested bytes tied
+to this candidate while observation proceeds.
 
 ## Evidence required after each RC
 
@@ -71,6 +77,8 @@ upgrade/rollback, and service-performance tracks. These generated files are
 candidate evidence: a release reviewer still links the retained artifact and
 records the approved exercise in `release/qualification.json`. A passing CI
 run alone does not start an observation period or change the NO-GO decision.
+The clock starts only when `observation_started_at` and a durable
+`observation_approval_url` are recorded after release-manager approval.
 
 The repository labels `priority:P0`, `priority:P1`, `security:critical`,
 `security:high`, and `release-blocker` are release-blocking. Release-event CI
@@ -102,8 +110,9 @@ its tracking issue is accidentally closed.
 4. Run representative applications and begin the observation log.
 5. Resolve discovered blockers, publish/record `1.0.0rc2`, and repeat every
    latest-RC exercise.
-6. After at least 30 days from rc1, complete security/defect audits, execute
-   rollback, and record an explicit `go` or `no-go` decision with approvers.
+6. After at least 30 days from the approved observation start, complete
+   security/defect audits, execute rollback, and record an explicit `go` or
+   `no-go` decision with approvers.
 7. Set `1.0.0`, build synchronized artifacts, and create the final tag. CI
    refuses publication if the record is incomplete, stale, or says no-go.
 
