@@ -27,14 +27,13 @@ routes intentionally share the root scope.
   `AUTH_SESSION_HTTPS_ONLY=true` so cross-site POST binding uses a Secure,
   `SameSite=None` handshake cookie.
 - Pin the Pytincture and widgetset versions in the deployment artifact.
-- For more than one worker or replica, set `USE_REDIS_INSTANCE=true` with the
-  same Upstash endpoint and token on every worker.
+- Redis is optional. Load-balanced sessions and SAML handshakes are carried in
+  signed browser cookies and work across workers without server-side state.
 
-Signed session cookies can be read by any worker sharing the signing secret.
-Immediate logout revocation, SAML transaction/replay protection, and one-time
-BFF replay tokens require shared Redis state across workers. In-memory state is
-supported for a single worker only; a restart intentionally invalidates its
-revocations, outstanding SAML logins, and unused replay tokens.
+Signed session and SAML handshake cookies can be read by any worker sharing the
+signing secret. Redis is only an optional enhancement for immediate
+cross-worker logout revocation and configured one-time BFF replay tokens; it is
+not required to run Pytincture or load balance normal authenticated traffic.
 
 ## Reverse proxy
 

@@ -80,13 +80,6 @@ def override_env(monkeypatch):
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {})
     monkeypatch.setattr(backend_app, "AUTH_SESSION_REVOCATIONS", {})
     monkeypatch.setattr(backend_app, "BFF_REPLAY_TOKEN_STORE", {})
-    monkeypatch.setattr(
-        backend_app,
-        "SAML_TRANSACTION_STORE",
-        __import__(
-            "pytincture.backend.saml", fromlist=["InMemorySAMLTransactionStore"]
-        ).InMemorySAMLTransactionStore(),
-    )
     set_user_authenticator(None)
     ALLOWED_NOAUTH_CLASSCALLS.clear()
     yield
@@ -1513,17 +1506,16 @@ def test_saml_login_embeds_replica_safe_relay_state(fresh_client, monkeypatch):
     query = parse_qs(urlsplit(response.headers["location"]).query)
     relay_state = backend_app._load_saml_relay_state(query["RelayState"][0])
     assert relay_state["version"] == 2
-    transaction = backend_app.SAML_TRANSACTION_STORE.peek(
-        relay_state["transaction_id"]
+    transaction = backend_app._get_saml_handshake_cookie_serializer().loads(
+        fresh_client.cookies[backend_app._SAML_HANDSHAKE_COOKIE],
+        max_age=backend_app.SAML_RELAY_STATE_TTL_SECONDS,
     )
     assert transaction == {
         "version": 1,
+        "transaction_id": relay_state["transaction_id"],
         "application": "demoapp",
         "provider_id": "default",
         "request_id": FakeSamlAuth.request_id,
-        "browser_binding": backend_app._saml_browser_binding(
-            fresh_client.cookies[backend_app._SAML_HANDSHAKE_COOKIE]
-        ),
         "return_to": "/demoapp/work",
     }
     set_cookie = response.headers["set-cookie"].lower()
@@ -1659,35 +1651,34 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
         lambda request, application, provider=None, post_data=None: fake_saml_auth,
     )
 
-    browser_secret = "browser-bound-secret"
     transaction_id = "opaque-transaction"
-    assert backend_app.SAML_TRANSACTION_STORE.create(
-        transaction_id,
-        {
-            "version": 1,
-            "application": "demoapp",
-            "provider_id": "default",
-            "request_id": "ONELOGIN_original_request",
-            "browser_binding": backend_app._saml_browser_binding(browser_secret),
-            "return_to": "/demoapp",
-        },
-        backend_app.SAML_RELAY_STATE_TTL_SECONDS,
+    transaction = {
+        "version": 1,
+        "transaction_id": transaction_id,
+        "application": "demoapp",
+        "provider_id": "default",
+        "request_id": "ONELOGIN_original_request",
+        "return_to": "/demoapp",
+    }
+    handshake_cookie = (
+        backend_app._get_saml_handshake_cookie_serializer().dumps(transaction)
     )
     fresh_client.cookies.set(
         backend_app._SAML_HANDSHAKE_COOKIE,
-        browser_secret,
+        handshake_cookie,
         path="/demoapp/auth/saml",
     )
     relay_state = backend_app._sign_saml_relay_state({
         "version": 2,
         "transaction_id": transaction_id,
     })
+    callback_data = {
+        "SAMLResponse": base64.b64encode(b"<Response/>").decode("ascii"),
+        "RelayState": relay_state,
+    }
     response = fresh_client.post(
         "/demoapp/auth/saml/acs",
-        data={
-            "SAMLResponse": base64.b64encode(b"<Response/>").decode("ascii"),
-            "RelayState": relay_state,
-        },
+        data=callback_data,
         follow_redirects=False,
     )
 
@@ -1703,6 +1694,28 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
     assert "attributes" not in user["saml"]
     assert "session_index" not in user["saml"]
     assert "saml_session_index" not in session_data
+    assert len(session_data["saml_replay_proof"]) == 64
+    assert "ONELOGIN_response" not in fresh_client.cookies["session"]
+    assert "ONELOGIN_assertion" not in fresh_client.cookies["session"]
+    assert any(
+        backend_app._SAML_HANDSHAKE_COOKIE in value and "Max-Age=0" in value
+        for value in response.headers.get_list("set-cookie")
+    )
+    # Even a raw client that restores the consumed handshake cookie is rejected
+    # by the replay proof carried in the signed browser session.
+    fresh_client.cookies.set(
+        backend_app._SAML_HANDSHAKE_COOKIE,
+        handshake_cookie,
+        path="/demoapp/auth/saml",
+    )
+
+    replay = fresh_client.post(
+        "/demoapp/auth/saml/acs",
+        data=callback_data,
+        follow_redirects=False,
+    )
+    assert replay.status_code == 400
+    assert replay.json() == {"detail": "Invalid or replayed SAML login"}
 
     backend_app.USER_SESSION_DICT["person@example.com"] = {"stale": True}
     bff_response = fresh_client.post(
@@ -1721,18 +1734,6 @@ def test_saml_acs_rejects_relay_state_copied_to_another_browser(
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
     monkeypatch.setattr(backend_app, "SAML_PROVIDERS", "")
     transaction_id = "victim-transaction"
-    assert backend_app.SAML_TRANSACTION_STORE.create(
-        transaction_id,
-        {
-            "version": 1,
-            "application": "demoapp",
-            "provider_id": "default",
-            "request_id": "request-one",
-            "browser_binding": backend_app._saml_browser_binding("victim-secret"),
-            "return_to": "/demoapp",
-        },
-        60,
-    )
     relay_state = backend_app._sign_saml_relay_state(
         {"version": 2, "transaction_id": transaction_id}
     )
@@ -1740,7 +1741,16 @@ def test_saml_acs_rejects_relay_state_copied_to_another_browser(
     # be able to submit the victim browser's copied RelayState.
     fresh_client.cookies.set(
         backend_app._SAML_HANDSHAKE_COOKIE,
-        "attacker-secret",
+        backend_app._get_saml_handshake_cookie_serializer().dumps(
+            {
+                "version": 1,
+                "transaction_id": "attacker-transaction",
+                "application": "demoapp",
+                "provider_id": "default",
+                "request_id": "attacker-request",
+                "return_to": "/demoapp",
+            }
+        ),
         path="/demoapp/auth/saml",
     )
     response = fresh_client.post(
@@ -1753,7 +1763,6 @@ def test_saml_acs_rejects_relay_state_copied_to_another_browser(
     )
     assert response.status_code == 400
     assert response.json() == {"detail": "Invalid or expired SAML login"}
-    assert backend_app.SAML_TRANSACTION_STORE.peek(transaction_id) is not None
 
 
 def test_saml_acs_requires_exact_in_response_to(fresh_client, monkeypatch):
@@ -1785,20 +1794,18 @@ def test_saml_acs_requires_exact_in_response_to(fresh_client, monkeypatch):
         "_init_saml_auth",
         lambda request, application, provider=None, post_data=None: FakeSamlAuth(),
     )
-    browser_secret = "browser-secret"
     transaction_id = "correlation-transaction"
     record = {
         "version": 1,
+        "transaction_id": transaction_id,
         "application": "demoapp",
         "provider_id": "default",
         "request_id": "request-one",
-        "browser_binding": backend_app._saml_browser_binding(browser_secret),
         "return_to": "/demoapp",
     }
-    assert backend_app.SAML_TRANSACTION_STORE.create(transaction_id, record, 60)
     fresh_client.cookies.set(
         backend_app._SAML_HANDSHAKE_COOKIE,
-        browser_secret,
+        backend_app._get_saml_handshake_cookie_serializer().dumps(record),
         path="/demoapp/auth/saml",
     )
     relay_state = backend_app._sign_saml_relay_state(
@@ -1814,7 +1821,6 @@ def test_saml_acs_requires_exact_in_response_to(fresh_client, monkeypatch):
     )
     assert response.status_code == 400
     assert response.json() == {"detail": "Invalid SAML response correlation"}
-    assert backend_app.SAML_TRANSACTION_STORE.peek(transaction_id) == record
 
 
 def test_saml_acs_rejects_disallowed_transforms_before_toolkit_and_rate_limits(

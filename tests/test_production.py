@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 from pathlib import Path
@@ -35,6 +36,23 @@ def make_workers(tmp_path: Path, *, https_only: bool = False):
     return create_app(config), create_app(config)
 
 
+def make_saml_workers(tmp_path: Path):
+    (tmp_path / "demo.py").write_text(
+        'APP_TITLE = "SAML production smoke"\n', encoding="utf-8"
+    )
+    config = PytinctureConfig(
+        modules_path=str(tmp_path),
+        default_application="demo",
+        enable_saml_auth=True,
+        saml_idp_entity_id="https://idp.example/metadata",
+        saml_idp_sso_url="https://idp.example/sso",
+        saml_idp_x509_cert="test-certificate",
+        session_secret="production-test-secret-at-least-32-bytes",
+        session_https_only=False,
+    )
+    return create_app(config), create_app(config)
+
+
 def login(client: TestClient):
     response = client.post(
         "/demo/auth/user",
@@ -52,6 +70,74 @@ def test_signed_session_cookie_is_portable_between_workers(tmp_path):
         second_client.cookies.update(first_client.cookies)
         response = second_client.get("/demo", follow_redirects=False)
         assert response.status_code == 200
+
+
+def test_saml_handshake_is_portable_between_workers_without_redis(tmp_path):
+    first, second = make_saml_workers(tmp_path)
+    first_backend = first.state.pytincture_backend
+    second_backend = second.state.pytincture_backend
+
+    class FakeSamlAuth:
+        def process_response(self, request_id=None):
+            assert request_id == "request-from-worker-one"
+
+        def get_errors(self):
+            return []
+
+        def is_authenticated(self):
+            return True
+
+        def get_last_response_in_response_to(self):
+            return "request-from-worker-one"
+
+        def get_last_message_id(self):
+            return "response-on-worker-two"
+
+        def get_last_assertion_id(self):
+            return "assertion-on-worker-two"
+
+        def get_attributes(self):
+            return {"email": ["person@example.com"]}
+
+        def get_nameid(self):
+            return "person@example.com"
+
+    second_backend._init_saml_auth = (
+        lambda request, application, provider=None, post_data=None: FakeSamlAuth()
+    )
+    transaction = {
+        "version": 1,
+        "transaction_id": "portable-transaction",
+        "application": "demo",
+        "provider_id": "default",
+        "request_id": "request-from-worker-one",
+        "return_to": "/demo",
+    }
+    handshake_cookie = first_backend._get_saml_handshake_cookie_serializer().dumps(
+        transaction
+    )
+    relay_state = first_backend._sign_saml_relay_state(
+        {"version": 2, "transaction_id": transaction["transaction_id"]}
+    )
+
+    assert not hasattr(first_backend, "SAML_TRANSACTION_STORE")
+    assert not hasattr(second_backend, "SAML_TRANSACTION_STORE")
+    with TestClient(second, base_url="http://service.example") as client:
+        client.cookies.set(
+            second_backend._SAML_HANDSHAKE_COOKIE,
+            handshake_cookie,
+            path="/demo/auth/saml",
+        )
+        response = client.post(
+            "/demo/auth/saml/acs",
+            data={
+                "SAMLResponse": base64.b64encode(b"<Response/>").decode("ascii"),
+                "RelayState": relay_state,
+            },
+            follow_redirects=False,
+        )
+    assert response.status_code == 302
+    assert response.headers["location"] == "/demo"
 
 
 def test_local_revocations_are_worker_local_but_shared_store_propagates(tmp_path):
