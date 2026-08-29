@@ -35,6 +35,18 @@ signing secret. Redis is only an optional enhancement for immediate
 cross-worker logout revocation and configured one-time BFF replay tokens; it is
 not required to run Pytincture or load balance normal authenticated traffic.
 
+## Private-network exposure
+
+State-changing BFF routes require JSON and reject browser requests unless
+Origin, plus Fetch Metadata when present, proves the exact service origin.
+Pytincture does not
+grant Private Network Access preflights, including for explicitly no-auth BFFs.
+This is application-layer defense in depth: also bind development services to
+loopback, firewall private deployments from untrusted networks, publish only
+through the configured proxy/host, and do not add broad CORS or proxy rules for
+BFF paths. Trusted server-to-server clients may omit both browser headers; they
+must still use `application/json` and any configured authentication/policy.
+
 ## Reverse proxy
 
 Example nginx location for a dedicated host:

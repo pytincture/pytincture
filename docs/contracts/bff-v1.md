@@ -45,6 +45,13 @@ Generated stubs may send positional values in `args` and named values in
 entries containing a `value`, and treats a body without `args`/`kwargs` as
 keyword arguments. New stubs must emit the canonical form.
 
+State-changing dispatcher requests require `Content-Type: application/json`.
+Browser requests must supply the exact service `Origin`; when Fetch Metadata is
+present it must also report `Sec-Fetch-Site: same-origin`. Cross-site,
+same-site, opaque/null-origin, and malformed browser contexts are rejected.
+Trusted non-browser clients may omit both browser headers, but cannot send
+conflicting browser metadata.
+
 Authenticated state-changing requests carry `X-CSRF-Token`. When replay
 protection is enabled, generated stubs additionally carry
 `X-Pytincture-BFF-Token`; rejected or expired proofs return `409` with
