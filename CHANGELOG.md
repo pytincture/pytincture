@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Bound passwordless development login to the actual loopback network peer,
+  ignored spoofable Host headers for that decision, and made the supported
+  launcher default this mode to a loopback-only listener while rejecting
+  routable binds.
 - Recorded the partial rc1 publication state without treating the candidate as
   passed or starting the observation period before the npm artifact is
   available.

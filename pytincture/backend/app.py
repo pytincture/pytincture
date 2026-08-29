@@ -6,6 +6,7 @@ import hmac
 import importlib
 import inspect
 import io
+import ipaddress
 import json
 import logging
 import os
@@ -659,15 +660,19 @@ def _allowed_email(email: str) -> bool:
 
 
 def _is_loopback_development_request(request: Request) -> bool:
-    allowed_hosts = {"localhost", "127.0.0.1", "::1", "testserver"}
-    hostname = (request.url.hostname or "").casefold()
-    forwarded_host = (
-        request.headers.get("x-forwarded-host", "").split(",", 1)[0]
-        if TRUST_PROXY_HEADERS
-        else ""
-    )
-    forwarded_hostname = forwarded_host.rsplit(":", 1)[0].strip("[]").casefold()
-    return hostname in allowed_hosts and (not forwarded_host or forwarded_hostname in allowed_hosts)
+    """Return whether the connection peer is a literal loopback address.
+
+    Host and forwarded headers describe the requested origin, not the network
+    peer, and are attacker-controlled unless a trusted proxy replaces them.
+    Development password bypass therefore never consults those headers.
+    """
+
+    if request.client is None:
+        return False
+    try:
+        return ipaddress.ip_address(request.client.host).is_loopback
+    except ValueError:
+        return False
 
 
 def _verify_configured_password(email: str, password: str) -> bool:
