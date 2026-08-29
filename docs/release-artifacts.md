@@ -72,7 +72,9 @@ sdist into clean base environments, and installs each feature extra in its own
 clean environment. It also runs Python 3.13/3.14, JavaScript, Chromium,
 Firefox, WebKit, and production topology gates.
 
-Publishing a GitHub release runs the same gates. PyPI and npm jobs depend on all
-of them and upload the exact files from the validated `release-artifacts`
-workflow artifact. There is no independent/manual publishing path in GitHub
-Actions.
+Publishing a GitHub release runs the same gates and attests the exact validated
+artifact bytes after they pass. PyPI publishes from that release run. The npm
+publisher additionally verifies the published tag and commit, release-triggered
+CI identity, artifact attestation, package identity, filename, and mapped
+SemVer. A manual npm retry accepts only a published tag and resolves the same
+successful attested release run; it cannot select an arbitrary CI artifact.
