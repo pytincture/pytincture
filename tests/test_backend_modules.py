@@ -287,7 +287,7 @@ def test_saml_mitigation_evidence_matches_the_enforced_runtime():
     evidence = json.loads(
         (root / "security" / "saml-transform-mitigation.json").read_text()
     )
-    assert evidence["status"] == "guarded"
+    assert evidence["status"] == "passed"
     assert evidence["upstream_status"] == "open"
     assert evidence["dependency"] == f"python3-saml=={version('python3-saml')}"
     assert evidence["mitigations"]["strict_transform_allowlist"] is True

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "guarded",
+  "status": "passed",
   "finding": "python3-saml signature verification accepts attacker-selected XSLT transforms",
   "upstream_issue": "https://github.com/SAML-Toolkits/python3-saml/issues/447",
   "upstream_status_checked_at": "2026-08-29T21:34:12Z",
