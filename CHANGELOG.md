@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Required JSON for state-changing BFF dispatcher requests and applied strict
+  Origin and Fetch Metadata validation to authenticated and no-auth calls,
+  blocking drive-by requests to loopback/private-network services while
+  retaining clients that send no browser security headers.
 - Scoped generated BFF calls and signed sessions to an application audience,
   replaced basename authorization aliases with exact packaged-module paths,
   enforced declared provider/issuer/tenant/role/operation predicates, and made

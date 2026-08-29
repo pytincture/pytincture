@@ -33,6 +33,11 @@ methods. Private names and undecorated classes are never registered.
 
 Methods default to POST. Declare GET only for side-effect-free operations.
 Cookie-authenticated state-changing calls include the CSRF token automatically.
+All state-changing calls use JSON. Pytincture also validates exact Origin and
+Fetch Metadata on browser requests, including BFFs intentionally exposed
+without authentication. API clients such as server-to-server jobs may omit
+both browser headers; if either is supplied it must describe a same-origin
+browser request.
 The server checks the static operation manifest before importing a requested
 module or constructing its class.
 

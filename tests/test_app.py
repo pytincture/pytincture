@@ -774,6 +774,111 @@ def test_class_call_noauth(dummy_module, monkeypatch, fresh_client):
     assert json_response.get("result") == "success"
 
 
+def _allow_demoapp_noauth_call():
+    ALLOWED_NOAUTH_CLASSCALLS.clear()
+    ALLOWED_NOAUTH_CLASSCALLS.append({
+        "application": "demoapp",
+        "file": "example.py",
+        "class": "ExampleClass",
+        "function": "testfunc",
+    })
+
+
+def test_noauth_bff_rejects_text_plain(dummy_module, monkeypatch, fresh_client):
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    _allow_demoapp_noauth_call()
+
+    response = fresh_client.post(
+        "/demoapp/classcall/example.py/ExampleClass/testfunc",
+        content='{"kwargs": {}}',
+        headers={"Content-Type": "text/plain"},
+    )
+
+    assert response.status_code == 415
+
+
+def test_noauth_bff_rejects_cross_origin_form(
+    dummy_module, monkeypatch, fresh_client
+):
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    _allow_demoapp_noauth_call()
+
+    response = fresh_client.post(
+        "/demoapp/classcall/example.py/ExampleClass/testfunc",
+        data={"kwargs": "{}"},
+        headers={
+            "Origin": "https://attacker.example",
+            "Sec-Fetch-Site": "cross-site",
+        },
+    )
+
+    assert response.status_code == 415
+
+
+def test_noauth_bff_rejects_null_origin(dummy_module, monkeypatch, fresh_client):
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    _allow_demoapp_noauth_call()
+
+    response = fresh_client.post(
+        "/demoapp/classcall/example.py/ExampleClass/testfunc",
+        json={"kwargs": {}},
+        headers={"Origin": "null", "Sec-Fetch-Site": "cross-site"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_noauth_bff_rejects_cross_origin_private_network_request(
+    dummy_module, monkeypatch, fresh_client
+):
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    _allow_demoapp_noauth_call()
+
+    response = fresh_client.post(
+        "/demoapp/classcall/example.py/ExampleClass/testfunc",
+        json={"kwargs": {}},
+        headers={
+            "Origin": "https://attacker.example",
+            "Sec-Fetch-Site": "cross-site",
+            "Access-Control-Request-Private-Network": "true",
+        },
+    )
+
+    assert response.status_code == 403
+
+
+def test_noauth_bff_accepts_same_origin_browser_request(
+    dummy_module, monkeypatch, fresh_client
+):
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    _allow_demoapp_noauth_call()
+
+    response = fresh_client.post(
+        "/demoapp/classcall/example.py/ExampleClass/testfunc",
+        json={"kwargs": {}},
+        headers={
+            "Origin": "https://testserver",
+            "Sec-Fetch-Site": "same-origin",
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_noauth_bff_accepts_trusted_non_browser_json_client(
+    dummy_module, monkeypatch, fresh_client
+):
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    _allow_demoapp_noauth_call()
+
+    response = fresh_client.post(
+        "/demoapp/classcall/example.py/ExampleClass/testfunc",
+        json={"kwargs": {}},
+    )
+
+    assert response.status_code == 200
+
+
 def test_class_call_policy_hook(monkeypatch, fresh_client, tmp_path):
     """
     Custom policy hooks can inspect metadata and user context before allowing a call.

@@ -1111,6 +1111,45 @@ def _validate_csrf(request: Request, user: Any) -> None:
         raise HTTPException(status_code=403, detail="Origin validation failed")
 
 
+def _validate_bff_browser_request(request: Request) -> None:
+    """Reject drive-by browser mutations while preserving trusted API clients.
+
+    Browsers identify their initiating origin and fetch site. Non-browser
+    clients commonly send neither header and remain supported, but supplying
+    either header opts the request into strict browser validation.
+    """
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+
+    content_type = request.headers.get("content-type", "").partition(";")[0]
+    if content_type.strip().casefold() != "application/json":
+        raise HTTPException(
+            status_code=415,
+            detail="BFF requests require application/json",
+        )
+
+    origin = request.headers.get("origin")
+    fetch_site = request.headers.get("sec-fetch-site")
+    if origin is not None:
+        normalized_origin = origin.strip().rstrip("/")
+        if (
+            not normalized_origin
+            or normalized_origin.casefold() == "null"
+            or normalized_origin != _request_origin(request)
+        ):
+            raise HTTPException(status_code=403, detail="Origin validation failed")
+
+    if fetch_site is None:
+        return
+    normalized_fetch_site = fetch_site.strip().casefold()
+    if normalized_fetch_site != "same-origin":
+        raise HTTPException(status_code=403, detail="Fetch Metadata validation failed")
+    if origin is None:
+        # A browser identifying itself through Fetch Metadata must also prove
+        # the exact origin for a state-changing dispatcher request.
+        raise HTTPException(status_code=403, detail="Origin validation failed")
+
+
 def _bff_replay_subject(request: Request, user: Any) -> Optional[str]:
     if not isinstance(user, dict) or user.get("is_authenticated") is not True:
         return None
@@ -1506,6 +1545,7 @@ async def class_call(
             headers={"Allow": ", ".join(allowed_methods)},
         )
 
+    _validate_bff_browser_request(request)
     _validate_csrf(request, user)
     _validate_bff_replay_token(request, user)
     policy = operation.get("policy", {})
