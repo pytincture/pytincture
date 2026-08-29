@@ -8,89 +8,164 @@ on:
       - completed
   workflow_dispatch:
     inputs:
-      source_run_id:
-        description: CI run containing the retained release-artifacts artifact
-        required: true
-        type: string
-      expected_version:
-        description: Exact npm SemVer expected inside the retained tarball
+      release_tag:
+        description: Published v-prefixed release tag to retry
         required: true
         type: string
 
 permissions:
   actions: read
+  attestations: read
   contents: read
   id-token: write
 
 jobs:
   publish-npm:
-    name: Publish retained npm artifact
+    name: Publish attested npm release artifact
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.event == 'release' &&
       github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
+    environment: npm
 
     steps:
-      - name: Download retained validated artifacts
-        uses: actions/download-artifact@v7
+      - name: Check out trusted publication policy
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Resolve published release and successful release run
+        id: source
+        env:
+          AUTO_RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
+          AUTO_SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          DISPATCH_RELEASE_TAG: ${{ inputs.release_tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            release_tag="$DISPATCH_RELEASE_TAG"
+          else
+            release_tag="$AUTO_RELEASE_TAG"
+          fi
+          if [[ ! "$release_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)((a|b|rc)(0|[1-9][0-9]*))?(\.dev(0|[1-9][0-9]*))?$ ]]; then
+            echo "Unsupported release tag" >&2
+            exit 1
+          fi
+
+          release_json="$RUNNER_TEMP/pytincture-release.json"
+          run_json="$RUNNER_TEMP/pytincture-release-run.json"
+          gh api "repos/$REPOSITORY/releases/tags/$release_tag" > "$release_json"
+          tag_sha=$(gh api "repos/$REPOSITORY/commits/$release_tag" --jq .sha)
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            runs_json="$RUNNER_TEMP/pytincture-release-runs.json"
+            gh api --method GET \
+              "repos/$REPOSITORY/actions/workflows/ci.yml/runs" \
+              -f event=release \
+              -f status=success \
+              -f per_page=100 > "$runs_json"
+            source_run_id=$(jq -r \
+              --arg tag "$release_tag" \
+              --arg sha "$tag_sha" \
+              '[.workflow_runs[] | select(
+                .event == "release" and
+                .conclusion == "success" and
+                .head_branch == $tag and
+                .head_sha == $sha and
+                .path == ".github/workflows/ci.yml"
+              )] | sort_by(.created_at) | last | .id // empty' \
+              "$runs_json")
+          else
+            source_run_id="$AUTO_SOURCE_RUN_ID"
+          fi
+          if [[ ! "$source_run_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "No successful release CI run found for tag" >&2
+            exit 1
+          fi
+
+          gh api "repos/$REPOSITORY/actions/runs/$source_run_id" > "$run_json"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "tag_sha=$tag_sha" >> "$GITHUB_OUTPUT"
+          echo "source_run_id=$source_run_id" >> "$GITHUB_OUTPUT"
+          echo "release_json=$release_json" >> "$GITHUB_OUTPUT"
+          echo "run_json=$run_json" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact retained release artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: release-artifacts
           path: dist
-          run-id: >-
-            ${{ github.event_name == 'workflow_dispatch' &&
-            inputs.source_run_id || github.event.workflow_run.id }}
+          run-id: ${{ steps.source.outputs.source_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify release metadata and npm package identity
+        id: verify
+        env:
+          RELEASE_JSON: ${{ steps.source.outputs.release_json }}
+          RELEASE_TAG: ${{ steps.source.outputs.release_tag }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_JSON: ${{ steps.source.outputs.run_json }}
+          TAG_SHA: ${{ steps.source.outputs.tag_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          verification=$(python scripts/verify_npm_release.py \
+            --repository "$REPOSITORY" \
+            --release-tag "$RELEASE_TAG" \
+            --tag-sha "$TAG_SHA" \
+            --release-json "$RELEASE_JSON" \
+            --run-json "$RUN_JSON" \
+            --artifact-dir dist)
+          echo "npm_path=$(jq -r .npm_path <<< "$verification")" >> "$GITHUB_OUTPUT"
+          echo "npm_version=$(jq -r .npm_version <<< "$verification")" >> "$GITHUB_OUTPUT"
+          echo "dist_tag=$(jq -r .dist_tag <<< "$verification")" >> "$GITHUB_OUTPUT"
+
+      - name: Verify artifact attestation and trusted builder identity
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_PATH: ${{ steps.verify.outputs.npm_path }}
+          RELEASE_TAG: ${{ steps.source.outputs.release_tag }}
+          REPOSITORY: ${{ github.repository }}
+          TAG_SHA: ${{ steps.source.outputs.tag_sha }}
+        shell: bash
+        run: |
+          gh attestation verify "$NPM_PATH" \
+            --repo "$REPOSITORY" \
+            --signer-workflow "$REPOSITORY/.github/workflows/ci.yml" \
+            --source-digest "$TAG_SHA" \
+            --source-ref "refs/tags/$RELEASE_TAG" \
+            --deny-self-hosted-runners
+
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Verify retained npm artifact
-        id: verify
+      - name: Check whether the immutable version already exists
+        id: registry
         env:
-          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          NPM_VERSION: ${{ steps.verify.outputs.npm_version }}
         shell: bash
         run: |
-          mapfile -t npm_paths < <(find dist -maxdepth 1 -name '*.tgz' -print)
-          if [[ "${#npm_paths[@]}" -ne 1 ]]; then
-            echo "Expected exactly one retained npm tarball; found ${#npm_paths[@]}" >&2
-            exit 1
-          fi
-          npm_path="${npm_paths[0]}"
-          package_name=$(tar -xOf "$npm_path" package/package.json | \
-            node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).name")
-          package_version=$(tar -xOf "$npm_path" package/package.json | \
-            node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
-          if [[ "$package_name" != "@pytincture/runtime" ]]; then
-            echo "Unexpected retained package: $package_name" >&2
-            exit 1
-          fi
-          if [[ -n "$EXPECTED_VERSION" && "$package_version" != "$EXPECTED_VERSION" ]]; then
-            echo "Retained version $package_version does not match $EXPECTED_VERSION" >&2
-            exit 1
-          fi
-          echo "npm_path=$npm_path" >> "$GITHUB_OUTPUT"
-          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
-          if npm view "$package_name@$package_version" version >/dev/null 2>&1; then
+          if npm view "@pytincture/runtime@$NPM_VERSION" version >/dev/null 2>&1; then
             echo "already_published=true" >> "$GITHUB_OUTPUT"
-            echo "$package_name@$package_version is already published; retry is a no-op."
+            echo "@pytincture/runtime@$NPM_VERSION is already published; retry is a no-op."
           else
             echo "already_published=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish exact retained npm artifact with OIDC
-        if: steps.verify.outputs.already_published != 'true'
+      - name: Publish exact attested npm artifact with OIDC
+        if: steps.registry.outputs.already_published != 'true'
+        env:
+          DIST_TAG: ${{ steps.verify.outputs.dist_tag }}
+          NPM_PATH: ${{ steps.verify.outputs.npm_path }}
         shell: bash
-        run: |
-          package_version="${{ steps.verify.outputs.package_version }}"
-          dist_tag=latest
-          if [[ "$package_version" == *-* ]]; then
-            dist_tag=next
-          fi
-          npm publish "./${{ steps.verify.outputs.npm_path }}" \
-            --access public \
-            --tag "$dist_tag"
+        run: npm publish "$NPM_PATH" --access public --tag "$DIST_TAG"

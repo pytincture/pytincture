@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -33,7 +34,7 @@ def candidate(version, published_at):
     }
 
 
-def test_npm_publish_uses_one_oidc_workflow_and_explicit_local_tarball():
+def test_npm_publish_requires_attested_release_provenance():
     release_workflow = (
         ROOT / ".github" / "workflows" / "npm-publish.yml"
     ).read_text()
@@ -42,8 +43,30 @@ def test_npm_publish_uses_one_oidc_workflow_and_explicit_local_tarball():
     assert "id-token: write" in release_workflow
     assert "NODE_AUTH_TOKEN" not in release_workflow
     assert "run-id:" in release_workflow
-    assert 'npm publish "./${{ steps.verify.outputs.npm_path }}"' in release_workflow
+    assert "source_run_id:" not in release_workflow
+    assert "expected_version:" not in release_workflow
+    assert "release_tag:" in release_workflow
+    assert "environment: npm" in release_workflow
+    assert "gh attestation verify" in release_workflow
+    assert "--signer-workflow" in release_workflow
+    assert "--source-digest" in release_workflow
+    assert "--source-ref" in release_workflow
+    assert 'run: npm publish "$NPM_PATH"' in release_workflow
+    assert "Attest exact release artifact bytes" in ci_workflow
+    assert "actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a" in ci_workflow
     assert "Publish validated npm artifact" not in ci_workflow
+
+    action_refs = re.findall(r"^\s+uses:\s+[^@\s]+@([^\s#]+)", release_workflow, re.MULTILINE)
+    assert action_refs
+    assert all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in action_refs)
+
+    run_blocks = re.findall(
+        r"^\s+run:\s*\|\n(?P<body>(?:^\s{10,}.*\n)*)",
+        release_workflow,
+        re.MULTILINE,
+    )
+    assert run_blocks
+    assert all("${{" not in block for block in run_blocks)
 
 
 def complete_record():

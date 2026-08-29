@@ -5,6 +5,9 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Restricted npm publication and retries to attested artifacts from successful
+  release-triggered CI at the exact published tag and commit, with strict
+  package/version/path validation and a protected release environment.
 - Bound passwordless development login to the actual loopback network peer,
   ignored spoofable Host headers for that decision, and made the supported
   launcher default this mode to a loopback-only listener while rejecting

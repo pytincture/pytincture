@@ -18,9 +18,12 @@ Only a maintained release commit with green required CI is publishable.
 6. Publish a GitHub release from that qualified tag. The release event rebuilds
    artifacts with the commit timestamp, verifies byte
    reproducibility/content/hashes, and publishes the exact wheel and sdist.
-   After release CI succeeds, `npm-publish.yml` downloads that run's retained
-   artifact and publishes the exact npm tarball through npm trusted-publisher
-   OIDC. The same workflow supports an idempotent manual retry by source run ID.
+   Release CI signs GitHub artifact attestations after every qualification job
+   succeeds. After that release run completes, `npm-publish.yml` verifies the
+   published tag, exact commit, CI workflow identity, attestation, package
+   identity, filename, and SemVer before publishing the retained npm tarball
+   through npm trusted-publisher OIDC. The same workflow supports an idempotent
+   manual retry by published release tag; it resolves the trusted run itself.
 7. Verify PyPI/npm metadata and install each artifact from the public index in
    a new environment. Attach the generated `SHA256SUMS.json` to the release.
 
@@ -29,6 +32,13 @@ releases update `latest`.
 
 There is intentionally no independent GitHub publish workflow. Never upload a
 locally rebuilt file under an existing version.
+
+The npm publisher uses the protected `npm` GitHub environment. Keep required
+reviewers enabled and restrict deployment to protected branches. Publication
+actions are pinned to full commit SHAs, and values derived from release or
+artifact metadata are passed to shell steps through environment variables. Run
+manual tag-based retries from the protected default branch; the tag is an input,
+not the workflow execution ref.
 
 ## Failed publication
 
