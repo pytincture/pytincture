@@ -33,6 +33,11 @@ Run that application with any ASGI server, for example
 `uvicorn my_service:app`. The compatibility `launch_service()` API remains
 available for existing deployments.
 
+Application names are ASCII Python identifiers (`reports_v2`, not
+`reports-v2` or `reports.v2`) and cannot collide with framework route names
+such as `healthz`, `frontend`, `classcall`, or `mcp`. This rule applies to the
+default application and every application-scoped route.
+
 ## Typed reference
 
 The contract test checks every row in this table against the dataclass model.

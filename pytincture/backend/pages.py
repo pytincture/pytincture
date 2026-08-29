@@ -30,11 +30,15 @@ def find_app_string_setting(
     file_path: str,
     assignment_names: Iterable[str],
     config_keys: Iterable[str],
+    *,
+    source_code: str | None = None,
 ) -> str | None:
     """Read a literal string setting from app source without importing it."""
     try:
-        with open(file_path, encoding="utf-8") as source_file:
-            tree = ast.parse(source_file.read())
+        if source_code is None:
+            with open(file_path, encoding="utf-8") as source_file:
+                source_code = source_file.read()
+        tree = ast.parse(source_code)
     except Exception as exc:
         logger.warning("Unable to read app configuration", exc_info=exc)
         return None
@@ -91,12 +95,13 @@ def normalize_app_asset_path(value: str | None) -> str | None:
     return "/".join(segments)
 
 
-def find_app_favicon(file_path: str) -> str | None:
+def find_app_favicon(file_path: str, *, source_code: str | None = None) -> str | None:
     """Resolve an explicit favicon or a conventional favicon directory."""
     configured = find_app_string_setting(
         file_path,
         assignment_names=("APP_FAVICON",),
         config_keys=("favicon",),
+        source_code=source_code,
     )
     if normalized := normalize_app_asset_path(configured):
         return normalized
@@ -104,6 +109,7 @@ def find_app_favicon(file_path: str) -> str | None:
     app_root = os.path.dirname(os.fspath(file_path))
     application = os.path.splitext(os.path.basename(os.fspath(file_path)))[0]
     for candidate in (f"favicon/{application}", "favicon"):
-        if os.path.isdir(os.path.join(app_root, *candidate.split("/"))):
+        candidate_path = os.path.join(app_root, *candidate.split("/"))
+        if os.path.isdir(candidate_path) and not os.path.islink(candidate_path):
             return candidate
     return None

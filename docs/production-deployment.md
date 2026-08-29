@@ -45,6 +45,13 @@ Optional Upstash operations use short deadlines and a per-worker circuit
 breaker; Redis remains optional and is not used by the default signed-cookie
 session path.
 
+Keep `MODULES_PATH` writable only by the deployment principal. Pytincture
+canonicalizes the root, rejects symlink components and cross-platform traversal
+syntax, uses no-follow opens where supported, and verifies BFF source digests
+between discovery and execution. These checks are defense in depth, not a
+replacement for read-only application artifacts and least-privilege filesystem
+permissions.
+
 ## Private-network exposure
 
 State-changing BFF routes require JSON and reject browser requests unless

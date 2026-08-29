@@ -12,6 +12,8 @@ from types import MappingProxyType
 from typing import Iterator, Mapping, Optional
 from urllib.parse import urlparse
 
+from pytincture.backend.safe_paths import validate_application_name
+
 
 def _setting(default, env: str, description: str):
     return field(default=default, metadata={"env": env, "description": description})
@@ -261,11 +263,8 @@ class PytinctureConfig:
             raise ValueError(f"modules_path is not a directory: {modules_path}")
 
         if self.default_application is not None:
-            candidate = str(self.default_application).strip().strip("/")
-            if not candidate or candidate in {".", ".."} or not all(
-                char.isalnum() or char in "._-" for char in candidate
-            ):
-                raise ValueError("default_application must be a single application name")
+            candidate = str(self.default_application).strip()
+            validate_application_name(candidate)
             object.__setattr__(self, "default_application", candidate)
 
         if self.favicon_folder is not None:

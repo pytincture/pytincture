@@ -38,7 +38,13 @@ from pytincture.backend.saml import (
     allowed_roles,
     validate_saml_response_xml,
 )
-from pytincture.backend.source_loading import build_dynamic_module_name
+from pytincture.backend.safe_paths import (
+    UnsafePath,
+    normalize_relative_path,
+    read_contained_file,
+    validate_application_name,
+)
+from pytincture.backend.source_loading import build_dynamic_module_name, load_source_module
 from pytincture.backend.storage import RedisDict
 from pytincture.backend.streaming import (
     as_streaming_response,
@@ -96,12 +102,12 @@ def test_bff_registry_owns_root_and_reload_state(tmp_path: Path):
         return {("Data", "read"): {"source": Path(path).name}}
 
     registry = BFFRegistry(str(first), manifest)
-    assert registry.operation(str(first), "alpha.py", "Data", "read") == {
-        "source": "alpha.py"
-    }
-    assert registry.operation(str(second), "beta.py", "Data", "read") == {
-        "source": "beta.py"
-    }
+    first_operation = registry.operation(str(first), "alpha.py", "Data", "read")
+    assert first_operation["source"] == "alpha.py"
+    assert first_operation["_source_path"] == str((first / "alpha.py").resolve())
+    assert len(first_operation["_source_digest"]) == 64
+    second_operation = registry.operation(str(second), "beta.py", "Data", "read")
+    assert second_operation["source"] == "beta.py"
     assert registry.root == str(second.resolve())
 
 
@@ -115,8 +121,122 @@ def test_bff_registry_can_defer_filesystem_scanning_until_first_use(tmp_path: Pa
 
     registry = BFFRegistry(str(tmp_path), manifest, autoload=False)
     assert calls == []
-    assert registry.operation(str(tmp_path), "data.py", "Data", "read") == {}
+    operation = registry.operation(str(tmp_path), "data.py", "Data", "read")
+    assert operation["_source_path"] == str((tmp_path / "data.py").resolve())
     assert calls == [str(tmp_path / "data.py")]
+
+
+@pytest.mark.parametrize(
+    "application",
+    (
+        "bad-name",
+        "bad.name",
+        "9bad",
+        "class",
+        "naïve",
+        "classcall",
+        "__init__",
+        "CON",
+        "frontend",
+        "..",
+        "bad\\name",
+    ),
+)
+def test_application_names_are_strict_non_reserved_identifiers(application):
+    with pytest.raises(ValueError, match="Python identifier"):
+        validate_application_name(application)
+
+
+def test_application_name_accepts_python_identifier():
+    assert validate_application_name("reports_v2") == "reports_v2"
+
+
+@pytest.mark.parametrize(
+    "path",
+    ("../outside.py", "pkg\\worker.py", "C:/outside.py", "/absolute.py"),
+)
+def test_relative_paths_reject_cross_platform_traversal(path):
+    with pytest.raises(UnsafePath):
+        normalize_relative_path(path)
+
+
+def test_secure_read_supports_nested_packages(tmp_path):
+    package = tmp_path / "package"
+    package.mkdir()
+    nested = package / "worker.py"
+    nested.write_text("value = 42\n", encoding="utf-8")
+
+    secure = read_contained_file(str(tmp_path), "package/worker.py")
+    assert secure.content == b"value = 42\n"
+    assert secure.path == str(nested.resolve())
+    assert len(secure.digest) == 64
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "symlink"), reason="symlinks unavailable")
+def test_secure_read_rejects_file_and_directory_symlinks(tmp_path):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
+    outside.write_text("secret = True\n", encoding="utf-8")
+    (tmp_path / "linked.py").symlink_to(outside)
+    outside_directory = tmp_path.parent / f"{tmp_path.name}-outside-dir"
+    outside_directory.mkdir()
+    (outside_directory / "worker.py").write_text("secret = True\n", encoding="utf-8")
+    (tmp_path / "linked_dir").symlink_to(
+        outside_directory, target_is_directory=True
+    )
+
+    with pytest.raises(UnsafePath, match="symlinks"):
+        read_contained_file(str(tmp_path), "linked.py")
+    with pytest.raises(UnsafePath, match="symlinks"):
+        read_contained_file(str(tmp_path), "linked_dir/worker.py")
+
+
+@pytest.mark.skipif(
+    not hasattr(__import__("os"), "O_NOFOLLOW"),
+    reason="no-follow opens unavailable",
+)
+def test_secure_read_rejects_swap_to_symlink_during_open(tmp_path, monkeypatch):
+    import pytincture.backend.safe_paths as safe_paths
+
+    target = tmp_path / "target.py"
+    outside = tmp_path.parent / f"{tmp_path.name}-race.py"
+    target.write_text("safe = True\n", encoding="utf-8")
+    outside.write_text("secret = True\n", encoding="utf-8")
+    original_open = safe_paths._open_relative_nofollow
+
+    def swap_then_open(root, relative_path):
+        target.unlink()
+        target.symlink_to(outside)
+        return original_open(root, relative_path)
+
+    monkeypatch.setattr(safe_paths, "_open_relative_nofollow", swap_then_open)
+    with pytest.raises(UnsafePath):
+        read_contained_file(str(tmp_path), "target.py")
+
+
+def test_registry_digest_is_revalidated_before_source_execution(tmp_path):
+    source = tmp_path / "worker.py"
+    source.write_text(
+        "from pytincture.dataclass import backend_for_frontend\n"
+        "@backend_for_frontend\n"
+        "class Worker:\n"
+        "    def ping(self): return 'first'\n",
+        encoding="utf-8",
+    )
+    registry = BFFRegistry(str(tmp_path))
+    first = registry.operation(str(tmp_path), "worker.py", "Worker", "ping")
+
+    source.write_text(source.read_text().replace("first", "second"), encoding="utf-8")
+    second = registry.operation(str(tmp_path), "worker.py", "Worker", "ping")
+    assert second["_source_digest"] != first["_source_digest"]
+
+    source.write_text(source.read_text().replace("second", "third"), encoding="utf-8")
+    with pytest.raises(ImportError, match="changed after registry discovery"):
+        load_source_module(
+            str(source),
+            "Worker",
+            str(tmp_path),
+            expected_digest=second["_source_digest"],
+        )
 
 
 def test_browser_package_discovery_is_transitive_and_explicit(tmp_path: Path):

@@ -213,10 +213,16 @@ def _declared_http_methods(
     return ("POST",)
 
 
-def get_bff_manifest(file_path: str) -> Dict[tuple[str, str], Dict[str, Any]]:
+def get_bff_manifest(
+    file_path: str,
+    *,
+    source: str | None = None,
+) -> Dict[tuple[str, str], Dict[str, Any]]:
     """Statically discover exported BFF operations without importing app code."""
-    with open(file_path, "r", encoding="utf-8") as source_file:
-        module = ast.parse(source_file.read(), filename=file_path)
+    if source is None:
+        with open(file_path, "r", encoding="utf-8") as source_file:
+            source = source_file.read()
+    module = ast.parse(source, filename=file_path)
 
     module_aliases = _collect_module_aliases(module)
     bff_aliases = _collect_import_aliases(module, "backend_for_frontend")
@@ -570,9 +576,11 @@ def add_bff_docs_to_app(app: FastAPI):
     # Set the custom OpenAPI function
     app.openapi = custom_openapi
 
-def get_imports_used_in_class(file_path, class_name):
-    with open(file_path, 'r') as file:
-        tree = ast.parse(file.read())
+def get_imports_used_in_class(file_path, class_name, source_code=None):
+    if source_code is None:
+        with open(file_path, 'r') as file:
+            source_code = file.read()
+    tree = ast.parse(source_code)
 
     imports = set()
     imports_used = set()
@@ -606,12 +614,15 @@ def generate_stub_classes(
     return_protocol,
     application=None,
     replay_client=None,
+    source_code=None,
 ):
     # Keep these parameters for parser compatibility, but never turn an HTTP
     # request's Host or forwarded headers into executable browser Python.
     del return_url, return_protocol
-    with open(file_path, 'r') as file:
-        code = file.read()
+    if source_code is None:
+        with open(file_path, 'r') as file:
+            source_code = file.read()
+    code = source_code
     
     file_identifier = _module_relative_identifier(file_path)
     application_prefix = (
@@ -675,7 +686,9 @@ def generate_stub_classes(
             )[0]
             for decorator in class_node.decorator_list
         ):
-            _, used_imports = get_imports_used_in_class(file_path, class_name)
+            _, used_imports = get_imports_used_in_class(
+                file_path, class_name, source_code=code
+            )
             class_imports.update(used_imports)
             stub_class_code += f"\nclass {class_name}:\n"
             stub_class_code += f"    _pytincture_replay_enabled = {replay_enabled!r}\n"
@@ -917,6 +930,7 @@ def get_parsed_output(
     return_protocol="http",
     application=None,
     replay_client=None,
+    source_code=None,
 ):
     stub_code = generate_stub_classes(
         file_path,
@@ -924,6 +938,7 @@ def get_parsed_output(
         return_protocol,
         application=application,
         replay_client=replay_client,
+        source_code=source_code,
     )
     if stub_code:
         return stub_code

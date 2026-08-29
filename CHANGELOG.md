@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Enforced canonical no-symlink module access with no-follow reads, bound BFF
+  registry entries to SHA-256 source digests, rejected cross-platform path
+  traversal, and standardized every application route on non-reserved ASCII
+  Python identifiers. Application names containing dots or hyphens must be
+  renamed before 1.0.
 - Added bounded local-login rate/field/hash-work controls; BFF admission,
   preparation, policy, execution, stream item/byte/idle/wall budgets; bounded
   cached appcode construction; and short optional remote-store deadlines with

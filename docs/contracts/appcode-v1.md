@@ -20,6 +20,9 @@ suffix is a transport convention; the payload is a standard ZIP archive.
   module-root-relative paths.
 - Hidden directories, virtual environments, `node_modules`, `build`, `dist`,
   and `__pycache__` are excluded from automatic discovery.
+- Symlinked files/directories are never packaged. Every member is opened
+  relative to the canonical modules root with no-follow semantics where the
+  operating system supports them.
 
 Pytincture transforms Python source as it packages it. Exported BFF classes
 become browser proxies while ordinary browser code and required imports remain
