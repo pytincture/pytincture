@@ -463,6 +463,105 @@ jobs:
             tests/standalone-server.log
           if-no-files-found: warn
 
+  saml-federated-e2e:
+    name: Keycloak SAML acceptance
+    needs: python-package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Download validated Python wheel
+        uses: actions/download-artifact@v7
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: Create wheel-only SAML environment and fallback widget wheel
+        shell: bash
+        run: |
+          python -m venv /tmp/pytincture-saml-wheel
+          saml_python=/tmp/pytincture-saml-wheel/bin/python
+          wheel_path=$(find dist -maxdepth 1 -name 'pytincture-*.whl' -print -quit)
+          "$saml_python" -m pip install --upgrade pip
+          "$saml_python" -m pip install "${wheel_path}[saml]"
+          "$saml_python" -m pip download \
+            --no-deps \
+            --dest tests/e2e_apps \
+            dhxpyt==0.9.16
+          cp \
+            tests/e2e_apps/dhxpyt-0.9.16-py3-none-any.whl \
+            tests/e2e_apps/dhxpyt-0.9.16+backend-py3-none-any.whl
+
+      - name: Start pinned Keycloak identity provider
+        run: |
+          docker run --detach \
+            --name pytincture-saml-acceptance \
+            --publish 127.0.0.1:8085:8080 \
+            --volume "$GITHUB_WORKSPACE/tests/federated/keycloak-realm.json:/opt/keycloak/data/import/pytincture-acceptance-realm.json:ro" \
+            --env KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+            --env KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            quay.io/keycloak/keycloak:26.7.2@sha256:9d1f1b2b7261ff53c66cb1092dfcdc34a5fb77e81f9e6a6e75b8b6a795de8067 \
+            start-dev --import-realm --hostname=http://127.0.0.1:8085
+          for attempt in {1..90}; do
+            if curl --fail --silent \
+              http://127.0.0.1:8085/realms/pytincture-acceptance/protocol/saml/descriptor \
+              > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs pytincture-saml-acceptance
+          exit 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: pytincture/frontend/package-lock.json
+
+      - name: Install browser test dependencies
+        working-directory: pytincture/frontend
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: pytincture/frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run production-style SAML acceptance
+        working-directory: pytincture/frontend
+        env:
+          PYTINCTURE_SAML_PYTHON: /tmp/pytincture-saml-wheel/bin/python
+        run: npx playwright test --config playwright.saml.config.mjs
+
+      - name: Capture Keycloak log
+        if: always()
+        run: docker logs pytincture-saml-acceptance > tests/keycloak-saml.log 2>&1
+
+      - name: Stop Keycloak
+        if: always()
+        run: docker stop pytincture-saml-acceptance
+
+      - name: Upload SAML qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytincture-saml-federated-acceptance
+          path: |
+            pytincture/frontend/test-results-saml
+            pytincture/frontend/playwright-report
+            tests/federated-saml-server.log
+            tests/keycloak-saml.log
+          if-no-files-found: warn
+
   production-smoke:
     name: Production topology smoke
     runs-on: ubuntu-latest
@@ -523,6 +622,7 @@ jobs:
       - javascript-runtime
       - browser-e2e
       - standalone-wheel-e2e
+      - saml-federated-e2e
       - production-smoke
     runs-on: ubuntu-latest
 

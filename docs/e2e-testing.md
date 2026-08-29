@@ -20,6 +20,7 @@ application in Chromium, Firefox, and WebKit. The fixture verifies:
 | Pyodide | 0.29.3 browser distribution |
 | Python in Pyodide | 3.13 |
 | dhxpyt | 0.9.16 |
+| Keycloak | 26.7.2, digest pinned in CI |
 | Playwright | 1.62.1 |
 | Browser engines | Playwright 1.62.1 Chromium, Firefox, and WebKit builds |
 
@@ -60,3 +61,20 @@ and zero unexpected console or network errors.
 The job retains `standalone-acceptance.json` plus console, network, trace,
 screenshot, video, and server-log diagnostics. This suite is intentionally
 separate from service-mode BFF and authentication coverage.
+
+## Federated SAML acceptance
+
+The `Keycloak SAML acceptance` job starts the pinned Keycloak 26.7.2 image and
+imports `tests/federated/keycloak-realm.json`. It installs the validated
+Pytincture wheel with the `saml` extra in a clean environment, then uses
+Chromium to exercise a signed redirect/POST flow against the real service.
+
+The suite verifies the SP entity ID and disabled `RequestedAuthnContext`, the
+IdP login and ACS callback, packaged application startup, authenticated BFF
+access, session persistence across reload, local logout, and denial of BFF
+access after logout. CI retains structured `saml-acceptance.json`, console and
+network evidence, Playwright diagnostics, and both service and Keycloak logs.
+
+Pytincture logout is local-only. The suite therefore inspects its redirect
+without following it; following `/login` would immediately initiate SAML and
+an existing Keycloak SSO session may authenticate again.
