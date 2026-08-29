@@ -43,7 +43,11 @@ async function callBff(page) {
 
 async function attachEvidence(testInfo, evidence, diagnostics) {
     const evidencePath = testInfo.outputPath("saml-acceptance.json");
-    writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
+    const renderedEvidence = `${JSON.stringify(evidence, null, 2)}\n`;
+    writeFileSync(evidencePath, renderedEvidence);
+    if (process.env.PYTINCTURE_ACCEPTANCE_RESULT) {
+        writeFileSync(process.env.PYTINCTURE_ACCEPTANCE_RESULT, renderedEvidence);
+    }
     await testInfo.attach("saml-acceptance.json", { path: evidencePath, contentType: "application/json" });
     await testInfo.attach("saml-console.json", {
         body: Buffer.from(JSON.stringify(diagnostics.consoleEntries, null, 2)),

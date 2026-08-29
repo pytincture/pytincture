@@ -27,7 +27,11 @@ function collectDiagnostics(page) {
 
 async function attachEvidence(testInfo, evidence, diagnostics) {
     const evidencePath = testInfo.outputPath("standalone-acceptance.json");
-    writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
+    const renderedEvidence = `${JSON.stringify(evidence, null, 2)}\n`;
+    writeFileSync(evidencePath, renderedEvidence);
+    if (process.env.PYTINCTURE_ACCEPTANCE_RESULT) {
+        writeFileSync(process.env.PYTINCTURE_ACCEPTANCE_RESULT, renderedEvidence);
+    }
     await testInfo.attach("standalone-acceptance.json", {
         path: evidencePath,
         contentType: "application/json",

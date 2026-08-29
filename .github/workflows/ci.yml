@@ -206,11 +206,26 @@ jobs:
           python scripts/compare_upgrade_smoke.py \
             upgrade-before.json upgrade-candidate.json upgrade-rollback.json
 
+      - name: Build upgrade and rollback qualification evidence
+        if: always()
+        run: |
+          python scripts/build_qualification_evidence.py \
+            --exercise upgrade_rollback \
+            --status "${{ job.status }}" \
+            --artifact-manifest dist/SHA256SUMS.json \
+            --result before=upgrade-before.json \
+            --result candidate=upgrade-candidate.json \
+            --result rollback=upgrade-rollback.json \
+            --output qualification-evidence-upgrade-rollback.json
+
       - name: Upload upgrade and rollback evidence
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: upgrade-rollback-results
-          path: upgrade-*.json
+          path: |
+            qualification-evidence-upgrade-rollback.json
+            upgrade-*.json
           if-no-files-found: error
 
   release-gates:
@@ -327,6 +342,7 @@ jobs:
 
   browser-e2e:
     name: Pyodide E2E (${{ matrix.browser }})
+    needs: python-package
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -345,6 +361,12 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+
+      - name: Download validated release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: release-artifacts
+          path: dist
 
       - name: Install Pytincture and prepare the pinned widget wheel
         run: |
@@ -371,8 +393,19 @@ jobs:
       - name: Run real Pyodide tests in ${{ matrix.browser }}
         working-directory: pytincture/frontend
         env:
+          PYTINCTURE_ACCEPTANCE_RESULT: browser-acceptance-result.json
           PYTINCTURE_E2E_PYTHON: python
         run: npx playwright test --config playwright.e2e.config.mjs --project ${{ matrix.browser }}
+
+      - name: Build authenticated BFF qualification evidence
+        if: always()
+        run: |
+          python scripts/build_qualification_evidence.py \
+            --exercise authenticated_bff \
+            --status "${{ job.status }}" \
+            --artifact-manifest dist/SHA256SUMS.json \
+            --result browser=pytincture/frontend/browser-acceptance-result.json \
+            --output qualification-evidence-authenticated-bff-${{ matrix.browser }}.json
 
       - name: Upload E2E failure artifacts
         if: failure()
@@ -390,7 +423,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: pytincture-performance-${{ matrix.browser }}
-          path: pytincture/frontend/test-results
+          path: |
+            qualification-evidence-authenticated-bff-${{ matrix.browser }}.json
+            pytincture/frontend/browser-acceptance-result.json
+            pytincture/frontend/test-results
           if-no-files-found: warn
 
   standalone-wheel-e2e:
@@ -448,9 +484,20 @@ jobs:
       - name: Qualify the runtime bundled in the Python wheel
         working-directory: pytincture/frontend
         env:
+          PYTINCTURE_ACCEPTANCE_RESULT: standalone-acceptance-result.json
           PYTINCTURE_STANDALONE_PYTHON: /tmp/pytincture-standalone-wheel/bin/python
           PYTINCTURE_STANDALONE_WIDGET_WHEEL: /tmp/pytincture-standalone-widget/dhxpyt-0.9.16+backend-py3-none-any.whl
         run: npx playwright test --config playwright.standalone.config.mjs
+
+      - name: Build standalone qualification evidence
+        if: always()
+        run: |
+          python scripts/build_qualification_evidence.py \
+            --exercise standalone \
+            --status "${{ job.status }}" \
+            --artifact-manifest dist/SHA256SUMS.json \
+            --result browser=pytincture/frontend/standalone-acceptance-result.json \
+            --output qualification-evidence-standalone.json
 
       - name: Upload standalone qualification evidence
         if: always()
@@ -458,6 +505,8 @@ jobs:
         with:
           name: pytincture-standalone-wheel-acceptance
           path: |
+            qualification-evidence-standalone.json
+            pytincture/frontend/standalone-acceptance-result.json
             pytincture/frontend/test-results-standalone
             pytincture/frontend/playwright-report
             tests/standalone-server.log
@@ -539,8 +588,19 @@ jobs:
       - name: Run production-style SAML acceptance
         working-directory: pytincture/frontend
         env:
+          PYTINCTURE_ACCEPTANCE_RESULT: saml-acceptance-result.json
           PYTINCTURE_SAML_PYTHON: /tmp/pytincture-saml-wheel/bin/python
         run: npx playwright test --config playwright.saml.config.mjs
+
+      - name: Build federated-auth qualification evidence
+        if: always()
+        run: |
+          python scripts/build_qualification_evidence.py \
+            --exercise federated_auth \
+            --status "${{ job.status }}" \
+            --artifact-manifest dist/SHA256SUMS.json \
+            --result saml=pytincture/frontend/saml-acceptance-result.json \
+            --output qualification-evidence-federated-auth.json
 
       - name: Capture Keycloak log
         if: always()
@@ -556,6 +616,8 @@ jobs:
         with:
           name: pytincture-saml-federated-acceptance
           path: |
+            qualification-evidence-federated-auth.json
+            pytincture/frontend/saml-acceptance-result.json
             pytincture/frontend/test-results-saml
             pytincture/frontend/playwright-report
             tests/federated-saml-server.log
@@ -564,6 +626,7 @@ jobs:
 
   production-smoke:
     name: Production topology smoke
+    needs: python-package
     runs-on: ubuntu-latest
 
     steps:
@@ -576,11 +639,16 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Build and install Pytincture wheel in a clean environment
+      - name: Download validated release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: Install validated Pytincture wheel in a clean environment
         run: |
           python -m pip install --upgrade pip
-          python -m pip wheel --no-deps --wheel-dir .production-wheel .
-          python -m pip install .production-wheel/pytincture-*.whl
+          python -m pip install dist/pytincture-*.whl
 
       - name: Run health load budget
         env:
@@ -593,12 +661,26 @@ jobs:
           python scripts/run_performance_smoke.py \
             --base-url http://127.0.0.1:8081
 
+      - name: Build service-performance qualification evidence
+        if: always()
+        run: |
+          python scripts/build_qualification_evidence.py \
+            --exercise performance_service \
+            --status "${{ job.status }}" \
+            --artifact-manifest dist/SHA256SUMS.json \
+            --result health=performance-health.json \
+            --result appcode=performance-appcode.json \
+            --result bff=performance-bff.json \
+            --output qualification-evidence-performance-service.json
+
       - name: Upload service performance evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: pytincture-performance-service
-          path: performance-*.json
+          path: |
+            qualification-evidence-performance-service.json
+            performance-*.json
           if-no-files-found: warn
 
       - name: Upload production smoke log

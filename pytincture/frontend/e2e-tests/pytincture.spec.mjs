@@ -220,9 +220,15 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         expect(new URL(page.url()).search).toBe("");
         const inlineLifecycle = await page.evaluate(() => window.__pytinctureLifecycle);
         expect(inlineLifecycle.at(-1).type).toBe("ready");
+        performanceEvidence.status = "passed";
     } finally {
+        performanceEvidence.status ||= "failed";
         const performancePath = testInfo.outputPath("performance.json");
-        writeFileSync(performancePath, `${JSON.stringify(performanceEvidence, null, 2)}\n`);
+        const renderedPerformance = `${JSON.stringify(performanceEvidence, null, 2)}\n`;
+        writeFileSync(performancePath, renderedPerformance);
+        if (process.env.PYTINCTURE_ACCEPTANCE_RESULT) {
+            writeFileSync(process.env.PYTINCTURE_ACCEPTANCE_RESULT, renderedPerformance);
+        }
         await testInfo.attach("performance.json", {
             path: performancePath,
             contentType: "application/json",
