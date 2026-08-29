@@ -45,6 +45,10 @@ Never disable signature/certificate validation to work around IdP errors.
 Use metadata at `/{application}/auth/saml/metadata`, confirm entity ID, ACS,
 certificate formatting, clock synchronization, and forwarded HTTPS origin.
 
+`SAML_REQUESTED_AUTHN_CONTEXT` is a boolean setting: use `true` to request a
+context or `false` (the default) to omit `RequestedAuthnContext` entirely. It
+does not accept a numeric authentication-context identifier.
+
 ## Session behavior
 
 The signed cookie stores compact stable identity claims, an opaque session ID,

@@ -26,6 +26,9 @@ pytincture/frontend/dist
 pytincture/frontend/playwright-report
 pytincture/frontend/test-results
 pytincture/frontend/test-results-standalone
+pytincture/frontend/test-results-saml
 tests/e2e-server.log
+tests/federated-saml-server.log
+tests/keycloak-saml.log
 tests/standalone-server.log
 tests/e2e_apps/*.whl
