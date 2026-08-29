@@ -90,7 +90,11 @@ def fresh_client(override_env):
     """
     Provide a fresh TestClient instance with cleared cookies.
     """
-    client = TestClient(app, base_url="https://testserver")
+    client = TestClient(
+        app,
+        base_url="https://testserver",
+        client=("127.0.0.1", 50000),
+    )
     client.cookies.clear()
     return client
 
@@ -216,20 +220,46 @@ def test_password_login_hydrates_safe_default_app_user_claims(
     assert "access_token" not in session_user
 
 
-def test_development_email_login_is_loopback_only(monkeypatch):
+def test_development_email_login_rejects_remote_peer_spoofing_loopback_host(monkeypatch):
     import pytincture.backend.app as backend_app
 
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
     monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
-    with TestClient(app, base_url="https://public.example.com") as client:
+    with TestClient(
+        app,
+        base_url="https://localhost",
+        headers={"X-Forwarded-Host": "localhost"},
+        client=("198.51.100.24", 50000),
+    ) as client:
         response = client.post(
             "/demoapp/auth/user",
             data={"email": "person@example.com", "password": "ignored"},
             follow_redirects=False,
         )
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize("peer", ["127.0.0.1", "::1"])
+def test_development_email_login_accepts_actual_loopback_peer(monkeypatch, peer):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    with TestClient(
+        app,
+        base_url="https://public.example.com",
+        client=(peer, 50000),
+    ) as client:
+        response = client.post(
+            "/demoapp/auth/user",
+            data={"email": "person@example.com", "password": "ignored"},
+            follow_redirects=False,
+        )
+    assert response.status_code == 303
 
 
 def test_authentication_enabled_requires_strong_startup_secret(tmp_path):
@@ -1308,8 +1338,10 @@ def test_stateless_session_survives_logout_in_another_browser_and_replica(
     )
     assert first_login.status_code == 303
 
-    with TestClient(app, base_url="https://testserver") as second_browser, TestClient(
-        app, base_url="https://testserver"
+    with TestClient(
+        app, base_url="https://testserver", client=("127.0.0.1", 50001)
+    ) as second_browser, TestClient(
+        app, base_url="https://testserver", client=("127.0.0.1", 50002)
     ) as another_replica:
         second_login = second_browser.post(
             "/demoapp/auth/user",

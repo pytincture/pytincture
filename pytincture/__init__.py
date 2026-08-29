@@ -5,6 +5,7 @@ pyTincture uvicorn launcher
 __version__ = "1.0.0rc1"
 
 from multiprocessing import Process, freeze_support
+import ipaddress
 import os
 import signal
 import shutil
@@ -73,12 +74,41 @@ def _normalize_favicon_folder(value, modules_folder):
     return os.path.abspath(candidate)
 
 
-def main(port, ssl_keyfile=None, ssl_certfile=None, modules_folder=None):
+def _environment_flag(name):
+    return os.getenv(name, "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _development_email_login_enabled():
+    return _environment_flag("ENABLE_USER_LOGIN") and _environment_flag(
+        "ENABLE_DEV_EMAIL_LOGIN"
+    )
+
+
+def _loopback_bind_host(host=None):
+    """Resolve and validate the listener used by passwordless development login."""
+
+    resolved = str(host).strip() if host is not None else ""
+    if not resolved:
+        resolved = "127.0.0.1" if _development_email_login_enabled() else "0.0.0.0"
+    if _development_email_login_enabled():
+        try:
+            loopback = ipaddress.ip_address(resolved).is_loopback
+        except ValueError:
+            loopback = False
+        if not loopback:
+            raise RuntimeError(
+                "ENABLE_DEV_EMAIL_LOGIN requires a literal loopback bind host "
+                "such as 127.0.0.1 or ::1"
+            )
+    return resolved
+
+
+def main(port, ssl_keyfile=None, ssl_certfile=None, modules_folder=None, host=None):
     if modules_folder is not None:
         set_modules_path(os.fspath(modules_folder))
 
     run_kwargs = dict(
-        host="0.0.0.0",
+        host=_loopback_bind_host(host),
         port=port,
         log_level="debug",
         access_log="access.log",
@@ -110,6 +140,7 @@ def launch_service(
     bff_docs_title: str = "pyTincture BFF API",
     default_application=None,
     favicon_folder=None,
+    host=None,
 ):
     modules_folder = os.fspath(modules_folder)
     set_modules_path(modules_folder)
@@ -134,7 +165,11 @@ def launch_service(
             modules_folder,
         )
 
-    main_application = Process(target=main, args=(port, ssl_keyfile, ssl_certfile, modules_folder))
+    bind_host = _loopback_bind_host(host)
+    main_application = Process(
+        target=main,
+        args=(port, ssl_keyfile, ssl_certfile, modules_folder, bind_host),
+    )
     # launch data and main applications
     main_application.start()
     

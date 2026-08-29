@@ -47,6 +47,32 @@ def test_main(monkeypatch):
     set_modules_path(None)
     os.environ.pop("MODULES_PATH", None)
 
+
+def test_main_defaults_development_login_to_loopback(monkeypatch):
+    calls = []
+    monkeypatch.setenv("ENABLE_USER_LOGIN", "true")
+    monkeypatch.setenv("ENABLE_DEV_EMAIL_LOGIN", "true")
+
+    import pytincture.__init__ as launcher_mod
+    monkeypatch.setattr(
+        launcher_mod.uvicorn,
+        "run",
+        lambda app_str, **kwargs: calls.append({"app_str": app_str, **kwargs}),
+    )
+
+    main(9000)
+
+    assert calls[0]["host"] == "127.0.0.1"
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "public.example.com"])
+def test_main_rejects_routable_development_login_bind(monkeypatch, host):
+    monkeypatch.setenv("ENABLE_USER_LOGIN", "true")
+    monkeypatch.setenv("ENABLE_DEV_EMAIL_LOGIN", "true")
+
+    with pytest.raises(RuntimeError, match="literal loopback bind host"):
+        main(9000, host=host)
+
 # --------------------------
 # Test for the launch_service() function
 # --------------------------
@@ -88,6 +114,8 @@ def test_launch_service(monkeypatch, tmp_path):
     os.environ.pop("TEST_VAR", None)
     os.environ.pop("PYTINCTURE_DEFAULT_APPLICATION", None)
     os.environ.pop("PYTINCTURE_FAVICON_FOLDER", None)
+    os.environ.pop("ENABLE_USER_LOGIN", None)
+    os.environ.pop("ENABLE_DEV_EMAIL_LOGIN", None)
 
     # Call launch_service.
     from pytincture.__init__ import launch_service
@@ -114,6 +142,68 @@ def test_launch_service(monkeypatch, tmp_path):
     os.environ.pop("TEST_VAR", None)
     os.environ.pop("PYTINCTURE_DEFAULT_APPLICATION", None)
     os.environ.pop("PYTINCTURE_FAVICON_FOLDER", None)
+
+
+def test_launch_service_uses_safe_implicit_bind_for_development_login(
+    monkeypatch, tmp_path
+):
+    process_args = []
+
+    class FakeProcess:
+        def __init__(self, target, args):
+            process_args.append(args)
+
+        def start(self):
+            pass
+
+        def terminate(self):
+            pass
+
+        def join(self):
+            pass
+
+    import pytincture as launcher_mod
+    monkeypatch.setattr(launcher_mod, "Process", FakeProcess)
+
+    try:
+        launcher_mod.launch_service(
+            modules_folder=str(tmp_path),
+            env_vars={
+                "ENABLE_USER_LOGIN": "true",
+                "ENABLE_DEV_EMAIL_LOGIN": "true",
+            },
+        )
+    finally:
+        os.environ.pop("ENABLE_USER_LOGIN", None)
+        os.environ.pop("ENABLE_DEV_EMAIL_LOGIN", None)
+
+    assert process_args[0][4] == "127.0.0.1"
+
+
+def test_launch_service_rejects_explicit_routable_development_bind(
+    monkeypatch, tmp_path
+):
+    import pytincture as launcher_mod
+
+    monkeypatch.setattr(
+        launcher_mod,
+        "Process",
+        lambda *args, **kwargs: pytest.fail("process must not be created"),
+    )
+
+    try:
+        with pytest.raises(RuntimeError, match="literal loopback bind host"):
+            launcher_mod.launch_service(
+                modules_folder=str(tmp_path),
+                host="0.0.0.0",
+                env_vars={
+                    "ENABLE_USER_LOGIN": "true",
+                    "ENABLE_DEV_EMAIL_LOGIN": "true",
+                },
+            )
+    finally:
+        os.environ.pop("ENABLE_USER_LOGIN", None)
+        os.environ.pop("ENABLE_DEV_EMAIL_LOGIN", None)
 
 
 def test_launch_service_ignores_env_var_override(monkeypatch, tmp_path):

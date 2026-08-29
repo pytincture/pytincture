@@ -23,7 +23,7 @@ Import these names from `pytincture`:
 - `launch_service(modules_folder, port=8070, ssl_keyfile=None,
   ssl_certfile=None, env_vars=None, bff_docs_path="/bff-docs",
   bff_docs_title="pyTincture BFF API", default_application=None,
-  favicon_folder=None)` starts the Pytincture service. The existing call forms
+  favicon_folder=None, host=None)` starts the Pytincture service. The existing call forms
   remain supported when the planned application factory is introduced.
 - `set_modules_path(path)` selects the application module root for the current
   process and synchronizes `MODULES_PATH`.
@@ -33,6 +33,10 @@ Import these names from `pytincture`:
 `launch_service()` is the supported production convenience launcher. The
 lower-level `main()` helper and process-management implementation are not
 public APIs.
+
+The launcher defaults to `0.0.0.0` for normal services. When development
+email login is active, an omitted `host` safely defaults to `127.0.0.1`, and
+an explicitly routable host is rejected before the server process starts.
 
 ### BFF declarations
 

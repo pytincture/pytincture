@@ -16,9 +16,13 @@ allowlist, not a password database. Hash values must be Argon2id or bcrypt:
 python -c 'from argon2 import PasswordHasher; print(PasswordHasher().hash("change-me"))'
 ```
 
-`ENABLE_DEV_EMAIL_LOGIN=true` bypasses password verification only on loopback
-hosts and must never be enabled in production. `LOGIN_HELP_TEXT` is escaped
-plain text suitable for disposable demo credentials.
+`ENABLE_DEV_EMAIL_LOGIN=true` bypasses password verification only when the
+actual network peer is a loopback IP address; `Host` and forwarded headers
+cannot enable it. With `launch_service()`, the development mode automatically
+binds to `127.0.0.1` unless another literal loopback `host` is supplied, and a
+routable bind is rejected. It must never be enabled in production.
+`LOGIN_HELP_TEXT` is escaped plain text suitable for disposable demo
+credentials.
 
 ## OAuth/OIDC
 
