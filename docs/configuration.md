@@ -58,6 +58,9 @@ The contract test checks every row in this table against the dataclass model.
 | `saml_idp_entity_id` | `SAML_IDP_ENTITY_ID` | Default SAML identity-provider entity id. |
 | `saml_idp_sso_url` | `SAML_IDP_SSO_URL` | Default SAML identity-provider sign-in URL. |
 | `saml_idp_x509_cert` | `SAML_IDP_X509_CERT` | Default SAML identity-provider certificate. |
+| `saml_response_max_bytes` | `SAML_RESPONSE_MAX_BYTES` | Maximum decoded SAML response size before signature processing. |
+| `saml_acs_rate_limit_attempts` | `SAML_ACS_RATE_LIMIT_ATTEMPTS` | Maximum SAML ACS attempts per peer in one window. |
+| `saml_acs_rate_limit_window_seconds` | `SAML_ACS_RATE_LIMIT_WINDOW_SECONDS` | SAML ACS rate-limit window in seconds. |
 | `session_secret` | `SAML_SECRET_KEY` | Session signing secret. |
 | `previous_session_secrets` | `AUTH_SESSION_PREVIOUS_SECRET_KEYS` | Previous signing keys accepted during rotation. |
 | `session_max_age_seconds` | `AUTH_SESSION_MAX_AGE_SECONDS` | Signed session lifetime. |

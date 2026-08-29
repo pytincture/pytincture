@@ -1,6 +1,8 @@
 import asyncio
+import base64
 import json
 import sys
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -24,7 +26,13 @@ from pytincture.backend.diagnostics import (
 )
 from pytincture.backend.mcp import FilteredFastAPIApp, exposed_operation_ids
 from pytincture.backend.pages import find_app_string_setting, normalize_app_asset_path
-from pytincture.backend.saml import SAMLProviderCatalog, allowed_roles
+from pytincture.backend.saml import (
+    ALLOWED_XML_SIGNATURE_TRANSFORMS,
+    SAMLProviderCatalog,
+    SlidingWindowRateLimiter,
+    allowed_roles,
+    validate_saml_response_xml,
+)
 from pytincture.backend.source_loading import build_dynamic_module_name
 from pytincture.backend.storage import RedisDict
 from pytincture.backend.streaming import limited_async_stream, limited_sync_stream
@@ -211,6 +219,85 @@ def test_saml_provider_catalog_is_independent_and_deterministic():
         }
     ]
     assert allowed_roles(provider, []) == ["admin", "reader"]
+
+
+def test_saml_response_transform_guard_accepts_only_bounded_safe_algorithms():
+    safe_response = b"""<samlp:Response
+        xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+        xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+      <ds:Signature><ds:SignedInfo>
+        <ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+        <ds:Reference><ds:Transforms>
+          <ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+          <ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+        </ds:Transforms></ds:Reference>
+      </ds:SignedInfo></ds:Signature>
+    </samlp:Response>"""
+
+    encoded = base64.b64encode(safe_response).decode("ascii")
+    assert validate_saml_response_xml(encoded, len(safe_response)) == safe_response
+
+    disallowed = (
+        Path(__file__).parent / "fixtures" / "saml" / "disallowed-xslt-transform.xml"
+    ).read_bytes()
+    with pytest.raises(ValueError, match="disallowed signature transform"):
+        validate_saml_response_xml(
+            base64.b64encode(disallowed).decode("ascii"),
+            len(disallowed),
+        )
+
+
+def test_saml_response_transform_guard_rejects_unsafe_or_oversized_xml():
+    with pytest.raises(ValueError, match="DTD or entity"):
+        validate_saml_response_xml(
+            base64.b64encode(b"<!DOCTYPE Response><Response/>").decode("ascii"),
+            1024,
+        )
+    with pytest.raises(ValueError, match="decoded size limit"):
+        validate_saml_response_xml(
+            base64.b64encode(b"<Response>too large</Response>").decode("ascii"),
+            8,
+        )
+    with pytest.raises(ValueError, match="valid base64"):
+        validate_saml_response_xml("not base64!", 1024)
+
+
+def test_saml_rate_limiter_is_windowed_and_memory_bounded():
+    now = [10.0]
+    limiter = SlidingWindowRateLimiter(
+        2,
+        5,
+        max_keys=2,
+        clock=lambda: now[0],
+    )
+    assert limiter.allow("first") == (True, 0)
+    assert limiter.allow("first") == (True, 0)
+    allowed, retry_after = limiter.allow("first")
+    assert allowed is False
+    assert retry_after == 5
+    limiter.allow("second")
+    limiter.allow("third")
+    assert len(limiter._entries) == 2
+    now[0] = 16.0
+    assert limiter.allow("first") == (True, 0)
+
+
+def test_saml_mitigation_evidence_matches_the_enforced_runtime():
+    root = Path(__file__).resolve().parents[1]
+    evidence = json.loads(
+        (root / "security" / "saml-transform-mitigation.json").read_text()
+    )
+    assert evidence["status"] == "passed"
+    assert evidence["upstream_status"] == "open"
+    assert evidence["dependency"] == f"python3-saml=={version('python3-saml')}"
+    assert evidence["mitigations"]["strict_transform_allowlist"] is True
+    assert evidence["mitigations"]["guard_runs_before_toolkit_signature_processing"] is True
+    assert evidence["safe_fixture"] == (
+        "tests/fixtures/saml/disallowed-xslt-transform.xml"
+    )
+    assert "http://www.w3.org/TR/1999/REC-xslt-19991116" not in (
+        ALLOWED_XML_SIGNATURE_TRANSFORMS
+    )
 
 
 def test_redis_store_accepts_an_injected_client():

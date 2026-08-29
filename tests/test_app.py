@@ -1673,6 +1673,62 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
     assert bff_response.status_code == 200
 
 
+def test_saml_acs_rejects_disallowed_transforms_before_toolkit_and_rate_limits(
+    fresh_client,
+    monkeypatch,
+):
+    import pytincture.backend.app as backend_app
+    from pytincture.backend.saml import SlidingWindowRateLimiter
+
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_PROVIDERS", "")
+    monkeypatch.setattr(
+        backend_app,
+        "SAML_ACS_RATE_LIMITER",
+        SlidingWindowRateLimiter(1, 60),
+    )
+    toolkit_called = False
+
+    def fail_if_toolkit_is_called(*args, **kwargs):
+        nonlocal toolkit_called
+        toolkit_called = True
+        raise AssertionError("unsafe XML reached the SAML toolkit")
+
+    monkeypatch.setattr(backend_app, "_init_saml_auth", fail_if_toolkit_is_called)
+    relay_state = backend_app._sign_saml_relay_state({
+        "version": 1,
+        "application": "demoapp",
+        "provider_id": "default",
+        "request_id": "ONELOGIN_original_request",
+        "return_to": "/demoapp",
+    })
+    guarded_response = (
+        Path(__file__).parent / "fixtures" / "saml" / "disallowed-xslt-transform.xml"
+    ).read_bytes()
+
+    rejected = fresh_client.post(
+        "/demoapp/auth/saml/acs",
+        data={
+            "SAMLResponse": base64.b64encode(guarded_response).decode("ascii"),
+            "RelayState": relay_state,
+        },
+    )
+    assert rejected.status_code == 400
+    assert rejected.json() == {"detail": "Invalid SAML response"}
+    assert toolkit_called is False
+
+    throttled = fresh_client.post(
+        "/demoapp/auth/saml/acs",
+        data={
+            "SAMLResponse": base64.b64encode(b"<Response/>").decode("ascii"),
+            "RelayState": relay_state,
+        },
+    )
+    assert throttled.status_code == 429
+    assert throttled.headers["retry-after"] == "60"
+    assert toolkit_called is False
+
+
 def test_login_endpoint(fresh_client, monkeypatch, tmp_path):
     """
     Test the /{application}/login endpoint returns expected HTML content.

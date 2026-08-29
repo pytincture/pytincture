@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "finding": "python3-saml signature verification accepts attacker-selected XSLT transforms",
+  "upstream_issue": "https://github.com/SAML-Toolkits/python3-saml/issues/447",
+  "upstream_status_checked_at": "2026-08-29T21:34:12Z",
+  "upstream_status": "open",
+  "dependency": "python3-saml==1.16.0",
+  "fixed_release_available": false,
+  "mitigations": {
+    "strict_transform_allowlist": true,
+    "dtd_and_entity_declarations_rejected": true,
+    "decoded_response_size_limited": true,
+    "xml_network_and_entity_resolution_disabled": true,
+    "acs_rate_limit_enabled": true,
+    "guard_runs_before_toolkit_signature_processing": true,
+    "process_isolation_required": false
+  },
+  "process_isolation_rationale": "Unapproved transforms are rejected before xmlsec processing; input allocation and XML parsing are bounded.",
+  "safe_fixture": "tests/fixtures/saml/disallowed-xslt-transform.xml",
+  "regression_tests": [
+    "tests/test_backend_modules.py::test_saml_response_transform_guard_accepts_only_bounded_safe_algorithms",
+    "tests/test_backend_modules.py::test_saml_response_transform_guard_rejects_unsafe_or_oversized_xml",
+    "tests/test_app.py::test_saml_acs_rejects_disallowed_transforms_before_toolkit_and_rate_limits"
+  ]
+}

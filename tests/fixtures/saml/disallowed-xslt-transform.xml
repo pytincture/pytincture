@@ -1,0 +1,13 @@
+<samlp:Response
+    xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+    xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+  <ds:Signature>
+    <ds:SignedInfo>
+      <ds:Reference>
+        <ds:Transforms>
+          <ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xslt-19991116" />
+        </ds:Transforms>
+      </ds:Reference>
+    </ds:SignedInfo>
+  </ds:Signature>
+</samlp:Response>

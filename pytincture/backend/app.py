@@ -93,7 +93,9 @@ from pytincture.backend.pages import (
 )
 from pytincture.backend.saml import (
     SAMLProviderCatalog,
+    SlidingWindowRateLimiter,
     split_csv,
+    validate_saml_response_xml,
 )
 from pytincture.backend.saml import (
     allowed_roles as saml_allowed_roles,
@@ -1709,6 +1711,21 @@ SAML_RELAY_STATE_TTL_SECONDS = int(
 )
 if SAML_RELAY_STATE_TTL_SECONDS <= 0:
     raise RuntimeError("SAML_RELAY_STATE_TTL_SECONDS must be greater than zero")
+SAML_RESPONSE_MAX_BYTES = int(os.getenv("SAML_RESPONSE_MAX_BYTES", str(512 * 1024)))
+SAML_ACS_RATE_LIMIT_ATTEMPTS = int(os.getenv("SAML_ACS_RATE_LIMIT_ATTEMPTS", "60"))
+SAML_ACS_RATE_LIMIT_WINDOW_SECONDS = int(
+    os.getenv("SAML_ACS_RATE_LIMIT_WINDOW_SECONDS", "60")
+)
+if SAML_RESPONSE_MAX_BYTES <= 0:
+    raise RuntimeError("SAML_RESPONSE_MAX_BYTES must be greater than zero")
+if ENABLE_SAML_AUTH and SAML_RESPONSE_MAX_BYTES > MAX_REQUEST_BODY_BYTES:
+    raise RuntimeError("SAML_RESPONSE_MAX_BYTES cannot exceed MAX_REQUEST_BODY_BYTES")
+if min(SAML_ACS_RATE_LIMIT_ATTEMPTS, SAML_ACS_RATE_LIMIT_WINDOW_SECONDS) <= 0:
+    raise RuntimeError("SAML ACS rate-limit values must be greater than zero")
+SAML_ACS_RATE_LIMITER = SlidingWindowRateLimiter(
+    SAML_ACS_RATE_LIMIT_ATTEMPTS,
+    SAML_ACS_RATE_LIMIT_WINDOW_SECONDS,
+)
 
 
 def _split_csv(value: Any) -> List[str]:
@@ -2266,6 +2283,7 @@ async def _saml_login(request: Request, application: str, provider_id: Optional[
         400: {
             "description": "HTTPException (if SAML response invalid)"},
         401: {"description": "HTTPException (if user not authorized)"},
+        429: {"description": "HTTPException (if ACS rate limit is exceeded)"},
         404: {"description": "HTTPException (if SAML disabled)"},
     },
 )
@@ -2281,11 +2299,27 @@ async def saml_assertion_consumer(request: Request, application: str):
         302: {"description": "RedirectResponse (to original path after login)"},
         400: {"description": "HTTPException (if SAML response invalid)"},
         401: {"description": "HTTPException (if user not authorized)"},
+        429: {"description": "HTTPException (if ACS rate limit is exceeded)"},
         404: {"description": "HTTPException (if SAML disabled or provider missing)"},
     },
 )
 async def saml_provider_assertion_consumer(request: Request, application: str, provider_id: str):
     return await _saml_assertion_consumer(request, application, provider_id=provider_id)
+
+
+def _saml_acs_peer_key(request: Request) -> str:
+    peer = request.client.host if request.client else "unknown"
+    if TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+        if forwarded:
+            try:
+                peer = str(ipaddress.ip_address(forwarded))
+            except ValueError:
+                pass
+    try:
+        return str(ipaddress.ip_address(peer))
+    except ValueError:
+        return str(peer)[:128]
 
 
 async def _saml_assertion_consumer(request: Request, application: str, provider_id: Optional[str] = None):
@@ -2295,9 +2329,29 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
     if not ENABLE_SAML_AUTH:
         raise HTTPException(status_code=404, detail="SAML authentication not enabled")
 
+    allowed, retry_after = SAML_ACS_RATE_LIMITER.allow(_saml_acs_peer_key(request))
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many SAML authentication attempts",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     _debug_session_state("saml_acs:entry", request)
     form_data = await request.form()
     post_data = dict(form_data.multi_items())
+    try:
+        validate_saml_response_xml(
+            post_data.get("SAMLResponse", ""),
+            SAML_RESPONSE_MAX_BYTES,
+        )
+    except (RuntimeError, ValueError) as exc:
+        logger.warning(
+            "SAML response pre-validation failed correlation_id=%s reason=%s",
+            getattr(request.state, "correlation_id", ""),
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=400, detail="Invalid SAML response") from exc
     relay_token = post_data.get("RelayState")
     relay_state = _load_saml_relay_state(relay_token)
     if relay_state["application"] != application:

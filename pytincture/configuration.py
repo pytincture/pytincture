@@ -106,6 +106,21 @@ class PytinctureConfig:
     saml_idp_x509_cert: str = _setting(
         "", "SAML_IDP_X509_CERT", "Default SAML identity-provider certificate."
     )
+    saml_response_max_bytes: int = _setting(
+        512 * 1024,
+        "SAML_RESPONSE_MAX_BYTES",
+        "Maximum decoded SAML response size before signature processing.",
+    )
+    saml_acs_rate_limit_attempts: int = _setting(
+        60,
+        "SAML_ACS_RATE_LIMIT_ATTEMPTS",
+        "Maximum SAML ACS attempts per peer in one window.",
+    )
+    saml_acs_rate_limit_window_seconds: int = _setting(
+        60,
+        "SAML_ACS_RATE_LIMIT_WINDOW_SECONDS",
+        "SAML ACS rate-limit window in seconds.",
+    )
     session_secret: str = _setting("", "SAML_SECRET_KEY", "Session signing secret.")
     previous_session_secrets: tuple[str, ...] = _setting(
         (), "AUTH_SESSION_PREVIOUS_SECRET_KEYS", "Previous signing keys accepted during rotation."
@@ -203,6 +218,15 @@ class PytinctureConfig:
             raise ValueError("session_same_site='none' requires session_https_only=true")
         if self.max_request_body_bytes <= 0:
             raise ValueError("max_request_body_bytes must be greater than zero")
+        if self.saml_response_max_bytes <= 0:
+            raise ValueError("saml_response_max_bytes must be greater than zero")
+        if self.enable_saml_auth and self.saml_response_max_bytes > self.max_request_body_bytes:
+            raise ValueError("saml_response_max_bytes cannot exceed max_request_body_bytes")
+        if min(
+            self.saml_acs_rate_limit_attempts,
+            self.saml_acs_rate_limit_window_seconds,
+        ) <= 0:
+            raise ValueError("SAML ACS rate-limit values must be greater than zero")
         if min(self.bff_call_timeout_seconds, self.bff_stream_max_seconds, self.bff_stream_max_bytes) <= 0:
             raise ValueError("BFF timeout and stream limits must be greater than zero")
         if not 1 <= self.bff_replay_token_batch_size <= 100:
@@ -336,7 +360,8 @@ class PytinctureConfig:
         integer_fields = {
             "session_max_age_seconds", "max_request_body_bytes", "bff_stream_max_bytes",
             "bff_replay_token_batch_size", "bff_replay_token_low_watermark",
-            "bff_replay_token_ttl_seconds",
+            "bff_replay_token_ttl_seconds", "saml_response_max_bytes",
+            "saml_acs_rate_limit_attempts", "saml_acs_rate_limit_window_seconds",
         }
         float_fields = {"bff_call_timeout_seconds", "bff_stream_max_seconds"}
         tuple_fields = {
