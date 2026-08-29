@@ -56,6 +56,22 @@ For every release candidate, record:
 Every exercise needs an ISO-8601 UTC timestamp, `passed` status, tested RC
 version, and durable evidence URL. Do not use local-only logs as final evidence.
 
+## Automated exercise evidence
+
+Qualification jobs emit documents governed by
+[`contracts/qualification-evidence-v1.schema.json`](../contracts/qualification-evidence-v1.schema.json).
+Each document records the exercise type, pass/fail status, tested Python and npm
+versions, UTC timestamp, full tested commit, durable Actions run URL and run
+identity, and SHA-256 hashes for the wheel, source distribution, npm tarball,
+and every embedded raw result.
+
+The shared `scripts/build_qualification_evidence.py` producer is used for the
+standalone, authenticated BFF/browser-performance, federated SAML,
+upgrade/rollback, and service-performance tracks. These generated files are
+candidate evidence: a release reviewer still links the retained artifact and
+records the approved exercise in `release/qualification.json`. A passing CI
+run alone does not start an observation period or change the NO-GO decision.
+
 The repository labels `priority:P0`, `priority:P1`, `security:critical`,
 `security:high`, and `release-blocker` are release-blocking. Release-event CI
 audits open issues for those labels before publishing.

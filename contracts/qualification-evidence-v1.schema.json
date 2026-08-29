@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pytincture/pytincture/contracts/qualification-evidence-v1.schema.json",
+  "title": "Pytincture qualification exercise evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "exercise",
+    "status",
+    "version",
+    "npm_version",
+    "tested_at",
+    "commit_sha",
+    "evidence_url",
+    "run",
+    "artifact_files",
+    "artifact_sha256",
+    "result_sha256",
+    "results"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "https://github.com/pytincture/pytincture/contracts/qualification-evidence-v1.schema.json"
+    },
+    "schema_version": { "const": 1 },
+    "exercise": {
+      "enum": [
+        "standalone",
+        "authenticated_bff",
+        "federated_auth",
+        "upgrade_rollback",
+        "performance_service"
+      ]
+    },
+    "status": { "enum": ["passed", "failed", "cancelled", "skipped"] },
+    "version": { "type": "string", "minLength": 1 },
+    "npm_version": { "type": "string", "minLength": 1 },
+    "tested_at": { "type": "string", "format": "date-time" },
+    "commit_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "evidence_url": { "type": "string", "format": "uri" },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "attempt", "job", "event", "ref"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "job": { "type": "string", "minLength": 1 },
+        "event": { "type": "string", "minLength": 1 },
+        "ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifact_files": { "$ref": "#/$defs/artifactMap" },
+    "artifact_sha256": { "$ref": "#/$defs/hashMap" },
+    "result_sha256": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/sha256" }
+    },
+    "results": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "object" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artifactMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wheel", "sdist", "npm"],
+      "properties": {
+        "wheel": { "type": "string", "minLength": 1 },
+        "sdist": { "type": "string", "minLength": 1 },
+        "npm": { "type": "string", "minLength": 1 }
+      }
+    },
+    "hashMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wheel", "sdist", "npm"],
+      "properties": {
+        "wheel": { "$ref": "#/$defs/sha256" },
+        "sdist": { "$ref": "#/$defs/sha256" },
+        "npm": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

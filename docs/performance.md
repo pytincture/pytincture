@@ -15,8 +15,10 @@ Each Chromium, Firefox, and WebKit E2E job records:
   runtime once; and
 - p95 latency for 20 authenticated BFF calls from the running Pyodide app.
 
-The job retains `performance.json` as a CI artifact even on success. RC
-qualification should link the retained browser evidence for the exact RC.
+The job retains the raw browser result and a standardized
+`qualification-evidence-authenticated-bff-{browser}.json` document even on
+success. The standardized document includes the exact release-artifact hashes,
+tested version, UTC timestamp, commit, run URL, and the measured values.
 
 ## Service measurements
 
@@ -28,7 +30,9 @@ latency for:
 - 200 representative BFF calls at concurrency 10.
 
 The resulting `performance-health.json`, `performance-appcode.json`, and
-`performance-bff.json` files are retained as the service performance artifact.
+`performance-bff.json` files are retained with
+`qualification-evidence-performance-service.json`, which hashes each raw
+result and the validated wheel, source distribution, and npm tarball.
 
 Budgets may only be relaxed with a documented reason and review of the
 corresponding CI evidence. Application owners must establish tighter budgets

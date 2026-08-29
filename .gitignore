@@ -15,6 +15,7 @@ pytincture.egg-info/top_level.txt
 .vscode/launch.json
 dist
 dist/*.whl
+/qualification-evidence-*.json
 *.zip
 !pytincture/frontend/pyodide/**/python_stdlib.zip
 *.pyt
@@ -27,6 +28,9 @@ pytincture/frontend/playwright-report
 pytincture/frontend/test-results
 pytincture/frontend/test-results-standalone
 pytincture/frontend/test-results-saml
+pytincture/frontend/browser-acceptance-result.json
+pytincture/frontend/saml-acceptance-result.json
+pytincture/frontend/standalone-acceptance-result.json
 tests/e2e-server.log
 tests/federated-saml-server.log
 tests/keycloak-saml.log
