@@ -92,8 +92,6 @@ from pytincture.backend.pages import (
     find_main_window_subclass as _find_main_window,
 )
 from pytincture.backend.saml import (
-    InMemorySAMLTransactionStore,
-    RedisSAMLTransactionStore,
     SAMLProviderCatalog,
     SlidingWindowRateLimiter,
     split_csv,
@@ -361,7 +359,6 @@ async def readiness_check():
             "session_store": USER_SESSION_DICT,
             "revocation_store": AUTH_SESSION_REVOCATIONS,
             "replay_store": BFF_REPLAY_TOKEN_STORE,
-            "saml_transaction_store": SAML_TRANSACTION_STORE,
         }
     ready, checks = readiness_report(get_modules_path(), STATIC_PATH, stores)
     return JSONResponse(
@@ -537,15 +534,10 @@ if  USE_REDIS_INSTANCE == "true":
         key_prefix="bff-replay-token:",
         cache_reads=False,
     )
-    SAML_TRANSACTION_STORE = RedisSAMLTransactionStore(
-        redis_url=REDIS_UPSTASH_INSTANCE_URL,
-        redis_token=REDIS_UPSTASH_INSTANCE_TOKEN,
-    )
 else:
     USER_SESSION_DICT = {}
     AUTH_SESSION_REVOCATIONS = {}
     BFF_REPLAY_TOKEN_STORE = {}
-    SAML_TRANSACTION_STORE = InMemorySAMLTransactionStore()
 
 MODULE_PATH = get_modules_path()
 
@@ -1786,6 +1778,7 @@ def _get_saml_role_attribute_keys(provider: Optional[Dict[str, Any]] = None) -> 
 
 
 _SAML_RELAY_STATE_SALT = "pytincture-saml-relay-state-v2"
+_SAML_HANDSHAKE_COOKIE_SALT = "pytincture-saml-handshake-cookie-v1"
 _SAML_HANDSHAKE_COOKIE = "pytincture_saml_handshake"
 
 
@@ -1825,8 +1818,12 @@ def _load_saml_relay_state(token: Optional[str]) -> Dict[str, Any]:
     return payload
 
 
-def _saml_browser_binding(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+def _get_saml_handshake_cookie_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(
+        SAML_SECRET_KEY,
+        salt=_SAML_HANDSHAKE_COOKIE_SALT,
+        signer_kwargs={"digest_method": hashlib.sha256},
+    )
 
 
 def _saml_handshake_cookie_path(application: str) -> str:
@@ -1836,11 +1833,11 @@ def _saml_handshake_cookie_path(application: str) -> str:
 def _set_saml_handshake_cookie(
     response: Response,
     application: str,
-    browser_secret: str,
+    transaction: Dict[str, Any],
 ) -> None:
     response.set_cookie(
         _SAML_HANDSHAKE_COOKIE,
-        browser_secret,
+        _get_saml_handshake_cookie_serializer().dumps(transaction),
         max_age=SAML_RELAY_STATE_TTL_SECONDS,
         path=_saml_handshake_cookie_path(application),
         secure=AUTH_SESSION_HTTPS_ONLY,
@@ -1851,6 +1848,35 @@ def _set_saml_handshake_cookie(
     )
 
 
+def _load_saml_handshake_cookie(
+    request: Request,
+    transaction_id: str,
+) -> Dict[str, Any]:
+    token = request.cookies.get(_SAML_HANDSHAKE_COOKIE, "")
+    if not token:
+        raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
+    try:
+        transaction = _get_saml_handshake_cookie_serializer().loads(
+            token,
+            max_age=SAML_RELAY_STATE_TTL_SECONDS,
+        )
+    except (BadSignature, SignatureExpired) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or expired SAML login",
+        ) from exc
+    if (
+        not isinstance(transaction, dict)
+        or transaction.get("version") != 1
+        or not hmac.compare_digest(
+            str(transaction.get("transaction_id", "")),
+            transaction_id,
+        )
+    ):
+        raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
+    return transaction
+
+
 def _delete_saml_handshake_cookie(response: Response, application: str) -> None:
     response.delete_cookie(
         _SAML_HANDSHAKE_COOKIE,
@@ -1859,6 +1885,19 @@ def _delete_saml_handshake_cookie(response: Response, application: str) -> None:
         httponly=True,
         samesite="none" if AUTH_SESSION_HTTPS_ONLY else "lax",
     )
+
+
+def _saml_replay_proof(
+    transaction_id: str,
+    response_id: str,
+    assertion_id: str,
+) -> str:
+    message = "\0".join((transaction_id, response_id, assertion_id)).encode("utf-8")
+    return hmac.new(
+        SAML_SECRET_KEY.encode("utf-8"),
+        b"pytincture-saml-replay-v1\0" + message,
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def _replace_saml_relay_state(
@@ -2251,7 +2290,6 @@ app.add_middleware(RequestBodyLimitMiddleware, max_bytes=MAX_REQUEST_BODY_BYTES)
         302: {"description": "RedirectResponse (to IdP login)"},
         404: {"description": "HTTPException (if SAML disabled)"},
         500: {"description": "HTTPException (if configuration error)"},
-        503: {"description": "HTTPException (if SAML state is unavailable)"},
     },
 )
 async def saml_login(request: Request, application: str):
@@ -2266,7 +2304,6 @@ async def saml_login(request: Request, application: str):
         302: {"description": "RedirectResponse (to IdP login)"},
         404: {"description": "HTTPException (if SAML disabled or provider missing)"},
         500: {"description": "HTTPException (if configuration error)"},
-        503: {"description": "HTTPException (if SAML state is unavailable)"},
     },
 )
 async def saml_provider_login(request: Request, application: str, provider_id: str):
@@ -2302,33 +2339,15 @@ async def _saml_login(request: Request, application: str, provider_id: Optional[
     if not request_id:
         raise HTTPException(status_code=500, detail="SAML login did not generate a request ID")
 
-    browser_secret = secrets.token_urlsafe(32)
+    transaction_id = secrets.token_urlsafe(32)
     transaction_record = {
         "version": 1,
+        "transaction_id": transaction_id,
         "application": application,
         "provider_id": provider["id"],
         "request_id": request_id,
-        "browser_binding": _saml_browser_binding(browser_secret),
         "return_to": fallback_return,
     }
-    try:
-        for _ in range(3):
-            transaction_id = secrets.token_urlsafe(32)
-            if await run_in_threadpool(
-                SAML_TRANSACTION_STORE.create,
-                transaction_id,
-                transaction_record,
-                SAML_RELAY_STATE_TTL_SECONDS,
-            ):
-                break
-        else:  # pragma: no cover - requires repeated cryptographic collisions
-            raise RuntimeError("SAML transaction IDs collided")
-    except Exception as exc:  # noqa: BLE001
-        logger.error(
-            "SAML transaction creation failed correlation_id=%s",
-            getattr(request.state, "correlation_id", ""),
-        )
-        raise HTTPException(status_code=503, detail="Unable to begin SAML login") from exc
 
     relay_token = _sign_saml_relay_state(
         {"version": 2, "transaction_id": transaction_id}
@@ -2337,7 +2356,7 @@ async def _saml_login(request: Request, application: str, provider_id: Optional[
     request.session.pop("saml_request_id", None)
     request.session.pop("saml_provider_id", None)
     response = RedirectResponse(url=auth_url)
-    _set_saml_handshake_cookie(response, application, browser_secret)
+    _set_saml_handshake_cookie(response, application, transaction_record)
     return response
 
 
@@ -2351,7 +2370,6 @@ async def _saml_login(request: Request, application: str, provider_id: Optional[
             "description": "HTTPException (if SAML response invalid)"},
         401: {"description": "HTTPException (if user not authorized)"},
         429: {"description": "HTTPException (if ACS rate limit is exceeded)"},
-        503: {"description": "HTTPException (if SAML state is unavailable)"},
         404: {"description": "HTTPException (if SAML disabled)"},
     },
 )
@@ -2368,7 +2386,6 @@ async def saml_assertion_consumer(request: Request, application: str):
         400: {"description": "HTTPException (if SAML response invalid)"},
         401: {"description": "HTTPException (if user not authorized)"},
         429: {"description": "HTTPException (if ACS rate limit is exceeded)"},
-        503: {"description": "HTTPException (if SAML state is unavailable)"},
         404: {"description": "HTTPException (if SAML disabled or provider missing)"},
     },
 )
@@ -2424,25 +2441,8 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
     relay_token = post_data.get("RelayState")
     relay_state = _load_saml_relay_state(relay_token)
     transaction_id = relay_state["transaction_id"]
-    browser_secret = request.cookies.get(_SAML_HANDSHAKE_COOKIE, "")
-    if not browser_secret:
-        raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
-    try:
-        transaction = await run_in_threadpool(
-            SAML_TRANSACTION_STORE.peek,
-            transaction_id,
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail="SAML login state unavailable") from exc
-    if not transaction:
-        raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
-    if (
-        transaction.get("application") != application
-        or not hmac.compare_digest(
-            str(transaction.get("browser_binding", "")),
-            _saml_browser_binding(browser_secret),
-        )
-    ):
+    transaction = _load_saml_handshake_cookie(request, transaction_id)
+    if transaction.get("application") != application:
         raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
 
     state_provider_id = transaction.get("provider_id")
@@ -2498,24 +2498,15 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
     ):
         raise HTTPException(status_code=400, detail="Invalid SAML response correlation")
 
-    try:
-        consumed_transaction = await run_in_threadpool(
-            SAML_TRANSACTION_STORE.consume,
-            transaction_id,
-            {
-                "application": application,
-                "provider_id": provider["id"],
-                "request_id": request_id,
-                "browser_binding": _saml_browser_binding(browser_secret),
-            },
-            response_id,
-            assertion_id,
-            SAML_RELAY_STATE_TTL_SECONDS,
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail="SAML login state unavailable") from exc
-    if not consumed_transaction:
+    replay_proof = _saml_replay_proof(transaction_id, response_id, assertion_id)
+    previous_replay_proof = str(request.session.get("saml_replay_proof", ""))
+    if previous_replay_proof and hmac.compare_digest(
+        previous_replay_proof,
+        replay_proof,
+    ):
         raise HTTPException(status_code=400, detail="Invalid or replayed SAML login")
+
+    consumed_transaction = transaction
 
     attributes = saml_auth.get_attributes()
     
@@ -2588,6 +2579,7 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
             raise HTTPException(status_code=401, detail="Not authorized")
 
     _set_authenticated_user(request, user_info)
+    request.session["saml_replay_proof"] = replay_proof
 
     cached_redirect = _sanitize_return_to(consumed_transaction.get("return_to"))
     session_redirect = _sanitize_return_to(request.session.pop("return_to", None))

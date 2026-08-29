@@ -5,20 +5,27 @@
   "verified_at": "2026-08-29T21:57:45Z",
   "mitigations": {
     "dedicated_httponly_handshake_cookie": true,
-    "server_side_expiring_transaction": true,
+    "signed_expiring_browser_transaction": true,
     "exact_in_response_to_required": true,
-    "response_id_single_use": true,
-    "assertion_id_single_use": true,
-    "atomic_concurrent_consume": true,
-    "redis_multi_worker_store": true,
-    "single_worker_memory_fallback": true
+    "response_and_assertion_ids_required": true,
+    "signed_browser_session_replay_proof": true,
+    "handshake_cookie_cleared_after_success": true,
+    "copied_relay_state_rejected_cross_browser": true,
+    "sequential_browser_replay_rejected": true,
+    "cross_worker_callback_portable": true
   },
+  "architecture": {
+    "server_side_transaction_state": false,
+    "redis_required": false,
+    "process_memory_required": false,
+    "browser_session_storage": "signed HttpOnly cookies"
+  },
+  "stateless_boundary": "Without shared mutable state, no server can guarantee that exactly one of two simultaneous raw HTTP requests carrying identical pre-response cookies wins. Pytincture rejects cross-browser login CSRF and normal sequential browser replay; exact request correlation and short expiry bound the remaining duplicate-delivery case.",
   "regression_tests": [
     "tests/test_app.py::test_saml_acs_rejects_relay_state_copied_to_another_browser",
     "tests/test_app.py::test_saml_acs_requires_exact_in_response_to",
-    "tests/test_backend_modules.py::test_in_memory_saml_transaction_is_bound_expiring_and_single_use",
-    "tests/test_backend_modules.py::test_in_memory_saml_transaction_rejects_concurrent_replay",
-    "tests/test_backend_modules.py::test_redis_saml_transaction_is_atomic_across_workers",
+    "tests/test_app.py::test_saml_acs_creates_compact_session_that_authorizes_bff_calls",
+    "tests/test_production.py::test_saml_handshake_is_portable_between_workers_without_redis",
     "pytincture/frontend/e2e-tests/saml-federated.spec.mjs"
   ]
 }
