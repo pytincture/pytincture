@@ -246,14 +246,13 @@ test("packaged entrypoint failure is rendered without fallback", async ({ browse
             window.addEventListener("pytincture:lifecycle", event => window.__pytinctureLifecycle.push(event.detail));
         });
         await blockExternalWidgetIndex(page);
-        await page.goto("/e2e_app/login");
+        await page.goto("/failure_app/login");
         await page.getByPlaceholder("Email").fill("e2e@example.com");
         await page.getByPlaceholder("Password").fill("demo-password");
         await Promise.all([
-            page.waitForURL(/\/e2e_app$/),
+            page.waitForURL(/\/failure_app$/),
             page.getByRole("button", { name: "Login with Email" }).click(),
         ]);
-        await page.goto("/failure_app");
         await expect(page.locator(".pytincture-loading__status")).toContainText("Failed during entrypoint-execution");
         const lifecycle = await page.evaluate(() => window.__pytinctureLifecycle);
         expect(lifecycle.some(event => event.type === "fallback")).toBe(false);
