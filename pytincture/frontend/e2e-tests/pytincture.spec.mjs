@@ -77,7 +77,7 @@ async function callAuthenticatedBff(page) {
             .find(([name]) => name === "pytincture_csrf")
             ?.slice(1).join("=") || "";
         const invoke = async (method, kwargs) => {
-            const response = await fetch(`/classcall/e2e_data.py/E2EData/${method}`, {
+            const response = await fetch(`/e2e_app/classcall/e2e_data.py/E2EData/${method}`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -105,7 +105,7 @@ async function measureAuthenticatedBff(page, sampleCount) {
         const measurements = [];
         for (let index = 0; index < count; index += 1) {
             const startedAt = performance.now();
-            const response = await fetch("/classcall/e2e_data.py/E2EData/sync_call", {
+            const response = await fetch("/e2e_app/classcall/e2e_data.py/E2EData/sync_call", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
