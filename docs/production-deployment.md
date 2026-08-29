@@ -22,14 +22,19 @@ routes intentionally share the root scope.
   signature processing. Tune `SAML_ACS_RATE_LIMIT_ATTEMPTS` and
   `SAML_ACS_RATE_LIMIT_WINDOW_SECONDS` alongside an edge rate limit; do not
   disable or bypass the built-in response guard.
+- SAML logins use an HttpOnly browser-binding cookie and a one-time transaction
+  with exact `InResponseTo`, response-ID, and assertion-ID correlation. Keep
+  `AUTH_SESSION_HTTPS_ONLY=true` so cross-site POST binding uses a Secure,
+  `SameSite=None` handshake cookie.
 - Pin the Pytincture and widgetset versions in the deployment artifact.
 - For more than one worker or replica, set `USE_REDIS_INSTANCE=true` with the
   same Upstash endpoint and token on every worker.
 
 Signed session cookies can be read by any worker sharing the signing secret.
-Immediate logout revocation and one-time BFF replay tokens require shared
-Redis state. In-memory state is supported for a single worker only; a restart
-intentionally invalidates its revocations and unused replay tokens.
+Immediate logout revocation, SAML transaction/replay protection, and one-time
+BFF replay tokens require shared Redis state across workers. In-memory state is
+supported for a single worker only; a restart intentionally invalidates its
+revocations, outstanding SAML logins, and unused replay tokens.
 
 ## Reverse proxy
 

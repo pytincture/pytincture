@@ -601,6 +601,7 @@ jobs:
             --artifact-manifest dist/SHA256SUMS.json \
             --result saml=pytincture/frontend/saml-acceptance-result.json \
             --result saml_transform_mitigation=security/saml-transform-mitigation.json \
+            --result saml_replay_mitigation=security/saml-replay-mitigation.json \
             --output qualification-evidence-federated-auth.json
 
       - name: Capture Keycloak log
@@ -619,6 +620,7 @@ jobs:
           path: |
             qualification-evidence-federated-auth.json
             security/saml-transform-mitigation.json
+            security/saml-replay-mitigation.json
             pytincture/frontend/saml-acceptance-result.json
             pytincture/frontend/test-results-saml
             pytincture/frontend/playwright-report

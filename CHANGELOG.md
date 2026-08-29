@@ -5,6 +5,9 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Bound each SAML login to an HttpOnly handshake cookie and a shared, expiring,
+  one-time transaction, with exact `InResponseTo` validation and atomic
+  response/assertion replay protection across Redis-backed workers.
 - Guarded SAML signature processing with a strict transform allowlist, bounded
   secure XML pre-validation, decoded-response limits, per-peer ACS throttling,
   and federated-auth qualification evidence for upstream python3-saml #447.

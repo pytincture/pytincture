@@ -92,6 +92,8 @@ from pytincture.backend.pages import (
     find_main_window_subclass as _find_main_window,
 )
 from pytincture.backend.saml import (
+    InMemorySAMLTransactionStore,
+    RedisSAMLTransactionStore,
     SAMLProviderCatalog,
     SlidingWindowRateLimiter,
     split_csv,
@@ -359,6 +361,7 @@ async def readiness_check():
             "session_store": USER_SESSION_DICT,
             "revocation_store": AUTH_SESSION_REVOCATIONS,
             "replay_store": BFF_REPLAY_TOKEN_STORE,
+            "saml_transaction_store": SAML_TRANSACTION_STORE,
         }
     ready, checks = readiness_report(get_modules_path(), STATIC_PATH, stores)
     return JSONResponse(
@@ -534,10 +537,15 @@ if  USE_REDIS_INSTANCE == "true":
         key_prefix="bff-replay-token:",
         cache_reads=False,
     )
+    SAML_TRANSACTION_STORE = RedisSAMLTransactionStore(
+        redis_url=REDIS_UPSTASH_INSTANCE_URL,
+        redis_token=REDIS_UPSTASH_INSTANCE_TOKEN,
+    )
 else:
     USER_SESSION_DICT = {}
     AUTH_SESSION_REVOCATIONS = {}
     BFF_REPLAY_TOKEN_STORE = {}
+    SAML_TRANSACTION_STORE = InMemorySAMLTransactionStore()
 
 MODULE_PATH = get_modules_path()
 
@@ -1777,7 +1785,8 @@ def _get_saml_role_attribute_keys(provider: Optional[Dict[str, Any]] = None) -> 
     return saml_role_attribute_keys(provider, SAML_ROLE_ATTRIBUTE_KEYS)
 
 
-_SAML_RELAY_STATE_SALT = "pytincture-saml-relay-state-v1"
+_SAML_RELAY_STATE_SALT = "pytincture-saml-relay-state-v2"
+_SAML_HANDSHAKE_COOKIE = "pytincture_saml_handshake"
 
 
 def _get_saml_relay_state_serializer() -> URLSafeTimedSerializer:
@@ -1806,18 +1815,50 @@ def _load_saml_relay_state(token: Optional[str]) -> Dict[str, Any]:
     except BadSignature as exc:
         raise HTTPException(status_code=400, detail="Invalid SAML RelayState") from exc
 
-    if not isinstance(payload, dict) or payload.get("version") != 1:
+    if not isinstance(payload, dict) or payload.get("version") != 2:
         raise HTTPException(status_code=400, detail="Invalid SAML RelayState")
 
-    for key in ("application", "provider_id", "request_id"):
-        if not isinstance(payload.get(key), str) or not payload[key]:
-            raise HTTPException(status_code=400, detail="Invalid SAML RelayState")
-
-    return_to = payload.get("return_to")
-    if return_to is not None and _sanitize_return_to(return_to) is None:
-        raise HTTPException(status_code=400, detail="Invalid SAML RelayState return path")
+    transaction_id = payload.get("transaction_id")
+    if not isinstance(transaction_id, str) or not transaction_id:
+        raise HTTPException(status_code=400, detail="Invalid SAML RelayState")
 
     return payload
+
+
+def _saml_browser_binding(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _saml_handshake_cookie_path(application: str) -> str:
+    return f"/{quote(application, safe='')}/auth/saml"
+
+
+def _set_saml_handshake_cookie(
+    response: Response,
+    application: str,
+    browser_secret: str,
+) -> None:
+    response.set_cookie(
+        _SAML_HANDSHAKE_COOKIE,
+        browser_secret,
+        max_age=SAML_RELAY_STATE_TTL_SECONDS,
+        path=_saml_handshake_cookie_path(application),
+        secure=AUTH_SESSION_HTTPS_ONLY,
+        httponly=True,
+        # Cross-site POST binding requires SameSite=None in HTTPS deployments.
+        # Lax keeps explicit HTTP-only local development usable.
+        samesite="none" if AUTH_SESSION_HTTPS_ONLY else "lax",
+    )
+
+
+def _delete_saml_handshake_cookie(response: Response, application: str) -> None:
+    response.delete_cookie(
+        _SAML_HANDSHAKE_COOKIE,
+        path=_saml_handshake_cookie_path(application),
+        secure=AUTH_SESSION_HTTPS_ONLY,
+        httponly=True,
+        samesite="none" if AUTH_SESSION_HTTPS_ONLY else "lax",
+    )
 
 
 def _replace_saml_relay_state(
@@ -2210,6 +2251,7 @@ app.add_middleware(RequestBodyLimitMiddleware, max_bytes=MAX_REQUEST_BODY_BYTES)
         302: {"description": "RedirectResponse (to IdP login)"},
         404: {"description": "HTTPException (if SAML disabled)"},
         500: {"description": "HTTPException (if configuration error)"},
+        503: {"description": "HTTPException (if SAML state is unavailable)"},
     },
 )
 async def saml_login(request: Request, application: str):
@@ -2224,6 +2266,7 @@ async def saml_login(request: Request, application: str):
         302: {"description": "RedirectResponse (to IdP login)"},
         404: {"description": "HTTPException (if SAML disabled or provider missing)"},
         500: {"description": "HTTPException (if configuration error)"},
+        503: {"description": "HTTPException (if SAML state is unavailable)"},
     },
 )
 async def saml_provider_login(request: Request, application: str, provider_id: str):
@@ -2259,19 +2302,43 @@ async def _saml_login(request: Request, application: str, provider_id: Optional[
     if not request_id:
         raise HTTPException(status_code=500, detail="SAML login did not generate a request ID")
 
+    browser_secret = secrets.token_urlsafe(32)
+    transaction_record = {
+        "version": 1,
+        "application": application,
+        "provider_id": provider["id"],
+        "request_id": request_id,
+        "browser_binding": _saml_browser_binding(browser_secret),
+        "return_to": fallback_return,
+    }
+    try:
+        for _ in range(3):
+            transaction_id = secrets.token_urlsafe(32)
+            if await run_in_threadpool(
+                SAML_TRANSACTION_STORE.create,
+                transaction_id,
+                transaction_record,
+                SAML_RELAY_STATE_TTL_SECONDS,
+            ):
+                break
+        else:  # pragma: no cover - requires repeated cryptographic collisions
+            raise RuntimeError("SAML transaction IDs collided")
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "SAML transaction creation failed correlation_id=%s",
+            getattr(request.state, "correlation_id", ""),
+        )
+        raise HTTPException(status_code=503, detail="Unable to begin SAML login") from exc
+
     relay_token = _sign_saml_relay_state(
-        {
-            "version": 1,
-            "application": application,
-            "provider_id": provider["id"],
-            "request_id": request_id,
-            "return_to": fallback_return,
-        }
+        {"version": 2, "transaction_id": transaction_id}
     )
     auth_url = _replace_saml_relay_state(saml_auth, auth_url, relay_token)
     request.session.pop("saml_request_id", None)
     request.session.pop("saml_provider_id", None)
-    return RedirectResponse(url=auth_url)
+    response = RedirectResponse(url=auth_url)
+    _set_saml_handshake_cookie(response, application, browser_secret)
+    return response
 
 
 @app.post(
@@ -2284,6 +2351,7 @@ async def _saml_login(request: Request, application: str, provider_id: Optional[
             "description": "HTTPException (if SAML response invalid)"},
         401: {"description": "HTTPException (if user not authorized)"},
         429: {"description": "HTTPException (if ACS rate limit is exceeded)"},
+        503: {"description": "HTTPException (if SAML state is unavailable)"},
         404: {"description": "HTTPException (if SAML disabled)"},
     },
 )
@@ -2300,6 +2368,7 @@ async def saml_assertion_consumer(request: Request, application: str):
         400: {"description": "HTTPException (if SAML response invalid)"},
         401: {"description": "HTTPException (if user not authorized)"},
         429: {"description": "HTTPException (if ACS rate limit is exceeded)"},
+        503: {"description": "HTTPException (if SAML state is unavailable)"},
         404: {"description": "HTTPException (if SAML disabled or provider missing)"},
     },
 )
@@ -2354,10 +2423,31 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
         raise HTTPException(status_code=400, detail="Invalid SAML response") from exc
     relay_token = post_data.get("RelayState")
     relay_state = _load_saml_relay_state(relay_token)
-    if relay_state["application"] != application:
-        raise HTTPException(status_code=400, detail="SAML application mismatch")
+    transaction_id = relay_state["transaction_id"]
+    browser_secret = request.cookies.get(_SAML_HANDSHAKE_COOKIE, "")
+    if not browser_secret:
+        raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
+    try:
+        transaction = await run_in_threadpool(
+            SAML_TRANSACTION_STORE.peek,
+            transaction_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail="SAML login state unavailable") from exc
+    if not transaction:
+        raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
+    if (
+        transaction.get("application") != application
+        or not hmac.compare_digest(
+            str(transaction.get("browser_binding", "")),
+            _saml_browser_binding(browser_secret),
+        )
+    ):
+        raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
 
-    state_provider_id = relay_state["provider_id"]
+    state_provider_id = transaction.get("provider_id")
+    if not isinstance(state_provider_id, str) or not state_provider_id:
+        raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
     resolved_provider_id = provider_id or state_provider_id
     provider = _get_saml_provider(resolved_provider_id)
     if provider["id"] != state_provider_id:
@@ -2365,7 +2455,9 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
     
     try:
         saml_auth = _init_saml_auth(request, application, provider=provider, post_data=post_data)
-        request_id = relay_state["request_id"]
+        request_id = transaction.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
         request.session.pop("saml_request_id", None)
         request.session.pop("saml_provider_id", None)
         try:
@@ -2393,6 +2485,37 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
 
     if not saml_auth.is_authenticated():
         raise HTTPException(status_code=401, detail="SAML authentication failed")
+
+    response_in_response_to = saml_auth.get_last_response_in_response_to()
+    response_id = saml_auth.get_last_message_id()
+    assertion_id = saml_auth.get_last_assertion_id()
+    if (
+        response_in_response_to != request_id
+        or not isinstance(response_id, str)
+        or not response_id
+        or not isinstance(assertion_id, str)
+        or not assertion_id
+    ):
+        raise HTTPException(status_code=400, detail="Invalid SAML response correlation")
+
+    try:
+        consumed_transaction = await run_in_threadpool(
+            SAML_TRANSACTION_STORE.consume,
+            transaction_id,
+            {
+                "application": application,
+                "provider_id": provider["id"],
+                "request_id": request_id,
+                "browser_binding": _saml_browser_binding(browser_secret),
+            },
+            response_id,
+            assertion_id,
+            SAML_RELAY_STATE_TTL_SECONDS,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail="SAML login state unavailable") from exc
+    if not consumed_transaction:
+        raise HTTPException(status_code=400, detail="Invalid or replayed SAML login")
 
     attributes = saml_auth.get_attributes()
     
@@ -2466,12 +2589,14 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
 
     _set_authenticated_user(request, user_info)
 
-    cached_redirect = _sanitize_return_to(relay_state.get("return_to"))
+    cached_redirect = _sanitize_return_to(consumed_transaction.get("return_to"))
     session_redirect = _sanitize_return_to(request.session.pop("return_to", None))
     if not cached_redirect:
         cached_redirect = session_redirect
     redirect_target = cached_redirect or _get_saml_default_redirect(application, request, provider=provider)
-    return RedirectResponse(url=redirect_target, status_code=302)
+    response = RedirectResponse(url=redirect_target, status_code=302)
+    _delete_saml_handshake_cookie(response, application)
+    return response
 
 
 @app.get(
