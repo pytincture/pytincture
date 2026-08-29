@@ -393,6 +393,76 @@ jobs:
           path: pytincture/frontend/test-results
           if-no-files-found: warn
 
+  standalone-wheel-e2e:
+    name: Standalone Python-wheel acceptance
+    needs: python-package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Download validated Python wheel
+        uses: actions/download-artifact@v7
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: Create wheel-only environment and fallback widget wheel
+        shell: bash
+        run: |
+          python -m venv /tmp/pytincture-standalone-wheel
+          standalone_python=/tmp/pytincture-standalone-wheel/bin/python
+          "$standalone_python" -m pip install --upgrade pip
+          "$standalone_python" -m pip install dist/pytincture-*.whl
+          mkdir -p /tmp/pytincture-standalone-widget
+          "$standalone_python" -m pip download \
+            --no-deps \
+            --dest /tmp/pytincture-standalone-widget \
+            dhxpyt==0.9.16
+          cp \
+            /tmp/pytincture-standalone-widget/dhxpyt-0.9.16-py3-none-any.whl \
+            /tmp/pytincture-standalone-widget/dhxpyt-0.9.16+backend-py3-none-any.whl
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: pytincture/frontend/package-lock.json
+
+      - name: Install browser test dependencies
+        working-directory: pytincture/frontend
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: pytincture/frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Qualify the runtime bundled in the Python wheel
+        working-directory: pytincture/frontend
+        env:
+          PYTINCTURE_STANDALONE_PYTHON: /tmp/pytincture-standalone-wheel/bin/python
+          PYTINCTURE_STANDALONE_WIDGET_WHEEL: /tmp/pytincture-standalone-widget/dhxpyt-0.9.16+backend-py3-none-any.whl
+        run: npx playwright test --config playwright.standalone.config.mjs
+
+      - name: Upload standalone qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytincture-standalone-wheel-acceptance
+          path: |
+            pytincture/frontend/test-results-standalone
+            pytincture/frontend/playwright-report
+            tests/standalone-server.log
+          if-no-files-found: warn
+
   production-smoke:
     name: Production topology smoke
     runs-on: ubuntu-latest
@@ -452,6 +522,7 @@ jobs:
       - security-audit
       - javascript-runtime
       - browser-e2e
+      - standalone-wheel-e2e
       - production-smoke
     runs-on: ubuntu-latest
 

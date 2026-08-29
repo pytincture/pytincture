@@ -46,3 +46,17 @@ npm run test:e2e
 Failed runs retain Playwright traces, screenshots, videos, console entries,
 network entries, and `tests/e2e-server.log`. CI uploads those artifacts per
 browser engine.
+
+## Standalone Python-wheel acceptance
+
+The separate Chromium standalone job depends on the validated release artifact
+job and installs that Python wheel into a clean, non-editable environment. Its
+static fixture serves `pytincture.min.js` and Pyodide only from the installed
+wheel. It verifies a real dhxpyt layout, pinned backend-wheel fallback before
+the `99.99.99` development fallback, UUID cache tokens on local frontend
+resources, canonical unmodified package-index URLs, a clean visible address,
+and zero unexpected console or network errors.
+
+The job retains `standalone-acceptance.json` plus console, network, trace,
+screenshot, video, and server-log diagnostics. This suite is intentionally
+separate from service-mode BFF and authentication coverage.
