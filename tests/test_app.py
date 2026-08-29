@@ -118,6 +118,10 @@ def dummy_module(tmp_path: Path):
             def testfunc(self, *args, **kwargs):
                 return {"result": "success", "args": args, "kwargs": kwargs}
     """))
+    (tmp_path / "demoapp.py").write_text(
+        "from example import ExampleClass\n",
+        encoding="utf-8",
+    )
     return dummy_file.parent  # Return the directory containing example.py
 
 
@@ -755,14 +759,15 @@ def test_class_call_noauth(dummy_module, monkeypatch, fresh_client):
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
     ALLOWED_NOAUTH_CLASSCALLS.clear()
     allowed_calls = [{
-        "file": "Example.PY",
+        "application": "example",
+        "file": "example.py",
         "class": "ExampleClass",
         "function": "testfunc"
     }]
     ALLOWED_NOAUTH_CLASSCALLS.extend(allowed_calls)
     fresh_client.cookies.clear()
     response = fresh_client.post(
-        "/classcall/example.py/ExampleClass/testfunc", json={"kwargs": {}}
+        "/example/classcall/example.py/ExampleClass/testfunc", json={"kwargs": {}}
     )
     assert response.status_code == 200
     json_response = response.json()
@@ -827,7 +832,7 @@ def test_class_call_policy_hook_receives_mapping_for_noauth(monkeypatch, fresh_c
 
         @backend_for_frontend
         class PublicRestricted:
-            @bff_policy(role="admin")
+            @bff_policy(custom="admin")
             def inspect(self):
                 return {"ok": True}
     """)
@@ -836,6 +841,7 @@ def test_class_call_policy_hook_receives_mapping_for_noauth(monkeypatch, fresh_c
     monkeypatch.setenv("MODULES_PATH", str(modules_dir))
     ALLOWED_NOAUTH_CLASSCALLS.clear()
     ALLOWED_NOAUTH_CLASSCALLS.extend([{
+        "application": "public_restricted",
         "file": "public_restricted.py",
         "class": "PublicRestricted",
         "function": "inspect",
@@ -846,13 +852,13 @@ def test_class_call_policy_hook_receives_mapping_for_noauth(monkeypatch, fresh_c
     def policy_hook(user, policy, **kwargs):
         seen_user.update(user)
         roles = set(user.get("roles", []))
-        required_role = policy.get("role")
+        required_role = policy.get("custom")
         if required_role and required_role not in roles:
             raise HTTPException(status_code=403, detail="Forbidden")
 
     set_bff_policy_hook(policy_hook)
     try:
-        response = fresh_client.post("/classcall/public_restricted.py/PublicRestricted/inspect", json={"kwargs": {}})
+        response = fresh_client.post("/public_restricted/classcall/public_restricted.py/PublicRestricted/inspect", json={"kwargs": {}})
         assert response.status_code == 403
         assert seen_user["auth_type"] == "noauth"
         assert seen_user["is_authenticated"] is False
@@ -985,7 +991,7 @@ def test_class_call_nested_module_path(monkeypatch, fresh_client, tmp_path):
 
 def test_class_call_noauth_nested_path(monkeypatch, fresh_client, tmp_path):
     """
-    No-auth allowances should work with nested file paths irrespective of case.
+    No-auth allowances use exact nested paths scoped to one application.
     """
     modules_dir = tmp_path / "nested_noauth"
     target_dir = modules_dir / "pkg" / "internal"
@@ -1002,20 +1008,157 @@ def test_class_call_noauth_nested_path(monkeypatch, fresh_client, tmp_path):
                 return {"status": "ok"}
     """)
     (target_dir / "worker.py").write_text(module_code)
+    (modules_dir / "nested_app.py").write_text(
+        "from pkg.internal.worker import Worker\n",
+        encoding="utf-8",
+    )
 
     monkeypatch.setenv("MODULES_PATH", str(modules_dir))
     ALLOWED_NOAUTH_CLASSCALLS.clear()
     ALLOWED_NOAUTH_CLASSCALLS.extend([{
-        "file": "PKG/Internal/worker.py",
+        "application": "nested_app",
+        "file": "pkg/internal/worker.py",
         "class": "Worker",
         "function": "ping"
     }])
 
     response = fresh_client.post(
-        "/classcall/pkg/internal/worker.py/Worker/ping", json={}
+        "/nested_app/classcall/pkg/internal/worker.py/Worker/ping", json={}
     )
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_noauth_bff_grant_does_not_authorize_same_basename(monkeypatch, fresh_client, tmp_path):
+    modules_dir = tmp_path / "collision_modules"
+    public_dir = modules_dir / "public"
+    private_dir = modules_dir / "private"
+    public_dir.mkdir(parents=True)
+    private_dir.mkdir(parents=True)
+    source = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class Worker:
+            def ping(self):
+                return {"ok": True}
+    """)
+    (public_dir / "worker.py").write_text(source)
+    (private_dir / "worker.py").write_text(source)
+    (modules_dir / "portal.py").write_text(
+        "from public.worker import Worker\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODULES_PATH", str(modules_dir))
+    ALLOWED_NOAUTH_CLASSCALLS.clear()
+    ALLOWED_NOAUTH_CLASSCALLS.append({
+        "application": "portal",
+        "file": "public/worker.py",
+        "class": "Worker",
+        "function": "ping",
+    })
+
+    allowed = fresh_client.post(
+        "/portal/classcall/public/worker.py/Worker/ping", json={}
+    )
+    collision = fresh_client.post(
+        "/portal/classcall/private/worker.py/Worker/ping", json={}
+    )
+
+    assert allowed.status_code == 200
+    assert collision.status_code in {401, 404}
+
+
+def test_authenticated_session_cannot_cross_application_audience(
+    monkeypatch, fresh_client, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    modules_dir = tmp_path / "audience_modules"
+    modules_dir.mkdir()
+    module_source = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class Data:
+            def read(self):
+                return {"ok": True}
+    """)
+    (modules_dir / "alpha.py").write_text(module_source)
+    (modules_dir / "beta.py").write_text(module_source)
+    monkeypatch.setenv("MODULES_PATH", str(modules_dir))
+    monkeypatch.setattr(
+        backend_app,
+        "require_auth",
+        lambda request: {
+            "email": "user@example.test",
+            "is_authenticated": True,
+            "application": "alpha",
+        },
+    )
+    monkeypatch.setattr(backend_app, "_validate_csrf", lambda request, user: None)
+
+    same_app = fresh_client.post("/alpha/classcall/alpha.py/Data/read", json={})
+    other_app = fresh_client.post("/beta/classcall/beta.py/Data/read", json={})
+
+    assert same_app.status_code == 200
+    assert other_app.status_code == 403
+
+
+def test_declared_provider_policy_rejects_other_provider(
+    monkeypatch, fresh_client, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "portal.py").write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_policy
+
+        @backend_for_frontend
+        class Restricted:
+            @bff_policy(auth_provider="google")
+            def read(self):
+                return {"ok": True}
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(
+        backend_app,
+        "require_auth",
+        lambda request: {
+            "email": "user@example.test",
+            "is_authenticated": True,
+            "application": "portal",
+            "auth_provider": "microsoft",
+        },
+    )
+    set_bff_policy_hook(lambda **kwargs: None)
+    try:
+        response = fresh_client.post(
+            "/portal/classcall/portal.py/Restricted/read", json={}
+        )
+    finally:
+        set_bff_policy_hook(None)
+
+    assert response.status_code == 403
+
+
+def test_policy_bearing_export_fails_startup_without_hook(monkeypatch, tmp_path):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "restricted.py").write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_policy
+
+        @backend_for_frontend
+        class Restricted:
+            @bff_policy(role="admin")
+            def read(self):
+                return True
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.delenv("BFF_POLICY_HOOK_PATH", raising=False)
+    set_bff_policy_hook(None)
+
+    with pytest.raises(RuntimeError, match="@bff_policy exports require"):
+        backend_app._validate_bff_policy_configuration()
 
 
 def test_class_call_streaming(monkeypatch, fresh_client, tmp_path):
@@ -1128,7 +1271,7 @@ def test_download_appcode(fresh_client, monkeypatch, tmp_path):
         generated_app = archive.read("demoapp.py").decode("utf-8")
     assert hostile_host not in generated_app
     assert "protocol-with-" not in generated_app
-    assert "url = '/classcall/demoapp.py/Demo/ping'" in generated_app
+    assert "url = '/demoapp/classcall/demoapp.py/Demo/ping'" in generated_app
     compile(generated_app, "demoapp.py", "exec")
 
 def test_frontend_runtime_cache_busts_packaged_app_fetch(fresh_client):
@@ -1987,6 +2130,7 @@ def test_microsoft_login_stores_only_compact_stateless_claims(
         "is_authenticated": True,
         "auth_provider": "microsoft",
         "auth_provider_label": "Microsoft",
+        "application": "demoapp",
     }
     assert "access_token" not in session_data
     assert backend_app.USER_SESSION_DICT == {"sentinel": True}

@@ -46,8 +46,9 @@ Import these decorators from `pytincture.dataclass`:
   class and produces the browser-side proxy.
 - `@bff_http_methods(*methods)` opts a method into one or more of `GET`,
   `POST`, `PUT`, `PATCH`, and `DELETE`. Undeclared methods use `POST`.
-- `@bff_policy(**metadata)` attaches literal application-defined metadata for
-  the server-side policy hook.
+- `@bff_policy(**metadata)` attaches literal policy metadata. A server-side
+  hook is required at startup; standard audience/provider/issuer/tenant/role/
+  operation predicates are enforced before the hook.
 - `@bff_stream(raw=False, media_type="text/event-stream")` marks a method as
   streaming. Non-raw values use newline-delimited JSON framing.
 

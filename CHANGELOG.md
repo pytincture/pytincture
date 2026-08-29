@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Scoped generated BFF calls and signed sessions to an application audience,
+  replaced basename authorization aliases with exact packaged-module paths,
+  enforced declared provider/issuer/tenant/role/operation predicates, and made
+  policy-bearing exports fail startup when no enforcement hook is configured.
 - Bound each SAML login to a signed, expiring HttpOnly handshake cookie, with
   exact `InResponseTo` validation and no Redis or process-memory dependency, so
   callbacks remain portable across load-balanced workers.

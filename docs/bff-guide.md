@@ -38,9 +38,8 @@ module or constructing its class.
 
 ## Authorization
 
-`@bff_policy` records literal metadata; it does not make an authorization
-decision by itself. Configure a server-side hook before application modules
-are loaded:
+`@bff_policy` records literal metadata. Policy-bearing exports fail startup
+unless a server-side hook is configured before application modules are loaded:
 
 ```python
 from fastapi import HTTPException
@@ -57,6 +56,13 @@ config = PytinctureConfig(
 
 The dotted callable is recommended for reproducible service startup. The
 compatibility `set_bff_policy_hook()` API is public through 1.x.
+Pytincture enforces standard application, provider, issuer, tenant, role, and
+operation predicates before the hook runs; the hook owns application-specific
+metadata such as scopes or account entitlements.
+
+Sessions and generated BFF routes are scoped to the application used during
+login. Exact module-relative paths are checked against the files packaged for
+that application, so a same-named module elsewhere cannot inherit a grant.
 
 ## Limits and streaming
 

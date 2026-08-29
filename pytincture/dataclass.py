@@ -600,7 +600,13 @@ def get_imports_used_in_class(file_path, class_name):
 
     return import_lines, imports_used
 
-def generate_stub_classes(file_path, return_url, return_protocol, replay_client=None):
+def generate_stub_classes(
+    file_path,
+    return_url,
+    return_protocol,
+    application=None,
+    replay_client=None,
+):
     # Keep these parameters for parser compatibility, but never turn an HTTP
     # request's Host or forwarded headers into executable browser Python.
     del return_url, return_protocol
@@ -608,6 +614,9 @@ def generate_stub_classes(file_path, return_url, return_protocol, replay_client=
         code = file.read()
     
     file_identifier = _module_relative_identifier(file_path)
+    application_prefix = (
+        f"/{str(application).strip('/')}" if application else ""
+    )
     module = ast.parse(code)
     backend_for_frontend_aliases = _collect_import_aliases(module, "backend_for_frontend")
     bff_stream_aliases = _collect_import_aliases(module, "bff_stream")
@@ -845,7 +854,7 @@ def generate_stub_classes(file_path, return_url, return_protocol, replay_client=
                     request_method = declared_methods[0]
                     if is_streaming:
                         stub_class_code += f"    async def {node.name}(self, *args, **kwargs):\n"
-                        call_url = f"/classcall/{file_identifier}/{class_name}/{node.name}"
+                        call_url = f"{application_prefix}/classcall/{file_identifier}/{class_name}/{node.name}"
                         stub_class_code += f"        url = {call_url!r}\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
                         stub_class_code += f"        stream_iter = self.fetch_stream(url, payload, {request_method!r})\n"
@@ -869,14 +878,14 @@ def generate_stub_classes(file_path, return_url, return_protocol, replay_client=
                             stub_class_code +=  "            yield json.loads(buffer)\n"
                     elif is_async_method:
                         stub_class_code += f"    async def {node.name}(self, *args, **kwargs):\n"
-                        call_url = f"/classcall/{file_identifier}/{class_name}/{node.name}"
+                        call_url = f"{application_prefix}/classcall/{file_identifier}/{class_name}/{node.name}"
                         stub_class_code += f"        url = {call_url!r}\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
                         stub_class_code += f"        response = await self.fetch(url, payload, {request_method!r})\n"
                         stub_class_code +=  "        return json.loads(response)\n"
                     else:
                         stub_class_code += f"    def {node.name}(self, *args, **kwargs):\n"
-                        call_url = f"/classcall/{file_identifier}/{class_name}/{node.name}"
+                        call_url = f"{application_prefix}/classcall/{file_identifier}/{class_name}/{node.name}"
                         stub_class_code += f"        url = {call_url!r}\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
                         stub_class_code += f"        response = self.fetch_sync(url, payload, {request_method!r})\n"
@@ -887,7 +896,7 @@ def generate_stub_classes(file_path, return_url, return_protocol, replay_client=
                             property_name = target.id
                             stub_class_code +=  "    @property\n"
                             stub_class_code += f"    def {property_name}(self):\n"
-                            call_url = f"/classcall/{file_identifier}/{class_name}/{property_name}"
+                            call_url = f"{application_prefix}/classcall/{file_identifier}/{class_name}/{property_name}"
                             stub_class_code += f"        url = {call_url!r}\n"
                             stub_class_code +=  "        response = self.fetch_sync(url)\n"
                             stub_class_code +=  "        return json.loads(response)\n"
@@ -906,12 +915,14 @@ def get_parsed_output(
     file_path,
     return_url,
     return_protocol="http",
+    application=None,
     replay_client=None,
 ):
     stub_code = generate_stub_classes(
         file_path,
         return_url,
         return_protocol,
+        application=application,
         replay_client=replay_client,
     )
     if stub_code:

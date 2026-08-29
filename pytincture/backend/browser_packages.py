@@ -201,6 +201,7 @@ def create_appcode_archive(
                     file_path,
                     host,
                     protocol,
+                    application=application,
                     replay_client=replay_client,
                 )
                 zip_file.writestr(arcname, file_contents or "")
