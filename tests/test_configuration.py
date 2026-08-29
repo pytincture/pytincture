@@ -18,6 +18,8 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "ENABLE_DEV_EMAIL_LOGIN": "true",
             "BFF_CALL_TIMEOUT_SECONDS": "12.5",
             "MCP_EXPOSED_OPERATIONS": '["health", "status"]',
+            "PYTINCTURE_ALLOWED_HOSTS": "app.example.test,api.example.test",
+            "PYTINCTURE_CANONICAL_ORIGIN": "https://app.example.test/",
             "APP_SPECIFIC_VALUE": "kept",
         },
         bff_call_timeout_seconds=8.0,
@@ -27,6 +29,9 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.enable_user_login is True
     assert config.bff_call_timeout_seconds == 8.0
     assert config.mcp_exposed_operations == ("health", "status")
+    assert config.allowed_hosts == ("app.example.test", "api.example.test")
+    assert config.canonical_origin == "https://app.example.test"
+    assert config.trusted_proxy_headers is False
     assert config.environment == {"APP_SPECIFIC_VALUE": "kept"}
     assert config.to_environ()["ENABLE_USER_LOGIN"] == "true"
 
@@ -77,6 +82,16 @@ def test_legacy_secret_key_is_an_environment_fallback(tmp_path):
         ),
         ({"use_redis_instance": True}, "Redis"),
         ({"cors_allowed_origins": ("*",)}, "cannot use '*'"),
+        ({"allowed_hosts": ("https://app.example",)}, "allowed host"),
+        ({"allowed_hosts": ("*",)}, "allowed host"),
+        ({"canonical_origin": "https://app.example/path"}, "canonical_origin"),
+        (
+            {
+                "allowed_hosts": ("other.example",),
+                "canonical_origin": "https://app.example",
+            },
+            "included in allowed_hosts",
+        ),
     ],
 )
 def test_invalid_configuration_fails_with_actionable_message(tmp_path, overrides, message):
@@ -164,6 +179,45 @@ def test_create_app_isolates_routes_registries_and_session_stores(tmp_path, monk
         assert first_client.get("/beta/appcode/appcode.pyt").status_code == 404
         assert second_client.get("/alpha/appcode/appcode.pyt").status_code == 404
         assert second_client.get("/beta/appcode/appcode.pyt").status_code == 200
+
+
+def test_canonical_origin_and_allowed_hosts_are_enforced(tmp_path):
+    configured = create_app(PytinctureConfig(
+        modules_path=str(tmp_path),
+        allowed_hosts=("app.example.test",),
+        canonical_origin="https://app.example.test/",
+        trusted_proxy_headers=True,
+    ))
+    backend = configured.state.pytincture_backend
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/",
+            "raw_path": b"/",
+            "query_string": b"",
+            "headers": [
+                (b"host", b"internal.example"),
+                (b"x-forwarded-host", b"attacker.example"),
+                (b"x-forwarded-proto", b"http"),
+            ],
+            "client": ("127.0.0.1", 1234),
+            "server": ("internal.example", 80),
+        }
+    )
+
+    assert backend._request_origin(request) == "https://app.example.test"
+    assert backend._extract_request_origin(request) == {
+        "protocol": "https",
+        "host": "app.example.test",
+        "host_with_port": "app.example.test",
+        "port": 443,
+        "base_url": "https://app.example.test",
+    }
+    with TestClient(configured) as client:
+        assert client.get("/healthz", headers={"Host": "attacker.example"}).status_code == 400
+        assert client.get("/healthz", headers={"Host": "app.example.test"}).status_code == 200
 
 
 def test_configuration_reference_document_matches_typed_model():

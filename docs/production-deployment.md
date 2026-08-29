@@ -13,6 +13,9 @@ routes intentionally share the root scope.
   unless the identity-provider flow requires another documented value.
 - Set `PYTINCTURE_TRUST_PROXY_HEADERS=true` only when the service is reachable
   exclusively through a trusted proxy that replaces forwarded headers.
+- Set `PYTINCTURE_ALLOWED_HOSTS` to the comma-separated public hostnames served
+  by this deployment and `PYTINCTURE_CANONICAL_ORIGIN` to its external origin,
+  such as `https://service.example.com`. Do not include paths in the origin.
 - Set explicit `CORS_ALLOWED_ORIGINS`; wildcard credentialed CORS is rejected.
 - Pin the Pytincture and widgetset versions in the deployment artifact.
 - For more than one worker or replica, set `USE_REDIS_INSTANCE=true` with the

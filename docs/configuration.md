@@ -24,6 +24,11 @@ config = PytinctureConfig(
 app = create_app(config)
 ```
 
+For an internet-facing service, also set `allowed_hosts` to its public
+hostname(s) and `canonical_origin` to the external origin used for OAuth/SAML
+callbacks. Forwarded headers are ignored unless `trusted_proxy_headers=True`;
+enable that only behind a proxy that replaces client-supplied forwarded values.
+
 Run that application with any ASGI server, for example
 `uvicorn my_service:app`. The compatibility `launch_service()` API remains
 available for existing deployments.
@@ -38,6 +43,8 @@ The contract test checks every row in this table against the dataclass model.
 | `default_application` | `PYTINCTURE_DEFAULT_APPLICATION` | Optional application for the root redirect. |
 | `favicon_folder` | `PYTINCTURE_FAVICON_FOLDER` | Optional favicon file/directory. |
 | `cors_allowed_origins` | `CORS_ALLOWED_ORIGINS` | Allowed browser origins. |
+| `allowed_hosts` | `PYTINCTURE_ALLOWED_HOSTS` | Allowed HTTP Host header names. |
+| `canonical_origin` | `PYTINCTURE_CANONICAL_ORIGIN` | Canonical external HTTP(S) origin for authentication callbacks. |
 | `enable_user_login` | `ENABLE_USER_LOGIN` | Enable local user login. |
 | `enable_dev_email_login` | `ENABLE_DEV_EMAIL_LOGIN` | Enable loopback-only development email login. |
 | `enable_google_auth` | `ENABLE_GOOGLE_AUTH` | Enable Google OAuth. |

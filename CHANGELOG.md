@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Changed generated browser BFF and replay calls to same-origin relative URLs,
+  preventing Host and forwarded-header values from entering executable Python,
+  marked personalized appcode archives private and non-cacheable, added optional
+  canonical-origin/allowed-host enforcement, and defaulted legacy proxy-header
+  trust off.
 - Restricted npm publication and retries to attested artifacts from successful
   release-triggered CI at the exact published tag and commit, with strict
   package/version/path validation and a protected release environment.
