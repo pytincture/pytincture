@@ -158,7 +158,7 @@ pip install ".[dev]"
       Provider entries may also override `sp_entity_id`, `sp_assertion_consumer_service_url`, `sp_x509_cert`, `sp_private_key`, `idp_slo_url`, `default_redirect`, `allowed_roles`, and `role_attribute_keys`. If `SAML_PROVIDERS` is not set, the existing single-provider `SAML_*` variables continue to work.
 - SAML_DEBUG: Enable verbose SAML logging.
 - ALLOWED_NOAUTH_CLASSCALLS
-   example: [{"file": "somefile.py", "class": "SomeClass", "function": "somefunction"}]
+   example: [{"application": "portal", "file": "services/somefile.py", "class": "SomeClass", "function": "somefunction"}]
 - GOOGLE_CLIENT_ID
 - GOOGLE_CLIENT_SECRET
 - SECRET_KEY: Legacy fallback signing key used only when `SAML_SECRET_KEY` is unset.
@@ -337,7 +337,7 @@ Policy metadata must use literal values so it can be read without importing the 
    set_bff_policy_hook(my_policy_hook)
    ```
 
-Because the authorization decision lives on the server, even an authenticated user who opens the browser console can’t call methods they don’t have rights to. The hook is optional—if you don’t register one, `bff_policy` metadata is ignored. Cookie-authenticated state-changing calls also require the CSRF token automatically sent by generated browser stubs.
+Because the authorization decision lives on the server, even an authenticated user who opens the browser console can’t call methods they don’t have rights to. Policy-bearing exports fail application startup unless a hook is configured. Pytincture also enforces the standard `application`, `auth_provider`/`provider`, `issuer`, `tenant`, `role`/`roles`, and `operation` predicates before calling the hook. Cookie-authenticated state-changing calls require the CSRF token automatically sent by generated browser stubs.
 
 ### 0.10 security migration
 

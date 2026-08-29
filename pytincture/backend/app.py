@@ -633,6 +633,24 @@ def _configured_bff_policy_hook() -> Optional[Callable[..., Any]]:
     return hook
 
 
+def _validate_bff_policy_configuration() -> None:
+    operations = reload_bff_registry(get_modules_path())
+    if any(operation.get("policy") for operation in operations.values()):
+        if _configured_bff_policy_hook() is None:
+            raise RuntimeError(
+                "@bff_policy exports require BFF_POLICY_HOOK_PATH or "
+                "set_bff_policy_hook() before application startup"
+            )
+
+
+def validate_bff_policy_configuration() -> None:
+    """Fail closed before serving when declared BFF policy cannot run."""
+    _validate_bff_policy_configuration()
+
+
+app.router.add_event_handler("startup", validate_bff_policy_configuration)
+
+
 def set_user_authenticator(authenticator: Optional[Callable[..., Any]]):
     """Register a local email/password authenticator that returns trusted user claims."""
     global USER_AUTHENTICATOR
@@ -774,50 +792,104 @@ def _normalize_file_identifier(value: str) -> str:
     return normalized
 
 
-def _file_aliases(value: str) -> Set[str]:
+def _canonical_bff_identifier(value: str) -> str:
     normalized = _normalize_file_identifier(value)
     if not normalized:
-        return set()
-
-    aliases = {normalized}
-    basename = os.path.basename(normalized)
-    aliases.add(basename)
-
-    def add_variants(name: str):
-        if not name:
-            return
-        if name.lower().endswith(".py"):
-            aliases.add(name[:-3])
-        else:
-            aliases.add(f"{name}.py")
-
-    add_variants(normalized)
-    add_variants(basename)
-
-    return {alias for alias in aliases if alias}
+        return ""
+    if not normalized.endswith(".py"):
+        normalized += ".py"
+    return normalized
 
 
-def is_noauth_allowed(file_name: str, class_name: str, function_name: str) -> bool:
+def is_noauth_allowed(
+    file_name: str,
+    class_name: str,
+    function_name: str,
+    application: Optional[str] = None,
+) -> bool:
     """
     Check if the given file, class, and function is allowed to be called without auth.
-    Matching is case-insensitive and supports relative paths or basenames with/without `.py`.
+    Module matching is exact after adding an omitted `.py` suffix. Auth-enabled
+    applications must also name the application so one grant cannot authorize a
+    same-named operation in another application.
     """
-    requested_aliases = _file_aliases(file_name)
-    requested_aliases_casefold = {alias.casefold() for alias in requested_aliases}
+    requested_file = _canonical_bff_identifier(file_name)
+    if not requested_file:
+        return False
 
     for entry in ALLOWED_NOAUTH_CLASSCALLS:
-        entry_file = entry.get("file", "")
-        entry_aliases = _file_aliases(entry_file)
-        if not entry_aliases:
+        entry_file = _canonical_bff_identifier(str(entry.get("file", "")))
+        if entry_file != requested_file:
             continue
-
-        entry_aliases_casefold = {alias.casefold() for alias in entry_aliases}
-        if ((requested_aliases & entry_aliases) or
-                (requested_aliases_casefold & entry_aliases_casefold)):
-            if (entry.get("class") == class_name and
-                    entry.get("function") == function_name):
-                return True
+        entry_application = str(entry.get("application") or "").strip()
+        if entry_application != str(application or ""):
+            continue
+        if (
+            entry.get("class") == class_name
+            and entry.get("function") == function_name
+        ):
+            return True
     return False
+
+
+def _assert_application_audience(user: Any, application: Optional[str]) -> None:
+    if not application or not isinstance(user, dict):
+        return
+    if user.get("is_authenticated") is not True:
+        return
+    audience = str(user.get("application") or "")
+    if not audience or not hmac.compare_digest(audience, application):
+        raise HTTPException(status_code=403, detail="Session is not authorized for this application")
+
+
+def _application_bff_identifiers(application: str, modules_root: str) -> Set[str]:
+    """Return exact modules delivered to one browser application."""
+    root = os.path.abspath(modules_root)
+    try:
+        files = _browser_package_files(application)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="Application not found") from None
+    return {
+        os.path.relpath(path, root).replace(os.sep, "/")
+        for path in files
+        if path.endswith(".py")
+    }
+
+
+def _enforce_declared_bff_policy(
+    user: Any,
+    policy: Dict[str, Any],
+    *,
+    application: Optional[str],
+    function_name: str,
+) -> None:
+    """Enforce standard policy claims before invoking an application hook."""
+    if not policy:
+        return
+    claims = _coerce_policy_user(user)
+    comparisons = {
+        "issuer": claims.get("issuer", claims.get("iss")),
+        "tenant": claims.get("tenant", claims.get("tenant_id", claims.get("tid"))),
+        "provider": claims.get("auth_provider"),
+        "auth_provider": claims.get("auth_provider"),
+        "application": application,
+        "operation": function_name,
+    }
+    for key, actual in comparisons.items():
+        expected = policy.get(key)
+        if expected is not None and str(actual or "") != str(expected):
+            raise HTTPException(status_code=403, detail="BFF policy denied")
+    required_role = policy.get("role")
+    required_roles = policy.get("roles")
+    if required_role is not None:
+        required_roles = [required_role]
+    if required_roles is not None:
+        if isinstance(required_roles, str):
+            required_roles = [required_roles]
+        actual_roles = set(_normalize_auth_roles(claims.get("roles", claims.get("role"))))
+        expected_roles = set(_normalize_auth_roles(required_roles))
+        if not expected_roles or not expected_roles.issubset(actual_roles):
+            raise HTTPException(status_code=403, detail="BFF policy denied")
 
 
 def _coerce_policy_user(user: Any) -> Dict[str, Any]:
@@ -952,9 +1024,12 @@ def _build_auth_session_user(
 def _set_authenticated_user(
     request: Request,
     user_info: Any,
+    *,
+    application: str,
     **identity_overrides: Any,
 ) -> Dict[str, Any]:
     session_user = _build_auth_session_user(user_info, **identity_overrides)
+    session_user["application"] = application
     _clear_auth_session(request)
     request.session["user"] = session_user
     request.session["session_id"] = secrets.token_urlsafe(24)
@@ -1233,6 +1308,7 @@ async def issue_bff_replay_tokens(
 
 @app.get("/{application}/appcode/appcode.pyt", operation_id="downloadAppcodePackage", responses={200: {"description": "StreamingResponse (ZIP file stream, media_type=\"application/zip\")"}, 401: {"description": "HTTPException (if authentication fails when required)"}})
 def download_appcode(request: Request, application: str, user=Depends(require_authenticated_user)):
+    _assert_application_audience(user, application)
     replay_client = _register_bff_replay_client(request, user)
     file_like = create_appcode_pkg_in_memory(
         "",
@@ -1328,6 +1404,11 @@ async def public_app_asset(application: str, asset_path: str):
         raise HTTPException(status_code=404, detail="Asset not found")
     return FileResponse(absolute_path)
 
+@app.get("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="getApplicationClassCall", response_model=Any)
+@app.post("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="postApplicationClassCall", response_model=Any)
+@app.put("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="putApplicationClassCall", response_model=Any)
+@app.patch("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="patchApplicationClassCall", response_model=Any)
+@app.delete("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="deleteApplicationClassCall", response_model=Any)
 @app.get("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="getClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float]) or StreamingResponse for streaming methods"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
 @app.post("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="postClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float]) or StreamingResponse for streaming methods"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
 @app.put("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="putClassCall", response_model=Any)
@@ -1337,7 +1418,8 @@ async def class_call(
     file_path: str,
     class_name: str,
     function_name: str,
-    request: Request
+    request: Request,
+    application: Optional[str] = None,
 ):
     
     # Determine if this call is allowed without auth.
@@ -1349,7 +1431,12 @@ async def class_call(
     if not request_identifier_with_ext.lower().endswith(".py"):
         request_identifier_with_ext += ".py"
 
-    if is_noauth_allowed(request_identifier_with_ext, class_name, function_name):
+    if is_noauth_allowed(
+        request_identifier_with_ext,
+        class_name,
+        function_name,
+        application,
+    ):
         user = "noauth"
     else:
         # Perform authentication check for calls not whitelisted for no-auth.
@@ -1357,8 +1444,20 @@ async def class_call(
 
     if not user:
         raise HTTPException(status_code=401, detail="Call not authorized")
+    if not application and isinstance(user, dict) and user.get("is_authenticated") is True:
+        application = str(user.get("application") or "") or None
+        if application is None:
+            raise HTTPException(
+                status_code=403,
+                detail="Session has no application audience; sign in again",
+            )
+    _assert_application_audience(user, application)
 
     modules_root = os.path.abspath(get_modules_path())
+    if application and request_identifier_with_ext not in _application_bff_identifiers(
+        application, modules_root
+    ):
+        raise HTTPException(status_code=404, detail="BFF operation not exported by this application")
     fs_relative = request_identifier_with_ext.replace("/", os.sep)
     fs_relative = os.path.normpath(fs_relative)
 
@@ -1409,11 +1508,23 @@ async def class_call(
 
     _validate_csrf(request, user)
     _validate_bff_replay_token(request, user)
+    policy = operation.get("policy", {})
     policy_hook = _configured_bff_policy_hook()
+    if policy and policy_hook is None:
+        raise RuntimeError(
+            "A @bff_policy export requires BFF_POLICY_HOOK_PATH or set_bff_policy_hook()"
+        )
+    _enforce_declared_bff_policy(
+        user,
+        policy,
+        application=application,
+        function_name=function_name,
+    )
     if policy_hook:
         policy_result = policy_hook(
             user=_coerce_policy_user(user),
-            policy=operation.get("policy", {}),
+            policy=policy,
+            application=application,
             class_name=class_name,
             function_name=function_name,
             module_path=request_identifier_with_ext,
@@ -2578,7 +2689,7 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
         if email_attr.lower() not in allowed_emails:
             raise HTTPException(status_code=401, detail="Not authorized")
 
-    _set_authenticated_user(request, user_info)
+    _set_authenticated_user(request, user_info, application=application)
     request.session["saml_replay_proof"] = replay_proof
 
     cached_redirect = _sanitize_return_to(consumed_transaction.get("return_to"))
@@ -2679,6 +2790,7 @@ async def auth_google_callback(request: Request, application: str):
     _set_authenticated_user(
         request,
         user_info,
+        application=application,
         auth_type="google",
         auth_provider="google",
         auth_provider_label="Google",
@@ -2730,6 +2842,7 @@ async def auth_microsoft_callback(request: Request, application: str):
     _set_authenticated_user(
         request,
         user_info,
+        application=application,
         auth_type="microsoft",
         auth_provider="microsoft",
         auth_provider_label="Microsoft",
@@ -2960,7 +3073,7 @@ async def auth_user_callback(request: Request, application: str):
         "roles": authenticated_claims.get("roles", authenticated_claims.get("role", [])),
     }
 
-    _set_authenticated_user(request, user_info)
+    _set_authenticated_user(request, user_info, application=application)
 
     # See if we stored a "return_to" path earlier; default to "/{application}"
     return_to = _sanitize_return_to(request.session.pop("return_to", None)) or f"/{application}"
@@ -2986,7 +3099,9 @@ async def mcp_auth(request: Request, application: str, auth_input: MCPAuthInput 
         "roles": authenticated_claims.get("roles", authenticated_claims.get("role", [])),
     }
 
-    session_user = _set_authenticated_user(request, user_info)
+    session_user = _set_authenticated_user(
+        request, user_info, application=application
+    )
 
     return {**session_user, "status": "authenticated"}
 
@@ -3019,6 +3134,12 @@ async def main_app_route(response: Response, application: str, request: Request)
         # Not logged in, so remember where they wanted to go:
         request.session["return_to"] = f"/{application}"
         # Then send them to Login page:
+        return RedirectResponse(url=f"/{application}/login")
+
+    try:
+        _assert_application_audience(user_session, application)
+    except HTTPException:
+        request.session["return_to"] = f"/{application}"
         return RedirectResponse(url=f"/{application}/login")
 
     # Already logged in, proceed normally

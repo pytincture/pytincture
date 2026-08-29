@@ -3,6 +3,7 @@ import importlib
 import e2e_widget
 import js
 from dhxpyt.layout import MainWindow
+from e2e_data import E2EData  # noqa: F401 - packaged BFF proxy/audience declaration
 
 from static_helper import STATIC_VALUE
 

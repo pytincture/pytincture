@@ -77,7 +77,7 @@ async function callAuthenticatedBff(page) {
             .find(([name]) => name === "pytincture_csrf")
             ?.slice(1).join("=") || "";
         const invoke = async (method, kwargs) => {
-            const response = await fetch(`/classcall/e2e_data.py/E2EData/${method}`, {
+            const response = await fetch(`/e2e_app/classcall/e2e_data.py/E2EData/${method}`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -105,7 +105,7 @@ async function measureAuthenticatedBff(page, sampleCount) {
         const measurements = [];
         for (let index = 0; index < count; index += 1) {
             const startedAt = performance.now();
-            const response = await fetch("/classcall/e2e_data.py/E2EData/sync_call", {
+            const response = await fetch("/e2e_app/classcall/e2e_data.py/E2EData/sync_call", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -246,14 +246,13 @@ test("packaged entrypoint failure is rendered without fallback", async ({ browse
             window.addEventListener("pytincture:lifecycle", event => window.__pytinctureLifecycle.push(event.detail));
         });
         await blockExternalWidgetIndex(page);
-        await page.goto("/e2e_app/login");
+        await page.goto("/failure_app/login");
         await page.getByPlaceholder("Email").fill("e2e@example.com");
         await page.getByPlaceholder("Password").fill("demo-password");
         await Promise.all([
-            page.waitForURL(/\/e2e_app$/),
+            page.waitForURL(/\/failure_app$/),
             page.getByRole("button", { name: "Login with Email" }).click(),
         ]);
-        await page.goto("/failure_app");
         await expect(page.locator(".pytincture-loading__status")).toContainText("Failed during entrypoint-execution");
         const lifecycle = await page.evaluate(() => window.__pytinctureLifecycle);
         expect(lifecycle.some(event => event.type === "fallback")).toBe(false);

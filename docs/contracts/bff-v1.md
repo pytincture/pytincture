@@ -19,8 +19,14 @@ by Pytincture 1.x.
 The route is:
 
 ```text
-/classcall/{file_path}/{class_name}/{function_name}
+/{application}/classcall/{file_path}/{class_name}/{function_name}
 ```
+
+The application is the signed session audience, and the module must be an
+exact path packaged for that application. The unscoped `/classcall/...` route
+remains a compatibility surface for unauthenticated services and sessions
+that already carry an application audience; new generated proxies always use
+the scoped route.
 
 Methods default to `POST`. `@bff_http_methods` may declare `GET`, `POST`,
 `PUT`, `PATCH`, or `DELETE`. A method mismatch returns `405` with `Allow`.
@@ -68,6 +74,6 @@ change user method signatures.
 
 Version 1 permits additive response headers, optional request fields, new
 decorator options with defaults, and new error details that do not expose
-secrets. Changing the route shape, canonical body fields, default method,
+secrets. Removing the compatibility route, changing canonical body fields, default method,
 stream framing, or generated public method signatures requires a new contract
 version and a major-release migration path.

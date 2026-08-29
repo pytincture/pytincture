@@ -92,7 +92,7 @@ come from the deployment secret manager rather than committed files.
 | Environment variable | Meaning |
 | --- | --- |
 | `ALLOWED_EMAILS` | Optional comma-separated authorization allowlist applied after identity verification. |
-| `ALLOWED_NOAUTH_CLASSCALLS` | Legacy JSON allowlist for unauthenticated BFF calls; avoid in new deployments. |
+| `ALLOWED_NOAUTH_CLASSCALLS` | Legacy JSON allowlist for unauthenticated BFF calls. Each entry must identify an exact `application`, module-relative `file`, `class`, and `function`; avoid in new deployments. |
 | `AUTH_PASSWORD_HASHES` | JSON email-to-Argon2id/bcrypt map for local login. |
 | `AUTH_SESSION_CLAIM_KEYS` | Additional small trusted user claims retained in signed sessions. |
 | `AUTH_USER_AUTHENTICATOR` | Dotted sync/async local credential verifier. |
