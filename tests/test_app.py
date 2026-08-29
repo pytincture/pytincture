@@ -245,6 +245,87 @@ def test_development_email_login_rejects_remote_peer_spoofing_loopback_host(monk
     assert response.status_code == 401
 
 
+def test_password_login_rejects_oversized_fields(fresh_client, monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "AUTH_LOGIN_EMAIL_MAX_CHARS", 8)
+    response = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "long-address@example.com", "password": "x"},
+    )
+    assert response.status_code == 400
+
+
+def test_password_login_rate_limit_recovers_after_window(fresh_client, monkeypatch):
+    import pytincture.backend.app as backend_app
+    from pytincture.backend.saml import SlidingWindowRateLimiter
+
+    now = [0.0]
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setattr(
+        backend_app,
+        "AUTH_LOGIN_RATE_LIMITER",
+        SlidingWindowRateLimiter(1, 10, clock=lambda: now[0]),
+    )
+
+    first = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "development"},
+        follow_redirects=False,
+    )
+    assert first.status_code == 303
+    second = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "development"},
+        follow_redirects=False,
+    )
+    assert second.status_code == 429
+    assert second.headers["retry-after"] == "10"
+
+    now[0] = 11
+    recovered = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "development"},
+        follow_redirects=False,
+    )
+    assert recovered.status_code == 303
+
+
+def test_password_hash_saturation_rejects_then_recovers(fresh_client, monkeypatch):
+    import pytincture.backend.app as backend_app
+    from pytincture.backend.limits import AsyncAdmissionGate
+    from pytincture.backend.saml import SlidingWindowRateLimiter
+
+    gate = AsyncAdmissionGate(1, 0, 0.001)
+    asyncio.run(gate.acquire())
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setattr(backend_app, "PASSWORD_HASH_GATE", gate)
+    monkeypatch.setattr(
+        backend_app,
+        "AUTH_LOGIN_RATE_LIMITER",
+        SlidingWindowRateLimiter(10, 60),
+    )
+
+    saturated = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "development"},
+        follow_redirects=False,
+    )
+    assert saturated.status_code == 503
+    gate.release()
+    recovered = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "development"},
+        follow_redirects=False,
+    )
+    assert recovered.status_code == 303
+
+
 @pytest.mark.parametrize("peer", ["127.0.0.1", "::1"])
 def test_development_email_login_accepts_actual_loopback_peer(monkeypatch, peer):
     import pytincture.backend.app as backend_app
@@ -1329,6 +1410,35 @@ def test_class_call_timeout_returns_gateway_timeout(monkeypatch, fresh_client, t
     assert response.json()["detail"] == "Internal server error"
     assert response.json()["correlation_id"]
 
+
+def test_timed_out_sync_bff_holds_capacity_until_worker_recovers(monkeypatch):
+    import time
+    from starlette.requests import Request
+    import pytincture.backend.app as backend_app
+    from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate
+
+    async def exercise():
+        gate = AsyncAdmissionGate(1, 0, 0.001)
+        monkeypatch.setattr(backend_app, "BFF_ADMISSION_GATE", gate)
+        request = Request({"type": "http", "method": "POST", "path": "/"})
+        request.state.bff_deadline = time.monotonic() + 0.001
+        request.state.bff_slot_held = True
+        await gate.acquire()
+
+        with pytest.raises(HTTPException) as timed_out:
+            await backend_app._run_bff_thread_stage(request, time.sleep, 0.03)
+        assert timed_out.value.status_code == 504
+        with pytest.raises(AdmissionRejected):
+            await gate.acquire()
+
+        deferred = request.state.bff_deferred_task
+        deferred.add_done_callback(lambda _task: backend_app._release_bff_slot(request))
+        await deferred
+        await gate.acquire()
+        gate.release()
+
+    asyncio.run(exercise())
+
 # ---------------------------------------------------------------------
 # Additional Tests for Increased Coverage
 # ---------------------------------------------------------------------
@@ -1378,6 +1488,27 @@ def test_download_appcode(fresh_client, monkeypatch, tmp_path):
     assert "protocol-with-" not in generated_app
     assert "url = '/demoapp/classcall/demoapp.py/Demo/ping'" in generated_app
     compile(generated_app, "demoapp.py", "exec")
+
+
+def test_appcode_build_saturation_rejects_then_recovers(
+    fresh_client, monkeypatch, tmp_path
+):
+    import threading
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "demoapp.py").write_text("value = 1\n", encoding="utf-8")
+    gate = threading.BoundedSemaphore(1)
+    gate.acquire()
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: "noauth")
+    monkeypatch.setattr(backend_app, "APPCODE_BUILD_GATE", gate)
+    monkeypatch.setattr(backend_app, "APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS", 0.001)
+
+    saturated = fresh_client.get("/demoapp/appcode/appcode.pyt")
+    assert saturated.status_code == 503
+    gate.release()
+    recovered = fresh_client.get("/demoapp/appcode/appcode.pyt")
+    assert recovered.status_code == 200
 
 def test_frontend_runtime_cache_busts_packaged_app_fetch(fresh_client):
     """

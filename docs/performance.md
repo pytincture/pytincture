@@ -34,6 +34,11 @@ The resulting `performance-health.json`, `performance-appcode.json`, and
 `qualification-evidence-performance-service.json`, which hashes each raw
 result and the validated wheel, source distribution, and npm tarball.
 
+The same job deliberately saturates a narrowly configured BFF admission gate.
+`performance-saturation.json` must show both completed work and prompt `503`
+overload responses, followed by successful BFF and health probes that prove
+the worker recovered.
+
 Budgets may only be relaxed with a documented reason and review of the
 corresponding CI evidence. Application owners must establish tighter budgets
 for their deployment, network, widgetset, and workload.

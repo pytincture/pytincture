@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Added bounded local-login rate/field/hash-work controls; BFF admission,
+  preparation, policy, execution, stream item/byte/idle/wall budgets; bounded
+  cached appcode construction; and short optional remote-store deadlines with
+  circuit breaking. Saturated workers now reject promptly and recover without
+  requiring Redis or sticky sessions.
 - Required JSON for state-changing BFF dispatcher requests and applied strict
   Origin and Fetch Metadata validation to authenticated and no-auth calls,
   blocking drive-by requests to loopback/private-network services while

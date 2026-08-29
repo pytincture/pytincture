@@ -41,6 +41,13 @@ browser request.
 The server checks the static operation manifest before importing a requested
 module or constructing its class.
 
+BFF work is admitted through a bounded per-worker queue. The configured call
+deadline starts before module loading, construction, and policy enforcement;
+timed-out synchronous work retains its slot until its worker thread actually
+finishes. Streaming responses—including a `StreamingResponse` returned by app
+code—are wrapped with item, byte, idle, and wall-time limits. Tune the
+`BFF_*` settings for the worker count and expected page-sized payloads.
+
 ## Authorization
 
 `@bff_policy` records literal metadata. Policy-bearing exports fail startup

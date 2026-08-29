@@ -14,8 +14,12 @@
     "health_requests": 500,
     "appcode_requests": 40,
     "bff_requests": 200,
+    "saturation_requests": 30,
     "health_concurrency": 20,
     "appcode_concurrency": 5,
-    "bff_concurrency": 10
+    "bff_concurrency": 10,
+    "saturation_concurrency": 15,
+    "saturation_min_rejections": 1,
+    "saturation_recovery_ms": 500
   }
 }

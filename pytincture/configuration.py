@@ -140,14 +140,77 @@ class PytinctureConfig:
     max_request_body_bytes: int = _setting(
         2 * 1024 * 1024, "MAX_REQUEST_BODY_BYTES", "Maximum request body size."
     )
+    login_rate_limit_attempts: int = _setting(
+        20, "AUTH_LOGIN_RATE_LIMIT_ATTEMPTS", "Password attempts per peer and window."
+    )
+    login_rate_limit_window_seconds: int = _setting(
+        60, "AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS", "Password rate-limit window."
+    )
+    login_email_max_chars: int = _setting(
+        320, "AUTH_LOGIN_EMAIL_MAX_CHARS", "Maximum submitted email length."
+    )
+    login_password_max_chars: int = _setting(
+        1024, "AUTH_LOGIN_PASSWORD_MAX_CHARS", "Maximum submitted password length."
+    )
+    password_hash_max_concurrency: int = _setting(
+        2, "AUTH_PASSWORD_HASH_MAX_CONCURRENCY", "Concurrent password hash checks per worker."
+    )
+    password_hash_queue_timeout_seconds: float = _setting(
+        1.0, "AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS", "Password hash admission wait."
+    )
+    password_hash_timeout_seconds: float = _setting(
+        15.0, "AUTH_PASSWORD_HASH_TIMEOUT_SECONDS", "Maximum credential-verifier runtime."
+    )
     bff_call_timeout_seconds: float = _setting(
         30.0, "BFF_CALL_TIMEOUT_SECONDS", "Non-streaming BFF timeout."
+    )
+    bff_max_concurrency: int = _setting(
+        32, "BFF_MAX_CONCURRENCY", "Concurrent admitted BFF calls per worker."
+    )
+    bff_max_queue: int = _setting(
+        64, "BFF_MAX_QUEUE", "Maximum queued BFF calls per worker."
+    )
+    bff_queue_timeout_seconds: float = _setting(
+        2.0, "BFF_QUEUE_TIMEOUT_SECONDS", "Maximum BFF admission wait."
     )
     bff_stream_max_seconds: float = _setting(
         300.0, "BFF_STREAM_MAX_SECONDS", "Maximum BFF stream duration."
     )
     bff_stream_max_bytes: int = _setting(
         10 * 1024 * 1024, "BFF_STREAM_MAX_BYTES", "Maximum BFF stream bytes."
+    )
+    bff_stream_max_items: int = _setting(
+        10000, "BFF_STREAM_MAX_ITEMS", "Maximum BFF stream items."
+    )
+    bff_stream_idle_timeout_seconds: float = _setting(
+        30.0, "BFF_STREAM_IDLE_TIMEOUT_SECONDS", "Maximum wait between stream items."
+    )
+    appcode_max_files: int = _setting(
+        512, "APPCODE_MAX_FILES", "Maximum files in one browser archive."
+    )
+    appcode_max_file_bytes: int = _setting(
+        4 * 1024 * 1024, "APPCODE_MAX_FILE_BYTES", "Maximum source file size in an archive."
+    )
+    appcode_max_total_bytes: int = _setting(
+        32 * 1024 * 1024, "APPCODE_MAX_TOTAL_BYTES", "Maximum aggregate source bytes per archive."
+    )
+    appcode_cache_entries: int = _setting(
+        16, "APPCODE_CACHE_ENTRIES", "Per-worker bounded browser archive cache entries."
+    )
+    appcode_build_max_concurrency: int = _setting(
+        2, "APPCODE_BUILD_MAX_CONCURRENCY", "Concurrent archive builds per worker."
+    )
+    appcode_build_queue_timeout_seconds: float = _setting(
+        1.0, "APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS", "Maximum archive build admission wait."
+    )
+    remote_store_timeout_seconds: float = _setting(
+        2.0, "REMOTE_STORE_TIMEOUT_SECONDS", "Optional remote-store HTTP deadline."
+    )
+    remote_store_failure_threshold: int = _setting(
+        3, "REMOTE_STORE_FAILURE_THRESHOLD", "Failures before opening the store circuit."
+    )
+    remote_store_cooldown_seconds: float = _setting(
+        15.0, "REMOTE_STORE_COOLDOWN_SECONDS", "Open-circuit cooldown."
     )
     enable_bff_replay_tokens: bool = _setting(
         False, "ENABLE_BFF_REPLAY_TOKENS", "Enable one-time BFF request proofs."
@@ -234,8 +297,35 @@ class PytinctureConfig:
             self.saml_acs_rate_limit_window_seconds,
         ) <= 0:
             raise ValueError("SAML ACS rate-limit values must be greater than zero")
-        if min(self.bff_call_timeout_seconds, self.bff_stream_max_seconds, self.bff_stream_max_bytes) <= 0:
-            raise ValueError("BFF timeout and stream limits must be greater than zero")
+        positive_limits = (
+            self.login_rate_limit_attempts,
+            self.login_rate_limit_window_seconds,
+            self.login_email_max_chars,
+            self.login_password_max_chars,
+            self.password_hash_max_concurrency,
+            self.password_hash_queue_timeout_seconds,
+            self.password_hash_timeout_seconds,
+            self.bff_call_timeout_seconds,
+            self.bff_max_concurrency,
+            self.bff_queue_timeout_seconds,
+            self.bff_stream_max_seconds,
+            self.bff_stream_max_bytes,
+            self.bff_stream_max_items,
+            self.bff_stream_idle_timeout_seconds,
+            self.appcode_max_files,
+            self.appcode_max_file_bytes,
+            self.appcode_max_total_bytes,
+            self.appcode_cache_entries,
+            self.appcode_build_max_concurrency,
+            self.appcode_build_queue_timeout_seconds,
+            self.remote_store_timeout_seconds,
+            self.remote_store_failure_threshold,
+            self.remote_store_cooldown_seconds,
+        )
+        if min(positive_limits) <= 0:
+            raise ValueError("resource limits must be greater than zero")
+        if self.bff_max_queue < 0:
+            raise ValueError("bff_max_queue cannot be negative")
         if not 1 <= self.bff_replay_token_batch_size <= 100:
             raise ValueError("bff_replay_token_batch_size must be between 1 and 100")
         if not 0 <= self.bff_replay_token_low_watermark < self.bff_replay_token_batch_size:
@@ -370,8 +460,21 @@ class PytinctureConfig:
             "bff_replay_token_ttl_seconds", "saml_response_max_bytes",
             "saml_acs_rate_limit_attempts", "saml_acs_rate_limit_window_seconds",
             "saml_transaction_ttl_seconds",
+            "login_rate_limit_attempts", "login_rate_limit_window_seconds",
+            "login_email_max_chars", "login_password_max_chars",
+            "password_hash_max_concurrency", "bff_max_concurrency", "bff_max_queue",
+            "bff_stream_max_items", "appcode_max_files", "appcode_max_file_bytes",
+            "appcode_max_total_bytes", "appcode_cache_entries",
+            "appcode_build_max_concurrency",
+            "remote_store_failure_threshold",
         }
-        float_fields = {"bff_call_timeout_seconds", "bff_stream_max_seconds"}
+        float_fields = {
+            "password_hash_queue_timeout_seconds", "bff_call_timeout_seconds",
+            "password_hash_timeout_seconds",
+            "bff_queue_timeout_seconds", "bff_stream_max_seconds",
+            "bff_stream_idle_timeout_seconds", "remote_store_timeout_seconds",
+            "remote_store_cooldown_seconds", "appcode_build_queue_timeout_seconds",
+        }
         tuple_fields = {
             "cors_allowed_origins", "allowed_hosts", "previous_session_secrets",
             "mcp_exposed_operations",

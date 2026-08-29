@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 import uuid
 import zipfile
@@ -59,6 +60,7 @@ from pytincture.backend.auth import (
 from pytincture.backend.bff import BFFRegistry
 from pytincture.backend.bff import build_bff_registry as _build_bff_registry
 from pytincture.backend.browser_packages import (
+    AppcodeArchiveCache,
     browser_package_files,
     configured_browser_files,
     create_appcode_archive,
@@ -77,6 +79,7 @@ from pytincture.backend.mcp import (
     build_streamable_app,
     exposed_operation_ids,
 )
+from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate
 from pytincture.backend.middleware import (
     RequestBodyLimitMiddleware,
     RotatingSessionMiddleware,
@@ -318,6 +321,10 @@ def create_appcode_pkg_in_memory(host, protocol, application, replay_client=None
         get_parsed_output,
         replay_client,
         os.getenv("PYTINCTURE_BROWSER_FILES", ""),
+        max_files=APPCODE_MAX_FILES,
+        max_file_bytes=APPCODE_MAX_FILE_BYTES,
+        max_total_bytes=APPCODE_MAX_TOTAL_BYTES,
+        cache=APPCODE_ARCHIVE_CACHE,
     )
 
 
@@ -422,9 +429,9 @@ async def sanitized_http_exception_handler(request: Request, exc: HTTPException)
         )
         structured_log(
             logger,
-            logging.ERROR,
+            logging.WARNING if exc.status_code in {503, 504} else logging.ERROR,
             "request.error",
-            exc_info=True,
+            exc_info=exc.status_code not in {503, 504},
             correlation_id=correlation_id,
             status_code=exc.status_code,
             error_type=type(exc).__name__,
@@ -517,22 +524,30 @@ USE_REDIS_INSTANCE = os.environ.get("USE_REDIS_INSTANCE", "false").lower()
 if  USE_REDIS_INSTANCE == "true":
     REDIS_UPSTASH_INSTANCE_URL = os.environ.get("REDIS_UPSTASH_INSTANCE_URL", "")
     REDIS_UPSTASH_INSTANCE_TOKEN =  os.environ.get("REDIS_UPSTASH_INSTANCE_TOKEN", "")
+    _remote_store_options = {
+        "timeout_seconds": float(os.getenv("REMOTE_STORE_TIMEOUT_SECONDS", "2")),
+        "failure_threshold": int(os.getenv("REMOTE_STORE_FAILURE_THRESHOLD", "3")),
+        "cooldown_seconds": float(os.getenv("REMOTE_STORE_COOLDOWN_SECONDS", "15")),
+    }
     USER_SESSION_DICT = RedisDict(
         redis_url=REDIS_UPSTASH_INSTANCE_URL,
         redis_token=REDIS_UPSTASH_INSTANCE_TOKEN,
-        key_prefix="session"
+        key_prefix="session",
+        **_remote_store_options,
     )
     AUTH_SESSION_REVOCATIONS = RedisDict(
         redis_url=REDIS_UPSTASH_INSTANCE_URL,
         redis_token=REDIS_UPSTASH_INSTANCE_TOKEN,
         key_prefix="revoked-session:",
         cache_reads=False,
+        **_remote_store_options,
     )
     BFF_REPLAY_TOKEN_STORE = RedisDict(
         redis_url=REDIS_UPSTASH_INSTANCE_URL,
         redis_token=REDIS_UPSTASH_INSTANCE_TOKEN,
         key_prefix="bff-replay-token:",
         cache_reads=False,
+        **_remote_store_options,
     )
 else:
     USER_SESSION_DICT = {}
@@ -753,25 +768,90 @@ async def _authenticate_local_user(
     if not ENABLE_USER_LOGIN:
         raise HTTPException(status_code=403, detail="User login not enabled")
     normalized_email = str(email or "").strip().casefold()
+    if len(normalized_email) > AUTH_LOGIN_EMAIL_MAX_CHARS or len(password or "") > AUTH_LOGIN_PASSWORD_MAX_CHARS:
+        raise HTTPException(status_code=400, detail="Login fields exceed configured limits")
     if not normalized_email or not isinstance(password, str) or not _allowed_email(normalized_email):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    authenticator = _configured_user_authenticator()
-    if authenticator is not None:
-        authenticated = authenticator(
-            email=normalized_email, password=password, request=request
-        )
-        if inspect.isawaitable(authenticated):
-            authenticated = await authenticated
-        if not authenticated:
-            raise HTTPException(status_code=401, detail="Invalid email or password")
-        if authenticated is True:
-            return {"email": normalized_email}
-        if not isinstance(authenticated, dict):
-            raise RuntimeError("User authenticator must return a mapping, True, or False")
-        return {**authenticated, "email": normalized_email}
+    peer = request.client.host if request.client is not None else "unknown"
+    account_key = hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()
+    retry_after = 0
+    for key in (f"peer:{peer}", f"account:{account_key}"):
+        allowed, retry_after = AUTH_LOGIN_RATE_LIMITER.allow(key)
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many login attempts",
+                headers={"Retry-After": str(retry_after)},
+            )
 
-    if _verify_configured_password(normalized_email, password):
+    try:
+        await PASSWORD_HASH_GATE.acquire()
+    except AdmissionRejected as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Password verification capacity is temporarily exhausted",
+            headers={"Retry-After": "1"},
+        ) from exc
+
+    release_gate = True
+    verifier_task = None
+    try:
+        authenticator = _configured_user_authenticator()
+        if authenticator is not None and inspect.iscoroutinefunction(authenticator):
+            authenticated = await asyncio.wait_for(
+                authenticator(
+                    email=normalized_email, password=password, request=request
+                ),
+                timeout=AUTH_PASSWORD_HASH_TIMEOUT_SECONDS,
+            )
+        else:
+            verifier = authenticator or _verify_configured_password
+            verifier_args = () if authenticator is not None else (normalized_email, password)
+            verifier_kwargs = (
+                {"email": normalized_email, "password": password, "request": request}
+                if authenticator is not None
+                else {}
+            )
+            verifier_task = asyncio.create_task(
+                run_in_threadpool(verifier, *verifier_args, **verifier_kwargs)
+            )
+            try:
+                authenticated = await asyncio.wait_for(
+                    asyncio.shield(verifier_task),
+                    timeout=AUTH_PASSWORD_HASH_TIMEOUT_SECONDS,
+                )
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                if not verifier_task.done():
+                    verifier_task.add_done_callback(
+                        lambda _task: PASSWORD_HASH_GATE.release()
+                    )
+                    release_gate = False
+                raise
+        if authenticator is not None:
+            if inspect.isawaitable(authenticated):
+                authenticated = await asyncio.wait_for(
+                    authenticated, timeout=AUTH_PASSWORD_HASH_TIMEOUT_SECONDS
+                )
+            if not authenticated:
+                raise HTTPException(status_code=401, detail="Invalid email or password")
+            if authenticated is True:
+                return {"email": normalized_email}
+            if not isinstance(authenticated, dict):
+                raise RuntimeError("User authenticator must return a mapping, True, or False")
+            return {**authenticated, "email": normalized_email}
+        password_valid = bool(authenticated)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Password verification timed out",
+            headers={"Retry-After": "1"},
+        ) from exc
+    finally:
+        if release_gate:
+            PASSWORD_HASH_GATE.release()
+
+    if password_valid:
         return _configured_local_user_claims(normalized_email)
 
     if (
@@ -1150,6 +1230,53 @@ def _validate_bff_browser_request(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Origin validation failed")
 
 
+def _release_bff_slot(request: Request) -> None:
+    if getattr(request.state, "bff_slot_held", False):
+        request.state.bff_slot_held = False
+        BFF_ADMISSION_GATE.release()
+
+
+async def _admit_bff_call(request: Request):
+    try:
+        await BFF_ADMISSION_GATE.acquire()
+    except AdmissionRejected as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="BFF capacity is temporarily exhausted",
+            headers={"Retry-After": "1"},
+        ) from exc
+    request.state.bff_slot_held = True
+    request.state.bff_deadline = time.monotonic() + BFF_CALL_TIMEOUT_SECONDS
+    try:
+        yield
+    finally:
+        if getattr(request.state, "bff_stream_owns_slot", False):
+            return
+        deferred = getattr(request.state, "bff_deferred_task", None)
+        if deferred is not None and not deferred.done():
+            deferred.add_done_callback(lambda _task: _release_bff_slot(request))
+        else:
+            _release_bff_slot(request)
+
+
+def _remaining_bff_seconds(request: Request) -> float:
+    return max(0.0, request.state.bff_deadline - time.monotonic())
+
+
+async def _run_bff_thread_stage(request: Request, function: Callable, *args, **kwargs):
+    remaining = _remaining_bff_seconds(request)
+    if remaining <= 0:
+        raise HTTPException(status_code=504, detail="BFF call timed out")
+    task = asyncio.create_task(run_in_threadpool(function, *args, **kwargs))
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
+    except asyncio.TimeoutError as exc:
+        # A Python thread cannot be killed safely. Keep its admission slot until
+        # it actually exits so repeated timeouts cannot create unbounded work.
+        request.state.bff_deferred_task = task
+        raise HTTPException(status_code=504, detail="BFF call timed out") from exc
+
+
 def _bff_replay_subject(request: Request, user: Any) -> Optional[str]:
     if not isinstance(user, dict) or user.get("is_authenticated") is not True:
         return None
@@ -1349,12 +1476,21 @@ async def issue_bff_replay_tokens(
 def download_appcode(request: Request, application: str, user=Depends(require_authenticated_user)):
     _assert_application_audience(user, application)
     replay_client = _register_bff_replay_client(request, user)
-    file_like = create_appcode_pkg_in_memory(
-        "",
-        "",
-        application,
-        replay_client=replay_client,
-    )
+    if not APPCODE_BUILD_GATE.acquire(timeout=APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS):
+        raise HTTPException(
+            status_code=503,
+            detail="Appcode build capacity is temporarily exhausted",
+            headers={"Retry-After": "1"},
+        )
+    try:
+        file_like = create_appcode_pkg_in_memory(
+            "",
+            "",
+            application,
+            replay_client=replay_client,
+        )
+    finally:
+        APPCODE_BUILD_GATE.release()
     return StreamingResponse(
         file_like,
         media_type="application/zip",
@@ -1459,6 +1595,7 @@ async def class_call(
     function_name: str,
     request: Request,
     application: Optional[str] = None,
+    _admission=Depends(_admit_bff_call),
 ):
     
     # Determine if this call is allowed without auth.
@@ -1479,7 +1616,7 @@ async def class_call(
         user = "noauth"
     else:
         # Perform authentication check for calls not whitelisted for no-auth.
-        user = require_auth(request)
+        user = await _run_bff_thread_stage(request, require_auth, request)
 
     if not user:
         raise HTTPException(status_code=401, detail="Call not authorized")
@@ -1493,10 +1630,18 @@ async def class_call(
     _assert_application_audience(user, application)
 
     modules_root = os.path.abspath(get_modules_path())
-    if application and request_identifier_with_ext not in _application_bff_identifiers(
-        application, modules_root
-    ):
-        raise HTTPException(status_code=404, detail="BFF operation not exported by this application")
+    if application:
+        application_identifiers = await _run_bff_thread_stage(
+            request,
+            _application_bff_identifiers,
+            application,
+            modules_root,
+        )
+        if request_identifier_with_ext not in application_identifiers:
+            raise HTTPException(
+                status_code=404,
+                detail="BFF operation not exported by this application",
+            )
     fs_relative = request_identifier_with_ext.replace("/", os.sep)
     fs_relative = os.path.normpath(fs_relative)
 
@@ -1519,7 +1664,9 @@ async def class_call(
     if not os.path.isfile(module_file_path):
         raise HTTPException(status_code=404, detail=f"File {request_identifier_with_ext} not found in appcode folder")
 
-    operation = _registered_bff_operation(
+    operation = await _run_bff_thread_stage(
+        request,
+        _registered_bff_operation,
         modules_root,
         request_identifier_with_ext,
         class_name,
@@ -1547,9 +1694,11 @@ async def class_call(
 
     _validate_bff_browser_request(request)
     _validate_csrf(request, user)
-    _validate_bff_replay_token(request, user)
+    await _run_bff_thread_stage(request, _validate_bff_replay_token, request, user)
     policy = operation.get("policy", {})
-    policy_hook = _configured_bff_policy_hook()
+    policy_hook = await _run_bff_thread_stage(
+        request, _configured_bff_policy_hook
+    )
     if policy and policy_hook is None:
         raise RuntimeError(
             "A @bff_policy export requires BFF_POLICY_HOOK_PATH or set_bff_policy_hook()"
@@ -1561,24 +1710,44 @@ async def class_call(
         function_name=function_name,
     )
     if policy_hook:
-        policy_result = policy_hook(
-            user=_coerce_policy_user(user),
-            policy=policy,
-            application=application,
-            class_name=class_name,
-            function_name=function_name,
-            module_path=request_identifier_with_ext,
-            request=request,
-        )
+        policy_arguments = {
+            "user": _coerce_policy_user(user),
+            "policy": policy,
+            "application": application,
+            "class_name": class_name,
+            "function_name": function_name,
+            "module_path": request_identifier_with_ext,
+            "request": request,
+        }
+        if inspect.iscoroutinefunction(policy_hook):
+            try:
+                policy_result = await asyncio.wait_for(
+                    policy_hook(**policy_arguments),
+                    timeout=_remaining_bff_seconds(request),
+                )
+            except asyncio.TimeoutError as exc:
+                raise HTTPException(status_code=504, detail="BFF policy timed out") from exc
+        else:
+            policy_result = await _run_bff_thread_stage(
+                request, lambda: policy_hook(**policy_arguments)
+            )
         if inspect.isawaitable(policy_result):
-            await policy_result
+            try:
+                await asyncio.wait_for(
+                    policy_result, timeout=_remaining_bff_seconds(request)
+                )
+            except asyncio.TimeoutError as exc:
+                raise HTTPException(status_code=504, detail="BFF policy timed out") from exc
 
-    module = _load_source_module(module_file_path, class_name)
-    cls = getattr(module, class_name)
-    instance = cls(_user=user)
+    def prepare_call():
+        module = _load_source_module(module_file_path, class_name)
+        cls = getattr(module, class_name)
+        instance = cls(_user=user)
+        return getattr(instance, function_name)
+
+    func = await _run_bff_thread_stage(request, prepare_call)
 
     # 3) Get the function
-    func = getattr(instance, function_name)
     function_obj = getattr(func, "__func__", func)
     is_streaming = getattr(function_obj, "_bff_streaming", False)
     streaming_raw = getattr(function_obj, "_bff_streaming_raw", False)
@@ -1628,15 +1797,20 @@ async def class_call(
                     reason=reason,
                     output_bytes=output_bytes,
                 )
+                _release_bff_slot(request)
 
-            return as_streaming_response(
+            response = as_streaming_response(
                 result_obj,
                 raw=streaming_raw,
                 media_type=streaming_media_type,
                 max_seconds=BFF_STREAM_MAX_SECONDS,
                 max_bytes=BFF_STREAM_MAX_BYTES,
+                max_items=BFF_STREAM_MAX_ITEMS,
+                idle_timeout_seconds=BFF_STREAM_IDLE_TIMEOUT_SECONDS,
                 on_finish=log_stream_finish,
             )
+            request.state.bff_stream_owns_slot = True
+            return response
 
         # Execute the target callable
         if is_async_gen_function:
@@ -1644,11 +1818,20 @@ async def class_call(
             if is_streaming:
                 return _as_streaming_response(result)
             collected_items = []
+            collected_bytes = 0
             async def collect_items():
+                nonlocal collected_bytes
                 async for item in result:
                     collected_items.append(item)
+                    if len(collected_items) > BFF_STREAM_MAX_ITEMS:
+                        raise HTTPException(status_code=413, detail="BFF result item limit exceeded")
+                    collected_bytes += len(json.dumps(item, default=str).encode("utf-8"))
+                    if collected_bytes > BFF_STREAM_MAX_BYTES:
+                        raise HTTPException(status_code=413, detail="BFF result byte limit exceeded")
             try:
-                await asyncio.wait_for(collect_items(), timeout=BFF_CALL_TIMEOUT_SECONDS)
+                await asyncio.wait_for(
+                    collect_items(), timeout=_remaining_bff_seconds(request)
+                )
             except asyncio.TimeoutError as exc:
                 raise HTTPException(status_code=504, detail="BFF call timed out") from exc
             return collected_items
@@ -1656,18 +1839,12 @@ async def class_call(
         if is_coroutine_function:
             try:
                 result = await asyncio.wait_for(
-                    func(*args, **kwargs), timeout=BFF_CALL_TIMEOUT_SECONDS
+                    func(*args, **kwargs), timeout=_remaining_bff_seconds(request)
                 )
             except asyncio.TimeoutError as exc:
                 raise HTTPException(status_code=504, detail="BFF call timed out") from exc
         else:
-            try:
-                result = await asyncio.wait_for(
-                    run_in_threadpool(func, *args, **kwargs),
-                    timeout=BFF_CALL_TIMEOUT_SECONDS,
-                )
-            except asyncio.TimeoutError as exc:
-                raise HTTPException(status_code=504, detail="BFF call timed out") from exc
+            result = await _run_bff_thread_stage(request, func, *args, **kwargs)
 
         if is_streaming:
             return _as_streaming_response(result)
@@ -1789,11 +1966,77 @@ if AUTH_SESSION_SAME_SITE not in {"lax", "strict", "none"}:
 MAX_REQUEST_BODY_BYTES = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(2 * 1024 * 1024)))
 if MAX_REQUEST_BODY_BYTES <= 0:
     raise RuntimeError("MAX_REQUEST_BODY_BYTES must be greater than zero")
+AUTH_LOGIN_RATE_LIMIT_ATTEMPTS = int(os.getenv("AUTH_LOGIN_RATE_LIMIT_ATTEMPTS", "20"))
+AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS", "60"))
+AUTH_LOGIN_EMAIL_MAX_CHARS = int(os.getenv("AUTH_LOGIN_EMAIL_MAX_CHARS", "320"))
+AUTH_LOGIN_PASSWORD_MAX_CHARS = int(os.getenv("AUTH_LOGIN_PASSWORD_MAX_CHARS", "1024"))
+AUTH_PASSWORD_HASH_MAX_CONCURRENCY = int(os.getenv("AUTH_PASSWORD_HASH_MAX_CONCURRENCY", "2"))
+AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS", "1")
+)
+AUTH_PASSWORD_HASH_TIMEOUT_SECONDS = float(
+    os.getenv("AUTH_PASSWORD_HASH_TIMEOUT_SECONDS", "15")
+)
+if min(
+    AUTH_LOGIN_RATE_LIMIT_ATTEMPTS,
+    AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+    AUTH_LOGIN_EMAIL_MAX_CHARS,
+    AUTH_LOGIN_PASSWORD_MAX_CHARS,
+    AUTH_PASSWORD_HASH_MAX_CONCURRENCY,
+    AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS,
+    AUTH_PASSWORD_HASH_TIMEOUT_SECONDS,
+) <= 0:
+    raise RuntimeError("authentication resource limits must be greater than zero")
+AUTH_LOGIN_RATE_LIMITER = SlidingWindowRateLimiter(
+    AUTH_LOGIN_RATE_LIMIT_ATTEMPTS,
+    AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+)
+PASSWORD_HASH_GATE = AsyncAdmissionGate(
+    AUTH_PASSWORD_HASH_MAX_CONCURRENCY,
+    max(1, AUTH_PASSWORD_HASH_MAX_CONCURRENCY * 4),
+    AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS,
+)
 BFF_CALL_TIMEOUT_SECONDS = float(os.getenv("BFF_CALL_TIMEOUT_SECONDS", "30"))
+BFF_MAX_CONCURRENCY = int(os.getenv("BFF_MAX_CONCURRENCY", "32"))
+BFF_MAX_QUEUE = int(os.getenv("BFF_MAX_QUEUE", "64"))
+BFF_QUEUE_TIMEOUT_SECONDS = float(os.getenv("BFF_QUEUE_TIMEOUT_SECONDS", "2"))
 BFF_STREAM_MAX_SECONDS = float(os.getenv("BFF_STREAM_MAX_SECONDS", "300"))
 BFF_STREAM_MAX_BYTES = int(os.getenv("BFF_STREAM_MAX_BYTES", str(10 * 1024 * 1024)))
-if BFF_CALL_TIMEOUT_SECONDS <= 0 or BFF_STREAM_MAX_SECONDS <= 0 or BFF_STREAM_MAX_BYTES <= 0:
+BFF_STREAM_MAX_ITEMS = int(os.getenv("BFF_STREAM_MAX_ITEMS", "10000"))
+BFF_STREAM_IDLE_TIMEOUT_SECONDS = float(os.getenv("BFF_STREAM_IDLE_TIMEOUT_SECONDS", "30"))
+APPCODE_MAX_FILES = int(os.getenv("APPCODE_MAX_FILES", "512"))
+APPCODE_MAX_FILE_BYTES = int(os.getenv("APPCODE_MAX_FILE_BYTES", str(4 * 1024 * 1024)))
+APPCODE_MAX_TOTAL_BYTES = int(os.getenv("APPCODE_MAX_TOTAL_BYTES", str(32 * 1024 * 1024)))
+APPCODE_CACHE_ENTRIES = int(os.getenv("APPCODE_CACHE_ENTRIES", "16"))
+APPCODE_BUILD_MAX_CONCURRENCY = int(os.getenv("APPCODE_BUILD_MAX_CONCURRENCY", "2"))
+APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS", "1")
+)
+if min(
+    BFF_CALL_TIMEOUT_SECONDS,
+    BFF_MAX_CONCURRENCY,
+    BFF_QUEUE_TIMEOUT_SECONDS,
+    BFF_STREAM_MAX_SECONDS,
+    BFF_STREAM_MAX_BYTES,
+    BFF_STREAM_MAX_ITEMS,
+    BFF_STREAM_IDLE_TIMEOUT_SECONDS,
+    APPCODE_MAX_FILES,
+    APPCODE_MAX_FILE_BYTES,
+    APPCODE_MAX_TOTAL_BYTES,
+    APPCODE_CACHE_ENTRIES,
+    APPCODE_BUILD_MAX_CONCURRENCY,
+    APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS,
+) <= 0:
     raise RuntimeError("BFF timeout and stream limits must be greater than zero")
+if BFF_MAX_QUEUE < 0:
+    raise RuntimeError("BFF_MAX_QUEUE cannot be negative")
+BFF_ADMISSION_GATE = AsyncAdmissionGate(
+    BFF_MAX_CONCURRENCY,
+    BFF_MAX_QUEUE,
+    BFF_QUEUE_TIMEOUT_SECONDS,
+)
+APPCODE_ARCHIVE_CACHE = AppcodeArchiveCache(APPCODE_CACHE_ENTRIES)
+APPCODE_BUILD_GATE = threading.BoundedSemaphore(APPCODE_BUILD_MAX_CONCURRENCY)
 ENABLE_BFF_REPLAY_TOKENS = os.getenv("ENABLE_BFF_REPLAY_TOKENS", "false").lower() == "true"
 BFF_REPLAY_TOKEN_BATCH_SIZE = int(os.getenv("BFF_REPLAY_TOKEN_BATCH_SIZE", "12"))
 BFF_REPLAY_TOKEN_LOW_WATERMARK = int(os.getenv("BFF_REPLAY_TOKEN_LOW_WATERMARK", "3"))

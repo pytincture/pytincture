@@ -17,6 +17,10 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "ENABLE_USER_LOGIN": "true",
             "ENABLE_DEV_EMAIL_LOGIN": "true",
             "BFF_CALL_TIMEOUT_SECONDS": "12.5",
+            "BFF_MAX_CONCURRENCY": "9",
+            "BFF_STREAM_IDLE_TIMEOUT_SECONDS": "4.5",
+            "APPCODE_MAX_FILES": "80",
+            "REMOTE_STORE_TIMEOUT_SECONDS": "1.25",
             "MCP_EXPOSED_OPERATIONS": '["health", "status"]',
             "PYTINCTURE_ALLOWED_HOSTS": "app.example.test,api.example.test",
             "PYTINCTURE_CANONICAL_ORIGIN": "https://app.example.test/",
@@ -32,6 +36,10 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.modules_path == str(tmp_path.resolve())
     assert config.enable_user_login is True
     assert config.bff_call_timeout_seconds == 8.0
+    assert config.bff_max_concurrency == 9
+    assert config.bff_stream_idle_timeout_seconds == 4.5
+    assert config.appcode_max_files == 80
+    assert config.remote_store_timeout_seconds == 1.25
     assert config.mcp_exposed_operations == ("health", "status")
     assert config.allowed_hosts == ("app.example.test", "api.example.test")
     assert config.canonical_origin == "https://app.example.test"
@@ -84,6 +92,8 @@ def test_legacy_secret_key_is_an_environment_fallback(tmp_path):
     ("overrides", "message"),
     [
         ({"max_request_body_bytes": 0}, "max_request_body_bytes"),
+        ({"bff_max_queue": -1}, "bff_max_queue"),
+        ({"password_hash_max_concurrency": 0}, "resource limits"),
         ({"saml_response_max_bytes": 0}, "saml_response_max_bytes"),
         ({"saml_transaction_ttl_seconds": 0}, "saml_transaction_ttl_seconds"),
         ({"saml_acs_rate_limit_attempts": 0}, "rate-limit"),
