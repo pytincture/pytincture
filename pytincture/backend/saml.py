@@ -1,10 +1,119 @@
-"""SAML provider catalog parsing and selection."""
+"""SAML provider configuration and bounded response pre-validation."""
 
+import base64
+import binascii
 import json
 import re
+import threading
+import time
+from collections import OrderedDict, deque
 from typing import Any
 
 from fastapi import HTTPException
+
+
+XMLDSIG_NAMESPACE = "http://www.w3.org/2000/09/xmldsig#"
+ALLOWED_XML_SIGNATURE_TRANSFORMS = frozenset(
+    {
+        "http://www.w3.org/2000/09/xmldsig#enveloped-signature",
+        "http://www.w3.org/2001/10/xml-exc-c14n#",
+        "http://www.w3.org/2001/10/xml-exc-c14n#WithComments",
+        "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+        "http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments",
+        "http://www.w3.org/2006/12/xml-c14n11",
+        "http://www.w3.org/2006/12/xml-c14n11#WithComments",
+    }
+)
+_FORBIDDEN_XML_DECLARATION = re.compile(br"<!\s*(?:DOCTYPE|ENTITY)\b", re.IGNORECASE)
+
+
+def validate_saml_response_xml(encoded_response: str, max_decoded_bytes: int) -> bytes:
+    """Decode and safely inspect a POST-binding response before xmlsec sees it."""
+    if not isinstance(encoded_response, str) or not encoded_response:
+        raise ValueError("SAMLResponse is required")
+    if max_decoded_bytes <= 0:
+        raise ValueError("SAML response limit must be greater than zero")
+    # Reject oversized base64 before allocating its decoded representation.
+    max_encoded_bytes = ((max_decoded_bytes + 2) // 3) * 4
+    if len(encoded_response) > max_encoded_bytes:
+        raise ValueError("SAMLResponse exceeds the decoded size limit")
+    try:
+        xml_payload = base64.b64decode(encoded_response, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("SAMLResponse must contain valid base64") from exc
+    if len(xml_payload) > max_decoded_bytes:
+        raise ValueError("SAMLResponse exceeds the decoded size limit")
+    if _FORBIDDEN_XML_DECLARATION.search(xml_payload):
+        raise ValueError("SAMLResponse cannot contain DTD or entity declarations")
+
+    try:
+        from lxml import etree
+    except ImportError as exc:  # pragma: no cover - guarded by the SAML extra
+        raise RuntimeError("SAML response validation requires pytincture[saml]") from exc
+    parser = etree.XMLParser(
+        resolve_entities=False,
+        no_network=True,
+        load_dtd=False,
+        huge_tree=False,
+        recover=False,
+    )
+    try:
+        root = etree.fromstring(xml_payload, parser=parser)
+    except (etree.XMLSyntaxError, ValueError) as exc:
+        raise ValueError("SAMLResponse must contain bounded, well-formed XML") from exc
+
+    guarded_elements = {
+        f"{{{XMLDSIG_NAMESPACE}}}Transform",
+        f"{{{XMLDSIG_NAMESPACE}}}CanonicalizationMethod",
+    }
+    for element in root.iter():
+        if element.tag not in guarded_elements:
+            continue
+        algorithm = element.get("Algorithm", "")
+        if algorithm not in ALLOWED_XML_SIGNATURE_TRANSFORMS:
+            raise ValueError("SAMLResponse contains a disallowed signature transform")
+    return xml_payload
+
+
+class SlidingWindowRateLimiter:
+    """Small bounded in-process limiter used as ACS defense in depth."""
+
+    def __init__(
+        self,
+        limit: int,
+        window_seconds: float,
+        *,
+        max_keys: int = 10_000,
+        clock=time.monotonic,
+    ):
+        if limit <= 0 or window_seconds <= 0 or max_keys <= 0:
+            raise ValueError("rate-limit values must be greater than zero")
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self.max_keys = max_keys
+        self.clock = clock
+        self._entries: OrderedDict[str, deque[float]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def allow(self, key: str) -> tuple[bool, int]:
+        now = self.clock()
+        cutoff = now - self.window_seconds
+        with self._lock:
+            attempts = self._entries.get(key)
+            if attempts is None:
+                if len(self._entries) >= self.max_keys:
+                    self._entries.popitem(last=False)
+                attempts = deque()
+                self._entries[key] = attempts
+            else:
+                self._entries.move_to_end(key)
+            while attempts and attempts[0] <= cutoff:
+                attempts.popleft()
+            if len(attempts) >= self.limit:
+                retry_after = max(1, int(self.window_seconds - (now - attempts[0]) + 0.999))
+                return False, retry_after
+            attempts.append(now)
+            return True, 0
 
 
 def split_csv(value: Any) -> list[str]:

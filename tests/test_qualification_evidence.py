@@ -185,3 +185,6 @@ def test_ci_generates_standard_evidence_for_every_qualification_track():
     assert workflow.count("scripts/build_qualification_evidence.py") == len(
         qualification.EXERCISES
     )
+    mitigation = "security/saml-transform-mitigation.json"
+    assert f"--result saml_transform_mitigation={mitigation}" in workflow
+    assert workflow.count(mitigation) >= 2

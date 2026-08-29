@@ -17,6 +17,11 @@ routes intentionally share the root scope.
   by this deployment and `PYTINCTURE_CANONICAL_ORIGIN` to its external origin,
   such as `https://service.example.com`. Do not include paths in the origin.
 - Set explicit `CORS_ALLOWED_ORIGINS`; wildcard credentialed CORS is rejected.
+- SAML responses are decoded and parsed under `SAML_RESPONSE_MAX_BYTES`, use
+  an XML-signature transform allowlist, and are throttled per peer before
+  signature processing. Tune `SAML_ACS_RATE_LIMIT_ATTEMPTS` and
+  `SAML_ACS_RATE_LIMIT_WINDOW_SECONDS` alongside an edge rate limit; do not
+  disable or bypass the built-in response guard.
 - Pin the Pytincture and widgetset versions in the deployment artifact.
 - For more than one worker or replica, set `USE_REDIS_INSTANCE=true` with the
   same Upstash endpoint and token on every worker.

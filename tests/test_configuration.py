@@ -20,6 +20,9 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "MCP_EXPOSED_OPERATIONS": '["health", "status"]',
             "PYTINCTURE_ALLOWED_HOSTS": "app.example.test,api.example.test",
             "PYTINCTURE_CANONICAL_ORIGIN": "https://app.example.test/",
+            "SAML_RESPONSE_MAX_BYTES": "262144",
+            "SAML_ACS_RATE_LIMIT_ATTEMPTS": "30",
+            "SAML_ACS_RATE_LIMIT_WINDOW_SECONDS": "45",
             "APP_SPECIFIC_VALUE": "kept",
         },
         bff_call_timeout_seconds=8.0,
@@ -32,6 +35,9 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.allowed_hosts == ("app.example.test", "api.example.test")
     assert config.canonical_origin == "https://app.example.test"
     assert config.trusted_proxy_headers is False
+    assert config.saml_response_max_bytes == 262144
+    assert config.saml_acs_rate_limit_attempts == 30
+    assert config.saml_acs_rate_limit_window_seconds == 45
     assert config.environment == {"APP_SPECIFIC_VALUE": "kept"}
     assert config.to_environ()["ENABLE_USER_LOGIN"] == "true"
 
@@ -45,6 +51,15 @@ def test_cors_origins_use_the_backend_csv_format(tmp_path):
     assert config.to_environ()["CORS_ALLOWED_ORIGINS"] == (
         "https://one.example,https://two.example"
     )
+
+
+def test_saml_limits_do_not_constrain_services_with_saml_disabled(tmp_path):
+    config = PytinctureConfig(
+        modules_path=str(tmp_path),
+        max_request_body_bytes=1024,
+        saml_response_max_bytes=2048,
+    )
+    assert config.enable_saml_auth is False
 
 
 def test_legacy_secret_key_is_an_environment_fallback(tmp_path):
@@ -67,6 +82,17 @@ def test_legacy_secret_key_is_an_environment_fallback(tmp_path):
     ("overrides", "message"),
     [
         ({"max_request_body_bytes": 0}, "max_request_body_bytes"),
+        ({"saml_response_max_bytes": 0}, "saml_response_max_bytes"),
+        ({"saml_acs_rate_limit_attempts": 0}, "rate-limit"),
+        (
+            {
+                "enable_saml_auth": True,
+                "session_secret": "0123456789abcdef" * 2,
+                "max_request_body_bytes": 1024,
+                "saml_response_max_bytes": 2048,
+            },
+            "cannot exceed max_request_body_bytes",
+        ),
         ({"session_same_site": "none", "session_https_only": False}, "https"),
         (
             {"enable_google_auth": True, "session_secret": "0123456789abcdef" * 2},

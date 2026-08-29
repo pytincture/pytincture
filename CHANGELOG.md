@@ -5,6 +5,9 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Guarded SAML signature processing with a strict transform allowlist, bounded
+  secure XML pre-validation, decoded-response limits, per-peer ACS throttling,
+  and federated-auth qualification evidence for upstream python3-saml #447.
 - Changed generated browser BFF and replay calls to same-origin relative URLs,
   preventing Host and forwarded-header values from entering executable Python,
   marked personalized appcode archives private and non-cacheable, added optional
