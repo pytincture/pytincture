@@ -7,6 +7,8 @@ import importlib.metadata
 import json
 import os
 import sys
+import tempfile
+from pathlib import Path
 
 
 OPTIONAL_DISTRIBUTIONS = {
@@ -63,8 +65,35 @@ def main() -> None:
 
         assert backend.OneLogin_Saml2_Auth is not None
     elif feature == "mcp":
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        modules = tempfile.TemporaryDirectory()
+        modules_path = Path(modules.name)
+        (modules_path / "demoapp.py").write_text("from service import Service\n")
+        (modules_path / "service.py").write_text(
+            "from pytincture.dataclass import backend_for_frontend\n"
+            "@backend_for_frontend\n"
+            "class Service:\n"
+            "    def status(self): return {'ready': True}\n"
+        )
+        public_key = rsa.generate_private_key(
+            public_exponent=65537, key_size=2048
+        ).public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode()
+        os.environ["MODULES_PATH"] = str(modules_path)
         os.environ["ENABLE_MCP"] = "true"
-        os.environ["MCP_EXPOSED_OPERATIONS"] = "[]"
+        os.environ["MCP_TOOLS"] = json.dumps([{
+            "name": "status", "application": "demoapp", "module": "service.py",
+            "class": "Service", "method": "status", "scopes": ["status:read"],
+        }])
+        os.environ["MCP_ALLOWED_HOSTS"] = '["mcp.example.test"]'
+        os.environ["MCP_ALLOWED_ORIGINS"] = '["https://mcp.example.test"]'
+        os.environ["MCP_JWT_PUBLIC_KEY"] = public_key
+        os.environ["MCP_JWT_ISSUER"] = "https://issuer.example.test"
+        os.environ["MCP_JWT_AUDIENCE"] = "pytincture-smoke"
         import pytincture.backend.app as backend
 
         assert backend.mcp_http_app is not None
