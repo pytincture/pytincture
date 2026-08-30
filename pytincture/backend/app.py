@@ -456,6 +456,21 @@ async def correlation_id_middleware(request: Request, call_next):
     request.state.correlation_id = correlation_id
     response = await call_next(request)
     response.headers["X-Request-ID"] = correlation_id
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()"
+    )
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; object-src 'none'; base-uri 'self'; "
+        "frame-ancestors 'none'; form-action 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; "
+        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
+        "font-src 'self' data: https://cdnjs.cloudflare.com; "
+        "img-src 'self' data: https:; connect-src 'self' https:; "
+        "worker-src 'self' blob:",
+    )
     csrf_token = request.session.get("csrf_token") if hasattr(request, "session") else None
     if csrf_token:
         response.set_cookie(
@@ -581,6 +596,32 @@ if ALLOWED_HOSTS:
 
 # Mount the frontend static files
 STATIC_PATH = os.path.join(os.path.dirname(__file__), "../frontend/")
+_PUBLIC_FRAMEWORK_FILES = frozenset({
+    "pytincture.js",
+    "dist/pytincture.js",
+    "dist/pytincture.js.map",
+    "dist/pytincture.esm.js",
+    "dist/pytincture.esm.js.map",
+    "dist/pytincture.min.js",
+    "dist/pytincture.min.js.map",
+    "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl",
+    "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl.metadata",
+    "pyodide/0.29.3/full/pyodide-lock.json",
+    "pyodide/0.29.3/full/pyodide.asm.js",
+    "pyodide/0.29.3/full/pyodide.asm.wasm",
+    "pyodide/0.29.3/full/pyodide.js",
+    "pyodide/0.29.3/full/python_stdlib.zip",
+})
+
+
+class _ManifestStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        normalized = path.replace("\\", "/").lstrip("/")
+        if normalized not in _PUBLIC_FRAMEWORK_FILES:
+            raise HTTPException(status_code=404, detail="Static asset not found")
+        return await super().get_response(normalized, scope)
+
+
 USE_REDIS_INSTANCE = os.environ.get("USE_REDIS_INSTANCE", "false").lower()
 if  USE_REDIS_INSTANCE == "true":
     REDIS_UPSTASH_INSTANCE_URL = os.environ.get("REDIS_UPSTASH_INSTANCE_URL", "")
@@ -702,8 +743,8 @@ def application_service_worker_script(application: str, request: Request):
     return _service_worker_response(request, allowed_scope=f"/{application}/")
 
 
-app.mount("/{application}/frontend", StaticFiles(directory=STATIC_PATH), name="static")
-app.mount("/frontend", StaticFiles(directory=STATIC_PATH), name="static_frontend")
+app.mount("/{application}/frontend", _ManifestStaticFiles(directory=STATIC_PATH), name="static")
+app.mount("/frontend", _ManifestStaticFiles(directory=STATIC_PATH), name="static_frontend")
 
 BFF_POLICY_HOOK: Optional[Callable[..., Any]] = None
 USER_AUTHENTICATOR: Optional[Callable[..., Any]] = None
@@ -760,8 +801,10 @@ def set_user_authenticator(authenticator: Optional[Callable[..., Any]]):
 
 
 def revoke_session(session_id: str) -> None:
-    """Revoke a signed session; Redis-backed deployments share the revocation."""
+    """Revoke through an optional shared store; base deployments stay stateless."""
     if session_id:
+        if USE_REDIS_INSTANCE != "true":
+            return
         expires_at = time.time() + AUTH_SESSION_MAX_AGE_SECONDS
         set_with_ttl = getattr(AUTH_SESSION_REVOCATIONS, "set_with_ttl", None)
         if callable(set_with_ttl):
@@ -777,7 +820,13 @@ def revoke_session(session_id: str) -> None:
 
 
 def _session_is_revoked(session_id: str) -> bool:
-    expires_at = AUTH_SESSION_REVOCATIONS.get(session_id)
+    try:
+        expires_at = AUTH_SESSION_REVOCATIONS.get(session_id)
+    except Exception:  # noqa: BLE001 - configured revocation store must fail closed
+        if USE_REDIS_INSTANCE == "true":
+            logger.exception("Shared session revocation lookup failed; rejecting session")
+            return True
+        raise
     if expires_at is None:
         return False
     try:
@@ -1082,6 +1131,8 @@ def _clear_auth_session(request: Request) -> None:
         "saml_session_index",
         "saml_provider_id",
         "saml_request_id",
+        "auth_issued_at",
+        "login_csrf_token",
     ):
         request.session.pop(key, None)
 
@@ -1097,6 +1148,9 @@ _DEFAULT_AUTH_SESSION_CLAIM_KEYS = {
     "next_billing",
     "theme",
     "sidebar",
+    "issuer",
+    "subject",
+    "tenant",
 }
 
 
@@ -1171,6 +1225,15 @@ def _build_auth_session_user(
         session_user["auth_provider"] = resolved_provider
     if resolved_provider_label:
         session_user["auth_provider_label"] = resolved_provider_label
+    issuer = str(source.get("issuer") or source.get("iss") or "").strip()
+    subject = str(source.get("subject") or source.get("sub") or "").strip()
+    tenant = str(source.get("tenant") or source.get("tid") or "").strip()
+    if issuer:
+        session_user["issuer"] = issuer
+    if subject:
+        session_user["subject"] = subject
+    if tenant:
+        session_user["tenant"] = tenant
 
     saml_source = source.get("saml")
     if isinstance(saml_source, dict):
@@ -1201,6 +1264,7 @@ def _set_authenticated_user(
     request.session["user"] = session_user
     request.session["session_id"] = secrets.token_urlsafe(24)
     request.session["csrf_token"] = secrets.token_urlsafe(32)
+    request.session["auth_issued_at"] = int(time.time())
     return session_user
 
 
@@ -1231,6 +1295,14 @@ def require_auth(request: Request):
 
         session_id = request.session.get("session_id")
         if not isinstance(session_id, str) or not session_id or _session_is_revoked(session_id):
+            _clear_auth_session(request)
+            return None
+        issued_at = request.session.get("auth_issued_at")
+        if (
+            not isinstance(issued_at, (int, float))
+            or issued_at > time.time() + 60
+            or time.time() - issued_at > AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS
+        ):
             _clear_auth_session(request)
             return None
 
@@ -1278,6 +1350,22 @@ def _validate_csrf(request: Request, user: Any) -> None:
     origin = request.headers.get("origin")
     if origin and origin.rstrip("/") != _request_origin(request):
         raise HTTPException(status_code=403, detail="Origin validation failed")
+
+
+def _validate_preauthentication_request(request: Request, supplied_token: str) -> None:
+    """Bind browser login posts to the page and exact initiating origin."""
+    origin = request.headers.get("origin")
+    fetch_site = request.headers.get("sec-fetch-site", "").strip().casefold()
+    if origin is not None and origin.strip().rstrip("/") != _request_origin(request):
+        raise HTTPException(status_code=403, detail="Origin validation failed")
+    if fetch_site and fetch_site != "same-origin":
+        raise HTTPException(status_code=403, detail="Fetch Metadata validation failed")
+    expected = request.session.get("login_csrf_token")
+    if expected and (
+        not supplied_token
+        or not hmac.compare_digest(str(expected), str(supplied_token))
+    ):
+        raise HTTPException(status_code=403, detail="Login CSRF validation failed")
 
 
 def _validate_bff_browser_request(request: Request) -> None:
@@ -2145,7 +2233,7 @@ if _previous_secret_value:
             value.strip() for value in _previous_secret_value.split(",") if value.strip()
         ]
     if not isinstance(AUTH_SESSION_PREVIOUS_SECRET_KEYS, list) or any(
-        not isinstance(value, str) or len(value) < 32
+        not isinstance(value, str) or len(value) < 32 or len(set(value)) < 8
         for value in AUTH_SESSION_PREVIOUS_SECRET_KEYS
     ):
         raise RuntimeError("AUTH_SESSION_PREVIOUS_SECRET_KEYS must contain strong keys")
@@ -2156,6 +2244,13 @@ AUTH_SESSION_SCHEMA_VERSION = 2
 AUTH_SESSION_MAX_AGE_SECONDS = int(os.getenv("AUTH_SESSION_MAX_AGE_SECONDS", "28800"))
 if AUTH_SESSION_MAX_AGE_SECONDS <= 0:
     raise RuntimeError("AUTH_SESSION_MAX_AGE_SECONDS must be greater than zero")
+AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS = int(
+    os.getenv("AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS", "86400")
+)
+if AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS < AUTH_SESSION_MAX_AGE_SECONDS:
+    raise RuntimeError(
+        "AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS cannot be shorter than the idle lifetime"
+    )
 AUTH_SESSION_HTTPS_ONLY = os.getenv(
     "AUTH_SESSION_HTTPS_ONLY",
     "false" if DEV_EMAIL_LOGIN_ONLY else "true",
@@ -2257,6 +2352,7 @@ config_data = {
     "GOOGLE_CLIENT_SECRET": os.getenv("GOOGLE_CLIENT_SECRET", ""),
     "MICROSOFT_CLIENT_ID": os.getenv("MICROSOFT_CLIENT_ID", ""),
     "MICROSOFT_CLIENT_SECRET": os.getenv("MICROSOFT_CLIENT_SECRET", ""),
+    "MICROSOFT_TENANT_ID": os.getenv("MICROSOFT_TENANT_ID", ""),
     "SECRET_KEY": SAML_SECRET_KEY,
 }
 config = Config(environ=config_data)
@@ -2851,11 +2947,25 @@ if ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH:
             client_kwargs={"scope": "openid email profile"},
         )
     if ENABLE_MICROSOFT_AUTH:
+        microsoft_tenant_id = config.get("MICROSOFT_TENANT_ID")
+        if (
+            not microsoft_tenant_id
+            or str(microsoft_tenant_id).casefold()
+            in {"common", "organizations", "consumers"}
+            or re.fullmatch(
+                r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?",
+                str(microsoft_tenant_id),
+            )
+            is None
+        ):
+            raise RuntimeError(
+                "Microsoft authentication requires one explicit MICROSOFT_TENANT_ID"
+            )
         oauth.register(
             name="microsoft",
             client_id=config.get("MICROSOFT_CLIENT_ID"),
             client_secret=config.get("MICROSOFT_CLIENT_SECRET"),
-            server_metadata_url="https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration",
+            server_metadata_url=f"https://login.microsoftonline.com/{microsoft_tenant_id}/v2.0/.well-known/openid-configuration",
             client_kwargs={"scope": "openid email profile offline_access"},
         )
 else:
@@ -2867,6 +2977,7 @@ app.add_middleware(
     secret_key=SAML_SECRET_KEY,
     previous_secret_keys=AUTH_SESSION_PREVIOUS_SECRET_KEYS,
     max_age=AUTH_SESSION_MAX_AGE_SECONDS,
+    absolute_max_age=AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS,
     same_site=AUTH_SESSION_SAME_SITE,
     https_only=AUTH_SESSION_HTTPS_ONLY,
 )
@@ -3241,6 +3352,8 @@ async def auth_google(request: Request, application: str):
     Redirect the user to Google's OAuth2 screen.
     """
 
+    if oauth is None or not ENABLE_GOOGLE_AUTH:
+        raise HTTPException(status_code=404, detail="Google authentication not enabled")
     redirect_uri = f"{_request_origin(request)}/{application}/auth/google/callback"
 
     return await oauth.google.authorize_redirect(request, redirect_uri)
@@ -3251,6 +3364,8 @@ async def auth_google_callback(request: Request, application: str):
     Google redirects here after login. Authlib will exchange code for token.
     We'll store user info in the session, then redirect back to original app path.
     """
+    if oauth is None or not ENABLE_GOOGLE_AUTH:
+        raise HTTPException(status_code=404, detail="Google authentication not enabled")
     try:
         token = await oauth.google.authorize_access_token(request)
     except OAuthError as e:
@@ -3263,6 +3378,13 @@ async def auth_google_callback(request: Request, application: str):
             user_info = await oauth.google.parse_id_token(request, token)
         except Exception:
             user_info = user_info or {}
+    if user_info.get("email_verified") is not True:
+        return JSONResponse({"error": "Email is not verified"}, status_code=401)
+    if str(user_info.get("iss") or "") not in {
+        "https://accounts.google.com",
+        "accounts.google.com",
+    } or not str(user_info.get("sub") or ""):
+        return JSONResponse({"error": "Invalid identity claims"}, status_code=401)
 
     # You can optionally grab user info from token["userinfo"]
     if os.getenv("ALLOWED_EMAILS", "") != "":
@@ -3317,6 +3439,18 @@ async def auth_microsoft_callback(request: Request, application: str):
         except Exception:
             user_info = user_info or {}
 
+    microsoft_tenant_id = os.getenv("MICROSOFT_TENANT_ID", "").strip()
+    expected_issuer = f"https://login.microsoftonline.com/{microsoft_tenant_id}/v2.0"
+    if (
+        not microsoft_tenant_id
+        or str(user_info.get("tid") or "") != microsoft_tenant_id
+        or str(user_info.get("iss") or "").rstrip("/") != expected_issuer
+        or not str(user_info.get("sub") or user_info.get("oid") or "")
+    ):
+        return JSONResponse({"error": "Invalid tenant or identity claims"}, status_code=401)
+    if not user_info.get("sub") and user_info.get("oid"):
+        user_info = {**user_info, "sub": user_info["oid"]}
+
     if os.getenv("ALLOWED_EMAILS", "") != "":
         allowed_emails = os.getenv("ALLOWED_EMAILS").split(",")  # Assuming comma-separated
         if user_info.get("email", "").lower() not in [email.strip().lower() for email in allowed_emails]:
@@ -3334,11 +3468,13 @@ async def auth_microsoft_callback(request: Request, application: str):
     return_to = _sanitize_return_to(request.session.pop("return_to", None)) or "/"
     return RedirectResponse(url=return_to)
 
-@app.get("/{application}/auth/logout", operation_id="logoutUser", response_class=RedirectResponse, responses={302: {"description": "RedirectResponse (to login page)"}})
+@app.post("/{application}/auth/logout", operation_id="logoutUser", response_class=RedirectResponse, responses={302: {"description": "RedirectResponse (to login page)"}})
 def logout(request: Request,  application: str):
     """
     Logs the user out of *your app only*.
     """
+    user = require_authenticated_user(request)
+    _validate_csrf(request, user)
     revoke_session(str(request.session.get("session_id") or ""))
     _clear_auth_session(request)
     # 2) If stored tokens in session, remove them
@@ -3369,6 +3505,8 @@ async def login(request: Request, application: str):
     enable_saml_auth = _resolve_auth_flag("ENABLE_SAML_AUTH", ENABLE_SAML_AUTH)
     enable_microsoft_auth = _resolve_auth_flag("ENABLE_MICROSOFT_AUTH", ENABLE_MICROSOFT_AUTH)
     login_help_text = os.getenv("LOGIN_HELP_TEXT", "").strip()
+    login_csrf_token = secrets.token_urlsafe(32)
+    request.session["login_csrf_token"] = login_csrf_token
 
     saml_login_buttons = _get_saml_login_buttons() if enable_saml_auth else []
     if enable_saml_auth and not enable_google_auth and not enable_user_login and not enable_microsoft_auth and len(saml_login_buttons) == 1:
@@ -3515,8 +3653,9 @@ async def login(request: Request, application: str):
             html_content += '''
                 <div class="divider"><span>OR</span></div>
             '''
-        html_content += '''
+        html_content += f'''
             <form method="post" action="auth/user">
+                <input type="hidden" name="login_csrf_token" value="{login_csrf_token}">
                 <input type="email" name="email" class="input-field" placeholder="Email" required>
                 <input type="password" name="password" class="input-field" placeholder="Password" required>
                 <input type="submit" class="submit-button" value="Login with Email"></input>
@@ -3545,6 +3684,10 @@ async def auth_user_callback(request: Request, application: str):
     """
 
     form = await request.form()
+    _validate_preauthentication_request(
+        request, str(form.get("login_csrf_token") or "")
+    )
+    request.session.pop("login_csrf_token", None)
     email = str(form.get('email') or "")
     password = str(form.get('password') or "")
     authenticated_claims = await _authenticate_local_user(request, email, password)
@@ -3677,7 +3820,7 @@ async def main_app_route(response: Response, application: str, request: Request)
         request_uuid=request_uuid,
         source_code=entrypoint_source,
     )
-    index_html = index_html.replace("***LOADING_TITLE***", escape(loading_title))
+    index_html = index_html.replace("***LOADING_TITLE***", json.dumps(loading_title))
     index_html = index_html.replace("***FAVICON_LINK***", favicon_markup)
     index_html = index_html.replace("***REQUEST_UUID***", request_uuid)
 
@@ -3958,7 +4101,7 @@ async def configured_favicon_asset(
     )
 
 
-add_bff_docs_to_app(app)
+add_bff_docs_to_app(app, operations=reload_bff_registry(get_modules_path()))
 reload_mcp_tools()
 
 # =================

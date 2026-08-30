@@ -145,7 +145,11 @@ def test_local_revocations_are_worker_local_but_shared_store_propagates(tmp_path
     with TestClient(first) as first_client, TestClient(second) as second_client:
         login(first_client)
         second_client.cookies.update(first_client.cookies)
-        first_client.get("/demo/auth/logout", follow_redirects=False)
+        first_client.post(
+            "/demo/auth/logout",
+            headers={"X-CSRF-Token": first_client.cookies["pytincture_csrf"]},
+            follow_redirects=False,
+        )
         assert second_client.get("/demo", follow_redirects=False).status_code == 200
 
     first, second = make_workers(tmp_path)
@@ -176,11 +180,17 @@ def test_local_revocations_are_worker_local_but_shared_store_propagates(tmp_path
     second.state.pytincture_backend.AUTH_SESSION_REVOCATIONS = RedisDict(
         key_prefix="revoked-session:", redis_client=redis, cache_reads=False
     )
+    first.state.pytincture_backend.USE_REDIS_INSTANCE = "true"
+    second.state.pytincture_backend.USE_REDIS_INSTANCE = "true"
     with TestClient(first) as first_client, TestClient(second) as second_client:
         login(first_client)
         second_client.cookies.update(first_client.cookies)
         assert second_client.get("/demo", follow_redirects=False).status_code == 200
-        first_client.get("/demo/auth/logout", follow_redirects=False)
+        first_client.post(
+            "/demo/auth/logout",
+            headers={"X-CSRF-Token": first_client.cookies["pytincture_csrf"]},
+            follow_redirects=False,
+        )
         rejected = second_client.get("/demo", follow_redirects=False)
         assert rejected.status_code == 307
         assert rejected.headers["location"] == "/demo/login"

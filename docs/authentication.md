@@ -26,8 +26,11 @@ credentials.
 
 ## OAuth/OIDC
 
-Set the Google or Microsoft enable flag and client credentials. Register the
-exact callback URL shown by the route:
+Set the Google or Microsoft enable flag and client credentials. Microsoft also
+requires `MICROSOFT_TENANT_ID`; the multi-tenant `common` issuer is not
+accepted. Google callbacks require a verified email and both providers retain
+the immutable issuer/subject identity in the signed session. Register the exact
+callback URL shown by the route:
 
 - `https://host/{application}/auth/google/callback`
 - `https://host/{application}/auth/microsoft/callback`
@@ -57,10 +60,16 @@ does not accept a numeric authentication-context identifier.
 
 The signed cookie stores compact stable identity claims, an opaque session ID,
 and CSRF state—not passwords, tokens, assertions, or full SAML attributes.
-Use `AUTH_SESSION_CLAIM_KEYS` for small additional trusted claims. Rotate keys
-by placing old values in `AUTH_SESSION_PREVIOUS_SECRET_KEYS` for at least one
+Use `AUTH_SESSION_CLAIM_KEYS` for small additional trusted claims. Idle expiry
+is controlled by `AUTH_SESSION_MAX_AGE_SECONDS`; the non-sliding upper bound is
+`AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS`. Rotate keys by placing equally strong
+old values in `AUTH_SESSION_PREVIOUS_SECRET_KEYS` for at least the absolute
 session lifetime.
 
-One worker may use in-memory revocations. Multiple workers require
-`pytincture[redis]` and `USE_REDIS_INSTANCE=true` so logout and one-time BFF
-tokens are immediately shared. See the [production runbook](production-deployment.md).
+Login forms and logout use pre-authentication/CSRF checks, and logout is a
+state-changing `POST`. By default, logout clears the browser cookie and the
+service stores no session or revocation state in Redis or process memory, so
+replicas require neither Redis nor sticky sessions. If immediate revocation of
+a copied cookie is required, install `pytincture[redis]` and explicitly set
+`USE_REDIS_INSTANCE=true`; authentication then fails closed when that shared
+store is unavailable. See the [production runbook](production-deployment.md).

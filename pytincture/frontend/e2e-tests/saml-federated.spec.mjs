@@ -108,7 +108,13 @@ test("Keycloak SAML login authenticates the packaged app and BFF", async ({ page
         await expect(page.locator("#e2e-ready")).toBeVisible();
         expect(page.url()).toBe("http://127.0.0.1:8084/e2e_app");
 
-        const logoutResponse = await page.request.get("/e2e_app/auth/logout", { maxRedirects: 0 });
+        const csrfCookie = (await page.context().cookies()).find(
+            cookie => cookie.name === "pytincture_csrf",
+        );
+        const logoutResponse = await page.request.post("/e2e_app/auth/logout", {
+            headers: { "X-CSRF-Token": csrfCookie.value },
+            maxRedirects: 0,
+        });
         expect(logoutResponse.status()).toBe(302);
         expect(logoutResponse.headers().location).toBe("/e2e_app/login");
         expect(await page.context().cookies()).not.toEqual(expect.arrayContaining([

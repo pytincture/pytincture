@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 from fastapi.openapi.docs import get_swagger_ui_html
 import inspect
-from typing import Dict, Any
+from typing import Dict, Any, Mapping
 from pytincture import get_modules_path
 from pytincture.configuration import get_runtime_env
 
@@ -543,10 +543,62 @@ def backend_for_frontend(cls):
 
     return BackendForFrontendWrapper
     
-def add_bff_docs_to_app(app: FastAPI):
+def add_bff_docs_to_app(
+    app: FastAPI,
+    operations: Mapping[tuple[str, str, str], Mapping[str, Any]] | None = None,
+):
     """
     Adds BFF-specific OpenAPI documentation to a FastAPI application
     """
+    if operations is None:
+        documented_routes = dict(bff_routes)
+    else:
+        documented_routes = {}
+        for (module_path, class_name, method_name), operation in operations.items():
+            if operation.get("kind") != "method":
+                continue
+            parameters = operation.get("parameters", ())
+            documented_routes[
+                f"/classcall/{module_path}/{class_name}/{method_name}"
+            ] = {
+                "summary": f"Call {method_name} on {class_name}",
+                "operationId": f"call_{class_name}_{method_name}"[:50],
+                "tags": [module_path],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "kwargs": {
+                                        "type": "object",
+                                        "properties": {
+                                            parameter["name"]: {
+                                                "type": (
+                                                    parameter.get("annotation", "string")
+                                                    if parameter.get("annotation")
+                                                    in {"string", "integer", "number", "boolean", "object", "array"}
+                                                    else "string"
+                                                )
+                                            }
+                                            for parameter in parameters
+                                        },
+                                        "required": [
+                                            parameter["name"]
+                                            for parameter in parameters
+                                            if parameter.get("required")
+                                        ],
+                                        "additionalProperties": False,
+                                    }
+                                },
+                            }
+                        }
+                    }
+                },
+                "responses": {"200": {"description": "Successful response"}},
+                "x-bff-http-methods": list(operation.get("http_methods", ("POST",))),
+            }
+
     # Get configuration from environment variables or use defaults
     docs_path = os.getenv("BFF_DOCS_PATH", "bff-docs")
     docs_title = os.getenv("BFF_DOCS_TITLE", "pyTincture BFF API")
@@ -568,7 +620,7 @@ def add_bff_docs_to_app(app: FastAPI):
             paths = openapi_schema.get("paths", {}).copy()
             # Collect unique tags from BFF
             new_tags = set()
-            for route_path, operation_spec in bff_routes.items():
+            for route_path, operation_spec in documented_routes.items():
                 if route_path not in paths:
                     paths[route_path] = {}
                 paths[route_path]['post'] = operation_spec

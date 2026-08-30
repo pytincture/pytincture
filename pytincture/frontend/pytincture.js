@@ -446,20 +446,29 @@ function ensureLoadingOverlay(config) {
         return existing;
     }
     const overlay = document.createElement("div");
-    overlay.id = config.loadingOverlayId;
-    overlay.innerHTML = `
-      <div class="pytincture-loading__card">
-        <div class="pytincture-loading__title">${config.loadingTitle}</div>
-        <div class="pytincture-loading__status">Loading…</div>
-        <div class="pytincture-loading__bar">
-          <div class="pytincture-loading__bar-inner"></div>
-        </div>
-      </div>
-    `;
+    const overlayId = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(config.loadingOverlayId)
+        ? config.loadingOverlayId
+        : DEFAULT_CONFIG.loadingOverlayId;
+    overlay.id = overlayId;
+    const card = document.createElement("div");
+    card.className = "pytincture-loading__card";
+    const title = document.createElement("div");
+    title.className = "pytincture-loading__title";
+    title.textContent = String(config.loadingTitle || "Loading application");
+    const status = document.createElement("div");
+    status.className = "pytincture-loading__status";
+    status.textContent = "Loading…";
+    const bar = document.createElement("div");
+    bar.className = "pytincture-loading__bar";
+    const barInner = document.createElement("div");
+    barInner.className = "pytincture-loading__bar-inner";
+    bar.appendChild(barInner);
+    card.append(title, status, bar);
+    overlay.appendChild(card);
 
     const style = document.createElement("style");
     style.textContent = `
-      #${config.loadingOverlayId} {
+      #${overlayId} {
         position: fixed;
         inset: 0;
         display: flex;
@@ -1353,7 +1362,10 @@ function autoStartInlineApp() {
         console.error("Auto-start inline app failed:", error);
         const container = document.getElementById("maindiv");
         if (container) {
-            container.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            const message = document.createElement("p");
+            message.style.color = "red";
+            message.textContent = `Error: ${error.message}`;
+            container.replaceChildren(message);
         }
     });
 }

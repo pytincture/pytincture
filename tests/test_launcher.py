@@ -34,11 +34,11 @@ def test_main(monkeypatch):
 
     assert len(calls) == 1
     call = calls[0]
-    assert call["app_str"] == "pytincture.backend.app:app"
+    assert call["app_str"].title == "pyTincture API"
     assert call["host"] == "0.0.0.0"
     assert call["port"] == test_port
     assert call["log_level"] == "debug"
-    assert call["access_log"] == "access.log"
+    assert call["access_log"] is True
     assert call["reload"] is False
     assert call["ssl_keyfile"] == test_ssl_keyfile
     assert call["ssl_certfile"] == test_ssl_certfile
@@ -204,6 +204,28 @@ def test_launch_service_rejects_explicit_routable_development_bind(
     finally:
         os.environ.pop("ENABLE_USER_LOGIN", None)
         os.environ.pop("ENABLE_DEV_EMAIL_LOGIN", None)
+
+
+def test_launch_service_validates_typed_configuration_before_process(monkeypatch, tmp_path):
+    import pytincture as launcher_mod
+
+    monkeypatch.setattr(
+        launcher_mod,
+        "Process",
+        lambda *args, **kwargs: pytest.fail("process must not be created"),
+    )
+    try:
+        with pytest.raises(ValueError, match="absolute session lifetime"):
+            launcher_mod.launch_service(
+                modules_folder=str(tmp_path),
+                env_vars={
+                    "AUTH_SESSION_MAX_AGE_SECONDS": "120",
+                    "AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS": "60",
+                },
+            )
+    finally:
+        os.environ.pop("AUTH_SESSION_MAX_AGE_SECONDS", None)
+        os.environ.pop("AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS", None)
 
 
 def test_launch_service_ignores_env_var_override(monkeypatch, tmp_path):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, fields
@@ -15,8 +16,27 @@ from urllib.parse import urlparse
 from pytincture.backend.safe_paths import validate_application_name
 
 
-def _setting(default, env: str, description: str):
-    return field(default=default, metadata={"env": env, "description": description})
+_MICROSOFT_SHARED_TENANTS = {"common", "organizations", "consumers"}
+
+
+def _valid_microsoft_tenant_id(value: str) -> bool:
+    normalized = value.strip().casefold()
+    return bool(
+        normalized
+        and normalized not in _MICROSOFT_SHARED_TENANTS
+        and re.fullmatch(
+            r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?",
+            value.strip(),
+        )
+    )
+
+
+def _setting(default, env: str, description: str, *, repr: bool = True):
+    return field(
+        default=default,
+        repr=repr,
+        metadata={"env": env, "description": description},
+    )
 
 
 def _bool(value: object) -> bool:
@@ -88,16 +108,19 @@ class PytinctureConfig:
     enable_saml_auth: bool = _setting(False, "ENABLE_SAML_AUTH", "Enable SAML authentication.")
     google_client_id: str = _setting("", "GOOGLE_CLIENT_ID", "Google OAuth client id.")
     google_client_secret: str = _setting(
-        "", "GOOGLE_CLIENT_SECRET", "Google OAuth client secret."
+        "", "GOOGLE_CLIENT_SECRET", "Google OAuth client secret.", repr=False
     )
     microsoft_client_id: str = _setting(
         "", "MICROSOFT_CLIENT_ID", "Microsoft OAuth client id."
     )
     microsoft_client_secret: str = _setting(
-        "", "MICROSOFT_CLIENT_SECRET", "Microsoft OAuth client secret."
+        "", "MICROSOFT_CLIENT_SECRET", "Microsoft OAuth client secret.", repr=False
+    )
+    microsoft_tenant_id: str = _setting(
+        "", "MICROSOFT_TENANT_ID", "Required Microsoft Entra tenant id."
     )
     saml_providers: str = _setting(
-        "", "SAML_PROVIDERS", "JSON object or array of SAML identity providers."
+        "", "SAML_PROVIDERS", "JSON object or array of SAML identity providers.", repr=False
     )
     saml_idp_entity_id: str = _setting(
         "", "SAML_IDP_ENTITY_ID", "Default SAML identity-provider entity id."
@@ -128,12 +151,17 @@ class PytinctureConfig:
         "SAML_ACS_RATE_LIMIT_WINDOW_SECONDS",
         "SAML ACS rate-limit window in seconds.",
     )
-    session_secret: str = _setting("", "SAML_SECRET_KEY", "Session signing secret.")
+    session_secret: str = _setting(
+        "", "SAML_SECRET_KEY", "Session signing secret.", repr=False
+    )
     previous_session_secrets: tuple[str, ...] = _setting(
-        (), "AUTH_SESSION_PREVIOUS_SECRET_KEYS", "Previous signing keys accepted during rotation."
+        (), "AUTH_SESSION_PREVIOUS_SECRET_KEYS", "Previous signing keys accepted during rotation.", repr=False
     )
     session_max_age_seconds: int = _setting(
-        28800, "AUTH_SESSION_MAX_AGE_SECONDS", "Signed session lifetime."
+        28800, "AUTH_SESSION_MAX_AGE_SECONDS", "Session idle lifetime."
+    )
+    session_absolute_max_age_seconds: int = _setting(
+        86400, "AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS", "Absolute authenticated session lifetime."
     )
     session_https_only: Optional[bool] = _setting(
         None, "AUTH_SESSION_HTTPS_ONLY", "Secure-cookie requirement; derived when omitted."
@@ -228,7 +256,9 @@ class PytinctureConfig:
     )
     use_redis_instance: bool = _setting(False, "USE_REDIS_INSTANCE", "Use Upstash shared state.")
     redis_url: str = _setting("", "REDIS_UPSTASH_INSTANCE_URL", "Upstash Redis URL.")
-    redis_token: str = _setting("", "REDIS_UPSTASH_INSTANCE_TOKEN", "Upstash Redis token.")
+    redis_token: str = _setting(
+        "", "REDIS_UPSTASH_INSTANCE_TOKEN", "Upstash Redis token.", repr=False
+    )
     enable_mcp: bool = _setting(False, "ENABLE_MCP", "Enable the MCP mount.")
     mcp_tools: str = _setting("[]", "MCP_TOOLS", "Explicit MCP-to-BFF tool mappings.")
     mcp_allowed_hosts: tuple[str, ...] = _setting(
@@ -288,8 +318,10 @@ class PytinctureConfig:
                 raise ValueError(f"favicon_folder does not exist: {favicon_path}")
             object.__setattr__(self, "favicon_folder", str(favicon_path))
 
-        if self.session_max_age_seconds <= 0:
-            raise ValueError("session_max_age_seconds must be greater than zero")
+        if self.session_max_age_seconds <= 0 or self.session_absolute_max_age_seconds <= 0:
+            raise ValueError("session lifetime values must be greater than zero")
+        if self.session_absolute_max_age_seconds < self.session_max_age_seconds:
+            raise ValueError("absolute session lifetime cannot be shorter than idle lifetime")
         if self.session_same_site.lower() not in {"lax", "strict", "none"}:
             raise ValueError("session_same_site must be lax, strict, or none")
         object.__setattr__(self, "session_same_site", self.session_same_site.lower())
@@ -372,11 +404,17 @@ class PytinctureConfig:
         if self.enable_google_auth and not (self.google_client_id and self.google_client_secret):
             raise ValueError("Google authentication requires google_client_id and google_client_secret")
         if self.enable_microsoft_auth and not (
-            self.microsoft_client_id and self.microsoft_client_secret
+            self.microsoft_client_id
+            and self.microsoft_client_secret
+            and self.microsoft_tenant_id
         ):
             raise ValueError(
-                "Microsoft authentication requires microsoft_client_id and microsoft_client_secret"
+                "Microsoft authentication requires client id, client secret, and tenant id"
             )
+        if self.microsoft_tenant_id and not _valid_microsoft_tenant_id(
+            self.microsoft_tenant_id
+        ):
+            raise ValueError("microsoft_tenant_id must identify one explicit tenant")
         if self.enable_saml_auth:
             if self.saml_providers:
                 try:
@@ -411,8 +449,11 @@ class PytinctureConfig:
                 raise ValueError(
                     "SAML authentication requires saml_providers or the default IdP entity, SSO URL, and certificate"
                 )
-        if any(len(secret) < 32 for secret in self.previous_session_secrets):
-            raise ValueError("previous_session_secrets must contain keys of at least 32 characters")
+        if any(
+            len(secret) < 32 or len(set(secret)) < 8
+            for secret in self.previous_session_secrets
+        ):
+            raise ValueError("previous_session_secrets must contain strong keys")
         for origin in self.cors_allowed_origins:
             if origin != "*" and urlparse(origin).scheme not in {"http", "https"}:
                 raise ValueError(f"invalid CORS origin: {origin}")
@@ -477,7 +518,8 @@ class PytinctureConfig:
             "use_redis_instance", "enable_mcp", "trusted_proxy_headers",
         }
         integer_fields = {
-            "session_max_age_seconds", "max_request_body_bytes", "bff_stream_max_bytes",
+            "session_max_age_seconds", "session_absolute_max_age_seconds",
+            "max_request_body_bytes", "bff_stream_max_bytes",
             "bff_replay_token_batch_size", "bff_replay_token_low_watermark",
             "bff_replay_token_ttl_seconds", "saml_response_max_bytes",
             "saml_acs_rate_limit_attempts", "saml_acs_rate_limit_window_seconds",

@@ -100,12 +100,13 @@ pip install ".[dev]"
    example: "Demo login: demo@example.com / demo-password"
 - ENABLE_GOOGLE_AUTH: Enable the respective authentication mechanisms.
    example: "true"
-- ENABLE_MICROSOFT_AUTH: Enable Microsoft OAuth2 authentication using the shared `common` tenant endpoint.
+- ENABLE_MICROSOFT_AUTH: Enable Microsoft OAuth2 authentication for one explicitly configured Entra tenant.
    example: "true"
 - GOOGLE_CLIENT_ID: OAuth client ID for Google.
 - GOOGLE_CLIENT_SECRET: OAuth client secret for Google.
 - MICROSOFT_CLIENT_ID: OAuth client ID for Microsoft Azure AD / Microsoft identity platform.
 - MICROSOFT_CLIENT_SECRET: OAuth client secret for Microsoft Azure AD / Microsoft identity platform.
+- MICROSOFT_TENANT_ID: Required Entra tenant ID. The shared `common` issuer is not accepted.
 - ENABLE_SAML_AUTH: Enable SAML 2.0 authentication.
    example: "true"
 - SAML_EMAIL_ATTRIBUTE: Attribute name used to extract the user email from the SAML assertion.
@@ -118,7 +119,8 @@ pip install ".[dev]"
    example: "/appcode/contoso-logo.svg"
 - SAML_SECRET_KEY: Required whenever any production authentication method is enabled. Use at least 32 random characters, keep it stable across deployments, and provide the same value to every replica. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Loopback development login may use an ephemeral generated key.
 - AUTH_SESSION_PREVIOUS_SECRET_KEYS: JSON list (or comma-separated list) of prior strong signing keys accepted during rotation. Cookies accepted with an old key are re-signed with the current key.
-- AUTH_SESSION_MAX_AGE_SECONDS: Signed authentication cookie lifetime in seconds. Defaults to `28800` (8 hours).
+- AUTH_SESSION_MAX_AGE_SECONDS: Signed authentication cookie idle lifetime in seconds. Defaults to `28800` (8 hours).
+- AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS: Absolute authenticated-session lifetime that cannot be extended by activity. Defaults to `86400` (24 hours) and must be at least the idle lifetime.
 - AUTH_SESSION_HTTPS_ONLY: Require HTTPS for authentication and CSRF cookies. Defaults to `true`; loopback development login defaults it to `false` unless explicitly overridden.
 - AUTH_SESSION_SAME_SITE: Cookie SameSite policy: `lax`, `strict`, or `none`. Defaults to `lax`.
 - SAML_RELAY_STATE_TTL_SECONDS: Maximum browser-bound, one-time SAML login transaction age in seconds. Defaults to `600` (10 minutes).
@@ -184,7 +186,7 @@ pip install ".[dev]"
 - MCP_JWT_JWKS_URI (or MCP_JWT_PUBLIC_KEY), MCP_JWT_ISSUER, and MCP_JWT_AUDIENCE: Mandatory bearer-token verification policy.
 - PYTINCTURE_LOG_LEVEL: Structured Pytincture application log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`). Defaults to `INFO`.
 
-Authenticated browser cookies contain only stable identity claims plus opaque session and CSRF identifiers. Passwords, complete SAML attributes, SAML assertions, and changing SAML session indexes are not stored in the cookie. Logout revokes the current session; Upstash-backed services share revocations between replicas.
+Authenticated browser cookies contain only stable identity claims plus opaque session and CSRF identifiers. Passwords, complete SAML attributes, SAML assertions, and changing SAML session indexes are not stored in the cookie. Browser logout is a CSRF-protected `POST` that clears the signed cookie. The default remains fully stateless across replicas; an explicitly enabled shared store adds cross-browser revocation and fails closed if that store is unavailable.
 
 When `ENABLE_BFF_REPLAY_TOKENS=true`, each authenticated `.pyt` download receives a random, short-lived client decoder and an opaque session-bound capsule. Token refills return an authenticated opaque payload rather than a visible JSON token list. The capsule is recoverable after backend restarts as long as `SAML_SECRET_KEY` remains stable. Without Upstash, already-issued tokens are intentionally invalidated by a backend restart and generated stubs transparently refill them. This feature makes copied completed BFF requests fail and adds a reverse-engineering barrier; it is not a security boundary against a user who controls the browser, WASM memory, or application archive.
 
