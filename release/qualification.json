@@ -17,10 +17,37 @@
       },
       "status": "passed",
       "notes": "Signed GitHub prerelease and PyPI artifacts are published. The matching retained npm tarball is integrity-checked; npm registry publication is deferred and does not block the approved observation track."
+    },
+    {
+      "version": "1.0.0rc2",
+      "published_at": "2026-08-30T02:28:58Z",
+      "commit_sha": "9757ce29fe13863118177a244efefc88aa5b194a",
+      "ci_url": "https://github.com/pytincture/pytincture/actions/runs/33288079592",
+      "artifacts": {
+        "wheel": "9fab32bc689a372099f3c0a8d8b72a9290168a6dd5cf35adb47fb7d75986d70e",
+        "sdist": "25f83c803d08ed192f82cf77039e7fc7a96d2af0df0a58fb6afd97537e19de6c",
+        "npm": "a04cf74e0e4f8373c1f132ed0f0f9a1e3e3916acd377dfbc617f89b18aa36149"
+      },
+      "status": "passed",
+      "notes": "Signed GitHub prerelease, attested wheel/source distribution, and PyPI 1.0.0rc2 are published. The matching retained npm tarball is attested; npm registry approval remains a deferred distribution task."
     }
   ],
   "representative_applications": {
-    "standalone": [],
+    "standalone": [
+      {
+        "application": "wheel-only standalone fixture",
+        "version": "1.0.0rc2",
+        "tested_at": "2026-08-30T02:30:51Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33288079592",
+        "commit_sha": "9757ce29fe13863118177a244efefc88aa5b194a",
+        "browser": "chromium",
+        "widgetset": "dhxpyt==0.9.16+backend",
+        "console_errors": 0,
+        "visible_url_clean": true,
+        "findings": []
+      }
+    ],
     "authenticated_bff": [
       {
         "application": "pytincture_example",
@@ -31,12 +58,64 @@
         "commit_sha": "00ca6e5e8545b9aba1ce79b509461870429ffda8",
         "widgetset": "dhxpyt==0.9.16",
         "findings": []
+      },
+      {
+        "application": "authenticated BFF fixture",
+        "version": "1.0.0rc2",
+        "tested_at": "2026-08-30T02:31:39Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33288079592",
+        "commit_sha": "9757ce29fe13863118177a244efefc88aa5b194a",
+        "browsers": ["chromium", "firefox", "webkit"],
+        "authenticated_bff_p95_ms": {
+          "chromium": 13.2,
+          "firefox": 16.0,
+          "webkit": 13.0
+        },
+        "findings": []
       }
     ],
-    "federated_auth": []
+    "federated_auth": [
+      {
+        "application": "Keycloak SAML fixture",
+        "version": "1.0.0rc2",
+        "tested_at": "2026-08-30T02:31:45Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33288079592",
+        "commit_sha": "9757ce29fe13863118177a244efefc88aa5b194a",
+        "provider": "Keycloak 26.7.2",
+        "browser": "chromium",
+        "requested_authn_context": false,
+        "console_errors": 0,
+        "saml_transform_mitigation": "passed",
+        "saml_replay_mitigation": "passed",
+        "findings": []
+      }
+    ]
   },
-  "upgrade_exercises": [],
-  "rollback_exercises": [],
+  "upgrade_exercises": [
+    {
+      "from_version": "0.10.7",
+      "version": "1.0.0rc2",
+      "tested_at": "2026-08-30T02:30:35Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33288079592",
+      "commit_sha": "9757ce29fe13863118177a244efefc88aa5b194a",
+      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "server-secret exclusion"]
+    }
+  ],
+  "rollback_exercises": [
+    {
+      "from_version": "1.0.0rc2",
+      "version": "1.0.0rc2",
+      "to_version": "0.10.7",
+      "tested_at": "2026-08-30T02:30:35Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33288079592",
+      "commit_sha": "9757ce29fe13863118177a244efefc88aa5b194a",
+      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "baseline equivalence"]
+    }
+  ],
   "performance_reviews": [
     {
       "application": "pytincture_example",
@@ -52,15 +131,68 @@
         "requests_per_second": 396.106,
         "errors": 0
       }
+    },
+    {
+      "application": "release service and browser fixtures",
+      "version": "1.0.0rc2",
+      "tested_at": "2026-08-30T02:30:11Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33288079592",
+      "commit_sha": "9757ce29fe13863118177a244efefc88aa5b194a",
+      "service": {
+        "health_p95_ms": 21.851,
+        "bff_p95_ms": 47.671,
+        "appcode_p95_ms": 81.134,
+        "failures": 0,
+        "saturation_rejections": 26,
+        "recovered": true
+      },
+      "browser_authenticated_bff_p95_ms": {
+        "chromium": 13.2,
+        "firefox": 16.0,
+        "webkit": 13.0
+      }
     }
   ],
-  "repository_policy_reviews": [],
-  "security_reviews": [],
-  "defect_audits": [],
+  "repository_policy_reviews": [
+    {
+      "version": "1.0.0rc2",
+      "tested_at": "2026-08-30T02:34:34Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5466263350",
+      "required_checks": 16,
+      "enforce_admins": true,
+      "require_code_owner_reviews": true,
+      "required_approving_review_count": 1,
+      "require_last_push_approval": true
+    }
+  ],
+  "security_reviews": [
+    {
+      "version": "1.0.0rc2",
+      "tested_at": "2026-08-30T02:34:34Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5466263350",
+      "open_critical": 0,
+      "open_high": 0,
+      "scope": "Daybreak findings #172-#185, dependency audit, SAML mitigation evidence, release acceptance matrix"
+    }
+  ],
+  "defect_audits": [
+    {
+      "version": "1.0.0rc2",
+      "tested_at": "2026-08-30T02:34:34Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5466263350",
+      "open_p0": 0,
+      "open_p1": 0,
+      "open_release_blockers": 0
+    }
+  ],
   "final_decision": {
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1 and the approved pytincture_example observation are recorded. The 30-day observation period began at 2026-08-29T02:08:06Z and cannot complete before 2026-09-28T02:08:06Z. The release remains NO-GO pending RC2 and all latest-RC final gates."
+    "notes": "RC1, RC2, representative standalone/authenticated/federated applications, upgrade/rollback, performance, repository policy, security, and defect audits are recorded and passing. The release remains NO-GO only because the approved 30-day observation cannot complete before 2026-09-28T02:08:06Z."
   }
 }
