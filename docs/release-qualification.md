@@ -5,20 +5,22 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## Current decision: NO-GO; observation active
+## Current decision: NO-GO on the observation time gate
 
-As of 2026-08-29, the signed `v1.0.0rc1` GitHub prerelease and PyPI
-`1.0.0rc1` wheel and source distribution are published. The matching retained
-npm tarball is validated and integrity-checked; npm registry publication is
-deferred and does not block the approved observation track.
+As of 2026-08-30 UTC, signed GitHub prereleases and PyPI artifacts are
+published for both `1.0.0rc1` and `1.0.0rc2`. The matching retained npm
+tarballs are validated and integrity-checked; npm registry publication remains
+a deferred distribution task and does not block the approved observation
+track.
 
 The release manager approved the successful `pytincture_example` run, so the
 formal 30-day observation period began at `2026-08-29T02:08:06Z` and cannot
-complete before `2026-09-28T02:08:06Z`. The release remains NO-GO: no
-`1.0.0rc2`, complete latest-RC evidence, final security/defect and repository
-policy audits, or final approval exists. The Starlette security blocker is
-resolved by requiring the patched 1.6 release line and allowing no
-dependency-audit exceptions.
+complete before `2026-09-28T02:08:06Z`. RC2 now has complete latest-candidate
+standalone, authenticated BFF, federated SAML, upgrade/rollback, performance,
+security/defect, and repository-policy evidence. The release remains NO-GO
+only because the time gate and subsequent release-manager approval cannot yet
+be completed. The Starlette security blocker is resolved by requiring the
+patched 1.6 release line and allowing no dependency-audit exceptions.
 
 Published and retained rc1 evidence:
 
@@ -44,6 +46,24 @@ Published and retained rc1 evidence:
 The npm registry publication remains a distribution task before the final
 release; the retained tarball hash is sufficient to keep its tested bytes tied
 to this candidate while observation proceeds.
+
+Published and retained rc2 evidence:
+
+- signed tag and GitHub prerelease:
+  <https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc2>;
+- green tag qualification run:
+  <https://github.com/pytincture/pytincture/actions/runs/33287942932>;
+- green release/attestation/PyPI run and all representative-app evidence:
+  <https://github.com/pytincture/pytincture/actions/runs/33288079592>;
+- wheel SHA-256:
+  `9fab32bc689a372099f3c0a8d8b72a9290168a6dd5cf35adb47fb7d75986d70e`;
+- source-distribution SHA-256:
+  `25f83c803d08ed192f82cf77039e7fc7a96d2af0df0a58fb6afd97537e19de6c`;
+- retained npm tarball SHA-256:
+  `a04cf74e0e4f8373c1f132ed0f0f9a1e3e3916acd377dfbc617f89b18aa36149`;
+  and
+- security, defect, and live repository-policy audit:
+  <https://github.com/pytincture/pytincture/issues/143#issuecomment-5466263350>.
 
 ## Evidence required after each RC
 
