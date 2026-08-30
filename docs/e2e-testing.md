@@ -14,6 +14,12 @@ application in Chromium, Firefox, and WebKit. The fixture verifies:
   cross-origin/presigned requests; and
 - visible, non-fallback entrypoint failure diagnostics.
 
+The two checked-in quickstarts also run unchanged in Chromium, Firefox, and
+WebKit. CI installs the candidate Python wheel, launches the service example,
+serves the standalone example and its version-matched local runtime, and
+requires both pages to reach the ready lifecycle state with no console, page,
+request, or server failures.
+
 ## Pinned compatibility matrix
 
 | Component | E2E version |
@@ -44,6 +50,7 @@ cd pytincture/frontend
 npm ci
 npx playwright install chromium firefox webkit
 npm run test:e2e
+npm run test:examples
 ```
 
 Failed runs retain Playwright traces, screenshots, videos, console entries,

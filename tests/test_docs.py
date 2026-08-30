@@ -1,7 +1,6 @@
 import ast
 import importlib.util
 import io
-import json
 import re
 import zipfile
 from html.parser import HTMLParser
@@ -55,10 +54,12 @@ def test_standalone_quickstart_contains_compilable_browser_python():
     parser.feed(page)
     assert parser.python
     compile("\n".join(parser.python), "standalone-quickstart", "exec")
-    npm_version = json.loads(
-        (ROOT / "pytincture" / "frontend" / "package.json").read_text()
-    )["version"]
-    assert any(f"@pytincture/runtime@{npm_version}" in source for source in parser.runtime_sources)
+    assert parser.runtime_sources == ["./pytincture.min.js"]
+    assert (
+        ROOT / "examples" / "quickstart" / "standalone" / "pytincture.min.js"
+    ).read_bytes() == (
+        ROOT / "pytincture" / "frontend" / "dist" / "pytincture.min.js"
+    ).read_bytes()
 
 
 def test_configuration_reference_covers_every_backend_environment_setting():

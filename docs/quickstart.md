@@ -36,9 +36,10 @@ python3 -m http.server 8000
 ```
 
 Open <http://127.0.0.1:8000/>. Do not open the HTML through `file://`; browsers
-restrict module, worker, and network behavior for local files. The complete
-page is [`index.html`](../examples/quickstart/standalone/index.html). Continue
-with [standalone mode](standalone-mode.md).
+restrict module, worker, and network behavior for local files. The runnable
+example contains [`index.html`](../examples/quickstart/standalone/index.html)
+and its version-matched `pytincture.min.js` runtime. Continue with
+[standalone mode](standalone-mode.md).
 
 ## Verify the service
 
