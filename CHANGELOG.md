@@ -5,6 +5,9 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Discover service-mode browser entrypoints with AST and literal package
+  metadata, so page and appcode requests never execute browser module top-level
+  code with backend privileges.
 - Enforced canonical no-symlink module access with no-follow reads, bound BFF
   registry entries to SHA-256 source digests, rejected cross-platform path
   traversal, and standardized every application route on non-reserved ASCII

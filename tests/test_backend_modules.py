@@ -30,7 +30,12 @@ from pytincture.backend.diagnostics import (
     sanitized_validation_errors,
 )
 from pytincture.backend.mcp import FilteredFastAPIApp, exposed_operation_ids
-from pytincture.backend.pages import find_app_string_setting, normalize_app_asset_path
+from pytincture.backend.pages import (
+    EntryPointDiscoveryError,
+    find_app_string_setting,
+    find_main_window_subclass,
+    normalize_app_asset_path,
+)
 from pytincture.backend.saml import (
     ALLOWED_XML_SIGNATURE_TRANSFORMS,
     SAMLProviderCatalog,
@@ -262,6 +267,110 @@ def test_widgetset_discovery_reads_local_metadata_without_importing(tmp_path: Pa
         encoding="utf-8",
     )
     assert discover_widgetset("demo", str(tmp_path)) == "custom-widget==2.3.4"
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    (
+        (
+            "from dhxpyt.layout import MainWindow\n"
+            "class Dashboard(MainWindow): pass\n",
+            "Dashboard",
+        ),
+        (
+            "from dhxpyt.layout import MainWindow as Window\n"
+            "class Dashboard(Window): pass\n",
+            "Dashboard",
+        ),
+        (
+            "import dhxpyt.layout as layout\n"
+            "class Dashboard(layout.MainWindow): pass\n",
+            "Dashboard",
+        ),
+        (
+            "from dhxpyt import layout as ui\n"
+            "class Dashboard(ui.MainWindow): pass\n",
+            "Dashboard",
+        ),
+        (
+            "import dhxpyt\n"
+            "class Dashboard(dhxpyt.layout.MainWindow): pass\n",
+            "Dashboard",
+        ),
+        (
+            "from dhxpyt.layout import MainWindow\n"
+            "Window = MainWindow\n"
+            "class Dashboard(Window): pass\n",
+            "Dashboard",
+        ),
+    ),
+)
+def test_entrypoint_discovery_supports_static_main_window_aliases(source, expected):
+    assert (
+        find_main_window_subclass("dashboard.py", source_code=source) == expected
+    )
+
+
+def test_entrypoint_discovery_uses_source_order_not_alphabetical_order():
+    source = (
+        "from dhxpyt.layout import MainWindow\n"
+        "class Zebra(MainWindow): pass\n"
+        "class Alpha(MainWindow): pass\n"
+    )
+    assert find_main_window_subclass("dashboard.py", source_code=source) == "Zebra"
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        'APP_ENTRYPOINT = "Dashboard"\nclass Dashboard: pass\n',
+        'APP_CONFIG = {"entrypoint": "Dashboard"}\nclass Dashboard: pass\n',
+        'APP_ENTRYPOINT = "start"\ndef start(): pass\n',
+    ),
+)
+def test_entrypoint_discovery_supports_literal_explicit_metadata(source):
+    assert find_main_window_subclass("dashboard.py", source_code=source) in {
+        "Dashboard",
+        "start",
+    }
+
+
+def test_entrypoint_discovery_supports_conventional_indirect_subclass():
+    source = "from shared import BrowserWindow\nclass dashboard(BrowserWindow): pass\n"
+    assert find_main_window_subclass("dashboard.py", source_code=source) == "dashboard"
+
+
+def test_entrypoint_discovery_never_invokes_legacy_loader():
+    def forbidden_loader(*_args):
+        raise AssertionError("browser source was executed")
+
+    source = "from dhxpyt.layout import MainWindow\nclass Dashboard(MainWindow): pass\n"
+    assert (
+        find_main_window_subclass(
+            "dashboard.py", forbidden_loader, source_code=source
+        )
+        == "Dashboard"
+    )
+
+
+def test_entrypoint_discovery_requires_metadata_for_unresolved_custom_base():
+    source = "from shared import BrowserWindow\nclass Dashboard(BrowserWindow): pass\n"
+    with pytest.raises(EntryPointDiscoveryError, match="APP_ENTRYPOINT"):
+        find_main_window_subclass("dashboard.py", source_code=source)
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    (
+        ("APP_ENTRYPOINT = choose_entrypoint()\n", "must be a literal"),
+        ('APP_ENTRYPOINT = "missing"\n', "is not a top-level"),
+        ('APP_ENTRYPOINT = "bad-name"\nclass Dashboard: pass\n', "Python identifier"),
+        ("class Broken(\n", "Unable to parse"),
+    ),
+)
+def test_entrypoint_discovery_rejects_unsafe_dynamic_patterns(source, message):
+    with pytest.raises(EntryPointDiscoveryError, match=message):
+        find_main_window_subclass("dashboard.py", source_code=source)
 
 
 def test_source_names_are_stable_and_collision_resistant(tmp_path: Path):

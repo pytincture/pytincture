@@ -2516,6 +2516,56 @@ def test_main_app_frontend_files_share_one_instance_uuid(fresh_client, monkeypat
     assert first_response.headers["pragma"] == "no-cache"
 
 
+def test_page_and_appcode_requests_never_execute_browser_module(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    executed = tmp_path / "server-executed.txt"
+    (tmp_path / "safeapp.py").write_text(
+        "from pathlib import Path\n"
+        f"Path({str(executed)!r}).write_text('executed')\n"
+        "from dhxpyt.layout import MainWindow as Window\n"
+        "class BrowserOnly(Window):\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+
+    page = fresh_client.get("/safeapp")
+    archive = fresh_client.get("/safeapp/appcode/appcode.pyt")
+
+    assert page.status_code == 200
+    assert 'entrypoint: "BrowserOnly"' in page.text
+    assert archive.status_code == 200
+    assert not executed.exists()
+
+
+def test_main_page_reports_dynamic_entrypoint_metadata(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "dynamicapp.py").write_text(
+        "APP_ENTRYPOINT = choose_entrypoint()\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+
+    response = fresh_client.get("/dynamicapp")
+
+    assert response.status_code == 422
+    assert "APP_ENTRYPOINT must be a literal" in response.json()["detail"]
+
+
 def test_main_app_route_includes_per_app_favicon(fresh_client, monkeypatch, tmp_path):
     import pytincture.backend.app as backend_app
 
