@@ -638,6 +638,12 @@ def test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not(
     assert fresh_client.get(f"/demoapp/appcode/{matching_dev}").status_code == 200
     assert fresh_client.head(f"/demoapp/appcode/{matching_version}").status_code == 200
     assert fresh_client.head(f"/demoapp/appcode/{matching_dev}").status_code == 200
+    assert (
+        fresh_client.head(f"/demoapp/appcode/{matching_version}").headers[
+            "x-pytincture-sha256"
+        ]
+        == __import__("hashlib").sha256(b"versioned-wheel").hexdigest()
+    )
     assert fresh_client.get(f"/demoapp/appcode/{unrelated}").status_code == 404
     assert fresh_client.head(f"/demoapp/appcode/{unrelated}").status_code == 404
     assert fresh_client.get(f"/demoapp/appcode/private/{matching_version}").status_code == 404
@@ -1600,7 +1606,8 @@ def test_frontend_runtime_cache_busts_only_backend_micropip_installs(fresh_clien
     assert "withRequestUuid(lib, activeRequestUuid)" not in response.text
     assert "cacheBust ? withRequestUuid(source, activeRequestUuid) : source" in response.text
     assert "await installWidgetsetSource(pyodide, primarySource);" in response.text
-    assert "await installWidgetsetSource(pyodide, source, true);" in response.text
+    assert "await installWidgetsetSource(pyodide, lockedSource, true);" in response.text
+    assert "#sha256=${backendWheel.sha256}" in response.text
 
 
 def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_client):
@@ -1616,9 +1623,10 @@ def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_cli
     )
     assert "is not available from PyPI; checking backend wheels" in response.text
     assert "Failed to install widgetset from ${primarySource}" not in response.text
-    assert response.text.index("if (!(await urlExists(source)))") < response.text.index(
-        "await installWidgetsetSource(pyodide, source, true)"
+    assert response.text.index("const backendWheel = await probeBackendWheel(source)") < response.text.index(
+        "await installWidgetsetSource(pyodide, lockedSource, true)"
     )
+    assert "x-pytincture-sha256" in response.text
     assert "throw lastInstallError" in response.text
     assert 'name === "pytincture_csrf"' in response.text
     assert 'headers["X-CSRF-Token"] = csrfToken' in response.text

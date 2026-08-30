@@ -53,6 +53,7 @@
       "serviceWorkerUrl",
       "showLoadingOverlay",
       "warmPyodideCache",
+      "widgetAssetManifest",
       "widgetSource",
       "widgetlib"
     ]

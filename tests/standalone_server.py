@@ -110,11 +110,16 @@ class StandaloneHandler(BaseHTTPRequestHandler):
             self._respond(404, b"Not found", "text/plain; charset=utf-8", send_body)
             return
         guessed_type = content_type or mimetypes.guess_type(target.name)[0]
+        body = target.read_bytes()
+        response_headers = {}
+        if target.name.lower().endswith(".whl"):
+            response_headers["X-Pytincture-SHA256"] = hashlib.sha256(body).hexdigest()
         self._respond(
             200,
-            target.read_bytes(),
+            body,
             guessed_type or "application/octet-stream",
             send_body,
+            headers=response_headers,
         )
 
     def _respond(
@@ -123,11 +128,14 @@ class StandaloneHandler(BaseHTTPRequestHandler):
         body: bytes,
         content_type: str,
         send_body: bool,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         if send_body:
             self.wfile.write(body)

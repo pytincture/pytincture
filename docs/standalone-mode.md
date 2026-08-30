@@ -46,7 +46,15 @@ To add pure-Python browser dependencies:
 ```
 
 Packages must provide a Pyodide-compatible wheel or be pure Python. A normal
-CPython native wheel cannot run in WebAssembly.
+CPython native wheel cannot run in WebAssembly. Every entry must be an exact
+`name==version` pin or a wheel URL ending in `#sha256=<64 hex>`. Automatic
+dependency resolution is disabled, so list every required package explicitly;
+this keeps the browser dependency set reviewable and reproducible.
+
+Widgetsets may remain fully pluggable. A widget wheel that executes JavaScript
+or loads CSS includes a hashed `pytincture-assets.json`; see
+[widgetset packaging](widgetset-packaging.md). Pytincture never scans unrelated
+or transitive packages for executable assets.
 
 ## Explicit startup
 

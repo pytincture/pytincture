@@ -4,11 +4,13 @@ import test from "node:test";
 await import("../pytincture.js");
 
 const {
+    BUILTIN_WIDGET_ASSET_MANIFESTS,
     DEFAULT_RUNTIME_OPERATIONS,
     LIFECYCLE_STAGES,
     PytinctureLifecycleError,
     normalizeConfig,
     runStartup,
+    validatePackageRequirement,
 } = globalThis.__pytinctureTesting;
 
 
@@ -111,6 +113,134 @@ test("reports package-install failures", async () => {
         error => error.stage === LIFECYCLE_STAGES.PACKAGE_INSTALL
             && error.resource === "micropip",
     );
+});
+
+test("browser package requirements must be exact or hash-pinned wheels", () => {
+    assert.doesNotThrow(() => validatePackageRequirement("dhxpyt==0.9.16"));
+    assert.doesNotThrow(() => validatePackageRequirement(
+        "https://widgets.example/widget-1.0-py3-none-any.whl#sha256=" + "a".repeat(64),
+        { allowPackagePin: false },
+    ));
+    assert.throws(() => validatePackageRequirement("dhxpyt"), /exact name==version/);
+    assert.throws(
+        () => validatePackageRequirement("https://widgets.example/widget.whl"),
+        /#sha256/,
+    );
+});
+
+test("explicit widget sources require caller-provided wheel integrity", () => {
+    const config = normalizeConfig({
+        application: "sample",
+        widgetlib: "custom==1.0.0",
+        widgetSource: "https://widgets.example/custom.whl",
+    });
+    const originalDocument = globalThis.document;
+    globalThis.document = {};
+    try {
+        assert.throws(
+            () => DEFAULT_RUNTIME_OPERATIONS.preflightConfig(config),
+            /#sha256/,
+        );
+    } finally {
+        if (originalDocument === undefined) {
+            delete globalThis.document;
+        } else {
+            globalThis.document = originalDocument;
+        }
+    }
+});
+
+test("widget asset loader is manifest-only and verifies ownership and hashes", async () => {
+    let generatedPython = "";
+    const pyodide = fakePyodide();
+    pyodide.runPythonAsync = async source => {
+        generatedPython = source;
+        return JSON.stringify({
+            widgetPackage: "dhxpyt",
+            widgetVersion: "0.9.16",
+            javascriptAssets: 9,
+            cssAssets: 4,
+            assetManifest: "Pytincture compatibility lock dhxpyt@0.9.16",
+            dhxAvailable: true,
+        });
+    };
+    const report = await DEFAULT_RUNTIME_OPERATIONS.loadWidgetsetAssets(
+        pyodide,
+        normalizeConfig({ application: "sample", widgetlib: "dhxpyt==0.9.16" }),
+        "dhxpyt==0.9.16",
+    );
+
+    assert.equal(report.javascriptAssets, 9);
+    assert.equal(generatedPython.includes("os.walk"), false);
+    assert.match(generatedPython, /asset_path not in owned_files/);
+    assert.match(generatedPython, /Widget asset integrity check failed/);
+    assert.match(generatedPython, /hashlib\.sha256/);
+    assert.equal(BUILTIN_WIDGET_ASSET_MANIFESTS["dhxpyt@0.9.16"].assets.length, 13);
+});
+
+test("backend fallback locks the wheel hash and disables transitive installs", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+    const pyodide = fakePyodide();
+    pyodide.runPythonAsync = async source => {
+        calls.push(source);
+        if (source.includes('"dhxpyt==1.2.3"')) {
+            throw new Error("package index unavailable");
+        }
+    };
+    globalThis.fetch = async () => ({
+        ok: true,
+        headers: { get: name => name === "x-pytincture-sha256" ? "a".repeat(64) : null },
+    });
+    try {
+        const source = await DEFAULT_RUNTIME_OPERATIONS.installWidgetset(pyodide, {
+            application: "sample",
+            widgetlib: "dhxpyt==1.2.3",
+            widgetSource: null,
+            devWidgetHost: "https://widgets.example",
+            devWheelVersion: "99.99.99",
+            requestUuid: "instance-id",
+        });
+        assert.match(source, /#sha256=a{64}$/);
+        assert.match(calls.at(-1), /sha256=a{64}/);
+        assert.match(calls.at(-1), /deps=False/);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("backend fallback refuses a wheel without server integrity metadata", async () => {
+    const originalFetch = globalThis.fetch;
+    const pyodide = fakePyodide();
+    pyodide.runPythonAsync = async () => {
+        throw new Error("package index unavailable");
+    };
+    globalThis.fetch = async () => ({ ok: true, headers: { get: () => null } });
+    try {
+        await assert.rejects(
+            DEFAULT_RUNTIME_OPERATIONS.installWidgetset(pyodide, {
+                application: "sample",
+                widgetlib: "dhxpyt==1.2.3",
+                widgetSource: null,
+                devWidgetHost: "https://widgets.example",
+                devWheelVersion: "99.99.99",
+                requestUuid: "instance-id",
+            }),
+            /X-Pytincture-SHA256/,
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("package bootstrap no longer installs an unpinned framework dependency", async () => {
+    const fixture = startupFixture();
+    const pythonCalls = [];
+    fixture.pyodide.runPythonAsync = async source => {
+        pythonCalls.push(source);
+    };
+    await runStartup(fixture.config, null, fixture.operations);
+    assert.equal(pythonCalls.some(source => source.includes("python-dotenv")), false);
 });
 
 test("a packaged execution failure never falls back to inline mode", async () => {

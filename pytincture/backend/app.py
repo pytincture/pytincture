@@ -546,6 +546,7 @@ if allowed_origins:
         allow_credentials=True,
         allow_methods=allow_all_methods,
         allow_headers=allow_all_headers,
+        expose_headers=["X-Pytincture-SHA256", "X-Request-ID"],
     )
 else:
     logger.info("CORS middleware disabled; set CORS_ALLOWED_ORIGINS to enable it")
@@ -1628,7 +1629,10 @@ async def public_app_asset(request: Request, application: str, asset_path: str):
     return Response(
         content=b"" if request.method == "HEAD" else secure_file.content,
         media_type=media_type,
-        headers={"Content-Length": str(secure_file.size)},
+        headers={
+            "Content-Length": str(secure_file.size),
+            "X-Pytincture-SHA256": secure_file.digest,
+        },
     )
 
 @app.get("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="getApplicationClassCall", response_model=Any)

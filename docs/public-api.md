@@ -98,8 +98,9 @@ Two pre-load globals are public:
 | --- | --- | --- |
 | `application` | `null` | Service application route/name. |
 | `entrypoint` | application | Python class or callable to start. |
-| `widgetlib` | `"dhxpyt"` | PyPI package/specifier for the widgetset. |
-| `widgetSource` | `null` | Explicit micropip source; disables backend fallback. |
+| `widgetlib` | `"dhxpyt==0.9.16"` | Exact PyPI package/version for the widgetset. |
+| `widgetSource` | `null` | Explicit `#sha256=`-locked wheel URL; disables backend fallback. |
+| `widgetAssetManifest` | `null` | Optional hashed asset manifest for a controlled legacy widget wheel. |
 | `requestUuid` | generated | Cache namespace; service mode supplies one per server process. |
 | `mode` | `"auto"` | `"package"`, `"inline"`, or automatic selection. |
 | `onLifecycleEvent` | `null` | Callback for stage, compatibility, fallback, error, and ready events. |

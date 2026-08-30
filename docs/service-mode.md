@@ -68,7 +68,8 @@ Micropip/package-index URLs are not modified with the backend cache UUID.
 
 ## Production
 
-Use a stable signing key for authentication, Redis for shared revocations and
-replay tokens across workers, and a trusted TLS reverse proxy. See
+Use a stable signing key for authentication and a trusted TLS reverse proxy.
+Signed browser state works across workers without Redis or sticky sessions;
+remote revocation storage remains optional. See
 [configuration](configuration.md), [authentication](authentication.md), and
 [production deployment](production-deployment.md).
