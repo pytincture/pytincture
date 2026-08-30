@@ -213,6 +213,52 @@ def _declared_http_methods(
     return ("POST",)
 
 
+def _manifest_parameters(member: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[dict, ...]:
+    """Describe a method signature without importing or evaluating its module."""
+    positional = [*member.args.posonlyargs, *member.args.args]
+    if positional and positional[0].arg in {"self", "cls"}:
+        positional = positional[1:]
+    defaults: list[ast.expr | None] = [None] * (len(positional) - len(member.args.defaults))
+    defaults.extend(member.args.defaults)
+    parameters: list[dict] = []
+    positional_only = len(member.args.posonlyargs)
+    if member.args.posonlyargs and member.args.posonlyargs[0].arg in {"self", "cls"}:
+        positional_only -= 1
+    for index, (argument, default_node) in enumerate(zip(positional, defaults)):
+        parameter = {
+            "name": argument.arg,
+            "kind": "positional_only" if index < positional_only else "positional_or_keyword",
+            "required": default_node is None,
+            "annotation": argument.annotation.id if isinstance(argument.annotation, ast.Name) else "Any",
+        }
+        if default_node is not None:
+            try:
+                parameter["default"] = ast.literal_eval(default_node)
+            except (ValueError, TypeError):
+                parameter["default"] = None
+                parameter["default_supported"] = False
+        parameters.append(parameter)
+    if member.args.vararg is not None:
+        parameters.append({"name": member.args.vararg.arg, "kind": "var_positional", "required": False, "annotation": "Any"})
+    for argument, default_node in zip(member.args.kwonlyargs, member.args.kw_defaults):
+        parameter = {
+            "name": argument.arg,
+            "kind": "keyword_only",
+            "required": default_node is None,
+            "annotation": argument.annotation.id if isinstance(argument.annotation, ast.Name) else "Any",
+        }
+        if default_node is not None:
+            try:
+                parameter["default"] = ast.literal_eval(default_node)
+            except (ValueError, TypeError):
+                parameter["default"] = None
+                parameter["default_supported"] = False
+        parameters.append(parameter)
+    if member.args.kwarg is not None:
+        parameters.append({"name": member.args.kwarg.arg, "kind": "var_keyword", "required": False, "annotation": "Any"})
+    return tuple(parameters)
+
+
 def get_bff_manifest(
     file_path: str,
     *,
@@ -267,6 +313,7 @@ def get_bff_manifest(
                         module_aliases=module_aliases,
                     ),
                     "kind": "method",
+                    "parameters": _manifest_parameters(member),
                 }
             elif isinstance(member, (ast.Assign, ast.AnnAssign)):
                 targets = member.targets if isinstance(member, ast.Assign) else [member.target]

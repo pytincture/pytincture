@@ -21,7 +21,8 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "BFF_STREAM_IDLE_TIMEOUT_SECONDS": "4.5",
             "APPCODE_MAX_FILES": "80",
             "REMOTE_STORE_TIMEOUT_SECONDS": "1.25",
-            "MCP_EXPOSED_OPERATIONS": '["health", "status"]',
+            "MCP_ALLOWED_HOSTS": '["mcp.example.test"]',
+            "MCP_ALLOWED_ORIGINS": '["https://mcp.example.test"]',
             "PYTINCTURE_ALLOWED_HOSTS": "app.example.test,api.example.test",
             "PYTINCTURE_CANONICAL_ORIGIN": "https://app.example.test/",
             "SAML_RESPONSE_MAX_BYTES": "262144",
@@ -40,7 +41,8 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.bff_stream_idle_timeout_seconds == 4.5
     assert config.appcode_max_files == 80
     assert config.remote_store_timeout_seconds == 1.25
-    assert config.mcp_exposed_operations == ("health", "status")
+    assert config.mcp_allowed_hosts == ("mcp.example.test",)
+    assert config.mcp_allowed_origins == ("https://mcp.example.test",)
     assert config.allowed_hosts == ("app.example.test", "api.example.test")
     assert config.canonical_origin == "https://app.example.test"
     assert config.trusted_proxy_headers is False

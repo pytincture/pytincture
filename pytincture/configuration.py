@@ -230,9 +230,20 @@ class PytinctureConfig:
     redis_url: str = _setting("", "REDIS_UPSTASH_INSTANCE_URL", "Upstash Redis URL.")
     redis_token: str = _setting("", "REDIS_UPSTASH_INSTANCE_TOKEN", "Upstash Redis token.")
     enable_mcp: bool = _setting(False, "ENABLE_MCP", "Enable the MCP mount.")
-    mcp_exposed_operations: tuple[str, ...] = _setting(
-        (), "MCP_EXPOSED_OPERATIONS", "FastAPI operation ids exposed through MCP."
+    mcp_tools: str = _setting("[]", "MCP_TOOLS", "Explicit MCP-to-BFF tool mappings.")
+    mcp_allowed_hosts: tuple[str, ...] = _setting(
+        (), "MCP_ALLOWED_HOSTS", "Exact Host values accepted by the MCP transport."
     )
+    mcp_allowed_origins: tuple[str, ...] = _setting(
+        (), "MCP_ALLOWED_ORIGINS", "Exact Origin values accepted by the MCP transport."
+    )
+    mcp_jwt_jwks_uri: str = _setting("", "MCP_JWT_JWKS_URI", "HTTPS JWT JWKS endpoint.")
+    mcp_jwt_public_key: str = field(
+        default="", repr=False, metadata={"env": "MCP_JWT_PUBLIC_KEY", "description": "JWT public key."}
+    )
+    mcp_jwt_issuer: str = _setting("", "MCP_JWT_ISSUER", "Required JWT issuer.")
+    mcp_jwt_audience: str = _setting("", "MCP_JWT_AUDIENCE", "Required JWT audience.")
+    mcp_jwt_algorithm: str = _setting("", "MCP_JWT_ALGORITHM", "Optional JWT algorithm.")
     trusted_proxy_headers: bool = _setting(
         False, "PYTINCTURE_TRUST_PROXY_HEADERS", "Trust forwarded host/protocol headers."
     )
@@ -253,7 +264,8 @@ class PytinctureConfig:
             "cors_allowed_origins",
             "allowed_hosts",
             "previous_session_secrets",
-            "mcp_exposed_operations",
+            "mcp_allowed_hosts",
+            "mcp_allowed_origins",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
 
@@ -346,6 +358,17 @@ class PytinctureConfig:
             raise ValueError("Redis shared state requires redis_url and redis_token")
         if self.use_redis_instance and urlparse(self.redis_url).scheme not in {"http", "https"}:
             raise ValueError("redis_url must be an absolute HTTP(S) URL")
+        if self.enable_mcp:
+            if not self.mcp_allowed_hosts or not self.mcp_allowed_origins:
+                raise ValueError("MCP requires exact allowed hosts and origins")
+            if any("*" in value for value in (*self.mcp_allowed_hosts, *self.mcp_allowed_origins)):
+                raise ValueError("MCP allowed hosts and origins cannot contain wildcards")
+            if bool(self.mcp_jwt_jwks_uri) == bool(self.mcp_jwt_public_key):
+                raise ValueError("MCP requires exactly one JWT verification source")
+            if self.mcp_jwt_jwks_uri and urlparse(self.mcp_jwt_jwks_uri).scheme != "https":
+                raise ValueError("mcp_jwt_jwks_uri must use HTTPS")
+            if not self.mcp_jwt_issuer or not self.mcp_jwt_audience:
+                raise ValueError("MCP requires a JWT issuer and audience")
         if self.enable_google_auth and not (self.google_client_id and self.google_client_secret):
             raise ValueError("Google authentication requires google_client_id and google_client_secret")
         if self.enable_microsoft_auth and not (
@@ -476,7 +499,7 @@ class PytinctureConfig:
         }
         tuple_fields = {
             "cors_allowed_origins", "allowed_hosts", "previous_session_secrets",
-            "mcp_exposed_operations",
+            "mcp_allowed_hosts", "mcp_allowed_origins",
         }
         for definition in fields(cls):
             env_name = definition.metadata.get("env")
@@ -494,7 +517,7 @@ class PytinctureConfig:
             elif definition.name in tuple_fields:
                 values[definition.name] = (
                     _json_or_csv(raw)
-                    if definition.name in {"previous_session_secrets", "mcp_exposed_operations"}
+                    if definition.name in {"previous_session_secrets", "mcp_allowed_hosts", "mcp_allowed_origins"}
                     else _csv(raw)
                 )
             else:

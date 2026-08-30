@@ -9,7 +9,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import HTTPException
 
 from pytincture.backend.auth import (
     allowed_email,
@@ -29,7 +29,7 @@ from pytincture.backend.diagnostics import (
     request_correlation_id,
     sanitized_validation_errors,
 )
-from pytincture.backend.mcp import FilteredFastAPIApp, exposed_operation_ids
+from pytincture.backend.mcp import parse_tool_specs
 from pytincture.backend.pages import (
     EntryPointDiscoveryError,
     find_app_string_setting,
@@ -385,23 +385,16 @@ def test_source_names_are_stable_and_collision_resistant(tmp_path: Path):
     assert first_name != build_dynamic_module_name(str(second), "Data", str(tmp_path))
 
 
-def test_mcp_policy_rejects_session_routes_and_filters_schema():
-    assert exposed_operation_ids(False, "invalid JSON") == set()
-    with pytest.raises(RuntimeError, match="session/login/application"):
-        exposed_operation_ids(True, '["logoutUser"]')
+def test_mcp_policy_accepts_only_exact_purpose_bound_tools():
+    specs = parse_tool_specs(json.dumps([{
+        "name": "read_status", "application": "demoapp", "module": "status.py",
+        "class": "Status", "method": "read", "scopes": ["demo:status:read"],
+    }]))
+    assert specs[0].module == "status.py"
+    assert specs[0].scopes == ("demo:status:read",)
 
-    app = FastAPI()
-
-    @app.get("/public", operation_id="publicRead")
-    def public_read():
-        return {}
-
-    @app.post("/private", operation_id="privateWrite")
-    def private_write():
-        return {}
-
-    schema = FilteredFastAPIApp(app, {"publicRead"}).openapi()
-    assert set(schema["paths"]) == {"/public"}
+    with pytest.raises(RuntimeError, match="must contain only"):
+        parse_tool_specs('[{"name":"dispatch","operation":"postClassCall"}]')
 
 
 def test_page_metadata_is_read_without_importing_app(tmp_path: Path):

@@ -18,7 +18,6 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from pytincture.backend.app import (
     app,
     ALLOWED_NOAUTH_CLASSCALLS,
-    _build_streamable_mcp_app,
     _build_dynamic_module_name,
     _sanitize_return_to,
     set_bff_policy_hook,
@@ -677,45 +676,23 @@ def test_browser_package_excludes_unreachable_server_modules(
         assert "ServerHelper" not in archive.read("service.py").decode()
 
 
-def test_mcp_has_no_automatic_tools_and_rejects_sensitive_allowlist(monkeypatch):
+def test_mcp_has_no_automatic_tools_and_rejects_generic_dispatcher(monkeypatch):
     import pytincture.backend.app as backend_app
+    from pytincture.backend.mcp import parse_tool_specs
 
     assert asyncio.run(backend_app.mcp.list_tools()) == []
-    monkeypatch.setenv("ENABLE_MCP", "true")
-    monkeypatch.setenv("MCP_EXPOSED_OPERATIONS", '["handleUserAuth"]')
-    with pytest.raises(RuntimeError, match="session/login/application"):
-        backend_app._mcp_operation_ids()
+    with pytest.raises(RuntimeError, match="must contain only"):
+        parse_tool_specs('[{"name":"dispatch","operation":"postClassCall"}]')
 
 
-def test_mcp_classcall_cannot_bypass_http_authentication(monkeypatch, tmp_path):
-    import pytincture.backend.app as backend_app
+def test_mcp_tool_mapping_requires_exact_scopes():
+    from pytincture.backend.mcp import parse_tool_specs
 
-    (tmp_path / "service.py").write_text(textwrap.dedent("""
-        from pytincture.dataclass import backend_for_frontend
-        @backend_for_frontend
-        class Service:
-            def run(self):
-                return True
-    """))
-    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
-    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
-    backend_app.reload_bff_registry(str(tmp_path))
-    mcp_server = backend_app.FastMCP.from_fastapi(
-        backend_app._FilteredFastAPIApp(app, {"postClassCall"}),
-        name="security-test",
-    )
-
-    async def invoke_tool():
-        tool = await mcp_server.get_tool("postClassCall")
-        assert tool is not None
-        return await tool.run({
-            "file_path": "service.py",
-            "class_name": "Service",
-            "function_name": "run",
-        })
-
-    with pytest.raises(ValueError, match="HTTP error 401"):
-        asyncio.run(invoke_tool())
+    with pytest.raises(RuntimeError, match="non-empty exact strings"):
+        parse_tool_specs(json.dumps([{
+            "name": "run", "application": "demoapp", "module": "service.py",
+            "class": "Service", "method": "run", "scopes": ["bff:*"],
+        }]))
 
 
 def test_validation_error_does_not_echo_request_body(fresh_client):
@@ -825,25 +802,21 @@ def test_main_route_no_auth_when_disabled(fresh_client, monkeypatch, tmp_path):
 
 def test_build_streamable_mcp_app_prefers_http_app():
     class DummyMCP:
-        def streamable_http_app(self, path=None):
-            return {"transport": "streamable_http_app", "path": path}
+        def http_app(self, **kwargs):
+            return kwargs
 
-        def http_app(self, path=None, transport=None):
-            return {"transport": transport, "path": path}
+    from pytincture.backend.mcp import build_streamable_app
+    result = build_streamable_app(
+        DummyMCP(), path="/", allowed_hosts=("mcp.example",),
+        allowed_origins=("https://mcp.example",),
+    )
 
-    result = _build_streamable_mcp_app(DummyMCP(), path="/")
+    assert result == {
+        "transport": "streamable-http", "path": "/", "stateless_http": True,
+        "host_origin_protection": True, "allowed_hosts": ["mcp.example"],
+        "allowed_origins": ["https://mcp.example"],
+    }
 
-    assert result == {"transport": "streamable-http", "path": "/"}
-
-
-def test_build_streamable_mcp_app_falls_back_to_http_app():
-    class DummyMCP:
-        def http_app(self, path=None, transport=None):
-            return {"transport": transport, "path": path}
-
-    result = _build_streamable_mcp_app(DummyMCP(), path="/")
-
-    assert result == {"transport": "streamable-http", "path": "/"}
 
 def test_class_call_noauth(dummy_module, monkeypatch, fresh_client):
     """

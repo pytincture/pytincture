@@ -105,7 +105,14 @@ The contract test checks every row in this table against the dataclass model.
 | `redis_url` | `REDIS_UPSTASH_INSTANCE_URL` | Upstash Redis URL. |
 | `redis_token` | `REDIS_UPSTASH_INSTANCE_TOKEN` | Upstash Redis token. |
 | `enable_mcp` | `ENABLE_MCP` | Enable the MCP mount. |
-| `mcp_exposed_operations` | `MCP_EXPOSED_OPERATIONS` | FastAPI operation ids exposed through MCP. |
+| `mcp_tools` | `MCP_TOOLS` | Explicit MCP-to-BFF tool mappings. |
+| `mcp_allowed_hosts` | `MCP_ALLOWED_HOSTS` | Exact Host values accepted by the MCP transport. |
+| `mcp_allowed_origins` | `MCP_ALLOWED_ORIGINS` | Exact Origin values accepted by the MCP transport. |
+| `mcp_jwt_jwks_uri` | `MCP_JWT_JWKS_URI` | HTTPS JWT JWKS endpoint. |
+| `mcp_jwt_public_key` | `MCP_JWT_PUBLIC_KEY` | JWT public key. |
+| `mcp_jwt_issuer` | `MCP_JWT_ISSUER` | Required JWT issuer. |
+| `mcp_jwt_audience` | `MCP_JWT_AUDIENCE` | Required JWT audience. |
+| `mcp_jwt_algorithm` | `MCP_JWT_ALGORITHM` | Optional JWT algorithm. |
 | `trusted_proxy_headers` | `PYTINCTURE_TRUST_PROXY_HEADERS` | Trust forwarded host/protocol headers. |
 | `log_level` | `PYTINCTURE_LOG_LEVEL` | Structured application log level. |
 
