@@ -2,7 +2,7 @@
 var PytinctureRuntime = (() => {
   // pytincture.js
   var FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
-  var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc1";
+  var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc2";
   var BUILTIN_WIDGET_ASSET_MANIFESTS = Object.freeze({
     "dhxpyt@0.9.16": {
       schema: 1,

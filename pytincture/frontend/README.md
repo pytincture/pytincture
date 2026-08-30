@@ -19,7 +19,7 @@ error fields.
 <!DOCTYPE html>
 <html>
   <head>
-    <script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.1/dist/pytincture.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.2/dist/pytincture.min.js"></script>
   </head>
   <body>
     <div id="maindiv" style="width:100%;height:100vh;"></div>
@@ -140,7 +140,7 @@ The helper script:
 Once published, load from jsDelivr/UNPKG:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.1/dist/pytincture.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.2/dist/pytincture.min.js"></script>
 ```
 
 Replace `0.9.20` with the framework version you need, or omit it to use `@latest`.

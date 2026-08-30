@@ -21,6 +21,12 @@ def protected_policy(profile="release"):
             "contexts": policy["profiles"][profile]["required_checks"],
         },
         "enforce_admins": {"enabled": True},
+        "required_pull_request_reviews": {
+            "required_approving_review_count": 1,
+            "require_code_owner_reviews": True,
+            "dismiss_stale_reviews": True,
+            "require_last_push_approval": True,
+        },
         "required_conversation_resolution": {"enabled": True},
         "allow_force_pushes": {"enabled": False},
         "allow_deletions": {"enabled": False},
@@ -49,9 +55,11 @@ def test_repository_policy_rejects_missing_checks_and_admin_bypass():
     actual = protected_policy()
     actual["required_status_checks"]["contexts"].pop()
     actual["enforce_admins"]["enabled"] = False
+    actual["required_pull_request_reviews"] = None
     failures = validate_policy(actual, contract(), "release")
     assert any("required status checks are missing" in failure for failure in failures)
     assert any("enforce_admins" in failure for failure in failures)
+    assert any("require_code_owner_reviews" in failure for failure in failures)
 
 
 def test_apply_payload_uses_the_versioned_profile():
@@ -61,3 +69,9 @@ def test_apply_payload_uses_the_versioned_profile():
         policy["profiles"]["bootstrap"]["required_checks"]
     )
     assert payload["enforce_admins"] is True
+    assert payload["required_pull_request_reviews"] == {
+        "dismiss_stale_reviews": True,
+        "require_code_owner_reviews": True,
+        "required_approving_review_count": 1,
+        "require_last_push_approval": True,
+    }

@@ -26,7 +26,7 @@ Set configuration before loading the runtime:
     onLifecycleEvent: event => console.debug(event.stage, event.type)
   };
 </script>
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.1/dist/pytincture.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.2/dist/pytincture.min.js"></script>
 <div id="maindiv"></div>
 <script type="text/python">
 import js
