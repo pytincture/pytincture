@@ -43,6 +43,8 @@ def test_release_repository_policy_covers_every_publish_dependency():
             assert "Clean install (${{ matrix.extra }})" in workflow
         elif context.startswith("Pyodide E2E ("):
             assert "Pyodide E2E (${{ matrix.browser }})" in workflow
+        elif context.startswith("Quickstart examples ("):
+            assert "Quickstart examples (${{ matrix.browser }})" in workflow
         else:
             assert context in workflow
 

@@ -515,6 +515,75 @@ jobs:
             tests/standalone-server.log
           if-no-files-found: warn
 
+  quickstart-examples-e2e:
+    name: Quickstart examples (${{ matrix.browser }})
+    needs: python-package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser:
+          - chromium
+          - firefox
+          - webkit
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Download validated Python wheel
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: Install the candidate wheel in a clean environment
+        shell: bash
+        run: |
+          python -m venv /tmp/pytincture-quickstart-wheel
+          example_python=/tmp/pytincture-quickstart-wheel/bin/python
+          "$example_python" -m pip install --upgrade pip
+          "$example_python" -m pip install dist/pytincture-*.whl
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: pytincture/frontend/package-lock.json
+
+      - name: Install browser test dependencies
+        working-directory: pytincture/frontend
+        run: npm ci
+
+      - name: Install ${{ matrix.browser }}
+        working-directory: pytincture/frontend
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Run repository quickstarts in ${{ matrix.browser }}
+        working-directory: pytincture/frontend
+        env:
+          PYTINCTURE_EXAMPLE_PYTHON: /tmp/pytincture-quickstart-wheel/bin/python
+        run: npm run test:examples -- --project ${{ matrix.browser }}
+
+      - name: Upload quickstart failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pytincture-quickstarts-${{ matrix.browser }}
+          path: |
+            pytincture/frontend/playwright-report
+            pytincture/frontend/test-results-examples
+            tests/quickstart-service.log
+            tests/quickstart-standalone.log
+          if-no-files-found: ignore
+
   saml-federated-e2e:
     name: Keycloak SAML acceptance
     needs: python-package
@@ -715,6 +784,7 @@ jobs:
       - javascript-runtime
       - browser-e2e
       - standalone-wheel-e2e
+      - quickstart-examples-e2e
       - saml-federated-e2e
       - production-smoke
     runs-on: ubuntu-latest

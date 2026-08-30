@@ -29,6 +29,7 @@ pytincture/frontend/playwright-report
 pytincture/frontend/test-results
 pytincture/frontend/test-results-standalone
 pytincture/frontend/test-results-saml
+pytincture/frontend/test-results-examples
 pytincture/frontend/browser-acceptance-result.json
 pytincture/frontend/saml-acceptance-result.json
 pytincture/frontend/standalone-acceptance-result.json
@@ -36,4 +37,6 @@ tests/e2e-server.log
 tests/federated-saml-server.log
 tests/keycloak-saml.log
 tests/standalone-server.log
+tests/quickstart-service.log
+tests/quickstart-standalone.log
 tests/e2e_apps/*.whl

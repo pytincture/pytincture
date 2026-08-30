@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Run both checked-in quickstarts under real Pyodide in Chromium, Firefox, and
+  WebKit during CI, and ship the standalone quickstart with its version-matched
+  local runtime so it remains runnable before npm publication.
+
 ## 1.0.0rc2 — 2026-08-29
 
 - Added absolute authenticated-session expiry, browser-bound login protection,
