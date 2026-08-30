@@ -62,8 +62,8 @@ def local_python_imports(file_path: str, modules_root: str) -> set[str]:
     """Return local Python files directly imported by a browser module."""
     try:
         root = canonical_root(modules_root)
-        relative = os.path.relpath(file_path, root).replace(os.sep, "/")
-        source_file = read_contained_file(root, relative)
+        file_relative = os.path.relpath(file_path, root).replace(os.sep, "/")
+        source_file = read_contained_file(root, file_relative)
         tree = ast.parse(
             decode_python_source(source_file.content), filename=source_file.path
         )
@@ -77,13 +77,26 @@ def local_python_imports(file_path: str, modules_root: str) -> set[str]:
         candidates: list[str] = []
         if isinstance(node, ast.Import):
             candidates.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            candidates.append(node.module)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                relative_parts = file_relative.split("/")[:-1]
+                climb = node.level - 1
+                if climb > len(relative_parts):
+                    continue
+                package_parts = relative_parts[: len(relative_parts) - climb]
+                if node.module:
+                    candidates.append(".".join([*package_parts, *node.module.split(".")]))
+                else:
+                    candidates.extend(
+                        ".".join([*package_parts, alias.name]) for alias in node.names
+                    )
+            elif node.module:
+                candidates.append(node.module)
         for module_name in candidates:
-            relative = module_name.replace(".", os.sep)
+            module_relative = module_name.replace(".", os.sep)
             for candidate in (
-                os.path.join(modules_root, f"{relative}.py"),
-                os.path.join(modules_root, relative, "__init__.py"),
+                os.path.join(modules_root, f"{module_relative}.py"),
+                os.path.join(modules_root, module_relative, "__init__.py"),
             ):
                 candidate_relative = os.path.relpath(candidate, root).replace(os.sep, "/")
                 try:

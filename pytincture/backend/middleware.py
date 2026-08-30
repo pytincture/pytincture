@@ -2,6 +2,7 @@
 
 import base64
 import json
+import time
 
 from fastapi import HTTPException
 from itsdangerous import BadSignature, TimestampSigner
@@ -14,8 +15,16 @@ from starlette.responses import JSONResponse
 class RotatingSessionMiddleware(SessionMiddleware):
     """Accept old session signing keys and re-sign with the current key."""
 
-    def __init__(self, app, secret_key, previous_secret_keys=None, **kwargs):
+    def __init__(
+        self,
+        app,
+        secret_key,
+        previous_secret_keys=None,
+        absolute_max_age=None,
+        **kwargs,
+    ):
         super().__init__(app, secret_key=secret_key, **kwargs)
+        self.absolute_max_age = int(absolute_max_age or self.max_age or 0)
         self.previous_signers = [
             TimestampSigner(str(key))
             for key in (previous_secret_keys or [])
@@ -35,6 +44,17 @@ class RotatingSessionMiddleware(SessionMiddleware):
                 try:
                     decoded = signer.unsign(signed_data, max_age=self.max_age)
                     scope["session"] = json.loads(base64.b64decode(decoded))
+                    user = scope["session"].get("user")
+                    issued_at = scope["session"].get("auth_issued_at")
+                    if isinstance(user, dict) and user.get("is_authenticated") is True:
+                        if (
+                            not isinstance(issued_at, (int, float))
+                            or issued_at > time.time() + 60
+                            or time.time() - issued_at > self.absolute_max_age
+                        ):
+                            scope["session"] = {}
+                            initial_session_was_empty = False
+                            break
                     initial_session_was_empty = False
                     break
                 except (BadSignature, ValueError, json.JSONDecodeError):

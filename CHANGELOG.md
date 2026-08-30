@@ -5,6 +5,17 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Added absolute authenticated-session expiry, browser-bound login protection,
+  CSRF-protected POST logout, strict Google identity verification, and explicit
+  Microsoft tenant/issuer validation while retaining stateless signed-cookie
+  operation without Redis or sticky sessions.
+- Added baseline CSP/browser security headers, an explicit framework static
+  manifest, safe generated-script literal handling, per-application redacted
+  BFF documentation, and correct relative-import discovery.
+- Unified the launcher on typed configuration, hid secrets from configuration
+  representations, enforced strong previous signing keys, pinned CI actions,
+  added CODEOWNERS, tracked generated browser bundles, and verified vendored
+  Pyodide files with an SPDX SBOM and hashes.
 - Scoped service workers and caches per application/release, limited interception
   to an explicit immutable framework-asset manifest, preserved unrelated caches
   and signed/cross-origin requests, and removed the runtime-wide `fetch` patch.

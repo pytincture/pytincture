@@ -90,6 +90,52 @@ def test_legacy_secret_key_is_an_environment_fallback(tmp_path):
     assert config.to_environ()["SAML_SECRET_KEY"] == secret
 
 
+def test_secret_configuration_repr_is_redacted_and_previous_keys_are_strong(tmp_path):
+    secret = "0123456789abcdef" * 2
+    config = PytinctureConfig(
+        modules_path=str(tmp_path),
+        google_client_secret="google-secret-value",
+        microsoft_client_secret="microsoft-secret-value",
+        session_secret=secret,
+        previous_session_secrets=("abcdef0123456789" * 2,),
+        redis_token="redis-secret-value",
+        mcp_jwt_public_key="public-key-material",
+        saml_providers='{"private_key":"saml-secret-value"}',
+    )
+    rendered = repr(config)
+    for sensitive in (
+        "google-secret-value", "microsoft-secret-value", secret,
+        "redis-secret-value", "public-key-material", "saml-secret-value",
+    ):
+        assert sensitive not in rendered
+    with pytest.raises(ValueError, match="strong keys"):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            previous_session_secrets=("a" * 32,),
+        )
+
+
+def test_microsoft_auth_requires_explicit_tenant(tmp_path):
+    with pytest.raises(ValueError, match="tenant id"):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            enable_microsoft_auth=True,
+            microsoft_client_id="client",
+            microsoft_client_secret="secret",
+            session_secret="0123456789abcdef" * 2,
+        )
+
+    with pytest.raises(ValueError, match="one explicit tenant"):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            enable_microsoft_auth=True,
+            microsoft_client_id="client",
+            microsoft_client_secret="secret",
+            microsoft_tenant_id="common",
+            session_secret="0123456789abcdef" * 2,
+        )
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
@@ -261,6 +307,35 @@ def test_canonical_origin_and_allowed_hosts_are_enforced(tmp_path):
     with TestClient(configured) as client:
         assert client.get("/healthz", headers={"Host": "attacker.example"}).status_code == 400
         assert client.get("/healthz", headers={"Host": "app.example.test"}).status_code == 200
+
+
+def test_bff_documentation_is_per_app_and_redacts_defaults(tmp_path):
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    (first_root / "first.py").write_text("from service import FirstService\n")
+    (first_root / "service.py").write_text(
+        "from pytincture.dataclass import backend_for_frontend\n"
+        "@backend_for_frontend\n"
+        "class FirstService:\n"
+        "    def read(self, token='must-not-appear'): return token\n"
+    )
+    (second_root / "second.py").write_text("from worker import SecondService\n")
+    (second_root / "worker.py").write_text(
+        "from pytincture.dataclass import backend_for_frontend\n"
+        "@backend_for_frontend\n"
+        "class SecondService:\n"
+        "    def read(self): return True\n"
+    )
+    first = create_app(PytinctureConfig(modules_path=str(first_root)))
+    second = create_app(PytinctureConfig(modules_path=str(second_root)))
+    with TestClient(first) as first_client, TestClient(second) as second_client:
+        first_schema = first_client.get("/bff-docs/openapi.json").text
+        second_schema = second_client.get("/bff-docs/openapi.json").text
+    assert "FirstService" in first_schema and "SecondService" not in first_schema
+    assert "SecondService" in second_schema and "FirstService" not in second_schema
+    assert "must-not-appear" not in first_schema
 
 
 def test_configuration_reference_document_matches_typed_model():

@@ -23,6 +23,7 @@ from pytincture.backend.browser_packages import (
     browser_package_files,
     create_appcode_archive,
     discover_widgetset,
+    local_python_imports,
 )
 from pytincture.backend.diagnostics import (
     internal_error_payload,
@@ -57,6 +58,21 @@ from pytincture.backend.streaming import (
     limited_sync_stream,
 )
 from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate, CircuitOpen
+
+
+def test_local_python_imports_honors_relative_import_levels(tmp_path):
+    package = tmp_path / "pkg" / "nested"
+    package.mkdir(parents=True)
+    (tmp_path / "pkg" / "shared.py").write_text("VALUE = 1\n")
+    (package / "helper.py").write_text("VALUE = 2\n")
+    source = package / "screen.py"
+    source.write_text("from . import helper\nfrom ..shared import VALUE\n")
+
+    discovered = {
+        Path(path).relative_to(tmp_path).as_posix()
+        for path in local_python_imports(str(source), str(tmp_path))
+    }
+    assert discovered == {"pkg/nested/helper.py", "pkg/shared.py"}
 
 
 def test_auth_primitives_are_configuration_free():

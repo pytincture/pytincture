@@ -15,6 +15,8 @@ pytincture.egg-info/top_level.txt
 .vscode/launch.json
 dist
 dist/*.whl
+!pytincture/frontend/dist/
+!pytincture/frontend/dist/**
 /qualification-evidence-*.json
 *.zip
 !pytincture/frontend/pyodide/**/python_stdlib.zip
@@ -23,7 +25,6 @@ dist/*.whl
 pytincture/backend/.env
 fastmcp_stub/*
 pytincture/frontend/node_modules
-pytincture/frontend/dist
 pytincture/frontend/playwright-report
 pytincture/frontend/test-results
 pytincture/frontend/test-results-standalone

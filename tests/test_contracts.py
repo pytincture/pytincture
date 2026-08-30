@@ -2,6 +2,7 @@ import importlib
 import io
 import json
 import re
+import subprocess
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -22,6 +23,33 @@ def test_public_python_symbols_match_contract(contract):
         module = importlib.import_module(module_name)
         missing = [name for name in symbol_names if not hasattr(module, name)]
         assert not missing, f"{module_name} is missing public symbols: {missing}"
+
+
+def test_ci_actions_are_commit_pinned_and_generated_bundles_are_tracked():
+    for workflow in (ROOT / ".github" / "workflows").glob("*.yml"):
+        for line in workflow.read_text().splitlines():
+            if "uses:" not in line:
+                continue
+            reference = line.split("uses:", 1)[1].strip().split()[0]
+            assert re.search(r"@[0-9a-f]{40}$", reference), (
+                f"floating action reference in {workflow.name}: {reference}"
+            )
+    codeowners = (ROOT / ".github" / "CODEOWNERS").read_text()
+    assert "/pytincture/backend/" in codeowners
+    assert (ROOT / "pytincture" / "frontend" / "dist" / "pytincture.js").exists()
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", "pytincture/frontend/dist/pytincture.js"],
+        cwd=ROOT,
+        check=False,
+    )
+    assert ignored.returncode == 1
+
+
+def test_vendored_pyodide_sbom_and_checksums_validate():
+    script = ROOT / "scripts" / "validate_vendored_pyodide.py"
+    namespace = {"__name__": "validation_test", "__file__": str(script)}
+    exec(compile(script.read_text(), str(script), "exec"), namespace)
+    namespace["main"]()
 
 
 def test_javascript_globals_and_config_keys_match_contract(contract):

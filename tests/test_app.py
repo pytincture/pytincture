@@ -555,6 +555,7 @@ def test_revoked_session_is_rejected(fresh_client, monkeypatch, dummy_module):
     monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    monkeypatch.setattr(backend_app, "USE_REDIS_INSTANCE", "true")
     fresh_client.post(
         "/demoapp/auth/user",
         data={"email": "person@example.com", "password": "local"},
@@ -568,6 +569,32 @@ def test_revoked_session_is_rejected(fresh_client, monkeypatch, dummy_module):
         headers=_csrf_headers(fresh_client),
     )
     assert response.status_code == 401
+
+
+def test_revocation_is_stateless_by_default_and_shared_failures_fail_closed(monkeypatch):
+    import time
+    import pytincture.backend.app as backend_app
+
+    local_store = {}
+    monkeypatch.setattr(backend_app, "USE_REDIS_INSTANCE", "false")
+    monkeypatch.setattr(backend_app, "AUTH_SESSION_REVOCATIONS", local_store)
+    backend_app.revoke_session("session-id")
+    assert local_store == {}
+
+    class BrokenSharedStore:
+        def get(self, key):
+            raise RuntimeError("shared store unavailable")
+
+    user = backend_app._build_auth_session_user({"email": "user@example.com"})
+    request = type("Request", (), {"session": {
+        "user": user,
+        "session_id": "session-id",
+        "auth_issued_at": time.time(),
+    }})()
+    monkeypatch.setattr(backend_app, "USE_REDIS_INSTANCE", "true")
+    monkeypatch.setattr(backend_app, "AUTH_SESSION_REVOCATIONS", BrokenSharedStore())
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    assert backend_app.require_auth(request) is None
 
 
 def test_session_key_rotation_accepts_and_resigns_previous_key():
@@ -1772,7 +1799,11 @@ def test_require_auth_does_not_print_debug_output(monkeypatch, capsys):
 
     user = backend_app._build_auth_session_user({"email": "quiet@example.com"})
     request = type("Request", (), {
-        "session": {"user": user, "session_id": "test-session"}
+        "session": {
+            "user": user,
+            "session_id": "test-session",
+            "auth_issued_at": __import__("time").time(),
+        }
     })()
 
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
@@ -1851,7 +1882,11 @@ def test_stateless_session_survives_logout_in_another_browser_and_replica(
             "email": "person@example.com",
             "stale": True,
         }
-        fresh_client.get("/demoapp/auth/logout", follow_redirects=False)
+        fresh_client.post(
+            "/demoapp/auth/logout",
+            headers=_csrf_headers(fresh_client),
+            follow_redirects=False,
+        )
 
         another_replica.cookies.set("session", second_cookie)
         another_replica.cookies.set("pytincture_csrf", second_csrf_cookie)
@@ -2426,7 +2461,9 @@ def test_microsoft_login_stores_only_compact_stateless_claims(
                     "email": "person@example.com",
                     "name": "Example Person",
                     "picture": "https://example.com/profile.png",
-                    "tenant": "must-not-enter-the-cookie",
+                    "tid": "tenant-123",
+                    "iss": "https://login.microsoftonline.com/tenant-123/v2.0",
+                    "sub": "subject-123",
                 },
             }
 
@@ -2438,6 +2475,7 @@ def test_microsoft_login_stores_only_compact_stateless_claims(
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {"sentinel": True})
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setenv("MICROSOFT_TENANT_ID", "tenant-123")
 
     response = fresh_client.get(
         "/demoapp/auth/microsoft/callback",
@@ -2457,6 +2495,9 @@ def test_microsoft_login_stores_only_compact_stateless_claims(
         "is_authenticated": True,
         "auth_provider": "microsoft",
         "auth_provider_label": "Microsoft",
+        "issuer": "https://login.microsoftonline.com/tenant-123/v2.0",
+        "subject": "subject-123",
+        "tenant": "tenant-123",
         "application": "demoapp",
     }
     assert "access_token" not in session_data
@@ -2479,6 +2520,140 @@ def test_auth_user_callback(fresh_client, monkeypatch):
     # Now the response should be the raw RedirectResponse with status 303.
     assert response.status_code == 303
     assert "/demoapp" in response.headers.get("location", "")
+
+
+def test_authenticated_session_has_absolute_lifetime(
+    fresh_client, monkeypatch, dummy_module
+):
+    import time
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    assert fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "password"},
+        follow_redirects=False,
+    ).status_code == 303
+    session_data = _decode_session_cookie(fresh_client, backend_app.SAML_SECRET_KEY)
+    assert isinstance(session_data["auth_issued_at"], int)
+    session_data["auth_issued_at"] = (
+        time.time() - backend_app.AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS - 1
+    )
+    encoded = base64.b64encode(json.dumps(session_data).encode("utf-8"))
+    expired_absolute_cookie = TimestampSigner(
+        backend_app.SAML_SECRET_KEY
+    ).sign(encoded).decode("utf-8")
+    fresh_client.cookies.set("session", expired_absolute_cookie)
+    response = fresh_client.post(
+        "/classcall/example.py/ExampleClass/testfunc",
+        json={"kwargs": {}},
+        headers={"X-CSRF-Token": fresh_client.cookies["pytincture_csrf"]},
+    )
+    assert response.status_code == 401
+
+
+def test_browser_login_and_logout_have_csrf_and_origin_protection(
+    fresh_client, monkeypatch
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+
+    login_page = fresh_client.get("/demoapp/login")
+    assert 'name="login_csrf_token"' in login_page.text
+    missing_token = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "password"},
+        follow_redirects=False,
+    )
+    assert missing_token.status_code == 403
+    cross_origin = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "person@example.com", "password": "password"},
+        headers={"Origin": "https://attacker.example", "Sec-Fetch-Site": "cross-site"},
+        follow_redirects=False,
+    )
+    assert cross_origin.status_code == 403
+
+    token = __import__("re").search(
+        r'name="login_csrf_token" value="([^"]+)"', login_page.text
+    ).group(1)
+    assert fresh_client.post(
+        "/demoapp/auth/user",
+        data={
+            "email": "person@example.com",
+            "password": "password",
+            "login_csrf_token": token,
+        },
+        follow_redirects=False,
+    ).status_code == 303
+    assert fresh_client.get("/demoapp/auth/logout").status_code == 405
+    assert fresh_client.post("/demoapp/auth/logout").status_code == 403
+    assert fresh_client.post(
+        "/demoapp/auth/logout",
+        headers=_csrf_headers(fresh_client),
+        follow_redirects=False,
+    ).status_code == 302
+
+
+def test_security_headers_and_static_manifest(fresh_client):
+    response = fresh_client.get("/healthz")
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    assert "camera=()" in response.headers["permissions-policy"]
+    assert fresh_client.get("/frontend/pytincture.js").status_code == 200
+    assert fresh_client.get("/frontend/README.md").status_code == 404
+    assert fresh_client.get("/frontend/package.json").status_code == 404
+    assert fresh_client.get("/frontend/browser-tests/lifecycle.spec.mjs").status_code == 404
+
+
+def test_disabled_google_routes_return_404(fresh_client, monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "oauth", None)
+    assert fresh_client.get("/demoapp/auth/google").status_code == 404
+    assert fresh_client.get("/demoapp/auth/google/callback").status_code == 404
+
+
+def test_google_callback_requires_verified_immutable_identity(fresh_client, monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    class FakeGoogle:
+        def __init__(self, verified):
+            self.verified = verified
+
+        async def authorize_access_token(self, request):
+            return {"userinfo": {
+                "email": "person@example.com",
+                "email_verified": self.verified,
+                "iss": "https://accounts.google.com",
+                "sub": "google-subject",
+            }}
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
+    monkeypatch.setattr(backend_app, "oauth", type("OAuth", (), {"google": FakeGoogle(False)})())
+    assert fresh_client.get(
+        "/demoapp/auth/google/callback", follow_redirects=False
+    ).status_code == 401
+    monkeypatch.setattr(backend_app, "oauth", type("OAuth", (), {"google": FakeGoogle(True)})())
+    response = fresh_client.get("/demoapp/auth/google/callback", follow_redirects=False)
+    assert response.status_code in {302, 307}
+    session = _decode_session_cookie(fresh_client, backend_app.SAML_SECRET_KEY)
+    assert session["user"]["issuer"] == "https://accounts.google.com"
+    assert session["user"]["subject"] == "google-subject"
 
 def test_main_app_route_logged_in(fresh_client, monkeypatch, tmp_path):
     """

@@ -59,6 +59,7 @@ The contract test checks every row in this table against the dataclass model.
 | `google_client_secret` | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret. |
 | `microsoft_client_id` | `MICROSOFT_CLIENT_ID` | Microsoft OAuth client id. |
 | `microsoft_client_secret` | `MICROSOFT_CLIENT_SECRET` | Microsoft OAuth client secret. |
+| `microsoft_tenant_id` | `MICROSOFT_TENANT_ID` | Required Microsoft Entra tenant id. |
 | `saml_providers` | `SAML_PROVIDERS` | JSON object or array of SAML identity providers. |
 | `saml_idp_entity_id` | `SAML_IDP_ENTITY_ID` | Default SAML identity-provider entity id. |
 | `saml_idp_sso_url` | `SAML_IDP_SSO_URL` | Default SAML identity-provider sign-in URL. |
@@ -69,7 +70,8 @@ The contract test checks every row in this table against the dataclass model.
 | `saml_acs_rate_limit_window_seconds` | `SAML_ACS_RATE_LIMIT_WINDOW_SECONDS` | SAML ACS rate-limit window in seconds. |
 | `session_secret` | `SAML_SECRET_KEY` | Session signing secret. |
 | `previous_session_secrets` | `AUTH_SESSION_PREVIOUS_SECRET_KEYS` | Previous signing keys accepted during rotation. |
-| `session_max_age_seconds` | `AUTH_SESSION_MAX_AGE_SECONDS` | Signed session lifetime. |
+| `session_max_age_seconds` | `AUTH_SESSION_MAX_AGE_SECONDS` | Session idle lifetime. |
+| `session_absolute_max_age_seconds` | `AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS` | Absolute authenticated session lifetime. |
 | `session_https_only` | `AUTH_SESSION_HTTPS_ONLY` | Secure-cookie requirement; derived when omitted. |
 | `session_same_site` | `AUTH_SESSION_SAME_SITE` | Cookie SameSite policy. |
 | `max_request_body_bytes` | `MAX_REQUEST_BODY_BYTES` | Maximum request body size. |

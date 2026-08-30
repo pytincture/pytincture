@@ -111,7 +111,7 @@ def main(port, ssl_keyfile=None, ssl_certfile=None, modules_folder=None, host=No
         host=_loopback_bind_host(host),
         port=port,
         log_level="debug",
-        access_log="access.log",
+        access_log=True,
         reload=False,
         ssl_keyfile=ssl_keyfile,
         ssl_certfile=ssl_certfile,
@@ -124,10 +124,8 @@ def main(port, ssl_keyfile=None, ssl_certfile=None, modules_folder=None, host=No
         except Exception:  # pragma: no cover - uvloop unsupported platform
             run_kwargs["loop"] = "asyncio"
 
-    uvicorn.run(
-        "pytincture.backend.app:app",
-        **run_kwargs,
-    )
+    config = PytinctureConfig.from_env()
+    uvicorn.run(create_app(config), **run_kwargs)
 
 
 def launch_service(
@@ -164,6 +162,10 @@ def launch_service(
             favicon_folder,
             modules_folder,
         )
+
+    # Validate the exact environment before a child process or network listener
+    # is created. The child constructs the ASGI app through the same typed path.
+    PytinctureConfig.from_env()
 
     bind_host = _loopback_bind_host(host)
     main_application = Process(
