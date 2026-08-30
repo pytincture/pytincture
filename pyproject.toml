@@ -46,14 +46,14 @@ saml = [
     "xmlsec>=1.3.17,<2",
 ]
 mcp = [
-    "fastmcp>=3.2,<4",
+    "fastmcp>=3.4.7,<4",
 ]
 dev = [
     "argon2-cffi>=23.1,<26",
     "authlib>=1.4,<2",
     "bcrypt>=4.2,<6",
     "build>=1.2,<2",
-    "fastmcp>=3.2,<4",
+    "fastmcp>=3.4.7,<4",
     "httpx>=0.27,<1",
     "httpx2>=2,<3",
     "pytest>=8.3,<10",

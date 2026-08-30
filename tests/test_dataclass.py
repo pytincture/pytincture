@@ -102,6 +102,7 @@ def test_bff_http_methods_and_static_manifest(tmp_path):
         "policy": {"tenant": "acme", "role": "reader"},
         "http_methods": ("GET",),
         "kind": "method",
+        "parameters": (),
     }
     assert manifest[("Reports", "refresh")]["http_methods"] == ("POST",)
 

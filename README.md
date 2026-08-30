@@ -178,8 +178,10 @@ pip install ".[dev]"
 - BFF_REPLAY_TOKEN_BATCH_SIZE: Number of one-time proofs returned in each opaque refill. Defaults to `12`.
 - BFF_REPLAY_TOKEN_LOW_WATERMARK: Refill the browser-side pool when this many proofs remain. Defaults to `3`.
 - BFF_REPLAY_TOKEN_TTL_SECONDS: Lifetime of an unused proof. Defaults to `300` seconds.
-- ENABLE_MCP: Enable the MCP mount. MCP exports no tools by default.
-- MCP_EXPOSED_OPERATIONS: JSON list of explicitly allowed FastAPI operation IDs. Login, session, logging, application delivery, and appcode download operations cannot be exported.
+- ENABLE_MCP: Enable the authenticated, stateless MCP mount. Disabled by default.
+- MCP_TOOLS: JSON list mapping purpose-built tool names and scopes to exact `@backend_for_frontend` methods. Generic HTTP/BFF dispatchers cannot be exported.
+- MCP_ALLOWED_HOSTS / MCP_ALLOWED_ORIGINS: Non-empty JSON lists of exact transport hosts and origins; wildcards are rejected.
+- MCP_JWT_JWKS_URI (or MCP_JWT_PUBLIC_KEY), MCP_JWT_ISSUER, and MCP_JWT_AUDIENCE: Mandatory bearer-token verification policy.
 - PYTINCTURE_LOG_LEVEL: Structured Pytincture application log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`). Defaults to `INFO`.
 
 Authenticated browser cookies contain only stable identity claims plus opaque session and CSRF identifiers. Passwords, complete SAML attributes, SAML assertions, and changing SAML session indexes are not stored in the cookie. Logout revokes the current session; Upstash-backed services share revocations between replicas.

@@ -48,7 +48,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 from starlette.config import Config
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from starlette.routing import Match
+from starlette.routing import Match, Route
 
 # Pytincture
 from pytincture import __version__, get_modules_path
@@ -77,9 +77,12 @@ from pytincture.backend.diagnostics import (
     structured_log,
 )
 from pytincture.backend.mcp import (
-    FilteredFastAPIApp,
+    MCPToolSpec,
+    build_jwt_verifier,
     build_streamable_app,
-    exposed_operation_ids,
+    parse_string_list,
+    parse_tool_specs,
+    register_bff_tools,
 )
 from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate
 from pytincture.backend.middleware import (
@@ -143,6 +146,7 @@ from pytincture.dataclass import (
 # ========================
 
 app = FastAPI(title="pyTincture API")
+_BASE_APP_LIFESPAN = app.router.lifespan_context
 logger = logging.getLogger("pytincture.security")
 _configured_log_level = os.getenv("PYTINCTURE_LOG_LEVEL", "INFO").strip().upper()
 logger.setLevel(getattr(logging, _configured_log_level, logging.INFO))
@@ -237,10 +241,6 @@ def _optional_dependency_error(feature: str, extra: str, exc: ImportError) -> Ru
     )
 
 
-def _build_streamable_mcp_app(mcp_server, path: str = "/"):
-    return build_streamable_app(mcp_server, path)
-
-
 def _build_dynamic_module_name(file_path: str, name_hint: str) -> str:
     """
     Build a stable module name for manually loaded source files.
@@ -267,16 +267,6 @@ def _load_source_module(
         expected_digest=expected_digest,
     )
 
-_FilteredFastAPIApp = FilteredFastAPIApp
-
-
-def _mcp_operation_ids() -> Set[str]:
-    return exposed_operation_ids(
-        os.getenv("ENABLE_MCP", "false").lower() == "true",
-        os.getenv("MCP_EXPOSED_OPERATIONS", "[]"),
-    )
-
-
 def reload_mcp_tools():
     global FastMCP, mcp, mcp_http_app
     
@@ -287,7 +277,7 @@ def reload_mcp_tools():
         if not route.path.startswith("/mcp")
     ]
     
-    operation_ids = _mcp_operation_ids()
+    app.router.lifespan_context = _BASE_APP_LIFESPAN
     if os.getenv("ENABLE_MCP", "false").lower() != "true":
         mcp = _DisabledMCP()
         mcp_http_app = None
@@ -299,18 +289,49 @@ def reload_mcp_tools():
         except ImportError as exc:
             raise _optional_dependency_error("MCP", "mcp", exc) from exc
         FastMCP = _FastMCP
-    if operation_ids:
-        mcp_source = _FilteredFastAPIApp(app, operation_ids)
-        mcp = FastMCP.from_fastapi(app=mcp_source, name="pytincture")
-    else:
-        mcp = FastMCP(name="pytincture")
-    logger.info("MCP tools reloaded for operations: %s", sorted(operation_ids))
-    
-    # Step 3: Recreate MCP app using streamable HTTP transport
-    mcp_http_app = _build_streamable_mcp_app(mcp, path='/')
-    
-    # Step 4: Remount the updated MCP app
+    tool_specs = parse_tool_specs(os.getenv("MCP_TOOLS", "[]"))
+    for tool_spec in tool_specs:
+        validate_application_name(tool_spec.application)
+    allowed_hosts = parse_string_list(
+        "MCP_ALLOWED_HOSTS", os.getenv("MCP_ALLOWED_HOSTS", "[]")
+    )
+    allowed_origins = parse_string_list(
+        "MCP_ALLOWED_ORIGINS", os.getenv("MCP_ALLOWED_ORIGINS", "[]")
+    )
+    auth = build_jwt_verifier(os.environ)
+    operations = reload_bff_registry(get_modules_path())
+    mcp = FastMCP(
+        name="pytincture",
+        auth=auth,
+        mask_error_details=True,
+        strict_input_validation=True,
+    )
+    register_bff_tools(mcp, tool_specs, operations, _invoke_mcp_bff)
+    logger.info("MCP tools reloaded: %s", [spec.name for spec in tool_specs])
+
+    mcp_http_app = build_streamable_app(
+        mcp,
+        path="/",
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
     app.mount("/mcp", mcp_http_app)
+    app.router.routes.insert(0, app.router.routes.pop())
+
+    class _ExactMCPRoute:
+        async def __call__(self, scope, receive, send):
+            child_scope = dict(scope)
+            child_scope["root_path"] = scope.get("root_path", "") + "/mcp"
+            child_scope["path"] = "/"
+            child_scope["raw_path"] = b"/"
+            await mcp_http_app(child_scope, receive, send)
+
+    app.router.routes.insert(0, Route("/mcp", endpoint=_ExactMCPRoute()))
+    from fastmcp.utilities.lifespan import combine_lifespans
+
+    app.router.lifespan_context = combine_lifespans(
+        _BASE_APP_LIFESPAN, mcp_http_app.lifespan
+    )
 
 def _local_python_imports(file_path: str, modules_root: str) -> Set[str]:
     """Return local Python files directly imported by a browser module."""
@@ -1244,6 +1265,8 @@ def _request_origin(request: Request) -> str:
 
 
 def _validate_csrf(request: Request, user: Any) -> None:
+    if request.scope.get("pytincture.mcp_user") is not None:
+        return
     if request.method in {"GET", "HEAD", "OPTIONS"}:
         return
     if not isinstance(user, dict) or user.get("is_authenticated") is not True:
@@ -1482,6 +1505,8 @@ def _issue_bff_replay_tokens(session_id: str) -> List[str]:
 
 
 def _validate_bff_replay_token(request: Request, user: Any) -> None:
+    if request.scope.get("pytincture.mcp_user") is not None:
+        return
     if not ENABLE_BFF_REPLAY_TOKENS:
         return
     session_id = _bff_replay_subject(request, user)
@@ -1693,7 +1718,10 @@ async def class_call(
     if not request_identifier_with_ext.lower().endswith(".py"):
         request_identifier_with_ext += ".py"
 
-    if is_noauth_allowed(
+    mcp_user = request.scope.get("pytincture.mcp_user")
+    if mcp_user is not None:
+        user = mcp_user
+    elif is_noauth_allowed(
         request_identifier_with_ext,
         class_name,
         function_name,
@@ -1939,6 +1967,91 @@ async def class_call(
         return result
 
     return func
+
+
+async def _invoke_mcp_bff(spec: MCPToolSpec, arguments: Dict[str, Any]) -> Any:
+    """Invoke one exact BFF export using a verified MCP bearer identity."""
+    from fastmcp.server.dependencies import get_access_token
+
+    token = get_access_token()
+    if token is None:
+        raise PermissionError("MCP authentication required")
+    claims = dict(token.claims or {})
+    subject = str(token.subject or token.client_id)
+    user = {
+        **claims,
+        "email": str(claims.get("email") or subject),
+        "subject": subject,
+        "client_id": token.client_id,
+        "roles": claims.get("roles", claims.get("role", [])),
+        "scopes": list(token.scopes),
+        "issuer": claims.get("iss"),
+        "auth_type": "mcp",
+        "auth_provider": "mcp",
+        "is_authenticated": True,
+        "session_version": AUTH_SESSION_SCHEMA_VERSION,
+        "application": spec.application,
+    }
+    body = json.dumps({"kwargs": arguments}).encode("utf-8")
+    delivered = False
+
+    async def receive():
+        nonlocal delivered
+        if delivered:
+            return {"type": "http.disconnect"}
+        delivered = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "https",
+        "path": f"/{spec.application}/classcall/{spec.module}/{spec.class_name}/{spec.method}",
+        "raw_path": b"",
+        "query_string": b"",
+        "headers": [(b"content-type", b"application/json"), (b"host", b"mcp.internal")],
+        "client": ("127.0.0.1", 0),
+        "server": ("mcp.internal", 443),
+        "app": app,
+        "state": {},
+        "session": {"user": user, "session_id": f"mcp:{subject}"},
+        "pytincture.mcp_user": user,
+    }
+    request = Request(scope, receive)
+    admission = _admit_bff_call(request)
+    await admission.__anext__()
+    try:
+        operation = await _run_bff_thread_stage(
+            request,
+            _registered_bff_operation,
+            get_modules_path(),
+            spec.module,
+            spec.class_name,
+            spec.method,
+        )
+        if operation is None:
+            raise RuntimeError("Configured MCP BFF export is no longer available")
+        allowed_methods = tuple(operation["http_methods"])
+        method = "POST" if "POST" in allowed_methods else allowed_methods[0]
+        if method == "GET" and arguments:
+            raise RuntimeError("A GET-only MCP BFF tool cannot declare arguments")
+        request.scope["method"] = method
+        result = await class_call(
+            spec.module,
+            spec.class_name,
+            spec.method,
+            request,
+            application=spec.application,
+            _admission=None,
+        )
+        if isinstance(result, StreamingResponse):
+            request.state.bff_stream_owns_slot = False
+            raise RuntimeError("Streaming BFF methods cannot be exposed as MCP tools")
+        return result
+    finally:
+        await admission.aclose()
 
 @app.post("/logs", operation_id="postLogs", responses={200: {"description": "JSONResponse ({\"status\": \"ok\"})"}, 401: {"description": "HTTPException (if authentication fails)"}})
 async def logs_endpoint(request: Request, user=Depends(require_authenticated_user)):
