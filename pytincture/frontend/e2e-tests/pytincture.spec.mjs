@@ -149,8 +149,9 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         expect(compatibility.widgetPackage).toBe("dhxpyt");
         expect(compatibility.widgetVersion).toBe("0.9.16");
         expect(compatibility.dhxAvailable).toBe(true);
-        expect(compatibility.javascriptAssets).toBeGreaterThan(0);
-        expect(compatibility.cssAssets).toBeGreaterThan(0);
+        expect(compatibility.javascriptAssets).toBe(9);
+        expect(compatibility.cssAssets).toBe(4);
+        expect(compatibility.assetManifest).toContain("dhxpyt@0.9.16");
         expect(lifecycle.at(-1).type).toBe("ready");
         expect(await page.locator("style").evaluateAll(styles => (
             styles.some(style => style.textContent.includes("data:font/woff2;base64,"))
@@ -168,6 +169,9 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         expect(widgetRequest).toBeTruthy();
         expect(new URL(widgetRequest.url).hostname).toBe("127.0.0.1");
         expect(new URL(widgetRequest.url).searchParams.get("uuid")).toBeTruthy();
+        const wheelHead = await request.head(`/e2e_app/appcode/${WIDGET_WHEEL}`);
+        expect(wheelHead.ok()).toBe(true);
+        expect(wheelHead.headers()["x-pytincture-sha256"]).toMatch(/^[a-f0-9]{64}$/);
 
         const localFrontendRequests = diagnostics.requests.filter(entry => {
             const url = new URL(entry.url);
@@ -235,6 +239,60 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         });
         await attachFailureDiagnostics(testInfo, diagnostics);
     }
+});
+
+test("widget manifests reject corrupt and non-owned executable assets", async ({ browserName, page }) => {
+    test.skip(browserName !== "chromium", "Manifest enforcement is deterministic Python logic and is exercised once.");
+    let manifest = null;
+    await blockExternalWidgetIndex(page);
+    await page.addInitScript(() => {
+        window.__pytinctureLifecycle = [];
+        window.addEventListener("pytincture:lifecycle", event => {
+            window.__pytinctureLifecycle.push(event.detail);
+        });
+    });
+    await page.route("**/e2e_app/appcode/inline-e2e.html", async route => {
+        const response = await route.fetch();
+        const original = await response.text();
+        const body = original.replace(
+            'loadingTitle: "Inline E2E"',
+            `application: "e2e_app",\n      widgetAssetManifest: ${JSON.stringify(manifest)},\n      loadingTitle: "Inline E2E"`,
+        );
+        await route.fulfill({ response, body, headers: { ...response.headers(), "content-type": "text/html" } });
+    });
+
+    const expectManifestFailure = async (asset, expectedMessage) => {
+        manifest = {
+            schema: 1,
+            package: "dhxpyt",
+            version: "0.9.16",
+            assets: [asset],
+        };
+        await page.goto("/e2e_app/appcode/inline-e2e.html");
+        await expect(page.locator(".pytincture-loading__status")).toContainText(
+            "Failed during widgetset-load",
+        );
+        const lifecycle = await page.evaluate(() => window.__pytinctureLifecycle);
+        expect(lifecycle.find(event => event.type === "error")?.error.rootCause).toContain(expectedMessage);
+        await expect(page.locator("#inline-ready")).toHaveCount(0);
+    };
+
+    await expectManifestFailure(
+        {
+            path: "dhxpyt/dhxsrc/suite.js",
+            type: "javascript",
+            sha256: "0".repeat(64),
+        },
+        "integrity check failed",
+    );
+    await expectManifestFailure(
+        {
+            path: "micropip/undeclared.js",
+            type: "javascript",
+            sha256: "0".repeat(64),
+        },
+        "is not owned by dhxpyt",
+    );
 });
 
 test("packaged entrypoint failure is rendered without fallback", async ({ browserName, page }, testInfo) => {

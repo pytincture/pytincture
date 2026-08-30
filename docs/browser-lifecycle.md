@@ -29,8 +29,14 @@ runTinctureApp({
 ```
 
 The compatibility event reports the Pytincture runtime version, Pyodide and
-Python versions, installed widgetset version, loaded JavaScript/CSS asset
-counts, and whether DHTMLX exposed `window.dhx` when `dhxpyt` is used.
+Python versions, installed widgetset version, verified asset-manifest source,
+loaded JavaScript/CSS asset counts, and whether DHTMLX exposed `window.dhx`
+when `dhxpyt` is used.
+
+The package-install stages accept exact package/version pins or SHA-256-locked
+wheel URLs and disable automatic transitive dependency installation. During
+`widgetset-load`, only files in the installed widget distribution's explicit
+asset manifest are loaded, and each file is SHA-256 verified before use.
 
 ## Errors and fallback
 

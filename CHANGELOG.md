@@ -5,6 +5,9 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Restricted browser installs to exact package pins or SHA-256-locked wheels,
+  disabled unpinned/transitive bootstrap installs, and replaced recursive
+  site-packages JavaScript evaluation with widget-owned hashed asset manifests.
 - Discover service-mode browser entrypoints with AST and literal package
   metadata, so page and appcode requests never execute browser module top-level
   code with backend privileges.

@@ -1,11 +1,38 @@
 const FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
 const PYTINCTURE_RUNTIME_VERSION = "1.0.0rc1";
 
+// Compatibility lock for the dhxpyt release used by the 1.0 acceptance
+// fixtures. New widgetsets (and future dhxpyt releases) should ship the same
+// object as <import-package>/pytincture-assets.json inside their wheel.
+const BUILTIN_WIDGET_ASSET_MANIFESTS = Object.freeze({
+    "dhxpyt@0.9.16": {
+        schema: 1,
+        package: "dhxpyt",
+        version: "0.9.16",
+        assets: [
+            { path: "dhxpyt/dhxsrc/suite.css", type: "css", sha256: "bbfb8928fce1a99acf5a6f610c99625eea8b31e0f62b4cb5b31b6ccb684a1719" },
+            { path: "dhxpyt/dhxsrc/fonts/inter.css", type: "css", sha256: "868d674eb57814ea39415af15132b4077ccdc081b1c8e15cf31e652e12bf3cc9" },
+            { path: "dhxpyt/dhxsrc/dhx_custom.css", type: "css", sha256: "43091047578499088323dc062805c71327c273c2840512b7700f9ed10c9c6a61" },
+            { path: "dhxpyt/dhxsrc/suite.js", type: "javascript", sha256: "f727f02e2a7bf163c920782bfc80927cff344a8cb78f0ae2d01b4a74252ee6b8" },
+            { path: "dhxpyt/dhxsrc/cardflow.js", type: "javascript", sha256: "4e445672ae0d5f296a3cd52b2a2e64ae7cc8b23aa08949c90e06f577bbc65cbc" },
+            { path: "dhxpyt/dhxsrc/cardpanel.js", type: "javascript", sha256: "511461c150a9e1c55e06b054bdaba15610ba3438726c6c23be0536a218dc606f" },
+            { path: "dhxpyt/dhxsrc/chat.js", type: "javascript", sha256: "99cd11cf5eb189b63880041ef1fe5e0f73153a9da0df839595e136bdf6fbfd67" },
+            { path: "dhxpyt/dhxsrc/kanban.css", type: "css", sha256: "155a5ea4b5589b1fa0c2b51ea7c9007e8939b1484d037f7ea04eaea9a03d1abb" },
+            { path: "dhxpyt/dhxsrc/kanban.js", type: "javascript", sha256: "186950aa79b1a09525b78c808a6a62e4cfc052e1de6afe834eab64cbb94b9acb" },
+            { path: "dhxpyt/dhxsrc/kanban_board.js", type: "javascript", sha256: "053a4d55b2c43171ce41b4888b0a89f123afbfe49ef5adbf540491b156626c55" },
+            { path: "dhxpyt/dhxsrc/ragwidget.js", type: "javascript", sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+            { path: "dhxpyt/dhxsrc/theme.js", type: "javascript", sha256: "1afd7bb65f81d3fc1e474edc81d3f6c23ffa2caa5feb2220153616137f117634" },
+            { path: "dhxpyt/dhxsrc/webgpu.js", type: "javascript", sha256: "f4825014ced0cb326995fa4ad9ecc6cccb6efa947ad8e6bf5b26a4e9c7759e89" },
+        ],
+    },
+});
+
 const DEFAULT_CONFIG = {
     application: null,
     entrypoint: null,
-    widgetlib: "dhxpyt",
+    widgetlib: "dhxpyt==0.9.16",
     widgetSource: null,
+    widgetAssetManifest: null,
     requestUuid: null,
     mode: "auto", // 'package', 'inline', or 'auto'
     pyodideBaseUrl: "./frontend/pyodide/0.29.3/full/",
@@ -301,12 +328,42 @@ function preflightConfig(config) {
     if (!config.pyodideBaseUrl) {
         throw new Error("pyodideBaseUrl is required.");
     }
+    validatePackageRequirement(config.widgetSource || config.widgetlib, {
+        label: "Widgetset",
+        allowPackagePin: !config.widgetSource,
+    });
     return {
         runtime: "pytincture",
         runtimeVersion: PYTINCTURE_RUNTIME_VERSION,
         pyodideBaseUrl: sanitizeResource(config.pyodideBaseUrl),
         widgetset: sanitizeDiagnostic(config.widgetSource || config.widgetlib || "none"),
     };
+}
+
+function isHashPinnedWheelUrl(value) {
+    try {
+        const parsed = new URL(value, "http://pytincture.invalid/");
+        return parsed.pathname.toLowerCase().endsWith(".whl")
+            && /^sha256=[a-f0-9]{64}$/i.test(parsed.hash.slice(1));
+    } catch (_error) {
+        return false;
+    }
+}
+
+function isExactPackagePin(value) {
+    return /^[A-Za-z0-9_.-]+==[A-Za-z0-9][A-Za-z0-9_.+!-]*$/.test(value || "");
+}
+
+function validatePackageRequirement(value, { label = "Browser package", allowPackagePin = true } = {}) {
+    if (!value) {
+        return;
+    }
+    if ((allowPackagePin && isExactPackagePin(value)) || isHashPinnedWheelUrl(value)) {
+        return;
+    }
+    throw new Error(
+        `${label} must use an exact name==version pin or a wheel URL with a #sha256=<64 hex> fragment.`,
+    );
 }
 
 function preflightPyodide(pyodide) {
@@ -575,22 +632,31 @@ async function installExtraMicropipLibs(pyodide, selector) {
     }
 
     for (const lib of libs) {
+        validatePackageRequirement(lib, { label: "micropip-libs entry" });
         const libLiteral = JSON.stringify(lib);
         await withoutCacheBusting(() => pyodide.runPythonAsync(`
 import micropip
-await micropip.install(${libLiteral})
+await micropip.install(${libLiteral}, deps=False)
         `));
     }
 }
 
-async function urlExists(url) {
+async function probeBackendWheel(url) {
+    let response;
     try {
-        const response = await fetch(url, { method: "HEAD" });
-        return response.ok;
+        response = await fetch(url, { method: "HEAD" });
     } catch (err) {
         console.warn(`Failed to check URL: ${url}`, err);
-        return false;
+        return null;
     }
+    if (!response.ok) {
+        return null;
+    }
+    const sha256 = response.headers?.get?.("x-pytincture-sha256") || "";
+    if (!/^[a-f0-9]{64}$/i.test(sha256)) {
+        throw new Error("Backend wheel response is missing a valid X-Pytincture-SHA256 header.");
+    }
+    return { url, sha256: sha256.toLowerCase() };
 }
 
 async function resolveBackendWidgetSources(config) {
@@ -731,7 +797,7 @@ async function installWidgetsetSource(pyodide, source, cacheBust = false) {
     const sourceLiteral = JSON.stringify(installSource);
     await withoutCacheBusting(() => pyodide.runPythonAsync(`
 import micropip
-await micropip.install(${sourceLiteral})
+await micropip.install(${sourceLiteral}, deps=False)
     `));
 }
 
@@ -745,6 +811,10 @@ async function installWidgetset(pyodide, config) {
     let lastInstallError = null;
     try {
         // PyPI (or an explicit widgetSource) remains the primary source.
+        validatePackageRequirement(primarySource, {
+            label: "Widgetset",
+            allowPackagePin: !config.widgetSource,
+        });
         await installWidgetsetSource(pyodide, primarySource);
         installedSource = primarySource;
     } catch (error) {
@@ -761,12 +831,14 @@ async function installWidgetset(pyodide, config) {
         // Backend order is the real pinned version first, then 99.99.99.
         const backendSources = await resolveBackendWidgetSources(config);
         for (const source of backendSources) {
-            if (!(await urlExists(source))) {
+            const backendWheel = await probeBackendWheel(source);
+            if (!backendWheel) {
                 continue;
             }
             try {
-                await installWidgetsetSource(pyodide, source, true);
-                installedSource = source;
+                const lockedSource = `${backendWheel.url}#sha256=${backendWheel.sha256}`;
+                await installWidgetsetSource(pyodide, lockedSource, true);
+                installedSource = lockedSource;
                 break;
             } catch (error) {
                 lastInstallError = error;
@@ -789,17 +861,66 @@ async function loadWidgetsetAssets(pyodide, config, installedSource) {
     const widgetPackageLiteral = JSON.stringify(
         String(config.widgetlib || "").match(/^[A-Za-z0-9_.\-]+/)?.[0] || "",
     );
+    const configuredManifestLiteral = JSON.stringify(
+        encodeURIComponent(JSON.stringify(config.widgetAssetManifest || null)),
+    );
+    const builtinManifestsLiteral = JSON.stringify(BUILTIN_WIDGET_ASSET_MANIFESTS);
     const loadFilesCode = `
-import os
-import pyodide
 import js
-import site
 import base64
 import re
 import json
+import hashlib
 import importlib.metadata
+import posixpath
+from urllib.parse import unquote
 
 REQUEST_UUID = ${requestUuidLiteral}
+CONFIGURED_MANIFEST = json.loads(unquote(${configuredManifestLiteral}))
+BUILTIN_MANIFESTS = ${builtinManifestsLiteral}
+widget_package = ${widgetPackageLiteral}
+
+if not widget_package:
+    raise RuntimeError("An installed widget package is required to load assets")
+
+distribution = importlib.metadata.distribution(widget_package)
+widget_version = distribution.version
+owned_files = {str(path).replace('\\\\', '/') for path in (distribution.files or ())}
+manifest_paths = sorted(
+    path for path in owned_files if path.endswith('/pytincture-assets.json')
+)
+if len(manifest_paths) > 1:
+    raise RuntimeError("Widgetset owns multiple pytincture-assets.json manifests")
+manifest_path = manifest_paths[0] if manifest_paths else None
+
+if CONFIGURED_MANIFEST is not None:
+    manifest = CONFIGURED_MANIFEST
+    manifest_source = "runtime configuration"
+elif manifest_path:
+    manifest = json.loads(distribution.locate_file(manifest_path).read_text(encoding="utf-8"))
+    manifest_source = manifest_path
+else:
+    manifest_key = f"{widget_package.lower().replace('-', '_')}@{widget_version}"
+    manifest = BUILTIN_MANIFESTS.get(manifest_key)
+    manifest_source = f"Pytincture compatibility lock {manifest_key}"
+
+if not isinstance(manifest, dict):
+    raise RuntimeError(
+        f"Widgetset {widget_package}=={widget_version} must provide an owned, "
+        "explicitly hashed pytincture-assets.json manifest"
+    )
+if manifest.get("schema") != 1:
+    raise RuntimeError("Widget asset manifest schema must be 1")
+normalize_name = lambda value: re.sub(r'[-_.]+', '_', str(value).lower())
+manifest_package = normalize_name(manifest.get("package") or "")
+if manifest_package != normalize_name(widget_package):
+    raise RuntimeError("Widget asset manifest package does not match the installed widgetset")
+manifest_version = str(manifest.get("version") or "")
+if manifest_version != widget_version:
+    raise RuntimeError("Widget asset manifest version does not match the installed widgetset")
+assets = manifest.get("assets")
+if not isinstance(assets, list) or not assets or len(assets) > 128:
+    raise RuntimeError("Widget asset manifest must declare between 1 and 128 assets")
 
 def cache_bust_url(url_value):
     if not url_value or not REQUEST_UUID:
@@ -818,10 +939,7 @@ def cache_bust_url(url_value):
         base = base + ('&' if '?' in base else '?') + 'uuid=' + encoded_uuid
     return f"{base}{separator}{fragment}"
 
-def replace_font_urls(css_content, search_dirs):
-    if not search_dirs:
-        return css_content
-
+def replace_font_urls(css_content, css_asset):
     mime_types = {
         'woff': 'font/woff',
         'woff2': 'font/woff2',
@@ -830,7 +948,7 @@ def replace_font_urls(css_content, search_dirs):
         'eot': 'application/vnd.ms-fontobject',
     }
 
-    def try_inline(url_value, base_dir):
+    def try_inline(url_value):
         if not url_value:
             return None
         if url_value.startswith('data:'):
@@ -842,15 +960,16 @@ def replace_font_urls(css_content, search_dirs):
             path = path.split('?', 1)[0]
         if '#' in path:
             path = path.split('#', 1)[0]
-        path = path.lstrip('/')
-        candidate = os.path.normpath(os.path.join(base_dir, path))
-        if not os.path.isfile(candidate):
+        if path.startswith('/') or '\\\\' in path:
             return None
-        ext = os.path.splitext(candidate)[1].lstrip('.').lower()
+        candidate = posixpath.normpath(posixpath.join(posixpath.dirname(css_asset), path))
+        if candidate.startswith('../') or candidate not in owned_files:
+            return None
+        ext = posixpath.splitext(candidate)[1].lstrip('.').lower()
         if ext not in mime_types:
             return None
         try:
-            with open(candidate, "rb") as f:
+            with open(distribution.locate_file(candidate), "rb") as f:
                 font_data = base64.b64encode(f.read()).decode("utf-8")
         except Exception:
             return None
@@ -861,47 +980,66 @@ def replace_font_urls(css_content, search_dirs):
         if not raw:
             return match.group(0)
         cleaned = raw.strip().strip("'").strip('"')
-        for base_dir in search_dirs:
-            data_uri = try_inline(cleaned, base_dir)
-            if data_uri:
-                return f"url('{data_uri[4:-1]}')" if data_uri.startswith('url(') else data_uri
+        data_uri = try_inline(cleaned)
+        if data_uri:
+            return f"url('{data_uri[4:-1]}')" if data_uri.startswith('url(') else data_uri
         return f"url('{cache_bust_url(cleaned)}')"
 
     return re.sub(r"url\\(([^)]+)\\)", repl, css_content, flags=re.IGNORECASE)
 
-package_path = site.getsitepackages()[0]
 javascript_assets = 0
 css_assets = 0
 
-for root, _, files in os.walk(package_path):
-    for file in files:
-        file_path = os.path.join(root, file)
-        file_extension = os.path.splitext(file_path)[1].lower()
-        if file_extension == '.js':
-            with open(file_path) as f:
-                js.eval(f.read())
-            javascript_assets += 1
-        elif file_extension == '.css':
-            with open(file_path) as f:
-                css_dir = os.path.dirname(file_path)
-                search_dirs = [css_dir, os.path.join(css_dir, "fonts")]
-                style_content = replace_font_urls(f.read(), search_dirs)
-            style = js.document.createElement('style')
-            style.innerHTML = style_content
-            js.document.head.appendChild(style)
-            css_assets += 1
+seen_paths = set()
+for asset in assets:
+    if not isinstance(asset, dict):
+        raise RuntimeError("Every widget asset declaration must be an object")
+    asset_path = str(asset.get("path") or "")
+    asset_type = str(asset.get("type") or "")
+    expected_hash = str(asset.get("sha256") or "").lower()
+    normalized_path = posixpath.normpath(asset_path)
+    if (
+        not asset_path
+        or normalized_path != asset_path
+        or asset_path.startswith('/')
+        or '\\\\' in asset_path
+        or normalized_path.startswith('../')
+        or asset_path in seen_paths
+    ):
+        raise RuntimeError(f"Invalid or duplicate widget asset path: {asset_path!r}")
+    if asset_path not in owned_files:
+        raise RuntimeError(f"Widget asset is not owned by {widget_package}: {asset_path}")
+    if asset_type not in {'javascript', 'css'}:
+        raise RuntimeError(f"Unsupported widget asset type for {asset_path}")
+    expected_extension = '.js' if asset_type == 'javascript' else '.css'
+    if not asset_path.lower().endswith(expected_extension):
+        raise RuntimeError(f"Widget asset type does not match {asset_path}")
+    if not re.fullmatch(r'[a-f0-9]{64}', expected_hash):
+        raise RuntimeError(f"Widget asset is missing a SHA-256 lock: {asset_path}")
 
-widget_package = ${widgetPackageLiteral}
-try:
-    widget_version = importlib.metadata.version(widget_package) if widget_package else None
-except importlib.metadata.PackageNotFoundError:
-    widget_version = None
+    asset_bytes = distribution.locate_file(asset_path).read_bytes()
+    actual_hash = hashlib.sha256(asset_bytes).hexdigest()
+    if actual_hash != expected_hash:
+        raise RuntimeError(f"Widget asset integrity check failed: {asset_path}")
+    asset_content = asset_bytes.decode('utf-8')
+    seen_paths.add(asset_path)
+
+    if asset_type == 'javascript':
+        js.eval(asset_content)
+        javascript_assets += 1
+    else:
+        style_content = replace_font_urls(asset_content, asset_path)
+        style = js.document.createElement('style')
+        style.textContent = style_content
+        js.document.head.appendChild(style)
+        css_assets += 1
 
 json.dumps({
     "widgetPackage": widget_package or None,
     "widgetVersion": widget_version,
     "javascriptAssets": javascript_assets,
     "cssAssets": css_assets,
+    "assetManifest": manifest_source,
     "dhxAvailable": bool(hasattr(js, "dhx")),
 })
     `;
@@ -968,10 +1106,6 @@ async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_O
         "micropip",
         async () => {
             await pyodide.loadPackage("micropip");
-            await withoutCacheBusting(() => pyodide.runPythonAsync(`
-import micropip
-await micropip.install("python-dotenv")
-            `));
             await operations.installExtraMicropipLibs(pyodide, config.libsSelector);
         },
     );
@@ -1155,10 +1289,12 @@ if (typeof document !== "undefined") {
 }
 
 globalThis.__pytinctureTesting = Object.freeze({
+    BUILTIN_WIDGET_ASSET_MANIFESTS,
     DEFAULT_RUNTIME_OPERATIONS,
     LIFECYCLE_STAGES,
     PytinctureLifecycleError,
     normalizeConfig,
+    validatePackageRequirement,
     runLifecycleStage,
     runStartup,
     runTinctureApp,
