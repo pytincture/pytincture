@@ -11,6 +11,9 @@ Only a maintained release commit with green required CI is publishable.
 3. After the complete 1.0 CI workflow is on `main`, apply and verify the full
    branch-protection contract with an administration token:
    `GITHUB_TOKEN=... python scripts/repository_policy.py --profile release --apply`.
+   The policy requires one CODEOWNER approval, dismisses stale approvals, and
+   requires approval from someone other than the last pusher. Keep at least two
+   active maintainers in `CODEOWNERS` so author review cannot deadlock a release.
 4. Run Python 3.13/3.14, JavaScript, browser lifecycle, Chromium/Firefox/WebKit
    Pyodide E2E, clean artifact/extras, and production topology gates.
 5. Create and push a signed `v<version>` tag at the green commit. Wait for the

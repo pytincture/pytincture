@@ -1,8 +1,8 @@
 # Security-sensitive framework, authentication, runtime, and release surfaces.
-* @schapman1974
-/.github/ @schapman1974
-/pytincture/backend/ @schapman1974
-/pytincture/frontend/ @schapman1974
-/pytincture/configuration.py @schapman1974
-/pytincture/factory.py @schapman1974
-/scripts/ @schapman1974
+* @schapman1974 @vxxzy
+/.github/ @schapman1974 @vxxzy
+/pytincture/backend/ @schapman1974 @vxxzy
+/pytincture/frontend/ @schapman1974 @vxxzy
+/pytincture/configuration.py @schapman1974 @vxxzy
+/pytincture/factory.py @schapman1974 @vxxzy
+/scripts/ @schapman1974 @vxxzy

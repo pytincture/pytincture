@@ -35,7 +35,14 @@ def expected_payload(contract: dict, profile: str) -> dict:
             "contexts": contract["profiles"][profile]["required_checks"],
         },
         "enforce_admins": contract["enforce_admins"],
-        "required_pull_request_reviews": None,
+        "required_pull_request_reviews": {
+            "dismiss_stale_reviews": contract["dismiss_stale_reviews"],
+            "require_code_owner_reviews": contract["require_code_owner_reviews"],
+            "required_approving_review_count": contract[
+                "required_approving_review_count"
+            ],
+            "require_last_push_approval": contract["require_last_push_approval"],
+        },
         "restrictions": None,
         "required_conversation_resolution": contract["required_conversation_resolution"],
         "allow_force_pushes": contract["allow_force_pushes"],
@@ -57,6 +64,15 @@ def validate_policy(actual: dict, contract: dict, profile: str) -> list[str]:
         failures.append(f"required status checks are missing: {', '.join(missing)}")
     if checks.get("strict") is not contract["strict"]:
         failures.append("strict up-to-date status checks are not enforced")
+    reviews = actual.get("required_pull_request_reviews") or {}
+    for key in (
+        "required_approving_review_count",
+        "require_code_owner_reviews",
+        "dismiss_stale_reviews",
+        "require_last_push_approval",
+    ):
+        if reviews.get(key) != contract[key]:
+            failures.append(f"pull request review policy {key} must be {contract[key]}")
     for key in (
         "enforce_admins",
         "required_conversation_resolution",

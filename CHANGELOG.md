@@ -5,6 +5,8 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+## 1.0.0rc2 — 2026-08-29
+
 - Added absolute authenticated-session expiry, browser-bound login protection,
   CSRF-protected POST logout, strict Google identity verification, and explicit
   Microsoft tenant/issuer validation while retaining stateless signed-cookie
