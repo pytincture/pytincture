@@ -642,18 +642,43 @@ except json.JSONDecodeError as e:
     raise RuntimeError("Invalid JSON in ALLOWED_NOAUTH_CLASSCALLS environment variable") from e
 
 
-@app.get("/frontend/sw.js", include_in_schema=False)
-def service_worker_script():
-    """Serve the shared worker with permission to control service application paths."""
+def _service_worker_response(request: Request, *, allowed_scope: str) -> Response:
+    """Serve bytes that change when the requested cache namespace changes."""
 
-    return FileResponse(
-        os.path.join(STATIC_PATH, "sw.js"),
+    marker_input = ":".join(
+        (
+            request.query_params.get("uuid", "")[:256],
+            request.query_params.get("release", "")[:256],
+        )
+    )
+    marker = hashlib.sha256(marker_input.encode("utf-8")).hexdigest()
+    with open(os.path.join(STATIC_PATH, "sw.js"), encoding="utf-8") as worker_file:
+        worker_source = worker_file.read()
+    return Response(
+        content=f"// pytincture-worker-namespace: {marker}\n{worker_source}",
         media_type="text/javascript",
         headers={
             "Cache-Control": "no-store, max-age=0",
-            "Service-Worker-Allowed": "/",
+            "Service-Worker-Allowed": allowed_scope,
         },
     )
+
+
+@app.get("/frontend/sw.js", include_in_schema=False)
+def service_worker_script(request: Request):
+    """Serve the standalone worker with a framework-only maximum scope."""
+
+    return _service_worker_response(request, allowed_scope="/")
+
+
+@app.get("/{application}/frontend/sw.js", include_in_schema=False)
+def application_service_worker_script(application: str, request: Request):
+    """Serve an application-isolated worker under its frontend asset scope."""
+    try:
+        validate_application_name(application)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return _service_worker_response(request, allowed_scope=f"/{application}/")
 
 
 app.mount("/{application}/frontend", StaticFiles(directory=STATIC_PATH), name="static")

@@ -100,7 +100,15 @@ To avoid re-downloading Pyodide assets on refresh, you can enable the bundled se
 
 Notes:
 - Service workers require HTTPS (or localhost) and a same-origin `sw.js`.
-- The bundled `sw.js` caches Pyodide assets and same-origin `.js/.wasm/.data/.json/.css/.whl/.pyt` files.
+- The bundled worker intercepts only its explicit Pytincture/Pyodide asset
+  manifest. It does not cache appcode, BFF/auth responses, arbitrary files, or
+  private/cookie-setting responses.
+- Service applications receive an application-scoped worker and an
+  application/release/instance cache namespace. Upgrades delete only older
+  caches owned by that application; disabling caching unregisters that worker
+  and leaves other applications and libraries alone.
+- Pytincture never patches global `fetch`. Cross-origin APIs, package indexes,
+  and presigned URLs therefore remain byte-for-byte unchanged.
 
 ## Development
 

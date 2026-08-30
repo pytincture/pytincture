@@ -42,7 +42,17 @@ async function blockExternalWidgetIndex(page) {
     await page.route("**/*", async route => {
         const url = new URL(route.request().url());
         if (url.hostname !== "127.0.0.1" && url.href.toLowerCase().includes("dhxpyt")) {
-            await route.abort("failed");
+            const isJsonIndex = url.pathname.endsWith("/json");
+            await route.fulfill({
+                status: 200,
+                headers: {
+                    "Access-Control-Allow-Origin": "http://127.0.0.1:8079",
+                    "Content-Type": isJsonIndex ? "application/json" : "text/html",
+                },
+                body: isJsonIndex
+                    ? JSON.stringify({ info: { version: "0.0.0" }, releases: {} })
+                    : "<!doctype html><html><body></body></html>",
+            });
             return;
         }
         await route.continue();
@@ -181,7 +191,12 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         });
         expect(localFrontendRequests.length).toBeGreaterThan(5);
         for (const request of localFrontendRequests) {
-            expect(new URL(request.url).searchParams.get("uuid"), request.url).toBeTruthy();
+            const url = new URL(request.url);
+            const isPyodideInternalRequest = url.pathname.includes("/frontend/pyodide/");
+            expect(
+                Boolean(url.searchParams.get("uuid")) || isPyodideInternalRequest,
+                request.url,
+            ).toBe(true);
         }
 
         const bff = await callAuthenticatedBff(page);
@@ -195,6 +210,11 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
             { kind: "stream", value: 1 },
             { kind: "stream", value: 2 },
         ]);
+        const bffRequests = diagnostics.requests.filter(entry => (
+            new URL(entry.url).pathname.includes("/classcall/")
+        ));
+        expect(bffRequests.length).toBeGreaterThan(0);
+        expect(bffRequests.every(entry => !new URL(entry.url).searchParams.has("uuid"))).toBe(true);
 
         const bffMeasurements = await measureAuthenticatedBff(
             page,
@@ -211,12 +231,78 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         );
 
         const worker = await page.evaluate(async () => {
-            const registration = await navigator.serviceWorker.ready;
+            const registration = await navigator.serviceWorker.getRegistration(
+                "/e2e_app/",
+            );
             return { scope: registration.scope, scriptURL: registration.active?.scriptURL || "" };
         });
-        expect(worker.scope).toBe("http://127.0.0.1:8079/");
-        expect(new URL(worker.scriptURL).pathname).toBe("/frontend/sw.js");
+        expect(worker.scope).toBe("http://127.0.0.1:8079/e2e_app/");
+        expect(new URL(worker.scriptURL).pathname).toBe("/e2e_app/frontend/sw.js");
         expect(new URL(worker.scriptURL).searchParams.get("uuid")).toBeTruthy();
+        const readCacheEvidence = () => page.evaluate(async () => {
+            const names = await caches.keys();
+            const ownedNames = names.filter(name => name.startsWith("pytincture:e2e_app:"));
+            const requests = (await Promise.all(ownedNames.map(async name => (
+                (await caches.open(name)).keys()
+            )))).flat();
+            return { names, urls: requests.map(request => request.url) };
+        });
+        if (testInfo.project.name !== "webkit") {
+            await expect.poll(
+                async () => (await readCacheEvidence()).urls.length,
+                { timeout: 60000 },
+            ).toBeGreaterThan(5);
+        }
+        const cacheEvidence = await readCacheEvidence();
+        expect(cacheEvidence.names.some(name => name.startsWith("pytincture:e2e_app:"))).toBe(true);
+        expect(cacheEvidence.urls.every(url => new URL(url).searchParams.get("uuid"))).toBe(true);
+
+        const signedUrl = "https://api.example.test/report?X-Amz-Signature=abc123&part=1";
+        let observedSignedUrl = "";
+        await page.route("https://api.example.test/**", async route => {
+            observedSignedUrl = route.request().url();
+            await route.fulfill({
+                status: 200,
+                headers: {
+                    "Access-Control-Allow-Origin": "http://127.0.0.1:8079",
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ ok: true }),
+            });
+        });
+        expect(await page.evaluate(async url => (await fetch(url)).json(), signedUrl)).toEqual({ ok: true });
+        expect(observedSignedUrl).toBe(signedUrl);
+        await page.unroute("https://api.example.test/**");
+
+        const upgradedCaches = await page.evaluate(async () => {
+            await caches.open("foreign-library-cache");
+            await caches.open("pytincture:other_app:current:other");
+            await caches.open("pytincture:e2e_app:obsolete:old");
+            const config = window.__pytinctureTesting.normalizeConfig({
+                application: "e2e_app",
+                requestUuid: "upgrade-test",
+                enableServiceWorker: true,
+                warmPyodideCache: false,
+            });
+            await window.__pytinctureTesting.DEFAULT_RUNTIME_OPERATIONS.ensureServiceWorker(config);
+            return caches.keys();
+        });
+        expect(upgradedCaches).toContain("foreign-library-cache");
+        expect(upgradedCaches).toContain("pytincture:other_app:current:other");
+        expect(upgradedCaches).not.toContain("pytincture:e2e_app:obsolete:old");
+
+        const unregisterEvidence = await page.evaluate(async () => {
+            const removed = await window.__pytinctureTesting.unregisterOwnedServiceWorker({
+                application: "e2e_app",
+                serviceWorkerScope: "/e2e_app/",
+                serviceWorkerUrl: "/e2e_app/frontend/sw.js",
+            });
+            return { removed, names: await caches.keys() };
+        });
+        expect(unregisterEvidence.removed).toBe(true);
+        expect(unregisterEvidence.names.some(name => name.startsWith("pytincture:e2e_app:"))).toBe(false);
+        expect(unregisterEvidence.names).toContain("foreign-library-cache");
+        expect(unregisterEvidence.names).toContain("pytincture:other_app:current:other");
 
         await page.unrouteAll({ behavior: "wait" });
         await page.goto("/e2e_app/appcode/inline-e2e.html");

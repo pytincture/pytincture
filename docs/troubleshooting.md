@@ -28,8 +28,11 @@ Python.
 Frontend, appcode, public assets, service workers, and backend wheel responses
 use one UUID per service process. Restarting changes it. The browser address
 bar must remain `/{application}` without `?uuid=...`; if navigation redirects
-to a UUID URL, report it as a runtime regression. Hard reload once after a
-service-worker upgrade and inspect the worker script URL/scope.
+to a UUID URL, report it as a runtime regression. The application-scoped worker
+caches only the explicit immutable framework manifest. Its cache name contains
+the application, release, and UUID; upgrades remove only older caches for that
+application. Package-index, BFF/auth, cross-origin, and presigned URLs must not
+gain a UUID.
 
 ## Login loops or identity-provider failures
 

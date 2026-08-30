@@ -106,7 +106,12 @@ test("standalone app runs from the Python wheel runtime", async ({ page, request
         });
         expect(localAssets.length).toBeGreaterThan(5);
         for (const asset of localAssets) {
-            expect(new URL(asset.url).searchParams.get("uuid"), asset.url).toBe(requestUuid);
+            const url = new URL(asset.url);
+            const isPyodideInternalRequest = url.pathname.startsWith("/runtime/pyodide/");
+            expect(
+                url.searchParams.get("uuid") === requestUuid || isPyodideInternalRequest,
+                asset.url,
+            ).toBe(true);
         }
 
         const realWheelRequests = localAssets.filter(entry => (

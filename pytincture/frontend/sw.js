@@ -1,51 +1,67 @@
-const CACHE_NAME = "pytincture-sw-v1";
-const PYODIDE_CDN_PREFIX = "https://cdn.jsdelivr.net/pyodide/";
-const CACHEABLE_EXTENSIONS = [
-    ".wasm", ".data", ".js", ".json", ".css", ".whl", ".pyt", ".zip",
-    ".woff", ".woff2", ".ttf", ".otf", ".eot", ".ico", ".png", ".jpg",
-    ".jpeg", ".gif", ".svg", ".webp", ".webmanifest", ".xml",
-];
-const REQUEST_UUID = new URL(self.location.href).searchParams.get("uuid");
+const WORKER_URL = new URL(self.location.href);
+const REQUEST_UUID = WORKER_URL.searchParams.get("uuid") || "unversioned";
+const APPLICATION = (WORKER_URL.searchParams.get("application") || "standalone")
+    .replace(/[^A-Za-z0-9_]/g, "_")
+    .slice(0, 64);
+const RELEASE = (WORKER_URL.searchParams.get("release") || "unknown")
+    .replace(/[^A-Za-z0-9_.-]/g, "_")
+    .slice(0, 64);
+const OWNED_CACHE_PREFIX = `pytincture:${encodeURIComponent(APPLICATION)}:`;
+const CACHE_NAME = `${OWNED_CACHE_PREFIX}${RELEASE}:${REQUEST_UUID}`;
+const FRAMEWORK_ASSET_PATHS = new Set([
+    "pytincture.js",
+    "pyodide/0.29.3/full/pyodide.js",
+    "pyodide/0.29.3/full/pyodide.asm.js",
+    "pyodide/0.29.3/full/pyodide.asm.wasm",
+    "pyodide/0.29.3/full/pyodide-lock.json",
+    "pyodide/0.29.3/full/python_stdlib.zip",
+    "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl",
+    "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl.metadata",
+]);
+const ASSET_BASE_PATH = new URL("./", WORKER_URL).pathname;
 
-function withRequestUuid(url) {
-    const bustedUrl = new URL(url.href);
-    bustedUrl.searchParams.set("uuid", REQUEST_UUID);
-    return bustedUrl.href;
+function isManifestRequest(request, url) {
+    if (request.method !== "GET" || url.origin !== WORKER_URL.origin) {
+        return false;
+    }
+    if (!url.pathname.startsWith(ASSET_BASE_PATH)) {
+        return false;
+    }
+    const relativePath = url.pathname.slice(ASSET_BASE_PATH.length);
+    const requestUuid = url.searchParams.get("uuid");
+    return FRAMEWORK_ASSET_PATHS.has(relativePath)
+        && (!requestUuid || requestUuid === REQUEST_UUID)
+        && !url.searchParams.has("pytincture_warm")
+        && !request.headers.get("authorization");
 }
 
-function isFrontendFileRequest(request, url) {
-    return Boolean(request.destination) ||
-        url.pathname.includes("/appcode/") ||
-        CACHEABLE_EXTENSIONS.some(ext => url.pathname.toLowerCase().endsWith(ext));
+function canonicalAssetRequest(url) {
+    const canonicalUrl = new URL(url.href);
+    canonicalUrl.searchParams.set("uuid", REQUEST_UUID);
+    return new Request(canonicalUrl.href, {
+        method: "GET",
+        credentials: "omit",
+    });
+}
+
+function responseIsPublicImmutable(response) {
+    if (!response?.ok || response.type === "opaque") {
+        return false;
+    }
+    const cacheControl = response.headers.get("cache-control") || "";
+    const vary = response.headers.get("vary") || "";
+    return !/(?:^|,)\s*(?:private|no-store)(?:\s|,|$)/i.test(cacheControl)
+        && !/(?:^|,)\s*(?:cookie|authorization)(?:\s|,|$)/i.test(vary)
+        && !response.headers.get("set-cookie");
 }
 
 self.addEventListener("install", event => {
-    self.skipWaiting();
+    event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", event => {
-    event.waitUntil((async () => {
-        const keys = await caches.keys();
-        await Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)));
-        await self.clients.claim();
-    })());
+    event.waitUntil(self.clients.claim());
 });
-
-function shouldCache(url) {
-    if (url.searchParams.has("uuid")) {
-        return false;
-    }
-    if (url.href.startsWith(PYODIDE_CDN_PREFIX)) {
-        return true;
-    }
-    if (url.origin === self.location.origin) {
-        if (url.pathname.includes("/appcode/")) {
-            return true;
-        }
-        return CACHEABLE_EXTENSIONS.some(ext => url.pathname.endsWith(ext));
-    }
-    return false;
-}
 
 async function cacheFirst(request) {
     const cache = await caches.open(CACHE_NAME);
@@ -53,31 +69,16 @@ async function cacheFirst(request) {
     if (cached) {
         return cached;
     }
-    const response = await fetch(request);
-    if (response && (response.ok || response.type === "opaque")) {
-        cache.put(request, response.clone());
+    const response = await fetch(request, { cache: "no-store" });
+    if (responseIsPublicImmutable(response)) {
+        await cache.put(request, response.clone());
     }
     return response;
 }
 
 self.addEventListener("fetch", event => {
-    if (event.request.method !== "GET") {
-        return;
-    }
     const url = new URL(event.request.url);
-    if (url.searchParams.has("uuid") && isFrontendFileRequest(event.request, url)) {
-        event.respondWith(fetch(event.request, { cache: "no-store" }));
-        return;
+    if (isManifestRequest(event.request, url)) {
+        event.respondWith(cacheFirst(canonicalAssetRequest(url)));
     }
-    // Only this backend's assets share its instance UUID. Cross-origin PyPI
-    // and micropip requests must keep their canonical URLs.
-    if (REQUEST_UUID && url.origin === self.location.origin && isFrontendFileRequest(event.request, url)) {
-        const bustedRequest = new Request(withRequestUuid(url), event.request);
-        event.respondWith(fetch(bustedRequest, { cache: "no-store" }));
-        return;
-    }
-    if (!shouldCache(url)) {
-        return;
-    }
-    event.respondWith(cacheFirst(event.request));
 });

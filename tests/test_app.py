@@ -1591,22 +1591,24 @@ def test_frontend_runtime_cache_busts_packaged_app_fetch(fresh_client):
     """
     response = fresh_client.get("/frontend/pytincture.js")
     assert response.status_code == 200
-    assert "installCacheBustingFetch(config.requestUuid)" in response.text
+    assert "installCacheBustingFetch" not in response.text
+    assert "globalThis.fetch =" not in response.text
     assert 'withRequestUuid(`${config.application}/appcode/appcode.pyt`, config.requestUuid)' in response.text
     assert "loadScript(`${config.pyodideBaseUrl}pyodide.asm.js`, config.requestUuid)" in response.text
-    assert "cache_bust_url(cleaned)" in response.text
+    assert "withSameOriginRequestUuid(url, requestUuid)" in response.text
+    assert "cache_bust_url(cleaned)" not in response.text
 
 
 def test_frontend_runtime_cache_busts_only_backend_micropip_installs(fresh_client):
     response = fresh_client.get("/frontend/pytincture.js")
 
     assert response.status_code == 200
-    assert "if (cacheBustingSuspensionDepth > 0)" in response.text
-    assert "await withoutCacheBusting(() => pyodide.runPythonAsync" in response.text
-    assert "withRequestUuid(lib, activeRequestUuid)" not in response.text
-    assert "cacheBust ? withRequestUuid(source, activeRequestUuid) : source" in response.text
+    assert "cacheBustingSuspensionDepth" not in response.text
+    assert "withoutCacheBusting" not in response.text
+    assert "activeRequestUuid" not in response.text
+    assert "requestUuid ? withRequestUuid(source, requestUuid) : source" in response.text
     assert "await installWidgetsetSource(pyodide, primarySource);" in response.text
-    assert "await installWidgetsetSource(pyodide, lockedSource, true);" in response.text
+    assert "await installWidgetsetSource(pyodide, lockedSource, config.requestUuid);" in response.text
     assert "#sha256=${backendWheel.sha256}" in response.text
 
 
@@ -1624,25 +1626,64 @@ def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_cli
     assert "is not available from PyPI; checking backend wheels" in response.text
     assert "Failed to install widgetset from ${primarySource}" not in response.text
     assert response.text.index("const backendWheel = await probeBackendWheel(source)") < response.text.index(
-        "await installWidgetsetSource(pyodide, lockedSource, true)"
+        "await installWidgetsetSource(pyodide, lockedSource, config.requestUuid)"
     )
     assert "x-pytincture-sha256" in response.text
     assert "throw lastInstallError" in response.text
     assert 'name === "pytincture_csrf"' in response.text
     assert 'headers["X-CSRF-Token"] = csrfToken' in response.text
 
-def test_service_worker_skips_cache_for_all_uuid_busted_files(fresh_client):
-    """
-    Every UUID-bearing file should bypass the service-worker cache.
-    """
+def test_service_worker_only_caches_manifested_framework_assets(fresh_client):
     response = fresh_client.get("/frontend/sw.js")
     assert response.status_code == 200
     assert response.headers["service-worker-allowed"] == "/"
     assert response.headers["cache-control"] == "no-store, max-age=0"
-    assert 'url.searchParams.has("uuid")' in response.text
-    assert "url.origin === self.location.origin" in response.text
-    assert "new Request(withRequestUuid(url), event.request)" in response.text
-    assert 'fetch(bustedRequest, { cache: "no-store" })' in response.text
+    assert "FRAMEWORK_ASSET_PATHS" in response.text
+    assert '"pyodide/0.29.3/full/pyodide.js"' in response.text
+    assert 'canonicalUrl.searchParams.set("uuid", REQUEST_UUID)' in response.text
+    assert 'url.pathname.includes("/appcode/")' not in response.text
+    assert "CACHEABLE_EXTENSIONS" not in response.text
+    assert "caches.delete" not in response.text
+    assert 'credentials: "omit"' in response.text
+
+
+def test_application_service_worker_is_limited_to_its_frontend_scope(fresh_client):
+    response = fresh_client.get("/demoapp/frontend/sw.js")
+    assert response.status_code == 200
+    assert response.headers["service-worker-allowed"] == "/demoapp/"
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+
+
+def test_service_worker_bytes_change_with_cache_namespace(fresh_client):
+    first = fresh_client.get("/demoapp/frontend/sw.js?uuid=instance-a&release=rc1")
+    repeated = fresh_client.get("/demoapp/frontend/sw.js?uuid=instance-a&release=rc1")
+    restarted = fresh_client.get("/demoapp/frontend/sw.js?uuid=instance-b&release=rc1")
+    upgraded = fresh_client.get("/demoapp/frontend/sw.js?uuid=instance-a&release=rc2")
+
+    assert first.content == repeated.content
+    assert first.content != restarted.content
+    assert first.content != upgraded.content
+
+
+def test_authenticated_frontend_assets_are_public_and_do_not_rotate_session(
+    fresh_client, monkeypatch
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setenv("ALLOWED_EMAILS", "asset-user@example.com")
+    login = fresh_client.post(
+        "/demoapp/auth/user",
+        data={"email": "asset-user@example.com", "password": "unused"},
+        follow_redirects=False,
+    )
+    assert login.status_code == 303
+
+    asset = fresh_client.get("/demoapp/frontend/pytincture.js?uuid=test-instance")
+    assert asset.status_code == 200
+    assert asset.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert "set-cookie" not in asset.headers
 
 
 def test_health_and_readiness_endpoints(fresh_client):

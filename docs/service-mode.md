@@ -65,6 +65,9 @@ The widgetset resolution order is:
 3. request backend version `99.99.99` only as an explicit development fallback.
 
 Micropip/package-index URLs are not modified with the backend cache UUID.
+The optional service worker uses a per-application scope and an exact immutable
+framework-asset manifest. It does not intercept appcode, BFF/auth calls,
+cross-origin requests, or unrelated same-origin resources.
 
 ## Production
 
