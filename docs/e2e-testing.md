@@ -9,7 +9,9 @@ application in Chromium, Firefox, and WebKit. The fixture verifies:
 - CSS application and widget JavaScript/CSS asset discovery;
 - verified local login and sync, async, and streaming BFF calls;
 - UUID cache namespaces without query parameters on the visible app URL;
-- service-worker registration; and
+- application-scoped service-worker registration, upgrade/unregister behavior,
+  private-response rejection, foreign-cache preservation, and unmodified
+  cross-origin/presigned requests; and
 - visible, non-fallback entrypoint failure diagnostics.
 
 ## Pinned compatibility matrix

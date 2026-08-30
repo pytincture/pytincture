@@ -61,3 +61,16 @@ Pytincture reads local metadata through the AST without importing browser-only
 code on the server. A root-level wheel is public only when its distribution
 name and version match the application widgetset. Backend wheel URLs receive
 the server cache UUID; micropip package-index requests do not.
+
+## Framework caching
+
+When enabled, the service worker is scoped to one application and matches only
+the bundled immutable Pytincture/Pyodide asset manifest. Its cache name includes
+the application, runtime release, and service instance UUID. It never caches
+appcode, BFF/auth responses, private or cookie-setting responses, or arbitrary
+same-origin files, and it never deletes caches belonging to other applications
+or libraries.
+
+The runtime constructs UUID URLs only for same-origin framework/backend assets;
+it does not replace global `fetch`. Package indexes, cross-origin APIs, and
+presigned URLs remain unchanged.

@@ -5,6 +5,12 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Scoped service workers and caches per application/release, limited interception
+  to an explicit immutable framework-asset manifest, preserved unrelated caches
+  and signed/cross-origin requests, and removed the runtime-wide `fetch` patch.
+  Private, authenticated, cookie-setting, and credential-varying responses are
+  never cached; application URLs remain clean while backend assets retain their
+  instance UUID.
 - Restricted browser installs to exact package pins or SHA-256-locked wheels,
   disabled unpinned/transitive bootstrap installs, and replaced recursive
   site-packages JavaScript evaluation with widget-owned hashed asset manifests.

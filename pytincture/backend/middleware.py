@@ -44,10 +44,26 @@ class RotatingSessionMiddleware(SessionMiddleware):
         else:
             scope["session"] = {}
 
+        path = str(scope.get("path") or "")
+        path_parts = path.split("/")
+        is_frontend_asset = (
+            scope["type"] == "http"
+            and str(scope.get("method") or "GET").upper() in {"GET", "HEAD"}
+            and (
+                path.startswith("/frontend/")
+                or (len(path_parts) > 2 and path_parts[2] == "frontend")
+            )
+        )
+
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
-                if scope["session"]:
+                if is_frontend_asset and message.get("status") == 200:
+                    if "set-cookie" in headers:
+                        del headers["set-cookie"]
+                    if "cache-control" not in headers:
+                        headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                elif scope["session"]:
                     data = base64.b64encode(
                         json.dumps(scope["session"]).encode("utf-8")
                     )

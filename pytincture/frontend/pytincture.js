@@ -68,9 +68,6 @@ const LIFECYCLE_STAGES = Object.freeze({
 
 let loggingInstalled = false;
 const originalConsoleMethods = {};
-let nativeFetch = null;
-let activeRequestUuid = null;
-let cacheBustingSuspensionDepth = 0;
 
 function sanitizeDiagnostic(value) {
     if (value === null || value === undefined) {
@@ -213,44 +210,18 @@ function withRequestUuid(value, requestUuid) {
     return `${base}${hash}`;
 }
 
-function installCacheBustingFetch(requestUuid) {
-    if (!requestUuid || typeof globalThis === "undefined" || typeof globalThis.fetch !== "function") {
-        return;
+function withSameOriginRequestUuid(value, requestUuid) {
+    if (!value || !requestUuid || typeof window === "undefined" || !window.location) {
+        return value;
     }
-    activeRequestUuid = requestUuid;
-    if (nativeFetch) {
-        return;
-    }
-
-    nativeFetch = globalThis.fetch.bind(globalThis);
-    globalThis.fetch = function (resource, options) {
-        // micropip validates package and wheel URLs. Query-string cache tokens
-        // can make otherwise valid package sources unresolvable, so installs
-        // temporarily use the original fetch implementation.
-        if (cacheBustingSuspensionDepth > 0) {
-            return nativeFetch(resource, options);
-        }
-        const requestMethod = String(
-            options?.method || (typeof Request !== "undefined" && resource instanceof Request ? resource.method : "GET"),
-        ).toUpperCase();
-        if (requestMethod !== "GET" && requestMethod !== "HEAD") {
-            return nativeFetch(resource, options);
-        }
-
-        if (typeof Request !== "undefined" && resource instanceof Request) {
-            const bustedRequest = new Request(withRequestUuid(resource.url, activeRequestUuid), resource);
-            return nativeFetch(bustedRequest, options);
-        }
-        return nativeFetch(withRequestUuid(String(resource), activeRequestUuid), options);
-    };
-}
-
-async function withoutCacheBusting(callback) {
-    cacheBustingSuspensionDepth += 1;
     try {
-        return await callback();
-    } finally {
-        cacheBustingSuspensionDepth -= 1;
+        const resolved = new URL(value, window.location.href);
+        if (resolved.origin !== window.location.origin) {
+            return value;
+        }
+        return withRequestUuid(resolved.href, requestUuid);
+    } catch (_error) {
+        return value;
     }
 }
 
@@ -274,15 +245,20 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
         merged.requestUuid = merged.requestUuid || makeRequestId();
         merged.entrypoint = merged.entrypoint || merged.application;
         merged.devWidgetHost = resolveDevWidgetHost(merged.devWidgetHost);
-        if (merged.application && merged.serviceWorkerUrl === DEFAULT_CONFIG.serviceWorkerUrl) {
-            merged.serviceWorkerUrl = "/frontend/sw.js";
+        if (merged.application) {
+            if (merged.serviceWorkerUrl === DEFAULT_CONFIG.serviceWorkerUrl) {
+                merged.serviceWorkerUrl = `/${merged.application}/frontend/sw.js`;
+            }
+            if (merged.serviceWorkerScope === DEFAULT_CONFIG.serviceWorkerScope) {
+                merged.serviceWorkerScope = `/${merged.application}/`;
+            }
         }
         if (!("enableBackendLogging" in arg1)) {
             merged.enableBackendLogging = !!merged.application;
         }
         if (merged.application && (merged.pyodideBaseUrl.startsWith("frontend/") || merged.pyodideBaseUrl.startsWith("./frontend/"))) {
             const cleanPath = merged.pyodideBaseUrl.replace(/^\.\//, "");
-            merged.pyodideBaseUrl = ensureTrailingSlash(`${merged.application}/${cleanPath}`);
+            merged.pyodideBaseUrl = ensureTrailingSlash(`/${merged.application}/${cleanPath}`);
         }
         return merged;
     }
@@ -297,13 +273,14 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
     config.pyodideBaseUrl = ensureTrailingSlash(config.pyodideBaseUrl);
     config.requestUuid = config.requestUuid || makeRequestId();
     config.devWidgetHost = resolveDevWidgetHost(config.devWidgetHost);
-    if (config.application && config.serviceWorkerUrl === DEFAULT_CONFIG.serviceWorkerUrl) {
-        config.serviceWorkerUrl = "/frontend/sw.js";
+    if (config.application) {
+        config.serviceWorkerUrl = `/${config.application}/frontend/sw.js`;
+        config.serviceWorkerScope = `/${config.application}/`;
     }
     config.enableBackendLogging = !!application;
     if (config.application && (config.pyodideBaseUrl.startsWith("frontend/") || config.pyodideBaseUrl.startsWith("./frontend/"))) {
         const cleanPath = config.pyodideBaseUrl.replace(/^\.\//, "");
-        config.pyodideBaseUrl = ensureTrailingSlash(`${config.application}/${cleanPath}`);
+        config.pyodideBaseUrl = ensureTrailingSlash(`/${config.application}/${cleanPath}`);
     }
     return config;
 }
@@ -385,7 +362,7 @@ function preflightPyodide(pyodide) {
 function loadScript(url, requestUuid) {
     return new Promise((resolve, reject) => {
         const script = document.createElement("script");
-        script.src = withRequestUuid(url, requestUuid);
+        script.src = withSameOriginRequestUuid(url, requestUuid);
         script.onload = resolve;
         script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
         document.head.appendChild(script);
@@ -396,7 +373,7 @@ function ensureMaterialIcons(url, requestUuid) {
     if (!url) {
         return;
     }
-    const stylesheetUrl = withRequestUuid(url, requestUuid);
+    const stylesheetUrl = withSameOriginRequestUuid(url, requestUuid);
     const existing = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).some(link => link.href === stylesheetUrl);
     if (existing) {
         return;
@@ -554,19 +531,142 @@ function removeLoadingOverlay(overlay) {
 
 async function ensureServiceWorker(config) {
     if (!config.enableServiceWorker) {
+        await unregisterOwnedServiceWorker(config);
         return;
     }
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
         return;
     }
     try {
-        await navigator.serviceWorker.register(withRequestUuid(config.serviceWorkerUrl, config.requestUuid), {
+        const workerUrl = new URL(config.serviceWorkerUrl, window.location.href);
+        workerUrl.searchParams.set("uuid", config.requestUuid);
+        workerUrl.searchParams.set("application", config.application || "standalone");
+        workerUrl.searchParams.set("release", PYTINCTURE_RUNTIME_VERSION);
+        const registration = await navigator.serviceWorker.register(workerUrl.href, {
             scope: config.serviceWorkerScope,
         });
-        await navigator.serviceWorker.ready;
+        await waitForServiceWorkerActivation(registration);
+        await waitForServiceWorkerControl(registration);
+        await deleteStaleOwnedCaches(config);
     } catch (err) {
         console.warn("Service worker registration failed:", err);
     }
+}
+
+async function waitForServiceWorkerControl(registration) {
+    if (navigator.serviceWorker.controller) {
+        return registration;
+    }
+    await Promise.race([
+        new Promise(resolve => {
+            const handleControllerChange = () => {
+                navigator.serviceWorker.removeEventListener("controllerchange", handleControllerChange);
+                resolve(registration);
+            };
+            navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
+        }),
+        new Promise(resolve => setTimeout(() => resolve(registration), 5000)),
+    ]);
+    return registration;
+}
+
+async function waitForServiceWorkerActivation(registration) {
+    if (registration.active) {
+        return registration;
+    }
+    const worker = registration.installing || registration.waiting;
+    if (!worker) {
+        return registration;
+    }
+    await Promise.race([
+        new Promise(resolve => {
+            const handleStateChange = () => {
+                if (worker.state === "activated" || worker.state === "redundant") {
+                    worker.removeEventListener("statechange", handleStateChange);
+                    resolve(registration);
+                }
+            };
+            worker.addEventListener("statechange", handleStateChange);
+            handleStateChange();
+        }),
+        new Promise(resolve => setTimeout(() => resolve(registration), 5000)),
+    ]);
+    return registration;
+}
+
+function ownedCachePrefix(config) {
+    const application = encodeURIComponent(config.application || "standalone");
+    return `pytincture:${application}:`;
+}
+
+function frameworkCacheName(config) {
+    return `${ownedCachePrefix(config)}${PYTINCTURE_RUNTIME_VERSION}:${config.requestUuid}`;
+}
+
+async function deleteStaleOwnedCaches(config) {
+    if (typeof caches === "undefined") {
+        return;
+    }
+    const currentCache = frameworkCacheName(config);
+    const keys = await caches.keys();
+    await Promise.all(
+        keys
+            .filter(key => key.startsWith(ownedCachePrefix(config)) && key !== currentCache)
+            .map(key => caches.delete(key)),
+    );
+}
+
+function frameworkAssetUrls(config) {
+    if (typeof window === "undefined" || !window.location) {
+        return [];
+    }
+    const assetBaseUrl = config.application
+        ? new URL(`/${config.application}/frontend/`, window.location.href)
+        : new URL(config.serviceWorkerScope, window.location.href);
+    const relativePaths = [
+        "pytincture.js",
+        "pyodide/0.29.3/full/pyodide.js",
+        "pyodide/0.29.3/full/pyodide.asm.js",
+        "pyodide/0.29.3/full/pyodide.asm.wasm",
+        "pyodide/0.29.3/full/pyodide-lock.json",
+        "pyodide/0.29.3/full/python_stdlib.zip",
+        "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl",
+        "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl.metadata",
+    ];
+    return relativePaths.map(path => withRequestUuid(new URL(path, assetBaseUrl).href, config.requestUuid));
+}
+
+function responseIsPublicImmutable(response) {
+    if (!response?.ok || response.type === "opaque") {
+        return false;
+    }
+    const cacheControl = response.headers?.get?.("cache-control") || "";
+    const vary = response.headers?.get?.("vary") || "";
+    return !/(?:^|,)\s*(?:private|no-store)(?:\s|,|$)/i.test(cacheControl)
+        && !/(?:^|,)\s*(?:cookie|authorization)(?:\s|,|$)/i.test(vary)
+        && !response.headers?.get?.("set-cookie");
+}
+
+async function unregisterOwnedServiceWorker(config) {
+    if (!config.application || typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+        return false;
+    }
+    const scopeUrl = new URL(config.serviceWorkerScope, window.location.href);
+    const expectedWorker = new URL(config.serviceWorkerUrl, window.location.href);
+    const registration = await navigator.serviceWorker.getRegistration(scopeUrl.href);
+    const activeUrl = registration?.active?.scriptURL || registration?.waiting?.scriptURL
+        || registration?.installing?.scriptURL || "";
+    let removed = false;
+    if (registration && activeUrl && new URL(activeUrl).pathname === expectedWorker.pathname) {
+        removed = await registration.unregister();
+    }
+    if (typeof caches !== "undefined") {
+        const keys = await caches.keys();
+        await Promise.all(
+            keys.filter(key => key.startsWith(ownedCachePrefix(config))).map(key => caches.delete(key)),
+        );
+    }
+    return removed;
 }
 
 async function warmPyodideCache(config) {
@@ -576,28 +676,26 @@ async function warmPyodideCache(config) {
     if (typeof caches === "undefined") {
         return;
     }
-    const base = ensureTrailingSlash(config.pyodideBaseUrl);
-    const resources = [
-        `${base}pyodide.js`,
-        `${base}pyodide.asm.js`,
-        `${base}pyodide.asm.wasm`,
-        `${base}pyodide-lock.json`,
-        `${base}python_stdlib.zip`,
-    ];
+    const resources = frameworkAssetUrls(config);
     try {
-        const cache = await caches.open("pytincture-preload");
-        await Promise.all(
-            resources.map(async url => {
-                const request = new Request(withRequestUuid(url, config.requestUuid), { mode: "cors", credentials: "omit" });
-                const existing = await cache.match(request);
-                if (!existing) {
-                    const response = await fetch(request);
-                    if (response && (response.ok || response.type === "opaque")) {
-                        await cache.put(request, response.clone());
-                    }
+        const cacheName = frameworkCacheName(config);
+        const cache = await caches.open(cacheName);
+        const cachedUrls = new Set((await cache.keys()).map(request => request.url));
+        for (const url of resources) {
+            const cacheRequest = new Request(url, { credentials: "omit" });
+            if (!cachedUrls.has(cacheRequest.url)) {
+                const networkUrl = new URL(url);
+                networkUrl.searchParams.set("pytincture_warm", "1");
+                const networkRequest = new Request(networkUrl.href, {
+                    credentials: "omit",
+                });
+                const response = await fetch(networkRequest, { cache: "no-store" });
+                if (responseIsPublicImmutable(response)) {
+                    await cache.put(cacheRequest, response.clone());
+                    cachedUrls.add(cacheRequest.url);
                 }
-            }),
-        );
+            }
+        }
     } catch (err) {
         console.warn("Pyodide cache warm failed:", err);
     }
@@ -634,10 +732,10 @@ async function installExtraMicropipLibs(pyodide, selector) {
     for (const lib of libs) {
         validatePackageRequirement(lib, { label: "micropip-libs entry" });
         const libLiteral = JSON.stringify(lib);
-        await withoutCacheBusting(() => pyodide.runPythonAsync(`
+        await pyodide.runPythonAsync(`
 import micropip
 await micropip.install(${libLiteral}, deps=False)
-        `));
+        `);
     }
 }
 
@@ -790,15 +888,15 @@ except Exception as exc:
     return true;
 }
 
-async function installWidgetsetSource(pyodide, source, cacheBust = false) {
+async function installWidgetsetSource(pyodide, source, requestUuid = null) {
     // Only wheels served by this Pytincture backend share the server-instance
     // cache namespace. PyPI and user-supplied micropip sources stay canonical.
-    const installSource = cacheBust ? withRequestUuid(source, activeRequestUuid) : source;
+    const installSource = requestUuid ? withRequestUuid(source, requestUuid) : source;
     const sourceLiteral = JSON.stringify(installSource);
-    await withoutCacheBusting(() => pyodide.runPythonAsync(`
+    await pyodide.runPythonAsync(`
 import micropip
 await micropip.install(${sourceLiteral}, deps=False)
-    `));
+    `);
 }
 
 async function installWidgetset(pyodide, config) {
@@ -837,7 +935,7 @@ async function installWidgetset(pyodide, config) {
             }
             try {
                 const lockedSource = `${backendWheel.url}#sha256=${backendWheel.sha256}`;
-                await installWidgetsetSource(pyodide, lockedSource, true);
+                await installWidgetsetSource(pyodide, lockedSource, config.requestUuid);
                 installedSource = lockedSource;
                 break;
             } catch (error) {
@@ -857,7 +955,6 @@ async function loadWidgetsetAssets(pyodide, config, installedSource) {
     if (!installedSource) {
         return { installedSource: null, javascriptAssets: 0, cssAssets: 0 };
     }
-    const requestUuidLiteral = JSON.stringify(config.requestUuid);
     const widgetPackageLiteral = JSON.stringify(
         String(config.widgetlib || "").match(/^[A-Za-z0-9_.\-]+/)?.[0] || "",
     );
@@ -875,7 +972,6 @@ import importlib.metadata
 import posixpath
 from urllib.parse import unquote
 
-REQUEST_UUID = ${requestUuidLiteral}
 CONFIGURED_MANIFEST = json.loads(unquote(${configuredManifestLiteral}))
 BUILTIN_MANIFESTS = ${builtinManifestsLiteral}
 widget_package = ${widgetPackageLiteral}
@@ -922,23 +1018,6 @@ assets = manifest.get("assets")
 if not isinstance(assets, list) or not assets or len(assets) > 128:
     raise RuntimeError("Widget asset manifest must declare between 1 and 128 assets")
 
-def cache_bust_url(url_value):
-    if not url_value or not REQUEST_UUID:
-        return url_value
-    if url_value.startswith(('data:', 'blob:', '#')):
-        return url_value
-    base, separator, fragment = url_value.partition('#')
-    encoded_uuid = str(REQUEST_UUID)
-    if re.search(r'(^|[?&])uuid=', base):
-        base = re.sub(
-            r'([?&])uuid=[^&]*',
-            lambda match: match.group(1) + 'uuid=' + encoded_uuid,
-            base,
-        )
-    else:
-        base = base + ('&' if '?' in base else '?') + 'uuid=' + encoded_uuid
-    return f"{base}{separator}{fragment}"
-
 def replace_font_urls(css_content, css_asset):
     mime_types = {
         'woff': 'font/woff',
@@ -983,7 +1062,7 @@ def replace_font_urls(css_content, css_asset):
         data_uri = try_inline(cleaned)
         if data_uri:
             return f"url('{data_uri[4:-1]}')" if data_uri.startswith('url(') else data_uri
-        return f"url('{cache_bust_url(cleaned)}')"
+        return f"url('{cleaned}')"
 
     return re.sub(r"url\\(([^)]+)\\)", repl, css_content, flags=re.IGNORECASE)
 
@@ -1227,7 +1306,6 @@ async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_O
 
 async function runTinctureApp(arg1, widgetlib, entrypoint) {
     const config = normalizeConfig(arg1, widgetlib, entrypoint);
-    installCacheBustingFetch(config.requestUuid);
     const loadingOverlay = ensureLoadingOverlay(config);
 
     if (config.enableBackendLogging) {
@@ -1293,8 +1371,13 @@ globalThis.__pytinctureTesting = Object.freeze({
     DEFAULT_RUNTIME_OPERATIONS,
     LIFECYCLE_STAGES,
     PytinctureLifecycleError,
+    frameworkAssetUrls,
+    frameworkCacheName,
     normalizeConfig,
+    responseIsPublicImmutable,
+    unregisterOwnedServiceWorker,
     validatePackageRequirement,
+    withSameOriginRequestUuid,
     runLifecycleStage,
     runStartup,
     runTinctureApp,

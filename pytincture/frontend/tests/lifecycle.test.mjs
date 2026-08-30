@@ -8,9 +8,14 @@ const {
     DEFAULT_RUNTIME_OPERATIONS,
     LIFECYCLE_STAGES,
     PytinctureLifecycleError,
+    frameworkAssetUrls,
+    frameworkCacheName,
     normalizeConfig,
+    responseIsPublicImmutable,
     runStartup,
+    unregisterOwnedServiceWorker,
     validatePackageRequirement,
+    withSameOriginRequestUuid,
 } = globalThis.__pytinctureTesting;
 
 
@@ -334,10 +339,122 @@ test("the archive downloader classifies only 404 and 410 as unavailable", async 
     }
 });
 
-test("service applications register the shared root service worker", () => {
+test("service applications isolate the worker under their application scope", () => {
     const config = normalizeConfig({ application: "sample" });
-    assert.equal(config.serviceWorkerUrl, "/frontend/sw.js");
-    assert.equal(config.serviceWorkerScope, "./");
+    assert.equal(config.serviceWorkerUrl, "/sample/frontend/sw.js");
+    assert.equal(config.serviceWorkerScope, "/sample/");
+    assert.equal(config.pyodideBaseUrl, "/sample/frontend/pyodide/0.29.3/full/");
+});
+
+test("framework caches are namespaced by application, release, and instance uuid", () => {
+    const alpha = normalizeConfig({ application: "alpha", requestUuid: "instance-a" });
+    const beta = normalizeConfig({ application: "beta", requestUuid: "instance-a" });
+    const restarted = normalizeConfig({ application: "alpha", requestUuid: "instance-b" });
+    assert.match(frameworkCacheName(alpha), /^pytincture:alpha:/);
+    assert.notEqual(frameworkCacheName(alpha), frameworkCacheName(beta));
+    assert.notEqual(frameworkCacheName(alpha), frameworkCacheName(restarted));
+});
+
+test("only same-origin framework URLs receive the instance uuid", () => {
+    const previousWindow = globalThis.window;
+    globalThis.window = {
+        location: {
+            href: "https://app.example.test/sample",
+            origin: "https://app.example.test",
+        },
+    };
+    try {
+        const signed = "https://storage.example.test/object?X-Amz-Signature=abc123";
+        assert.equal(withSameOriginRequestUuid(signed, "instance-a"), signed);
+        assert.equal(
+            withSameOriginRequestUuid("/sample/frontend/pytincture.js", "instance-a"),
+            "https://app.example.test/sample/frontend/pytincture.js?uuid=instance-a",
+        );
+        const assets = frameworkAssetUrls(normalizeConfig({
+            application: "sample",
+            requestUuid: "instance-a",
+        }));
+        assert.equal(assets.length, 8);
+        assert.equal(assets.every(url => (
+            new URL(url).pathname.startsWith("/sample/frontend/")
+            && new URL(url).searchParams.get("uuid") === "instance-a"
+        )), true);
+    } finally {
+        globalThis.window = previousWindow;
+    }
+});
+
+test("private, credential-varying, and cookie-setting responses are never cacheable", () => {
+    const response = headers => ({
+        ok: true,
+        type: "basic",
+        headers: { get: name => headers[name.toLowerCase()] || null },
+    });
+    assert.equal(responseIsPublicImmutable(response({ "cache-control": "public, max-age=31536000" })), true);
+    assert.equal(responseIsPublicImmutable(response({ "cache-control": "private, max-age=60" })), false);
+    assert.equal(responseIsPublicImmutable(response({ "cache-control": "no-store" })), false);
+    assert.equal(responseIsPublicImmutable(response({ vary: "Accept-Encoding, Cookie" })), false);
+    assert.equal(responseIsPublicImmutable(response({ "set-cookie": "session=secret" })), false);
+});
+
+test("disabling a service worker removes only the owning application's state", async () => {
+    const previousWindow = globalThis.window;
+    const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    const cachesDescriptor = Object.getOwnPropertyDescriptor(globalThis, "caches");
+    const removed = [];
+    let unregistered = false;
+    globalThis.window = {
+        location: {
+            href: "https://app.example.test/alpha",
+            origin: "https://app.example.test",
+        },
+    };
+    Object.defineProperty(globalThis, "navigator", {
+        configurable: true,
+        value: {
+            serviceWorker: {
+                getRegistration: async () => ({
+                    active: { scriptURL: "https://app.example.test/alpha/frontend/sw.js?uuid=old" },
+                    unregister: async () => {
+                        unregistered = true;
+                        return true;
+                    },
+                }),
+            },
+        },
+    });
+    Object.defineProperty(globalThis, "caches", {
+        configurable: true,
+        value: {
+            keys: async () => [
+                "pytincture:alpha:old-release:old",
+                "pytincture:beta:current-release:new",
+                "foreign-library-cache",
+            ],
+            delete: async key => {
+                removed.push(key);
+                return true;
+            },
+        },
+    });
+    try {
+        const result = await unregisterOwnedServiceWorker(normalizeConfig({ application: "alpha" }));
+        assert.equal(result, true);
+        assert.equal(unregistered, true);
+        assert.deepEqual(removed, ["pytincture:alpha:old-release:old"]);
+    } finally {
+        globalThis.window = previousWindow;
+        if (navigatorDescriptor) {
+            Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+        } else {
+            delete globalThis.navigator;
+        }
+        if (cachesDescriptor) {
+            Object.defineProperty(globalThis, "caches", cachesDescriptor);
+        } else {
+            delete globalThis.caches;
+        }
+    }
 });
 
 test("lifecycle diagnostics redact credentials and expose compatibility", async () => {
