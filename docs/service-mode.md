@@ -16,9 +16,21 @@ my_service/
 └── dashboard.css       # add through PYTINCTURE_BROWSER_FILES
 ```
 
-The URL application name selects `<application>.py`, and the default
-entrypoint is a class or callable with the same name. Keep secrets and database
-clients in BFF/server modules; never put them in browser files.
+The URL application name selects `<application>.py`. Pytincture discovers its
+browser entrypoint from source without importing or executing the module on the
+server. The supported forms are:
+
+- a top-level class or callable with the same name as the application;
+- a top-level class directly inheriting from `dhxpyt.layout.MainWindow`,
+  including normal import aliases; or
+- explicit literal metadata such as `APP_ENTRYPOINT = "Dashboard"` or
+  `APP_CONFIG = {"entrypoint": "Dashboard"}`.
+
+Explicit metadata must name a top-level class or function. Dynamic entrypoint
+expressions and inheritance patterns that cannot be resolved statically return
+a clear validation error; add literal metadata for those applications. Keep
+secrets and database clients in BFF/server modules; never put them in browser
+files.
 
 ## ASGI factory
 

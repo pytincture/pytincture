@@ -14,6 +14,9 @@ suffix is a transport convention; the payload is a standard ZIP archive.
 - All member names are relative, POSIX-style paths with no leading slash or
   parent traversal.
 - `{application}.py` is the required entrypoint at the archive root.
+- The service discovers the callable without executing this file. A callable
+  named for the application, a direct `MainWindow` subclass, or literal
+  `APP_ENTRYPOINT`/`APP_CONFIG["entrypoint"]` metadata identifies it.
 - Statically reachable local Python imports are included recursively.
 - Package `__init__.py` files required by included modules are included.
 - Extra files selected by `PYTINCTURE_BROWSER_FILES` are included with their

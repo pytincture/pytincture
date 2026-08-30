@@ -87,6 +87,7 @@ from pytincture.backend.middleware import (
     RotatingSessionMiddleware,
 )
 from pytincture.backend.pages import (
+    EntryPointDiscoveryError,
     find_app_favicon as _find_app_favicon_metadata,
 )
 from pytincture.backend.pages import (
@@ -3503,12 +3504,17 @@ async def main_app_route(response: Response, application: str, request: Request)
     index_html = open(f"{STATIC_PATH}/index.html").read()
     index_html = index_html.replace("***APPLICATION***", safe_application)
     
-    # Find the proper entrypoint class (MainWindow subclass)
+    entrypoint_source = decode_python_source(secure_entrypoint.content)
+
+    # Find the proper entrypoint class without importing browser code here.
     app_file_path = secure_entrypoint.path
-    main_window_class = find_main_window_subclass(
-        app_file_path,
-        expected_digest=secure_entrypoint.digest,
-    )
+    try:
+        main_window_class = find_main_window_subclass(
+            app_file_path,
+            source_code=entrypoint_source,
+        )
+    except EntryPointDiscoveryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if main_window_class:
         # Use the discovered MainWindow subclass name as the entrypoint
         index_html = index_html.replace("***ENTRYPOINT***", main_window_class)
@@ -3518,7 +3524,6 @@ async def main_app_route(response: Response, application: str, request: Request)
     
     loading_title = application
     favicon_markup = ""
-    entrypoint_source = decode_python_source(secure_entrypoint.content)
     loading_title = find_app_loading_title(
         app_file_path,
         application,
@@ -3543,17 +3548,22 @@ async def main_app_route(response: Response, application: str, request: Request)
         },
     )
 
-def find_main_window_subclass(file_path, *, expected_digest=None):
+def find_main_window_subclass(file_path, *, expected_digest=None, source_code=None):
     """
     Scans a Python file for a class that subclasses MainWindow.
     Returns the name of the first such class found, or None if no match.
     """
-    return _find_main_window(
-        file_path,
-        lambda path, hint: _load_source_module(
-            path, hint, expected_digest=expected_digest
-        ),
-    )
+    if source_code is None:
+        secure_source = read_contained_file(
+            os.path.dirname(os.fspath(file_path)),
+            os.path.basename(os.fspath(file_path)),
+        )
+        if expected_digest and secure_source.digest != expected_digest:
+            raise EntryPointDiscoveryError(
+                "Browser entrypoint source changed during discovery"
+            )
+        source_code = decode_python_source(secure_source.content)
+    return _find_main_window(file_path, source_code=source_code)
 
 def _find_app_string_setting(
     file_path, assignment_names, config_keys, *, source_code=None

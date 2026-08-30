@@ -15,7 +15,7 @@ creating a service or mutating process-global environment state:
 | `saml` | SAML provider parsing, selection, login-button metadata, and role policy |
 | `bff` | Per-application BFF manifest discovery and registry ownership |
 | `browser_packages` | Static widgetset discovery and browser archive file selection/building |
-| `pages` | Application title, entrypoint, and favicon metadata discovery |
+| `pages` | AST-only application title, entrypoint, and favicon metadata discovery |
 | `mcp` | Explicit MCP operation policy, schema filtering, and transport compatibility |
 | `middleware` | Rotating signed sessions and request body limits |
 | `storage` | Injectable Redis-backed shared session and one-time-token storage |
@@ -34,6 +34,9 @@ module first and retain route-level tests for observable HTTP behavior.
   not read another application instance's environment.
 - Local browser metadata is parsed statically where possible; discovering a
   widgetset does not execute application modules.
+- Serving a page or appcode archive never imports the browser entrypoint on the
+  server. Entrypoint discovery accepts documented static aliases and literal
+  metadata and rejects ambiguous dynamic patterns.
 - Mutable BFF and storage state belongs to an application instance or an
   explicitly constructed store.
 - Routes, operation IDs, session schema, and public imports remain governed by
