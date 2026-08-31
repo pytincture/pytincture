@@ -133,6 +133,29 @@ async function measureAuthenticatedBff(page, sampleCount) {
     }, sampleCount);
 }
 
+test("BFF documentation uses packaged hash-locked assets", async ({ page }) => {
+    const diagnostics = collectDiagnostics(page);
+    const response = await page.goto("/bff-docs");
+    expect(response.ok()).toBe(true);
+    await expect(page).toHaveURL("/bff-docs");
+    await expect(page.locator(".swagger-ui .info .title")).toContainText("pyTincture API");
+
+    const documentationRequests = diagnostics.requests.filter(entry => {
+        const url = new URL(entry.url);
+        return url.pathname.includes("swagger-ui")
+            || url.pathname.endsWith("/bff-docs.js")
+            || url.pathname.endsWith("/bff-docs/openapi.json");
+    });
+    expect(documentationRequests.length).toBe(4);
+    for (const entry of documentationRequests) {
+        const url = new URL(entry.url);
+        expect(url.origin).toBe("http://127.0.0.1:8079");
+        expect(url.searchParams.get("uuid")).toMatch(/^[a-f0-9]{32}$/);
+    }
+    expect(diagnostics.requests.some(entry => entry.url.includes("cdn.jsdelivr.net"))).toBe(false);
+    expect(diagnostics.consoleEntries.filter(entry => entry.type === "error")).toEqual([]);
+});
+
 test("authenticated packaged and inline apps run through real Pyodide", async ({ page, request }, testInfo) => {
     const diagnostics = collectDiagnostics(page);
     const performanceEvidence = { browser: testInfo.project.name };

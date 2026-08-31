@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Restore the interactive BFF API documentation under the enforced CSP by
+  packaging an exact, SHA-256-locked Swagger UI release in the Python wheel.
+  Documentation assets are same-origin, explicit framework-manifest entries
+  with the service instance UUID; no floating CDN scripts are executed.
 - Remove first-party SHA-1 usage by deleting unreachable certificate/XML
   helpers and using SHA-256 for internal module labels, and stop requesting
   Microsoft's unused `offline_access` permission. Active bounded SAML

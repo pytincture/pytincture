@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "package": "swagger-ui-dist",
+  "version": "5.32.14",
+  "license": "Apache-2.0",
+  "source": "https://registry.npmjs.org/swagger-ui-dist/-/swagger-ui-dist-5.32.14.tgz",
+  "npm_integrity": "sha512-nOA2pSQhcmODMUQZpJHYKNuwniDUqcOWGNaSCOoZv12FdOSJ9JxV95HtyRGNMqEBj6h6lCNTy20TgZDYTSuUIg==",
+  "assets": [
+    {
+      "path": "pytincture/frontend/vendor/swagger-ui/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "pytincture/frontend/vendor/swagger-ui/swagger-ui-bundle.js",
+      "sha256": "16d93d5cc19e54c98fb0b81157dbb3bd90780aa36b914e128a643b31e54a93f4"
+    },
+    {
+      "path": "pytincture/frontend/vendor/swagger-ui/swagger-ui.css",
+      "sha256": "d7f39f764aa18c7b47dd05b9af5613e373e4ac0f3557c2693d52d0abc2464d76"
+    }
+  ]
+}
