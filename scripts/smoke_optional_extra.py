@@ -41,6 +41,8 @@ def main() -> None:
     elif feature == "oauth":
         os.environ["ENABLE_GOOGLE_AUTH"] = "true"
         os.environ["SAML_SECRET_KEY"] = "clean-install-oauth-secret-0123456789abcdef"
+        os.environ["PYTINCTURE_ALLOWED_HOSTS"] = "auth.example.test"
+        os.environ["PYTINCTURE_CANONICAL_ORIGIN"] = "https://auth.example.test"
         import pytincture.backend.app as backend
 
         assert backend.OAuth is not None
@@ -61,6 +63,8 @@ def main() -> None:
     elif feature == "saml":
         os.environ["ENABLE_SAML_AUTH"] = "true"
         os.environ["SAML_SECRET_KEY"] = "clean-install-saml-secret-0123456789abcdef"
+        os.environ["PYTINCTURE_ALLOWED_HOSTS"] = "auth.example.test"
+        os.environ["PYTINCTURE_CANONICAL_ORIGIN"] = "https://auth.example.test"
         import pytincture.backend.app as backend
 
         assert backend.OneLogin_Saml2_Auth is not None
