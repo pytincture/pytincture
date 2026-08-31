@@ -2,7 +2,7 @@ import ast
 from decimal import Subnormal
 import os
 import sys
-from typing import Optional, Set
+from typing import Optional
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -15,25 +15,188 @@ from pytincture.configuration import get_runtime_env
 bff_routes: Dict[str, Dict] = {}
 
 
-def _collect_import_aliases(module: ast.Module, export_name: str) -> Set[str]:
-    aliases = {export_name}
-    for node in module.body:
-        if isinstance(node, ast.ImportFrom) and (node.module or "") in {"pytincture", "pytincture.dataclass"}:
-            for alias in node.names:
-                if alias.name == export_name:
-                    aliases.add(alias.asname or alias.name)
-    return aliases
+_PYTINCTURE_DECORATOR_MODULES = frozenset({"pytincture", "pytincture.dataclass"})
+_PYTINCTURE_DECORATORS = frozenset({
+    "backend_for_frontend",
+    "bff_http_methods",
+    "bff_policy",
+    "bff_stream",
+})
 
 
-def _collect_module_aliases(module: ast.Module) -> Set[str]:
-    aliases = set()
-    for node in module.body:
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name in {"pytincture", "pytincture.dataclass"}:
-                    aliases.add(alias.asname or alias.name.split(".")[-1])
-                    aliases.add(alias.name)
-    return aliases
+class _DecoratorBindings:
+    """Known decorator/module bindings at one point in module execution."""
+
+    def __init__(self):
+        self.decorators: Dict[str, str] = {}
+        self.modules: Dict[str, str] = {}
+
+    def copy(self):
+        copied = _DecoratorBindings()
+        copied.decorators = dict(self.decorators)
+        copied.modules = dict(self.modules)
+        return copied
+
+    def invalidate(self, name: str) -> None:
+        self.decorators.pop(name, None)
+        self.modules.pop(name, None)
+
+
+class _BoundNameVisitor(ast.NodeVisitor):
+    """Collect bindings created by a statement without entering nested scopes."""
+
+    def __init__(self):
+        self.names: set[str] = set()
+        self.has_star_import = False
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            self.names.add(node.id)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            dotted_name = _dotted_attribute_name(node)
+            if dotted_name:
+                self.names.add(dotted_name.split(".", 1)[0])
+        self.generic_visit(node)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            self.names.add(alias.asname or alias.name.split(".", 1)[0])
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            if alias.name == "*":
+                self.has_star_import = True
+            else:
+                self.names.add(alias.asname or alias.name)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.names.add(node.name)
+        self._visit_definition_expressions(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.names.add(node.name)
+        self._visit_definition_expressions(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.names.add(node.name)
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for base in node.bases:
+            self.visit(base)
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+
+    def _visit_definition_expressions(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for default in (*node.args.defaults, *node.args.kw_defaults):
+            if default is not None:
+                self.visit(default)
+        for argument in (
+            *node.args.posonlyargs,
+            *node.args.args,
+            *node.args.kwonlyargs,
+        ):
+            if argument.annotation is not None:
+                self.visit(argument.annotation)
+        if node.args.vararg and node.args.vararg.annotation is not None:
+            self.visit(node.args.vararg.annotation)
+        if node.args.kwarg and node.args.kwarg.annotation is not None:
+            self.visit(node.args.kwarg.annotation)
+        if node.returns is not None:
+            self.visit(node.returns)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        return
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        return
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        return
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        return
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        return
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.name:
+            self.names.add(node.name)
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_MatchAs(self, node: ast.MatchAs) -> None:
+        if node.name:
+            self.names.add(node.name)
+        if node.pattern is not None:
+            self.visit(node.pattern)
+
+    def visit_MatchStar(self, node: ast.MatchStar) -> None:
+        if node.name:
+            self.names.add(node.name)
+
+    def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
+        if node.rest:
+            self.names.add(node.rest)
+        self.generic_visit(node)
+
+
+def _apply_binding_statement(bindings: _DecoratorBindings, node: ast.stmt) -> None:
+    """Apply one definitely executed top-level/class binding statement."""
+    if isinstance(node, ast.Import):
+        for alias in node.names:
+            bound_name = alias.asname or alias.name.split(".", 1)[0]
+            bindings.invalidate(bound_name)
+            if alias.name in _PYTINCTURE_DECORATOR_MODULES:
+                bindings.modules[bound_name] = (
+                    alias.name if alias.asname else alias.name.split(".", 1)[0]
+                )
+        return
+
+    if isinstance(node, ast.ImportFrom) and node.level == 0:
+        imported_module = node.module or ""
+        if any(alias.name == "*" for alias in node.names):
+            bindings.decorators.clear()
+            bindings.modules.clear()
+            return
+        for alias in node.names:
+            bound_name = alias.asname or alias.name
+            bindings.invalidate(bound_name)
+            if (
+                imported_module in _PYTINCTURE_DECORATOR_MODULES
+                and alias.name in _PYTINCTURE_DECORATORS
+            ):
+                bindings.decorators[bound_name] = f"{imported_module}.{alias.name}"
+            elif imported_module == "pytincture" and alias.name == "dataclass":
+                bindings.modules[bound_name] = "pytincture.dataclass"
+        return
+
+    visitor = _BoundNameVisitor()
+    visitor.visit(node)
+    if visitor.has_star_import:
+        bindings.decorators.clear()
+        bindings.modules.clear()
+    for name in visitor.names:
+        bindings.invalidate(name)
+
+
+def _binding_snapshots(
+    statements: list[ast.stmt],
+    initial: _DecoratorBindings | None = None,
+) -> Dict[int, _DecoratorBindings]:
+    bindings = initial.copy() if initial is not None else _DecoratorBindings()
+    snapshots: Dict[int, _DecoratorBindings] = {}
+    for statement in statements:
+        snapshots[id(statement)] = bindings.copy()
+        _apply_binding_statement(bindings, statement)
+    return snapshots
 
 
 def _dotted_attribute_name(node: ast.AST) -> Optional[str]:
@@ -52,17 +215,30 @@ def _decorator_matches(
     decorator: ast.AST,
     *,
     decorator_name: str,
-    import_aliases: Set[str],
-    module_aliases: Set[str],
+    bindings: _DecoratorBindings,
 ) -> tuple[bool, ast.AST]:
     target = decorator.func if isinstance(decorator, ast.Call) else decorator
 
     if isinstance(target, ast.Name):
-        return target.id in import_aliases, decorator
+        resolved = bindings.decorators.get(target.id)
+        return resolved in {
+            f"{module}.{decorator_name}"
+            for module in _PYTINCTURE_DECORATOR_MODULES
+        }, decorator
 
-    if isinstance(target, ast.Attribute) and target.attr == decorator_name:
-        dotted_value = _dotted_attribute_name(target.value)
-        return dotted_value in module_aliases, decorator
+    if isinstance(target, ast.Attribute):
+        dotted_target = _dotted_attribute_name(target)
+        if not dotted_target:
+            return False, decorator
+        root_name, separator, remainder = dotted_target.partition(".")
+        module_name = bindings.modules.get(root_name)
+        if not module_name or not separator:
+            return False, decorator
+        resolved = f"{module_name}.{remainder}"
+        return resolved in {
+            f"{module}.{decorator_name}"
+            for module in _PYTINCTURE_DECORATOR_MODULES
+        }, decorator
 
     return False, decorator
 
@@ -154,16 +330,14 @@ def _literal_keyword_metadata(
     decorators: list[ast.expr],
     *,
     decorator_name: str,
-    import_aliases: Set[str],
-    module_aliases: Set[str],
+    bindings: _DecoratorBindings,
 ) -> Dict[str, Any]:
     metadata: Dict[str, Any] = {}
     for decorator in decorators:
         matches, decorator_node = _decorator_matches(
             decorator,
             decorator_name=decorator_name,
-            import_aliases=import_aliases,
-            module_aliases=module_aliases,
+            bindings=bindings,
         )
         if not matches or not isinstance(decorator_node, ast.Call):
             continue
@@ -184,15 +358,13 @@ def _literal_keyword_metadata(
 def _declared_http_methods(
     decorators: list[ast.expr],
     *,
-    import_aliases: Set[str],
-    module_aliases: Set[str],
+    bindings: _DecoratorBindings,
 ) -> tuple[str, ...]:
     for decorator in decorators:
         matches, decorator_node = _decorator_matches(
             decorator,
             decorator_name="bff_http_methods",
-            import_aliases=import_aliases,
-            module_aliases=module_aliases,
+            bindings=bindings,
         )
         if not matches:
             continue
@@ -270,19 +442,16 @@ def get_bff_manifest(
             source = source_file.read()
     module = ast.parse(source, filename=file_path)
 
-    module_aliases = _collect_module_aliases(module)
-    bff_aliases = _collect_import_aliases(module, "backend_for_frontend")
-    policy_aliases = _collect_import_aliases(module, "bff_policy")
-    method_aliases = _collect_import_aliases(module, "bff_http_methods")
+    module_bindings = _binding_snapshots(module.body)
     manifest: Dict[tuple[str, str], Dict[str, Any]] = {}
 
     for class_node in (node for node in module.body if isinstance(node, ast.ClassDef)):
+        class_bindings = module_bindings[id(class_node)]
         is_exported = any(
             _decorator_matches(
                 decorator,
                 decorator_name="backend_for_frontend",
-                import_aliases=bff_aliases,
-                module_aliases=module_aliases,
+                bindings=class_bindings,
             )[0]
             for decorator in class_node.decorator_list
         )
@@ -292,9 +461,9 @@ def get_bff_manifest(
         class_policy = _literal_keyword_metadata(
             class_node.decorator_list,
             decorator_name="bff_policy",
-            import_aliases=policy_aliases,
-            module_aliases=module_aliases,
+            bindings=class_bindings,
         )
+        member_bindings = _binding_snapshots(class_node.body, class_bindings)
         for member in class_node.body:
             if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 if member.name.startswith("_"):
@@ -302,15 +471,13 @@ def get_bff_manifest(
                 method_policy = _literal_keyword_metadata(
                     member.decorator_list,
                     decorator_name="bff_policy",
-                    import_aliases=policy_aliases,
-                    module_aliases=module_aliases,
+                    bindings=member_bindings[id(member)],
                 )
                 manifest[(class_node.name, member.name)] = {
                     "policy": {**class_policy, **method_policy},
                     "http_methods": _declared_http_methods(
                         member.decorator_list,
-                        import_aliases=method_aliases,
-                        module_aliases=module_aliases,
+                        bindings=member_bindings[id(member)],
                     ),
                     "kind": "method",
                     "parameters": _manifest_parameters(member),
@@ -728,10 +895,7 @@ def generate_stub_classes(
         f"/{str(application).strip('/')}" if application else ""
     )
     module = ast.parse(code)
-    backend_for_frontend_aliases = _collect_import_aliases(module, "backend_for_frontend")
-    bff_stream_aliases = _collect_import_aliases(module, "bff_stream")
-    bff_http_method_aliases = _collect_import_aliases(module, "bff_http_methods")
-    module_aliases = _collect_module_aliases(module)
+    module_bindings = _binding_snapshots(module.body)
     class_nodes = [node for node in module.body if isinstance(node, ast.ClassDef)]
     replay_enabled = bool(replay_client)
     replay_capsule = str((replay_client or {}).get("capsule", ""))
@@ -745,8 +909,7 @@ def generate_stub_classes(
             _decorator_matches(
                 decorator,
                 decorator_name="backend_for_frontend",
-                import_aliases=backend_for_frontend_aliases,
-                module_aliases=module_aliases,
+                bindings=module_bindings[id(node)],
             )[0]
             for decorator in node.decorator_list
         )
@@ -775,13 +938,14 @@ def generate_stub_classes(
 
     for class_node in class_nodes:
         class_name = class_node.name
+        class_bindings = module_bindings[id(class_node)]
+        member_bindings = _binding_snapshots(class_node.body, class_bindings)
 
         if any(
             _decorator_matches(
                 decorator,
                 decorator_name="backend_for_frontend",
-                import_aliases=backend_for_frontend_aliases,
-                module_aliases=module_aliases,
+                bindings=class_bindings,
             )[0]
             for decorator in class_node.decorator_list
         ):
@@ -908,8 +1072,7 @@ def generate_stub_classes(
                         matches, decorator_node = _decorator_matches(
                             decorator,
                             decorator_name="bff_stream",
-                            import_aliases=bff_stream_aliases,
-                            module_aliases=module_aliases,
+                            bindings=member_bindings[id(node)],
                         )
                         if matches:
                             streaming_methods[node.name] = _extract_stream_config(decorator_node)
@@ -960,8 +1123,7 @@ def generate_stub_classes(
                     is_async_method = isinstance(node, ast.AsyncFunctionDef)
                     declared_methods = _declared_http_methods(
                         node.decorator_list,
-                        import_aliases=bff_http_method_aliases,
-                        module_aliases=module_aliases,
+                        bindings=member_bindings[id(node)],
                     )
                     request_method = declared_methods[0]
                     if is_streaming:

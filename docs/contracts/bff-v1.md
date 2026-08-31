@@ -6,7 +6,10 @@ by Pytincture 1.x.
 
 ## Operation discovery
 
-- Only classes decorated with `@backend_for_frontend` are exported.
+- Only classes decorated with Pytincture's `@backend_for_frontend` are
+  exported. Static discovery proves that decorator names and module aliases
+  were imported directly from `pytincture.dataclass`; local, unrelated,
+  re-exported, or rebound same-named decorators are not security declarations.
 - Public methods are operations. Public assigned/annotated attributes are
   read-only `GET` operations.
 - Private names beginning with `_` are not exported.

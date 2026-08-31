@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Require statically discovered BFF export, policy, method, and stream
+  decorators to have direct Pytincture import provenance, with source-order
+  shadowing detection. The class-level export API and normal aliases remain
+  unchanged, while same-named local or unrelated decorators can no longer
+  create remotely callable operations.
 - Run both checked-in quickstarts under real Pyodide in Chromium, Firefox, and
   WebKit during CI, and ship the standalone quickstart with its version-matched
   local runtime so it remains runnable before npm publication.
