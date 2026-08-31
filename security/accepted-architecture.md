@@ -139,6 +139,30 @@ Required controls that remain in scope:
 - Sensitive deployments may opt into a shared revocation provider, but it is
   not a framework requirement.
 
+## Application admission remains stateless
+
+An intentionally single-trust service may use one global identity policy for
+all of its applications. A shared multi-app service can opt into a fail-closed
+application admission mapping for provider, issuer, tenant, subject,
+email/domain, and role constraints. Pytincture will not require server-side
+session state to make this authorization decision.
+
+Why:
+
+- The verified identity and admitted application fit in the signed browser
+  session and can be checked independently by every worker.
+- Redis, sticky routing, and in-process ACL state do not improve a deterministic
+  identity-to-application decision.
+
+Required controls that remain in scope:
+
+- Check admission before every authentication flow issues a session.
+- Bind the admitted application as the signed session audience and recheck the
+  rule whenever that audience is enforced.
+- When any per-application mapping is configured, deny applications missing
+  from it and reject malformed rules at startup.
+- Recommend separate origins/processes for materially different trust domains.
+
 ## Redis is optional, not a Pytincture dependency
 
 Redis or another shared atomic store may be configured for features that

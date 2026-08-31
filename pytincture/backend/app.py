@@ -64,6 +64,10 @@ from pytincture.backend.auth import (
     normalize_roles,
     verify_password,
 )
+from pytincture.backend.application_admission import (
+    identity_is_admitted,
+    parse_application_admission,
+)
 from pytincture.backend.bff import BFFRegistry
 from pytincture.backend.bff import build_bff_registry as _build_bff_registry
 from pytincture.backend.browser_packages import (
@@ -764,6 +768,13 @@ try:
 except json.JSONDecodeError as e:
     raise RuntimeError("Invalid JSON in ALLOWED_NOAUTH_CLASSCALLS environment variable") from e
 
+try:
+    APPLICATION_ADMISSION = parse_application_admission(
+        os.environ.get("AUTH_APPLICATION_ADMISSION", "")
+    )
+except ValueError as exc:
+    raise RuntimeError("Invalid AUTH_APPLICATION_ADMISSION configuration") from exc
+
 
 def _service_worker_response(request: Request, *, allowed_scope: str) -> Response:
     """Serve bytes that change when the requested cache namespace changes."""
@@ -1166,6 +1177,8 @@ def _assert_application_audience(user: Any, application: Optional[str]) -> None:
     audience = str(user.get("application") or "")
     if not audience or not hmac.compare_digest(audience, application):
         raise HTTPException(status_code=403, detail="Session is not authorized for this application")
+    if not identity_is_admitted(APPLICATION_ADMISSION, application, user):
+        raise HTTPException(status_code=403, detail="Identity is not authorized for this application")
 
 
 def _application_bff_identifiers(application: str, modules_root: str) -> Set[str]:
@@ -1371,6 +1384,11 @@ def _set_authenticated_user(
 ) -> Dict[str, Any]:
     session_user = _build_auth_session_user(user_info, **identity_overrides)
     session_user["application"] = application
+    if not identity_is_admitted(APPLICATION_ADMISSION, application, session_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Identity is not authorized for this application",
+        )
     _clear_auth_session(request)
     request.session["user"] = session_user
     request.session["session_id"] = secrets.token_urlsafe(24)
@@ -3491,6 +3509,10 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
         "auth_type": "saml",
         "auth_provider": provider["id"],
         "auth_provider_label": provider.get("label") or provider["id"],
+        "issuer": str(
+            _provider_value(provider, "idp_entity_id", "idpEntityId", default="")
+        ),
+        "subject": str(saml_auth.get_nameid() or ""),
         "roles": session_roles,
         "saml": {
             "provider_id": provider["id"],
@@ -3920,7 +3942,14 @@ async def auth_user_callback(request: Request, application: str):
         "roles": authenticated_claims.get("roles", authenticated_claims.get("role", [])),
     }
 
-    _set_authenticated_user(request, user_info, application=application)
+    _set_authenticated_user(
+        request,
+        user_info,
+        application=application,
+        auth_type="user",
+        auth_provider="user",
+        auth_provider_label="Email",
+    )
 
     # See if we stored a "return_to" path earlier; default to "/{application}"
     return_to = _sanitize_return_to(request.session.pop("return_to", None)) or f"/{application}"
@@ -3947,7 +3976,12 @@ async def mcp_auth(request: Request, application: str, auth_input: MCPAuthInput 
     }
 
     session_user = _set_authenticated_user(
-        request, user_info, application=application
+        request,
+        user_info,
+        application=application,
+        auth_type="user",
+        auth_provider="user",
+        auth_provider_label="Email",
     )
 
     return {**session_user, "status": "authenticated"}

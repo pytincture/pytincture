@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 from packaging.version import InvalidVersion, Version
 
+from pytincture.backend.application_admission import canonical_application_admission
 from pytincture.backend.safe_paths import validate_application_name
 from pytincture.backend.storage import validate_redis_url
 
@@ -137,6 +138,12 @@ class PytinctureConfig:
         False, "ENABLE_MICROSOFT_AUTH", "Enable Microsoft OAuth."
     )
     enable_saml_auth: bool = _setting(False, "ENABLE_SAML_AUTH", "Enable SAML authentication.")
+    application_admission: str | Mapping[str, object] = _setting(
+        "",
+        "AUTH_APPLICATION_ADMISSION",
+        "JSON per-application identity admission rules.",
+        repr=False,
+    )
     google_client_id: str = _setting("", "GOOGLE_CLIENT_ID", "Google OAuth client id.")
     google_client_secret: str = _setting(
         "", "GOOGLE_CLIENT_SECRET", "Google OAuth client secret.", repr=False
@@ -349,6 +356,12 @@ class PytinctureConfig:
         object.__setattr__(self, "modules_path", modules_path)
         if not Path(modules_path).is_dir():
             raise ValueError(f"modules_path is not a directory: {modules_path}")
+
+        object.__setattr__(
+            self,
+            "application_admission",
+            canonical_application_admission(self.application_admission),
+        )
 
         if self.default_application is not None:
             candidate = str(self.default_application).strip()

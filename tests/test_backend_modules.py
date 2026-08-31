@@ -818,6 +818,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-H-01",
         "REVIEW-2026-08-31-H-02",
         "REVIEW-2026-08-31-H-03",
+        "REVIEW-2026-08-31-H-05",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -854,6 +855,11 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert scope_controls["exact_application_graph_membership_required"] is True
     assert scope_controls["redundant_method_allowlist_required"] is False
     assert scope_controls["redis_required"] is False
+    admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
+    assert admission_controls["configured_applications_fail_closed"] is True
+    assert admission_controls["checked_before_session_issuance"] is True
+    assert admission_controls["sticky_sessions_required"] is False
+    assert admission_controls["redis_required"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:

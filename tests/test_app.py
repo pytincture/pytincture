@@ -76,6 +76,7 @@ def override_env(monkeypatch):
     monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", False)
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
     monkeypatch.setattr(backend_app, "ENABLE_BFF_REPLAY_TOKENS", False)
+    monkeypatch.setattr(backend_app, "APPLICATION_ADMISSION", {})
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {})
     monkeypatch.setattr(backend_app, "AUTH_SESSION_REVOCATIONS", {})
     monkeypatch.setattr(backend_app, "BFF_REPLAY_TOKEN_STORE", {})

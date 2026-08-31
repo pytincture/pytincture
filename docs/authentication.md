@@ -57,6 +57,23 @@ When a trusted proxy terminates TLS, enable forwarded headers only if that
 proxy replaces client values. A callback generated with `http://` or an
 internal host indicates proxy configuration, not an identity-provider issue.
 
+## Per-application identity admission
+
+The global provider checks establish who the user is. A shared multi-app
+service can additionally configure `AUTH_APPLICATION_ADMISSION` so each
+application decides which verified identities may receive its signed session.
+Rules support provider, issuer, tenant, immutable subject, exact email,
+email-domain, and role constraints. All configured dimensions must match and
+unlisted applications fail closed.
+
+This check runs before session issuance for local login, OAuth/OIDC, SAML, and
+the JSON login endpoint. It is also repeated when enforcing the session's
+application audience. The decision depends only on verified claims carried in
+the signed browser session, so replicas need neither Redis nor sticky routing.
+See [configuration](configuration.md) for the rule format. Leave the mapping
+empty for an intentionally single-trust service. Use separate origins and
+processes when applications represent materially different trust domains.
+
 ## SAML
 
 Single-provider deployments use the `SAML_IDP_*` values. Multi-provider

@@ -81,3 +81,9 @@ Signed browser state works across workers without Redis or sticky sessions;
 remote revocation storage remains optional. See
 [configuration](configuration.md), [authentication](authentication.md), and
 [production deployment](production-deployment.md).
+
+If applications in one service do not share the same admitted identities, use
+the stateless `application_admission` mapping to authorize identities before a
+session is issued for each application. Deploy materially different trust
+domains on separate origins/processes; browser code and widgets intentionally
+share their application's origin authority.
