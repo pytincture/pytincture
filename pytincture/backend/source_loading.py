@@ -34,7 +34,7 @@ def build_dynamic_module_name(
         re.sub(r"[^0-9a-zA-Z_]+", "_", relative_path.replace("\\", "/")).strip("_")
         or "source"
     )
-    path_hash = hashlib.sha1(absolute_path.encode("utf-8")).hexdigest()[:12]
+    path_hash = hashlib.sha256(absolute_path.encode("utf-8")).hexdigest()[:12]
     return f"pytincture_dynamic_{sanitized_hint}_{sanitized_path}_{path_hash}"
 
 

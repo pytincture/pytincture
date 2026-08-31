@@ -2592,6 +2592,31 @@ def test_login_endpoint_includes_microsoft_button_when_enabled(fresh_client, mon
     assert 'href="auth/microsoft"' in response.text
 
 
+def test_microsoft_oauth_requests_only_consumed_identity_scopes():
+    import pytincture.backend.app as backend_app
+
+    assert set(backend_app._MICROSOFT_OIDC_SCOPES.split()) == {
+        "openid",
+        "email",
+        "profile",
+    }
+    assert "offline_access" not in backend_app._MICROSOFT_OIDC_SCOPES
+
+
+@pytest.mark.parametrize(
+    "dead_helper",
+    (
+        "_strip_pem_headers",
+        "_certificate_fingerprint",
+        "_extract_response_certificates",
+    ),
+)
+def test_dead_certificate_xml_helpers_are_not_exposed(dead_helper):
+    import pytincture.backend.app as backend_app
+
+    assert not hasattr(backend_app, dead_helper)
+
+
 def test_microsoft_login_stores_only_compact_stateless_claims(
     fresh_client,
     monkeypatch,

@@ -44,6 +44,9 @@ accepted. Google callbacks require a verified email and both providers retain
 the immutable issuer/subject identity in the signed session. Register the exact
 callback URL shown by the route:
 
+Microsoft requests only `openid email profile`. Pytincture does not retain or
+refresh provider tokens, so it does not request `offline_access`.
+
 - `https://host/{application}/auth/google/callback`
 - `https://host/{application}/auth/microsoft/callback`
 
