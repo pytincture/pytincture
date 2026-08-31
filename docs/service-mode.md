@@ -62,7 +62,12 @@ The widgetset resolution order is:
 
 1. install the application-declared real version from the package index;
 2. request that same real version from the Pytincture backend;
-3. request backend version `99.99.99` only as an explicit development fallback.
+3. request `PYTINCTURE_DEV_WHEEL_VERSION` from the backend only as an explicit
+   development fallback (`99.99.99` by default).
+
+The backend authorizes only the declared widgetset version and that configured
+development version. Stale or arbitrary same-name wheel versions are not
+public.
 
 Micropip/package-index URLs are not modified with the backend cache UUID.
 The optional service worker uses a per-application scope and an exact immutable

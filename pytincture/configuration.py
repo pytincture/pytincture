@@ -13,6 +13,8 @@ from types import MappingProxyType
 from typing import Iterator, Mapping, Optional
 from urllib.parse import urlparse
 
+from packaging.version import InvalidVersion, Version
+
 from pytincture.backend.safe_paths import validate_application_name
 
 
@@ -233,6 +235,11 @@ class PytinctureConfig:
     appcode_build_queue_timeout_seconds: float = _setting(
         1.0, "APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS", "Maximum archive build admission wait."
     )
+    dev_wheel_version: str = _setting(
+        "99.99.99",
+        "PYTINCTURE_DEV_WHEEL_VERSION",
+        "Explicit development widget-wheel fallback version.",
+    )
     remote_store_timeout_seconds: float = _setting(
         2.0, "REMOTE_STORE_TIMEOUT_SECONDS", "Optional remote-store HTTP deadline."
     )
@@ -374,6 +381,14 @@ class PytinctureConfig:
             raise ValueError("resource limits must be greater than zero")
         if self.bff_max_queue < 0:
             raise ValueError("bff_max_queue cannot be negative")
+        development_widget_version = self.dev_wheel_version.strip()
+        try:
+            Version(development_widget_version)
+        except InvalidVersion as exc:
+            raise ValueError(
+                "dev_wheel_version must be a valid Python package version"
+            ) from exc
+        object.__setattr__(self, "dev_wheel_version", development_widget_version)
         if not 1 <= self.bff_replay_token_batch_size <= 100:
             raise ValueError("bff_replay_token_batch_size must be between 1 and 100")
         if not 0 <= self.bff_replay_token_low_watermark < self.bff_replay_token_batch_size:

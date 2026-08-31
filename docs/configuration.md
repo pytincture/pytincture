@@ -106,6 +106,7 @@ The contract test checks every row in this table against the dataclass model.
 | `appcode_cache_entries` | `APPCODE_CACHE_ENTRIES` | Per-worker bounded browser archive cache entries. |
 | `appcode_build_max_concurrency` | `APPCODE_BUILD_MAX_CONCURRENCY` | Concurrent archive builds per worker. |
 | `appcode_build_queue_timeout_seconds` | `APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS` | Maximum archive build admission wait. |
+| `dev_wheel_version` | `PYTINCTURE_DEV_WHEEL_VERSION` | Explicit development widget-wheel fallback version. |
 | `remote_store_timeout_seconds` | `REMOTE_STORE_TIMEOUT_SECONDS` | Optional remote-store HTTP deadline. |
 | `remote_store_failure_threshold` | `REMOTE_STORE_FAILURE_THRESHOLD` | Failures before opening the store circuit. |
 | `remote_store_cooldown_seconds` | `REMOTE_STORE_COOLDOWN_SECONDS` | Open-circuit cooldown. |

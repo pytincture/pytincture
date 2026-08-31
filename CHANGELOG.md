@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Restrict backend widget-wheel routes to the application's exact declared
+  distribution/version plus `PYTINCTURE_DEV_WHEEL_VERSION`, preventing stale
+  or arbitrary same-name wheels from becoming public while preserving the
+  real-version-first, development-version-last fallback.
 - Require exact allowed hosts and one canonical HTTPS origin whenever
   production authentication is enabled, and reject incomplete trusted-proxy
   configurations. Local HTTP authentication remains available through an

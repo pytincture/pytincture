@@ -30,6 +30,7 @@
       "fastapi",
       "itsdangerous",
       "markupsafe",
+      "packaging",
       "pydantic",
       "python-multipart",
       "starlette",

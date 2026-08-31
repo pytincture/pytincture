@@ -42,6 +42,12 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from markupsafe import escape
+from packaging.utils import (
+    InvalidWheelFilename,
+    canonicalize_name,
+    parse_wheel_filename,
+)
+from packaging.version import InvalidVersion, Version
 
 # Pydantic for JSON validation
 from pydantic import BaseModel
@@ -158,6 +164,15 @@ ALLOWED_HOSTS = tuple(
     for host in os.getenv("PYTINCTURE_ALLOWED_HOSTS", "").split(",")
     if host.strip()
 )
+DEVELOPMENT_WIDGET_VERSION_TEXT = os.getenv(
+    "PYTINCTURE_DEV_WHEEL_VERSION", "99.99.99"
+).strip()
+try:
+    DEVELOPMENT_WIDGET_VERSION = Version(DEVELOPMENT_WIDGET_VERSION_TEXT)
+except InvalidVersion as exc:
+    raise RuntimeError(
+        "PYTINCTURE_DEV_WHEEL_VERSION must be a valid Python package version"
+    ) from exc
 if CANONICAL_ORIGIN:
     _canonical_parts = urlsplit(CANONICAL_ORIGIN)
     if (
@@ -1804,10 +1819,6 @@ def _public_asset_response_headers(secure_file, relative_path: str) -> Dict[str,
     return headers
 
 
-def _normalized_distribution_name(value: str) -> str:
-    return re.sub(r"[-_.]+", "-", value).casefold()
-
-
 def _application_widget_wheel_allowed(
     application: str,
     relative_path: str,
@@ -1816,18 +1827,27 @@ def _application_widget_wheel_allowed(
     """Allow only a root-level wheel for the widgetset detected for this app."""
     if "/" in relative_path or not relative_path.lower().endswith(".whl"):
         return False
-    wheel_match = re.fullmatch(
-        r"(?P<distribution>[A-Za-z0-9_.]+)-[^/]+-[^-]+-[^-]+-[^-]+\.whl",
-        relative_path,
-    )
-    if not wheel_match:
+    try:
+        wheel_distribution, wheel_version, _build, _tags = parse_wheel_filename(
+            relative_path
+        )
+    except InvalidWheelFilename:
         return False
     widget_spec = get_widgetset(application, modules_root)
-    widget_distribution = widget_spec.split("==", 1)[0].strip()
+    widget_distribution, separator, declared_version_text = widget_spec.partition("==")
+    widget_distribution = widget_distribution.strip()
     if not widget_distribution:
         return False
-    return _normalized_distribution_name(wheel_match.group("distribution")) == (
-        _normalized_distribution_name(widget_distribution)
+    allowed_versions = {DEVELOPMENT_WIDGET_VERSION}
+    if separator and declared_version_text.strip():
+        try:
+            allowed_versions.add(Version(declared_version_text.strip()))
+        except InvalidVersion:
+            return False
+    return (
+        canonicalize_name(wheel_distribution)
+        == canonicalize_name(widget_distribution)
+        and wheel_version in allowed_versions
     )
 
 
@@ -3956,6 +3976,9 @@ async def main_app_route(response: Response, application: str, request: Request)
     index_html = index_html.replace("***LOADING_TITLE***", json.dumps(loading_title))
     index_html = index_html.replace("***FAVICON_LINK***", favicon_markup)
     index_html = index_html.replace("***REQUEST_UUID***", request_uuid)
+    index_html = index_html.replace(
+        "***DEV_WHEEL_VERSION***", json.dumps(DEVELOPMENT_WIDGET_VERSION_TEXT)
+    )
 
     index_html = index_html.replace("***WIDGETSET***", widgetset)
     return HTMLResponse(

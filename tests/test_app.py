@@ -741,15 +741,21 @@ def test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not(
     fresh_client, monkeypatch, tmp_path
 ):
     import sys
+    from packaging.version import Version
+    import pytincture.backend.app as backend_app
 
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
     monkeypatch.delenv("PYTINCTURE_PUBLIC_ASSET_PATHS", raising=False)
     (tmp_path / "demoapp.py").write_text("import demo_widgets\n")
     matching_version = "demo_widgets-0.1.0-py3-none-any.whl"
     matching_dev = "demo_widgets-99.99.99-py3-none-any.whl"
+    stale_version = "demo_widgets-0.0.9-py3-none-any.whl"
+    configured_dev = "demo_widgets-42.0.dev1-py3-none-any.whl"
     unrelated = "server_helpers-1.0.0-py3-none-any.whl"
     (tmp_path / matching_version).write_bytes(b"versioned-wheel")
     (tmp_path / matching_dev).write_bytes(b"development-wheel")
+    (tmp_path / stale_version).write_bytes(b"stale-wheel")
+    (tmp_path / configured_dev).write_bytes(b"configured-development-wheel")
     (tmp_path / unrelated).write_bytes(b"server-only-wheel")
     nested = tmp_path / "private"
     nested.mkdir()
@@ -771,8 +777,14 @@ def test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not(
         == __import__("hashlib").sha256(b"versioned-wheel").hexdigest()
     )
     assert fresh_client.get(f"/demoapp/appcode/{unrelated}").status_code == 404
+    assert fresh_client.get(f"/demoapp/appcode/{stale_version}").status_code == 404
+    assert fresh_client.head(f"/demoapp/appcode/{stale_version}").status_code == 404
     assert fresh_client.head(f"/demoapp/appcode/{unrelated}").status_code == 404
     assert fresh_client.get(f"/demoapp/appcode/private/{matching_version}").status_code == 404
+
+    monkeypatch.setattr(backend_app, "DEVELOPMENT_WIDGET_VERSION", Version("42.0.dev1"))
+    assert fresh_client.get(f"/demoapp/appcode/{configured_dev}").status_code == 200
+    assert fresh_client.get(f"/demoapp/appcode/{matching_dev}").status_code == 404
 
 
 def test_browser_package_excludes_unreachable_server_modules(
