@@ -53,7 +53,7 @@ def test_npm_publish_requires_attested_release_provenance():
     assert "--source-ref" in release_workflow
     assert 'run: npm publish "$NPM_PATH"' in release_workflow
     assert "Attest exact release artifact bytes" in ci_workflow
-    assert "actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a" in ci_workflow
+    assert "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8" in ci_workflow
     assert "Publish validated npm artifact" not in ci_workflow
 
     action_refs = re.findall(r"^\s+uses:\s+[^@\s]+@([^\s#]+)", release_workflow, re.MULTILINE)
