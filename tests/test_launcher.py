@@ -65,6 +65,34 @@ def test_main_defaults_development_login_to_loopback(monkeypatch):
     assert calls[0]["host"] == "127.0.0.1"
 
 
+def test_main_defaults_dynamic_auth_origin_development_to_loopback(monkeypatch):
+    calls = []
+    monkeypatch.setenv("ENABLE_USER_LOGIN", "true")
+    monkeypatch.setenv("PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN", "true")
+    monkeypatch.setenv("AUTH_SESSION_HTTPS_ONLY", "false")
+    monkeypatch.setenv("SAML_SECRET_KEY", "0123456789abcdef" * 2)
+
+    import pytincture.__init__ as launcher_mod
+    monkeypatch.setattr(
+        launcher_mod.uvicorn,
+        "run",
+        lambda app_str, **kwargs: calls.append({"app_str": app_str, **kwargs}),
+    )
+
+    main(9000)
+
+    assert calls[0]["host"] == "127.0.0.1"
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "public.example.com"])
+def test_main_rejects_routable_dynamic_auth_origin_bind(monkeypatch, host):
+    monkeypatch.setenv("ENABLE_USER_LOGIN", "true")
+    monkeypatch.setenv("PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN", "true")
+
+    with pytest.raises(RuntimeError, match="literal loopback bind host"):
+        main(9000, host=host)
+
+
 @pytest.mark.parametrize("host", ["0.0.0.0", "::", "public.example.com"])
 def test_main_rejects_routable_development_login_bind(monkeypatch, host):
     monkeypatch.setenv("ENABLE_USER_LOGIN", "true")

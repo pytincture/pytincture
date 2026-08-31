@@ -451,6 +451,20 @@ async def application_name_middleware(request: Request, call_next):
 
 
 @app.middleware("http")
+async def development_auth_origin_middleware(request: Request, call_next):
+    """Fail closed if the local-only dynamic-origin mode is exposed remotely."""
+    if (
+        ALLOW_DEVELOPMENT_AUTH_ORIGIN
+        and not _is_loopback_development_request(request)
+    ):
+        return JSONResponse(
+            {"detail": "Development authentication is loopback-only"},
+            status_code=403,
+        )
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
     started = time.monotonic()
     correlation_id = request_correlation_id(request.headers.get("x-request-id"))
@@ -2246,6 +2260,9 @@ ENABLE_USER_LOGIN = os.getenv("ENABLE_USER_LOGIN", "false").lower() == "true"
 ENABLE_SAML_AUTH = os.getenv("ENABLE_SAML_AUTH", "false").lower() == "true"
 ENABLE_MICROSOFT_AUTH = os.getenv("ENABLE_MICROSOFT_AUTH", "false").lower() == "true"
 ENABLE_DEV_EMAIL_LOGIN = os.getenv("ENABLE_DEV_EMAIL_LOGIN", "false").lower() == "true"
+ALLOW_DEVELOPMENT_AUTH_ORIGIN = os.getenv(
+    "PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN", "false"
+).lower() == "true"
 DEV_EMAIL_LOGIN_ONLY = bool(
     ENABLE_DEV_EMAIL_LOGIN
     and ENABLE_USER_LOGIN
@@ -2282,6 +2299,42 @@ if _authentication_enabled():
 else:
     # An unauthenticated development service still gets an unpredictable cookie signer.
     SAML_SECRET_KEY = SAML_SECRET_KEY or secrets.token_urlsafe(32)
+
+AUTH_SESSION_HTTPS_ONLY = os.getenv(
+    "AUTH_SESSION_HTTPS_ONLY",
+    "false" if DEV_EMAIL_LOGIN_ONLY else "true",
+).lower() == "true"
+
+if ALLOW_DEVELOPMENT_AUTH_ORIGIN:
+    if not _authentication_enabled():
+        raise RuntimeError(
+            "PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN requires authentication"
+        )
+    if AUTH_SESSION_HTTPS_ONLY:
+        raise RuntimeError(
+            "PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN requires AUTH_SESSION_HTTPS_ONLY=false"
+        )
+    if ALLOWED_HOSTS or CANONICAL_ORIGIN or TRUST_PROXY_HEADERS:
+        raise RuntimeError(
+            "Development auth origins cannot use production host/origin or proxy settings"
+        )
+
+if _authentication_enabled() and not (
+    DEV_EMAIL_LOGIN_ONLY or ALLOW_DEVELOPMENT_AUTH_ORIGIN
+):
+    if not ALLOWED_HOSTS or any("*" in host for host in ALLOWED_HOSTS):
+        raise RuntimeError(
+            "Production authentication requires exact PYTINCTURE_ALLOWED_HOSTS"
+        )
+    if not CANONICAL_ORIGIN or urlsplit(CANONICAL_ORIGIN).scheme != "https":
+        raise RuntimeError(
+            "Production authentication requires an HTTPS PYTINCTURE_CANONICAL_ORIGIN"
+        )
+
+if TRUST_PROXY_HEADERS and (not ALLOWED_HOSTS or not CANONICAL_ORIGIN):
+    raise RuntimeError(
+        "PYTINCTURE_TRUST_PROXY_HEADERS requires allowed hosts and a canonical origin"
+    )
 
 
 if ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH:
@@ -2335,10 +2388,6 @@ if AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS < AUTH_SESSION_MAX_AGE_SECONDS:
     raise RuntimeError(
         "AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS cannot be shorter than the idle lifetime"
     )
-AUTH_SESSION_HTTPS_ONLY = os.getenv(
-    "AUTH_SESSION_HTTPS_ONLY",
-    "false" if DEV_EMAIL_LOGIN_ONLY else "true",
-).lower() == "true"
 AUTH_SESSION_SAME_SITE = os.getenv("AUTH_SESSION_SAME_SITE", "lax").lower()
 if AUTH_SESSION_SAME_SITE not in {"lax", "strict", "none"}:
     raise RuntimeError("AUTH_SESSION_SAME_SITE must be lax, strict, or none")

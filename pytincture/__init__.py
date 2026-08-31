@@ -84,20 +84,27 @@ def _development_email_login_enabled():
     )
 
 
+def _development_auth_origin_enabled():
+    return _environment_flag("PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN")
+
+
 def _loopback_bind_host(host=None):
     """Resolve and validate the listener used by passwordless development login."""
 
     resolved = str(host).strip() if host is not None else ""
+    development_only = (
+        _development_email_login_enabled() or _development_auth_origin_enabled()
+    )
     if not resolved:
-        resolved = "127.0.0.1" if _development_email_login_enabled() else "0.0.0.0"
-    if _development_email_login_enabled():
+        resolved = "127.0.0.1" if development_only else "0.0.0.0"
+    if development_only:
         try:
             loopback = ipaddress.ip_address(resolved).is_loopback
         except ValueError:
             loopback = False
         if not loopback:
             raise RuntimeError(
-                "ENABLE_DEV_EMAIL_LOGIN requires a literal loopback bind host "
+                "Development authentication requires a literal loopback bind host "
                 "such as 127.0.0.1 or ::1"
             )
     return resolved

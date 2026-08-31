@@ -19,6 +19,8 @@ def production_config(modules_path: Path, *, https_only: bool = False):
         modules_path=str(modules_path),
         default_application="demo",
         enable_user_login=True,
+        allowed_hosts=("testserver", "service.example"),
+        canonical_origin="https://service.example",
         session_secret="production-test-secret-at-least-32-bytes",
         session_https_only=https_only,
         environment={
@@ -44,6 +46,8 @@ def make_saml_workers(tmp_path: Path):
         modules_path=str(tmp_path),
         default_application="demo",
         enable_saml_auth=True,
+        allowed_hosts=("testserver", "service.example"),
+        canonical_origin="https://service.example",
         saml_idp_entity_id="https://idp.example/metadata",
         saml_idp_sso_url="https://idp.example/sso",
         saml_idp_x509_cert="test-certificate",

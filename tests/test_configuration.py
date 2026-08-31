@@ -82,6 +82,8 @@ def test_legacy_secret_key_is_an_environment_fallback(tmp_path):
             "ENABLE_GOOGLE_AUTH": "true",
             "GOOGLE_CLIENT_ID": "client-id",
             "GOOGLE_CLIENT_SECRET": "client-secret",
+            "PYTINCTURE_ALLOWED_HOSTS": "app.example.test",
+            "PYTINCTURE_CANONICAL_ORIGIN": "https://app.example.test",
             "SECRET_KEY": secret,
         }
     )
@@ -188,6 +190,103 @@ def test_invalid_configuration_fails_with_actionable_message(tmp_path, overrides
         PytinctureConfig(modules_path=str(tmp_path), **overrides)
 
 
+def test_production_authentication_requires_exact_https_origin_controls(tmp_path):
+    base = {
+        "modules_path": str(tmp_path),
+        "enable_user_login": True,
+        "session_secret": "0123456789abcdef" * 2,
+    }
+
+    with pytest.raises(ValueError, match="exact allowed_hosts"):
+        PytinctureConfig(**base)
+    with pytest.raises(ValueError, match="canonical_origin"):
+        PytinctureConfig(**base, allowed_hosts=("app.example.test",))
+    with pytest.raises(ValueError, match="without wildcards"):
+        PytinctureConfig(
+            **base,
+            allowed_hosts=("*.example.test",),
+            canonical_origin="https://app.example.test",
+        )
+    with pytest.raises(ValueError, match="HTTPS canonical_origin"):
+        PytinctureConfig(
+            **base,
+            allowed_hosts=("app.example.test",),
+            canonical_origin="http://app.example.test",
+        )
+
+    config = PytinctureConfig(
+        **base,
+        allowed_hosts=("app.example.test",),
+        canonical_origin="https://app.example.test",
+    )
+    assert config.allowed_hosts == ("app.example.test",)
+    assert config.canonical_origin == "https://app.example.test"
+
+
+def test_dynamic_auth_origin_is_explicit_loopback_development_only(tmp_path):
+    base = {
+        "modules_path": str(tmp_path),
+        "enable_user_login": True,
+        "session_secret": "0123456789abcdef" * 2,
+        "allow_development_auth_origin": True,
+    }
+
+    with pytest.raises(ValueError, match="session_https_only=false"):
+        PytinctureConfig(**base)
+    with pytest.raises(ValueError, match="cannot trust proxy headers"):
+        PytinctureConfig(
+            **base,
+            session_https_only=False,
+            trusted_proxy_headers=True,
+        )
+
+    config = PytinctureConfig(**base, session_https_only=False)
+    assert config.allow_development_auth_origin is True
+    assert config.allowed_hosts == ()
+    assert config.canonical_origin is None
+
+
+def test_dynamic_auth_origin_rejects_non_loopback_requests(tmp_path):
+    (tmp_path / "demo.py").write_text('APP_TITLE = "Demo"\n', encoding="utf-8")
+    application = create_app(
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            enable_user_login=True,
+            session_secret="0123456789abcdef" * 2,
+            session_https_only=False,
+            allow_development_auth_origin=True,
+        )
+    )
+
+    with TestClient(
+        application,
+        base_url="http://localhost",
+        client=("203.0.113.7", 50000),
+    ) as remote_client:
+        rejected = remote_client.get("/healthz")
+    with TestClient(
+        application,
+        base_url="http://localhost",
+        client=("127.0.0.1", 50000),
+    ) as local_client:
+        accepted = local_client.get("/healthz")
+
+    assert rejected.status_code == 403
+    assert rejected.json() == {"detail": "Development authentication is loopback-only"}
+    assert accepted.status_code == 200
+
+
+def test_trusted_proxy_headers_require_fixed_host_and_origin(tmp_path):
+    with pytest.raises(
+        ValueError,
+        match="trusted_proxy_headers requires allowed_hosts and canonical_origin",
+    ):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            trusted_proxy_headers=True,
+        )
+
+
 def test_missing_modules_path_fails_before_application_creation(tmp_path):
     with pytest.raises(ValueError, match="modules_path is not a directory"):
         create_app(PytinctureConfig(modules_path=str(tmp_path / "missing")))
@@ -224,7 +323,12 @@ def test_create_app_isolates_routes_registries_and_session_stores(tmp_path, monk
 
     first = create_app(PytinctureConfig(modules_path=str(first_root)))
     second = create_app(
-        PytinctureConfig(modules_path=str(second_root), trusted_proxy_headers=True)
+        PytinctureConfig(
+            modules_path=str(second_root),
+            trusted_proxy_headers=True,
+            allowed_hosts=("public.example",),
+            canonical_origin="https://public.example",
+        )
     )
 
     assert isinstance(first, FastAPI)
@@ -263,7 +367,9 @@ def test_create_app_isolates_routes_registries_and_session_stores(tmp_path, monk
     assert first_backend._request_origin(proxy_request) == "http://internal.example"
     assert second_backend._request_origin(proxy_request) == "https://public.example"
 
-    with TestClient(first) as first_client, TestClient(second) as second_client:
+    with TestClient(first) as first_client, TestClient(
+        second, base_url="https://public.example"
+    ) as second_client:
         assert first_client.get("/alpha/appcode/appcode.pyt").status_code == 200
         assert first_client.get("/beta/appcode/appcode.pyt").status_code == 404
         assert second_client.get("/alpha/appcode/appcode.pyt").status_code == 404

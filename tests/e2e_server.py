@@ -21,6 +21,7 @@ config = PytinctureConfig(
     modules_path=str(ROOT),
     default_application="e2e_app",
     enable_user_login=True,
+    allow_development_auth_origin=True,
     session_secret="pytincture-e2e-session-secret-0123456789abcdef",
     session_https_only=False,
     environment={

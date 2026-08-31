@@ -96,6 +96,8 @@ pip install ".[dev]"
 - AUTH_SESSION_CLAIM_KEYS: Optional comma-separated names of additional trusted claims to retain in the signed session. `id`, `role`, `plan`, `next_billing`, `theme`, and `sidebar` are retained by default; passwords, hashes, secrets, and tokens are never retained.
 - AUTH_USER_AUTHENTICATOR: Optional dotted path to a sync or async callable accepting `email`, `password`, and `request`. It must return trusted user claims, `True`, or `False`.
 - ENABLE_DEV_EMAIL_LOGIN: Allow a non-empty `ALLOWED_EMAILS` list without password verification only when the actual client peer is loopback. The launcher automatically binds this mode to `127.0.0.1` and rejects routable bind hosts. This is intentionally unsafe and must only be set to `true` for local development.
+- PYTINCTURE_ALLOWED_HOSTS / PYTINCTURE_CANONICAL_ORIGIN: Required exact hostnames and one HTTPS external origin when production authentication is enabled. Wildcard or request-derived production auth origins are rejected.
+- PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN: Permit request-derived auth origins only for local HTTP testing. Also set `AUTH_SESSION_HTTPS_ONLY=false`; the supported launcher binds this mode to loopback and rejects routable bind hosts.
 - LOGIN_HELP_TEXT: Optional plain-text guidance displayed below the login-page introduction. It is HTML-escaped and is suitable for demo credentials or environment-specific login instructions. Do not expose real production passwords.
    example: "Demo login: demo@example.com / demo-password"
 - ENABLE_GOOGLE_AUTH: Enable the respective authentication mechanisms.

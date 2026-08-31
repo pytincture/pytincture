@@ -11,11 +11,16 @@ routes intentionally share the root scope.
   worker and replica.
 - Set `AUTH_SESSION_HTTPS_ONLY=true` and leave `AUTH_SESSION_SAME_SITE=lax`
   unless the identity-provider flow requires another documented value.
+- Authentication-enabled production services must set
+  `PYTINCTURE_ALLOWED_HOSTS` to exact comma-separated public hostnames and
+  `PYTINCTURE_CANONICAL_ORIGIN` to one external HTTPS origin, such as
+  `https://service.example.com`. Wildcards, paths, and request-derived origins
+  fail startup.
 - Set `PYTINCTURE_TRUST_PROXY_HEADERS=true` only when the service is reachable
-  exclusively through a trusted proxy that replaces forwarded headers.
-- Set `PYTINCTURE_ALLOWED_HOSTS` to the comma-separated public hostnames served
-  by this deployment and `PYTINCTURE_CANONICAL_ORIGIN` to its external origin,
-  such as `https://service.example.com`. Do not include paths in the origin.
+  exclusively through a trusted proxy that replaces forwarded headers. Proxy
+  trust fails startup unless both fixed host/origin controls are configured.
+- Never set `PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN` in production. It is a
+  loopback-only local HTTP compatibility mode.
 - Set explicit `CORS_ALLOWED_ORIGINS`; wildcard credentialed CORS is rejected.
 - SAML responses are decoded and parsed under `SAML_RESPONSE_MAX_BYTES`, use
   an XML-signature transform allowlist, and are throttled per peer before
