@@ -653,6 +653,56 @@
         "tests/test_performance_contract.py::test_ci_runs_and_retains_every_performance_profile",
         "pytincture/frontend/e2e-tests/pytincture.spec.mjs::authenticated packaged and inline apps run through real Pyodide"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-M-11-M-12-BLOCKING-SHARED-STORE",
+      "status": "remediated",
+      "title": "Blocking SAML and optional shared-store work is bounded and off-loop",
+      "intentional_contract": "Normal sessions, SAML browser handshakes, and load balancing remain stateless and browser-carried. Redis is an optional adapter only for deployments that explicitly select shared revocation or strict fleet-wide replay consumption.",
+      "security_boundary": "SAML XML prevalidation and toolkit signature/correlation processing execute in worker threads behind a dedicated concurrency and queue gate with a runtime deadline; a timed-out thread retains its slot until exit. Async readiness, direct page-session revocation checks, and replay issuance offload optional store work behind a separate bounded gate and network deadline. FastAPI sync authentication dependencies and logout already execute in its worker pool. Readiness refreshes are coalesced for a short TTL. RedisDict disables read caching by default; explicit caching stores only positive values, expires them by TTL, enforces LRU entry capacity, and invalidates local mutations. Remote calls retain transport deadlines and a failure circuit breaker.",
+      "controls": {
+        "saml_xml_off_event_loop": true,
+        "saml_signature_off_event_loop": true,
+        "saml_dedicated_concurrency_gate": true,
+        "saml_queue_bound": true,
+        "saml_runtime_deadline": true,
+        "timed_out_saml_slot_retained": true,
+        "remote_readiness_off_event_loop": true,
+        "remote_revocation_lookup_off_event_loop": true,
+        "remote_replay_issuance_off_event_loop": true,
+        "remote_operation_admission_bound": true,
+        "remote_transport_deadline": true,
+        "remote_failure_circuit": true,
+        "readiness_refresh_coalesced": true,
+        "readiness_cache_ttl_bound": true,
+        "redis_read_cache_default": false,
+        "negative_misses_cached": false,
+        "opt_in_cache_entry_bound": true,
+        "opt_in_cache_ttl_bound": true,
+        "redis_required": false,
+        "sticky_routing_required": false,
+        "normal_sessions_server_side": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/backend/storage.py",
+        "pytincture/backend/limits.py",
+        "pytincture/configuration.py",
+        "docs/production-deployment.md",
+        "security/accepted-architecture.md"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_redis_read_cache_is_opt_in_positive_ttl_bounded_and_invalidated",
+        "tests/test_backend_modules.py::test_remote_store_circuit_opens_and_recovers",
+        "tests/test_backend_modules.py::test_bounded_thread_stage_keeps_event_loop_responsive_and_holds_timed_out_slot",
+        "tests/test_app.py::test_readiness_checks_are_offloaded_coalesced_and_briefly_cached",
+        "tests/test_app.py::test_readiness_fails_when_shared_state_is_unavailable",
+        "tests/test_app.py::test_main_page_revocation_lookup_runs_off_the_event_loop",
+        "tests/test_app.py::test_bff_replay_refill_store_work_runs_off_the_event_loop",
+        "tests/test_app.py::test_saml_acs_creates_compact_session_that_authorizes_bff_calls",
+        "tests/test_configuration.py::test_replay_proofs_remain_optional_and_do_not_require_redis",
+        "tests/test_production.py::test_saml_handshake_is_portable_between_workers_without_redis"
+      ]
     }
   ]
 }

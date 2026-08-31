@@ -177,6 +177,13 @@ Why:
 - A feature requiring atomic shared consumption should expose a pluggable
   store contract or fail closed when enabled without a suitable topology.
 
+When a shared store is explicitly enabled, synchronous client operations are
+kept off async request paths, bounded by deadlines/admission and a circuit
+breaker, and readiness probes are briefly coalesced. The legacy read cache is
+disabled by default; its explicit mode stores only positive values under entry
+and TTL limits. These operational controls do not add shared state to normal
+sessions or make Redis part of the default deployment.
+
 ## BFF replay proofs are optional and topology-explicit
 
 One-time BFF request proofs remain disabled by default. Enabling the local

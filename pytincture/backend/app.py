@@ -448,9 +448,67 @@ async def health_check():
     return {"status": "ok", "version": __version__}
 
 
+async def _run_bounded_thread_stage(
+    gate: AsyncAdmissionGate,
+    function: Callable,
+    *args,
+    timeout_seconds: float,
+    unavailable_detail: str,
+    **kwargs,
+):
+    """Offload blocking work without releasing capacity while a timed-out thread runs."""
+
+    try:
+        await gate.acquire()
+    except AdmissionRejected as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=unavailable_detail,
+            headers={"Retry-After": "1"},
+        ) from exc
+
+    task = asyncio.create_task(run_in_threadpool(function, *args, **kwargs))
+    release_deferred = False
+
+    def release_when_finished(completed: asyncio.Task) -> None:
+        gate.release()
+        try:
+            completed.exception()
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(task), timeout=timeout_seconds
+        )
+    except asyncio.TimeoutError as exc:
+        release_deferred = True
+        task.add_done_callback(release_when_finished)
+        raise HTTPException(
+            status_code=503,
+            detail=unavailable_detail,
+            headers={"Retry-After": "1"},
+        ) from exc
+    except asyncio.CancelledError:
+        release_deferred = True
+        task.add_done_callback(release_when_finished)
+        raise
+    finally:
+        if not release_deferred:
+            gate.release()
+
+
+_READINESS_CACHE_LOCK = asyncio.Lock()
+_READINESS_CACHE_VALUE: Optional[
+    tuple[float, tuple[Any, ...], bool, dict[str, bool]]
+] = None
+
+
 @app.get("/readyz", include_in_schema=False)
 async def readiness_check():
     """Traffic readiness for application files, frontend assets, and shared stores."""
+    global _READINESS_CACHE_VALUE
+
     stores = {}
     if USE_REDIS_INSTANCE == "true":
         stores = {
@@ -458,7 +516,50 @@ async def readiness_check():
             "revocation_store": AUTH_SESSION_REVOCATIONS,
             "replay_store": BFF_REPLAY_TOKEN_STORE,
         }
-    ready, checks = readiness_report(get_modules_path(), STATIC_PATH, stores)
+    cache_key = (
+        get_modules_path(),
+        STATIC_PATH,
+        tuple((name, id(store)) for name, store in stores.items()),
+    )
+    now = time.monotonic()
+    cached = _READINESS_CACHE_VALUE
+    if cached is not None and cached[0] > now and cached[1] == cache_key:
+        ready, checks = cached[2], dict(cached[3])
+    else:
+        async with _READINESS_CACHE_LOCK:
+            now = time.monotonic()
+            cached = _READINESS_CACHE_VALUE
+            if (
+                cached is not None
+                and cached[0] > now
+                and cached[1] == cache_key
+            ):
+                ready, checks = cached[2], dict(cached[3])
+            else:
+                try:
+                    ready, checks = await _run_bounded_thread_stage(
+                        REMOTE_STORE_GATE,
+                        readiness_report,
+                        cache_key[0],
+                        STATIC_PATH,
+                        stores,
+                        timeout_seconds=REMOTE_STORE_TIMEOUT_SECONDS,
+                        unavailable_detail="Readiness dependency check timed out",
+                    )
+                except HTTPException:
+                    ready = False
+                    checks = {
+                        "modules_path": False,
+                        "frontend_index": False,
+                        "frontend_runtime": False,
+                        **{name: False for name in stores},
+                    }
+                _READINESS_CACHE_VALUE = (
+                    time.monotonic() + READINESS_CACHE_TTL_SECONDS,
+                    cache_key,
+                    ready,
+                    dict(checks),
+                )
     return JSONResponse(
         {"status": "ready" if ready else "not-ready", "checks": checks},
         status_code=200 if ready else 503,
@@ -703,13 +804,46 @@ class _ManifestStaticFiles(StaticFiles):
 
 
 USE_REDIS_INSTANCE = os.environ.get("USE_REDIS_INSTANCE", "false").lower()
+REMOTE_STORE_TIMEOUT_SECONDS = float(
+    os.getenv("REMOTE_STORE_TIMEOUT_SECONDS", "2")
+)
+REMOTE_STORE_FAILURE_THRESHOLD = int(
+    os.getenv("REMOTE_STORE_FAILURE_THRESHOLD", "3")
+)
+REMOTE_STORE_COOLDOWN_SECONDS = float(
+    os.getenv("REMOTE_STORE_COOLDOWN_SECONDS", "15")
+)
+REMOTE_STORE_MAX_CONCURRENCY = int(
+    os.getenv("REMOTE_STORE_MAX_CONCURRENCY", "8")
+)
+REMOTE_STORE_MAX_QUEUE = int(os.getenv("REMOTE_STORE_MAX_QUEUE", "16"))
+REMOTE_STORE_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("REMOTE_STORE_QUEUE_TIMEOUT_SECONDS", "1")
+)
+READINESS_CACHE_TTL_SECONDS = float(
+    os.getenv("READINESS_CACHE_TTL_SECONDS", "1")
+)
+if min(
+    REMOTE_STORE_TIMEOUT_SECONDS,
+    REMOTE_STORE_FAILURE_THRESHOLD,
+    REMOTE_STORE_COOLDOWN_SECONDS,
+    REMOTE_STORE_MAX_CONCURRENCY,
+    REMOTE_STORE_QUEUE_TIMEOUT_SECONDS,
+    READINESS_CACHE_TTL_SECONDS,
+) <= 0 or REMOTE_STORE_MAX_QUEUE < 0:
+    raise RuntimeError("optional remote-store limits must be valid and positive")
+REMOTE_STORE_GATE = AsyncAdmissionGate(
+    REMOTE_STORE_MAX_CONCURRENCY,
+    REMOTE_STORE_MAX_QUEUE,
+    REMOTE_STORE_QUEUE_TIMEOUT_SECONDS,
+)
 if  USE_REDIS_INSTANCE == "true":
     REDIS_UPSTASH_INSTANCE_URL = os.environ.get("REDIS_UPSTASH_INSTANCE_URL", "")
     REDIS_UPSTASH_INSTANCE_TOKEN =  os.environ.get("REDIS_UPSTASH_INSTANCE_TOKEN", "")
     _remote_store_options = {
-        "timeout_seconds": float(os.getenv("REMOTE_STORE_TIMEOUT_SECONDS", "2")),
-        "failure_threshold": int(os.getenv("REMOTE_STORE_FAILURE_THRESHOLD", "3")),
-        "cooldown_seconds": float(os.getenv("REMOTE_STORE_COOLDOWN_SECONDS", "15")),
+        "timeout_seconds": REMOTE_STORE_TIMEOUT_SECONDS,
+        "failure_threshold": REMOTE_STORE_FAILURE_THRESHOLD,
+        "cooldown_seconds": REMOTE_STORE_COOLDOWN_SECONDS,
     }
     USER_SESSION_DICT = RedisDict(
         redis_url=REDIS_UPSTASH_INSTANCE_URL,
@@ -1896,9 +2030,16 @@ async def issue_bff_replay_tokens(
         raise HTTPException(status_code=401, detail="Authentication required")
     _admit_bff_replay_issuance(request, session_id)
     client_key = _bff_replay_client_key(request, session_id)
+    issued_tokens = await _run_bounded_thread_stage(
+        REMOTE_STORE_GATE,
+        _issue_bff_replay_tokens,
+        session_id,
+        timeout_seconds=REMOTE_STORE_TIMEOUT_SECONDS,
+        unavailable_detail="BFF request-proof store is temporarily unavailable",
+    )
     payload = _encrypt_bff_replay_payload(
         client_key,
-        _issue_bff_replay_tokens(session_id),
+        issued_tokens,
     )
     return Response(
         content=payload,
@@ -3065,15 +3206,36 @@ SAML_ACS_RATE_LIMIT_ATTEMPTS = int(os.getenv("SAML_ACS_RATE_LIMIT_ATTEMPTS", "60
 SAML_ACS_RATE_LIMIT_WINDOW_SECONDS = int(
     os.getenv("SAML_ACS_RATE_LIMIT_WINDOW_SECONDS", "60")
 )
+SAML_VALIDATION_MAX_CONCURRENCY = int(
+    os.getenv("SAML_VALIDATION_MAX_CONCURRENCY", "2")
+)
+SAML_VALIDATION_MAX_QUEUE = int(os.getenv("SAML_VALIDATION_MAX_QUEUE", "8"))
+SAML_VALIDATION_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("SAML_VALIDATION_QUEUE_TIMEOUT_SECONDS", "1")
+)
+SAML_VALIDATION_TIMEOUT_SECONDS = float(
+    os.getenv("SAML_VALIDATION_TIMEOUT_SECONDS", "10")
+)
 if SAML_RESPONSE_MAX_BYTES <= 0:
     raise RuntimeError("SAML_RESPONSE_MAX_BYTES must be greater than zero")
 if ENABLE_SAML_AUTH and SAML_RESPONSE_MAX_BYTES > MAX_REQUEST_BODY_BYTES:
     raise RuntimeError("SAML_RESPONSE_MAX_BYTES cannot exceed MAX_REQUEST_BODY_BYTES")
 if min(SAML_ACS_RATE_LIMIT_ATTEMPTS, SAML_ACS_RATE_LIMIT_WINDOW_SECONDS) <= 0:
     raise RuntimeError("SAML ACS rate-limit values must be greater than zero")
+if min(
+    SAML_VALIDATION_MAX_CONCURRENCY,
+    SAML_VALIDATION_QUEUE_TIMEOUT_SECONDS,
+    SAML_VALIDATION_TIMEOUT_SECONDS,
+) <= 0 or SAML_VALIDATION_MAX_QUEUE < 0:
+    raise RuntimeError("SAML validation limits must be valid and positive")
 SAML_ACS_RATE_LIMITER = SlidingWindowRateLimiter(
     SAML_ACS_RATE_LIMIT_ATTEMPTS,
     SAML_ACS_RATE_LIMIT_WINDOW_SECONDS,
+)
+SAML_VALIDATION_GATE = AsyncAdmissionGate(
+    SAML_VALIDATION_MAX_CONCURRENCY,
+    SAML_VALIDATION_MAX_QUEUE,
+    SAML_VALIDATION_QUEUE_TIMEOUT_SECONDS,
 )
 
 
@@ -3736,6 +3898,99 @@ def _saml_acs_peer_key(request: Request) -> str:
         return str(peer)[:128]
 
 
+def _validate_saml_assertion(
+    request: Request,
+    application: str,
+    provider: Dict[str, Any],
+    post_data: Dict[str, Any],
+    request_id: str,
+) -> Dict[str, Any]:
+    """Run toolkit signature/XML work in a bounded worker thread."""
+
+    try:
+        saml_auth = _init_saml_auth(
+            request,
+            application,
+            provider=provider,
+            post_data=post_data,
+        )
+        try:
+            saml_auth.process_response(request_id=request_id)
+        except OneLogin_Saml2_ValidationError as validation_error:
+            logger.warning(
+                "SAML response validation failed correlation_id=%s code=%s",
+                getattr(request.state, "correlation_id", ""),
+                validation_error.code,
+            )
+            raise
+    except RuntimeError as config_error:
+        raise HTTPException(
+            status_code=500, detail="SAML configuration error"
+        ) from config_error
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="Invalid SAML response") from exc
+
+    errors = saml_auth.get_errors()
+    if errors:
+        logger.warning(
+            "SAML response rejected correlation_id=%s error_codes=%s",
+            getattr(request.state, "correlation_id", ""),
+            errors,
+        )
+        raise HTTPException(status_code=400, detail="Invalid SAML response")
+    if not saml_auth.is_authenticated():
+        raise HTTPException(status_code=401, detail="SAML authentication failed")
+
+    response_in_response_to = saml_auth.get_last_response_in_response_to()
+    response_id = saml_auth.get_last_message_id()
+    assertion_id = saml_auth.get_last_assertion_id()
+    if (
+        response_in_response_to != request_id
+        or not isinstance(response_id, str)
+        or not response_id
+        or not isinstance(assertion_id, str)
+        or not assertion_id
+    ):
+        raise HTTPException(status_code=400, detail="Invalid SAML response correlation")
+
+    response_xml = saml_auth.get_last_response_xml()
+    try:
+        validate_authenticated_saml_correlation(response_xml, request_id)
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail="Invalid SAML response correlation"
+        ) from exc
+
+    expirations: List[float] = []
+    for getter_name in (
+        "get_session_expiration",
+        "get_last_assertion_not_on_or_after",
+    ):
+        getter = getattr(saml_auth, getter_name, None)
+        if callable(getter):
+            value = getter()
+            if value is not None:
+                if not isinstance(value, (int, float)) or not math.isfinite(value):
+                    raise HTTPException(
+                        status_code=400, detail="Invalid SAML response expiry"
+                    )
+                expirations.append(float(value))
+    try:
+        expirations.extend(saml_assertion_expirations(response_xml))
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail="Invalid SAML response expiry"
+        ) from exc
+
+    return {
+        "response_id": response_id,
+        "assertion_id": assertion_id,
+        "authentication_expires_at": min(expirations) if expirations else None,
+        "attributes": saml_auth.get_attributes(),
+        "name_id": saml_auth.get_nameid(),
+    }
+
+
 async def _saml_assertion_consumer(request: Request, application: str, provider_id: Optional[str] = None):
     """
     Handle the assertion consumer service (ACS) endpoint invoked by the IdP.
@@ -3755,10 +4010,18 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
     form_data = await request.form()
     post_data = dict(form_data.multi_items())
     try:
-        validate_saml_response_xml(
+        await _run_bounded_thread_stage(
+            SAML_VALIDATION_GATE,
+            validate_saml_response_xml,
             post_data.get("SAMLResponse", ""),
             SAML_RESPONSE_MAX_BYTES,
+            timeout_seconds=SAML_VALIDATION_TIMEOUT_SECONDS,
+            unavailable_detail="SAML validation capacity is temporarily unavailable",
         )
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            raise
+        raise HTTPException(status_code=400, detail="Invalid SAML response") from exc
     except (RuntimeError, ValueError) as exc:
         logger.warning(
             "SAML response pre-validation failed correlation_id=%s reason=%s",
@@ -3780,78 +4043,26 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
     provider = _get_saml_provider(resolved_provider_id)
     if provider["id"] != state_provider_id:
         raise HTTPException(status_code=400, detail="SAML provider mismatch")
-    
-    try:
-        saml_auth = _init_saml_auth(request, application, provider=provider, post_data=post_data)
-        request_id = transaction.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
-        request.session.pop("saml_request_id", None)
-        request.session.pop("saml_provider_id", None)
-        try:
-            saml_auth.process_response(request_id=request_id)
-        except OneLogin_Saml2_ValidationError as validation_error:
-            logger.warning(
-                "SAML response validation failed correlation_id=%s code=%s",
-                getattr(request.state, "correlation_id", ""),
-                validation_error.code,
-            )
-            raise
-    except RuntimeError as config_error:
-        raise HTTPException(status_code=500, detail="SAML configuration error") from config_error
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail="Invalid SAML response") from exc
 
-    errors = saml_auth.get_errors()
-    if errors:
-        logger.warning(
-            "SAML response rejected correlation_id=%s error_codes=%s",
-            getattr(request.state, "correlation_id", ""),
-            errors,
-        )
-        raise HTTPException(status_code=400, detail="Invalid SAML response")
-
-    if not saml_auth.is_authenticated():
-        raise HTTPException(status_code=401, detail="SAML authentication failed")
-
-    response_in_response_to = saml_auth.get_last_response_in_response_to()
-    response_id = saml_auth.get_last_message_id()
-    assertion_id = saml_auth.get_last_assertion_id()
-    if (
-        response_in_response_to != request_id
-        or not isinstance(response_id, str)
-        or not response_id
-        or not isinstance(assertion_id, str)
-        or not assertion_id
-    ):
-        raise HTTPException(status_code=400, detail="Invalid SAML response correlation")
-
-    response_xml = saml_auth.get_last_response_xml()
-    try:
-        validate_authenticated_saml_correlation(response_xml, request_id)
-    except (RuntimeError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="Invalid SAML response correlation") from exc
-
-    saml_expirations: List[float] = []
-    for getter_name in (
-        "get_session_expiration",
-        "get_last_assertion_not_on_or_after",
-    ):
-        getter = getattr(saml_auth, getter_name, None)
-        if callable(getter):
-            value = getter()
-            if value is not None:
-                if (
-                    not isinstance(value, (int, float))
-                    or not math.isfinite(value)
-                ):
-                    raise HTTPException(status_code=400, detail="Invalid SAML response expiry")
-                saml_expirations.append(float(value))
-    try:
-        saml_expirations.extend(saml_assertion_expirations(response_xml))
-    except (RuntimeError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="Invalid SAML response expiry") from exc
-    authentication_expires_at = min(saml_expirations) if saml_expirations else None
+    request_id = transaction.get("request_id")
+    if not isinstance(request_id, str) or not request_id:
+        raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
+    request.session.pop("saml_request_id", None)
+    request.session.pop("saml_provider_id", None)
+    validated = await _run_bounded_thread_stage(
+        SAML_VALIDATION_GATE,
+        _validate_saml_assertion,
+        request,
+        application,
+        provider,
+        post_data,
+        request_id,
+        timeout_seconds=SAML_VALIDATION_TIMEOUT_SECONDS,
+        unavailable_detail="SAML validation capacity is temporarily unavailable",
+    )
+    response_id = validated["response_id"]
+    assertion_id = validated["assertion_id"]
+    authentication_expires_at = validated["authentication_expires_at"]
     if authentication_expires_at is not None and authentication_expires_at <= time.time():
         raise HTTPException(status_code=400, detail="SAML response has expired")
 
@@ -3865,7 +4076,8 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
 
     consumed_transaction = transaction
 
-    attributes = saml_auth.get_attributes()
+    attributes = validated["attributes"]
+    name_id = validated["name_id"]
     
     email_candidate_keys = [
         key for key in [
@@ -3886,7 +4098,7 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
             break
 
     if not email_attr:
-        email_attr = saml_auth.get_nameid()
+        email_attr = name_id
 
     if not email_attr:
         raise HTTPException(status_code=400, detail="SAML response missing required email attribute")
@@ -3925,12 +4137,12 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
         "issuer": str(
             _provider_value(provider, "idp_entity_id", "idpEntityId", default="")
         ),
-        "subject": str(saml_auth.get_nameid() or ""),
+        "subject": str(name_id or ""),
         "roles": session_roles,
         "saml": {
             "provider_id": provider["id"],
             "provider_label": provider.get("label") or provider["id"],
-            "name_id": saml_auth.get_nameid(),
+            "name_id": name_id,
         },
     }
 
@@ -4421,7 +4633,13 @@ async def main_app_route(response: Response, application: str, request: Request)
 
     # Check session
     try:
-        user_session = require_auth(request)
+        user_session = await _run_bounded_thread_stage(
+            REMOTE_STORE_GATE,
+            require_auth,
+            request,
+            timeout_seconds=REMOTE_STORE_TIMEOUT_SECONDS,
+            unavailable_detail="Session revocation store is temporarily unavailable",
+        )
     except HTTPException as auth_error:
         if auth_error.status_code != 401:
             raise

@@ -124,6 +124,10 @@ The contract test checks every row in this table against the dataclass model.
 | `saml_response_max_bytes` | `SAML_RESPONSE_MAX_BYTES` | Maximum decoded SAML response size before signature processing. |
 | `saml_acs_rate_limit_attempts` | `SAML_ACS_RATE_LIMIT_ATTEMPTS` | Maximum SAML ACS attempts per peer in one window. |
 | `saml_acs_rate_limit_window_seconds` | `SAML_ACS_RATE_LIMIT_WINDOW_SECONDS` | SAML ACS rate-limit window in seconds. |
+| `saml_validation_max_concurrency` | `SAML_VALIDATION_MAX_CONCURRENCY` | Concurrent SAML XML/signature validations per worker. |
+| `saml_validation_max_queue` | `SAML_VALIDATION_MAX_QUEUE` | Maximum queued SAML validations per worker. |
+| `saml_validation_queue_timeout_seconds` | `SAML_VALIDATION_QUEUE_TIMEOUT_SECONDS` | Maximum SAML validation admission wait. |
+| `saml_validation_timeout_seconds` | `SAML_VALIDATION_TIMEOUT_SECONDS` | Maximum wait for one SAML validation stage. |
 | `session_secret` | `SAML_SECRET_KEY` | Session signing secret. |
 | `previous_session_secrets` | `AUTH_SESSION_PREVIOUS_SECRET_KEYS` | Previous signing keys accepted during rotation. |
 | `session_max_age_seconds` | `AUTH_SESSION_MAX_AGE_SECONDS` | Session idle lifetime. |
@@ -168,6 +172,10 @@ The contract test checks every row in this table against the dataclass model.
 | `remote_store_timeout_seconds` | `REMOTE_STORE_TIMEOUT_SECONDS` | Optional remote-store HTTP deadline. |
 | `remote_store_failure_threshold` | `REMOTE_STORE_FAILURE_THRESHOLD` | Failures before opening the store circuit. |
 | `remote_store_cooldown_seconds` | `REMOTE_STORE_COOLDOWN_SECONDS` | Open-circuit cooldown. |
+| `remote_store_max_concurrency` | `REMOTE_STORE_MAX_CONCURRENCY` | Concurrent optional shared-store operations per worker. |
+| `remote_store_max_queue` | `REMOTE_STORE_MAX_QUEUE` | Maximum queued optional shared-store operations per worker. |
+| `remote_store_queue_timeout_seconds` | `REMOTE_STORE_QUEUE_TIMEOUT_SECONDS` | Maximum optional shared-store admission wait. |
+| `readiness_cache_ttl_seconds` | `READINESS_CACHE_TTL_SECONDS` | Short per-worker readiness result cache lifetime. |
 | `enable_bff_replay_tokens` | `ENABLE_BFF_REPLAY_TOKENS` | Enable one-time BFF request proofs. |
 | `bff_replay_token_batch_size` | `BFF_REPLAY_TOKEN_BATCH_SIZE` | Proofs issued per refill. |
 | `bff_replay_token_low_watermark` | `BFF_REPLAY_TOKEN_LOW_WATERMARK` | Proof-pool refill threshold. |

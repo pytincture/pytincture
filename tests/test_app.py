@@ -8,6 +8,7 @@ import tempfile
 import asyncio
 import subprocess
 import sys
+import threading
 import time
 import pytest
 from pathlib import Path
@@ -716,6 +717,41 @@ def test_bff_replay_refill_rejects_full_local_store_without_partial_issue(
     assert len(store) == 0
 
 
+def test_bff_replay_refill_store_work_runs_off_the_event_loop(
+    fresh_client, monkeypatch, dummy_module
+):
+    import pytincture.backend.app as backend_app
+
+    headers = _prepare_bff_replay_refill(fresh_client, monkeypatch, dummy_module)
+    event_loop_threads = []
+    store_threads = []
+    original_admission = backend_app._admit_bff_replay_issuance
+
+    def tracked_admission(request, session_id):
+        event_loop_threads.append(threading.get_ident())
+        return original_admission(request, session_id)
+
+    class RecordingReplayStore(LocalReplayStore):
+        def issue_batch(self, subject, records, ttl_seconds):
+            store_threads.append(threading.get_ident())
+            return super().issue_batch(subject, records, ttl_seconds)
+
+    monkeypatch.setattr(
+        backend_app,
+        "_admit_bff_replay_issuance",
+        tracked_admission,
+    )
+    monkeypatch.setattr(
+        backend_app,
+        "BFF_REPLAY_TOKEN_STORE",
+        RecordingReplayStore(100, 20),
+    )
+
+    response = fresh_client.post("/_pytincture/state", headers=headers)
+    assert response.status_code == 200
+    assert store_threads[0] != event_loop_threads[0]
+
+
 def test_bff_methods_default_to_post(fresh_client, monkeypatch, dummy_module):
     import pytincture.backend.app as backend_app
 
@@ -776,6 +812,55 @@ def test_revocation_is_stateless_by_default_and_shared_failures_fail_closed(monk
     monkeypatch.setattr(backend_app, "AUTH_SESSION_REVOCATIONS", BrokenSharedStore())
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
     assert backend_app.require_auth(request) is None
+
+
+def test_main_page_revocation_lookup_runs_off_the_event_loop(
+    fresh_client, monkeypatch, dummy_module
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    login = fresh_client.post(
+        "/example/auth/user",
+        data={"email": "person@example.com", "password": "local"},
+        follow_redirects=False,
+    )
+    assert login.status_code == 303
+
+    event_loop_threads = []
+    store_threads = []
+    original_validate_application_name = backend_app.validate_application_name
+
+    def tracked_validate_application_name(value):
+        event_loop_threads.append(threading.get_ident())
+        return original_validate_application_name(value)
+
+    class RecordingRevocationStore:
+        def get(self, _key):
+            store_threads.append(threading.get_ident())
+            return None
+
+    monkeypatch.setattr(backend_app, "USE_REDIS_INSTANCE", "true")
+    monkeypatch.setattr(
+        backend_app,
+        "AUTH_SESSION_REVOCATIONS",
+        RecordingRevocationStore(),
+    )
+    monkeypatch.setattr(
+        backend_app,
+        "validate_application_name",
+        tracked_validate_application_name,
+    )
+
+    response = fresh_client.get("/example", follow_redirects=False)
+    # Authentication completes before this fixture's intentionally missing UI
+    # entrypoint is reported.
+    assert response.status_code == 422
+    assert store_threads[0] != event_loop_threads[0]
 
 
 def test_session_key_rotation_accepts_and_resigns_previous_key():
@@ -2522,6 +2607,47 @@ def test_readiness_fails_when_shared_state_is_unavailable(fresh_client, monkeypa
     assert response.status_code == 503
     assert response.json()["checks"]["session_store"] is False
 
+
+def test_readiness_checks_are_offloaded_coalesced_and_briefly_cached(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    calls = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_readiness(*_args):
+        calls.append(time.monotonic())
+        entered.set()
+        assert release.wait(1.0)
+        return True, {"modules_path": True}
+
+    monkeypatch.setattr(backend_app, "USE_REDIS_INSTANCE", "false")
+    monkeypatch.setattr(backend_app, "readiness_report", slow_readiness)
+    monkeypatch.setattr(backend_app, "READINESS_CACHE_TTL_SECONDS", 10.0)
+    monkeypatch.setattr(backend_app, "_READINESS_CACHE_VALUE", None)
+    monkeypatch.setattr(backend_app, "_READINESS_CACHE_LOCK", asyncio.Lock())
+    monkeypatch.setattr(
+        backend_app,
+        "REMOTE_STORE_GATE",
+        backend_app.AsyncAdmissionGate(2, 2, 0.1),
+    )
+
+    async def exercise():
+        pending = [
+            asyncio.create_task(backend_app.readiness_check()) for _ in range(5)
+        ]
+        while not entered.is_set():
+            await asyncio.sleep(0)
+        release.set()
+        responses = await asyncio.gather(*pending)
+        cached = await backend_app.readiness_check()
+        return responses, cached
+
+    responses, cached = asyncio.run(exercise())
+    assert len(calls) == 1
+    assert all(response.status_code == 200 for response in responses)
+    assert cached.status_code == 200
+
 def test_get_widgetset(tmp_path, monkeypatch):
     """
     Test get_widgetset returns the correct widgetset string.
@@ -2891,12 +3017,14 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
 
     class FakeSamlAuth:
         processed_request_id = None
+        validation_thread_id = None
 
         def get_settings(self):
             return FakeSettings()
 
         def process_response(self, request_id=None):
             self.processed_request_id = request_id
+            self.validation_thread_id = threading.get_ident()
 
         def get_errors(self):
             return []
@@ -2962,6 +3090,18 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
         "_init_saml_auth",
         lambda request, application, provider=None, post_data=None: fake_saml_auth,
     )
+    acs_thread_ids = []
+    original_load_relay_state = backend_app._load_saml_relay_state
+
+    def tracked_load_relay_state(token):
+        acs_thread_ids.append(threading.get_ident())
+        return original_load_relay_state(token)
+
+    monkeypatch.setattr(
+        backend_app,
+        "_load_saml_relay_state",
+        tracked_load_relay_state,
+    )
 
     transaction_id = "opaque-transaction"
     transaction = {
@@ -2996,6 +3136,7 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
 
     assert response.status_code == 302
     assert fake_saml_auth.processed_request_id == "ONELOGIN_original_request"
+    assert fake_saml_auth.validation_thread_id != acs_thread_ids[0]
     session_data = _decode_session_cookie(fresh_client, backend_app.SAML_SECRET_KEY)
     user = session_data["user"]
     assert user["email"] == "person@example.com"

@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import sys
+import threading
 import time
 import io
 import zipfile
@@ -1142,6 +1143,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-M-08-REPLAY-ISSUANCE",
         "REVIEW-2026-08-31-M-09-BFF-EXECUTION",
         "REVIEW-2026-08-31-M-10-PUBLIC-FILE-APPCODE-CACHE",
+        "REVIEW-2026-08-31-M-11-M-12-BLOCKING-SHARED-STORE",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1233,6 +1235,17 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert public_file_controls["warm_archive_source_reread"] is False
     assert public_file_controls["cache_aggregate_byte_limit"] is True
     assert public_file_controls["redis_required"] is False
+    blocking_controls = dispositions[
+        "REVIEW-2026-08-31-M-11-M-12-BLOCKING-SHARED-STORE"
+    ]["controls"]
+    assert blocking_controls["saml_signature_off_event_loop"] is True
+    assert blocking_controls["timed_out_saml_slot_retained"] is True
+    assert blocking_controls["readiness_refresh_coalesced"] is True
+    assert blocking_controls["remote_revocation_lookup_off_event_loop"] is True
+    assert blocking_controls["redis_read_cache_default"] is False
+    assert blocking_controls["negative_misses_cached"] is False
+    assert blocking_controls["redis_required"] is False
+    assert blocking_controls["normal_sessions_server_side"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:
@@ -1288,6 +1301,123 @@ def test_redis_store_accepts_an_injected_client():
     first_replay_store["token"] = {"session_id": "one"}
     assert second_replay_store.pop_atomic("token") == {"session_id": "one"}
     assert first_replay_store.pop_atomic("token") is None
+
+
+def test_redis_read_cache_is_opt_in_positive_ttl_bounded_and_invalidated():
+    class FakeRedis:
+        def __init__(self):
+            self.values = {"one": "1", "two": "2", "three": "3"}
+            self.get_calls = 0
+
+        def get(self, key):
+            self.get_calls += 1
+            return self.values.get(key)
+
+        def set(self, key, value, ex=None):
+            self.values[key] = value
+
+        def delete(self, key):
+            return int(self.values.pop(key, None) is not None)
+
+    uncached_redis = FakeRedis()
+    uncached = RedisDict(redis_client=uncached_redis)
+    assert uncached.get("one") == "1"
+    assert uncached.get("one") == "1"
+    assert uncached_redis.get_calls == 2
+
+    redis = FakeRedis()
+    cached = RedisDict(
+        redis_client=redis,
+        cache_reads=True,
+        cache_max_entries=2,
+        cache_ttl_seconds=0.02,
+    )
+    assert cached.get("missing") is None
+    assert cached.get("missing") is None
+    assert redis.get_calls == 2  # Negative misses are never cached.
+
+    assert cached.get("one") == "1"
+    assert cached.get("one") == "1"
+    assert redis.get_calls == 3
+    assert cached.get("two") == "2"
+    assert cached.get("three") == "3"
+    assert len(cached) == 2
+    assert cached.get("one") == "1"  # LRU eviction forces a remote read.
+    assert redis.get_calls == 6
+
+    cached["one"] = "updated"
+    assert cached.get("one") == "updated"
+    del cached["one"]
+    assert cached.get("one") is None
+    assert cached.get("three") == "3"
+    redis.values.pop("three")
+    with pytest.raises(KeyError):
+        del cached["three"]
+    assert cached.get("three") is None
+    time.sleep(0.03)
+    assert len(cached) == 0
+
+
+def test_bounded_thread_stage_keeps_event_loop_responsive_and_holds_timed_out_slot():
+    import pytincture.backend.app as backend_app
+
+    def exercise_responsiveness():
+        gate = AsyncAdmissionGate(1, 1, 0.1)
+
+        async def run():
+            event_loop_thread = threading.get_ident()
+            work = asyncio.create_task(
+                backend_app._run_bounded_thread_stage(
+                    gate,
+                    lambda: (time.sleep(0.2), threading.get_ident())[1],
+                    timeout_seconds=1.0,
+                    unavailable_detail="test unavailable",
+                )
+            )
+            started = time.monotonic()
+            await asyncio.sleep(0.02)
+            assert time.monotonic() - started < 0.15
+            worker_thread = await work
+            assert worker_thread != event_loop_thread
+
+        asyncio.run(run())
+
+    def exercise_timeout_capacity():
+        gate = AsyncAdmissionGate(1, 0, 0.01)
+        release = threading.Event()
+
+        async def run():
+            with pytest.raises(HTTPException) as timed_out:
+                await backend_app._run_bounded_thread_stage(
+                    gate,
+                    release.wait,
+                    1.0,
+                    timeout_seconds=0.01,
+                    unavailable_detail="test unavailable",
+                )
+            assert timed_out.value.status_code == 503
+
+            with pytest.raises(HTTPException) as saturated:
+                await backend_app._run_bounded_thread_stage(
+                    gate,
+                    lambda: None,
+                    timeout_seconds=0.01,
+                    unavailable_detail="test unavailable",
+                )
+            assert saturated.value.status_code == 503
+            release.set()
+            await asyncio.sleep(0.05)
+            assert await backend_app._run_bounded_thread_stage(
+                gate,
+                lambda: "recovered",
+                timeout_seconds=0.1,
+                unavailable_detail="test unavailable",
+            ) == "recovered"
+
+        asyncio.run(run())
+
+    exercise_responsiveness()
+    exercise_timeout_capacity()
 
 
 def test_sync_stream_closes_source_at_byte_limit():
