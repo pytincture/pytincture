@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Remove the direct local npm publication script. The protected
+  `npm-publish.yml` retained-artifact/attestation/OIDC workflow is now the sole
+  registry publication path; local build and `npm pack --dry-run` inspection
+  remain credential-free.
 - Add stateless, fail-closed per-application identity admission for shared
   multi-app services. Optional rules constrain provider, issuer, tenant,
   subject, email/domain, and role before session issuance and whenever the

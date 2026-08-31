@@ -125,17 +125,22 @@ npm run build:watch  # rebuild on changes
 
 ## Publishing
 
-From the repo root you can run:
+Registry publication has exactly one supported path: the protected
+`.github/workflows/npm-publish.yml` workflow described in
+[`docs/releasing.md`](../../docs/releasing.md). It verifies the published tag,
+protected-branch ancestry, retained release artifact, GitHub attestation, and
+package identity before publishing with npm trusted-publisher OIDC. There is no
+local registry-publish command.
+
+Maintainers can build and inspect the package locally without registry
+credentials:
 
 ```bash
-bash scripts/publish_runtime.sh
+cd pytincture/frontend
+npm ci
+npm run build
+npm pack --dry-run
 ```
-
-The helper script:
-1. Reads the framework version.
-2. Installs dependencies & syncs package.json.
-3. Builds the bundles.
-4. Publishes to npm if that version isn’t already available.
 
 Once published, load from jsDelivr/UNPKG:
 
