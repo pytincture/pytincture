@@ -241,6 +241,15 @@ class PytinctureConfig:
     bff_queue_timeout_seconds: float = _setting(
         2.0, "BFF_QUEUE_TIMEOUT_SECONDS", "Maximum BFF admission wait."
     )
+    bff_request_max_bytes: int = _setting(
+        1024 * 1024, "BFF_REQUEST_MAX_BYTES", "Maximum canonical BFF JSON body size."
+    )
+    bff_request_max_depth: int = _setting(
+        32, "BFF_REQUEST_MAX_DEPTH", "Maximum canonical BFF JSON nesting depth."
+    )
+    bff_request_max_items: int = _setting(
+        10000, "BFF_REQUEST_MAX_ITEMS", "Maximum aggregate BFF JSON container items."
+    )
     bff_stream_max_seconds: float = _setting(
         300.0, "BFF_STREAM_MAX_SECONDS", "Maximum BFF stream duration."
     )
@@ -410,6 +419,9 @@ class PytinctureConfig:
             self.bff_call_timeout_seconds,
             self.bff_max_concurrency,
             self.bff_queue_timeout_seconds,
+            self.bff_request_max_bytes,
+            self.bff_request_max_depth,
+            self.bff_request_max_items,
             self.bff_stream_max_seconds,
             self.bff_stream_max_bytes,
             self.bff_stream_max_items,
@@ -664,6 +676,7 @@ class PytinctureConfig:
             "login_rate_limit_attempts", "login_rate_limit_window_seconds",
             "login_email_max_chars", "login_password_max_chars",
             "password_hash_max_concurrency", "bff_max_concurrency", "bff_max_queue",
+            "bff_request_max_bytes", "bff_request_max_depth", "bff_request_max_items",
             "bff_stream_max_items", "appcode_max_files", "appcode_max_file_bytes",
             "appcode_max_total_bytes", "appcode_cache_entries",
             "appcode_build_max_concurrency",

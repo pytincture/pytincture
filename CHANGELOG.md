@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Canonicalize BFF calls to one `{args, kwargs}` JSON object encoded once;
+  reject duplicate keys, non-finite values, excessive structure, malformed
+  arguments, and static signature/type mismatches before application import or
+  construction. GET exports are now a parameterless/read-only contract with
+  browser Origin/Fetch Metadata enforcement. No server-side state is added.
 - Require SAML request correlation to be authenticated by either the validated
   Response signature or an exact `InResponseTo` inside the validated assertion
   signature, reject SHA-1 and unknown XML signature/digest algorithms, and cap

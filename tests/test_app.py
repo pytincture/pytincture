@@ -486,7 +486,7 @@ def test_unknown_bff_target_is_rejected_before_module_execution(
     )
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
     monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "user@example.com"})
-    response = fresh_client.post("/danger/classcall/danger.py/Danger/run", json={})
+    response = fresh_client.post("/danger/classcall/danger.py/Danger/run", json={"args": [], "kwargs": {}})
     assert response.status_code == 404
     assert not marker.exists()
 
@@ -518,7 +518,7 @@ def test_async_policy_runs_before_constructor(fresh_client, monkeypatch, tmp_pat
     set_bff_policy_hook(deny_policy)
     try:
         response = fresh_client.post(
-            "/restricted/classcall/restricted.py/Restricted/run", json={}
+            "/restricted/classcall/restricted.py/Restricted/run", json={"args": [], "kwargs": {}}
         )
     finally:
         set_bff_policy_hook(None)
@@ -542,12 +542,12 @@ def test_state_changing_bff_call_requires_csrf(
         follow_redirects=False,
     )
     without_token = fresh_client.post(
-        "/demoapp/classcall/example.py/ExampleClass/testfunc", json={}
+        "/demoapp/classcall/example.py/ExampleClass/testfunc", json={"args": [], "kwargs": {}}
     )
     assert without_token.status_code == 403
     with_token = fresh_client.post(
         "/demoapp/classcall/example.py/ExampleClass/testfunc",
-        json={},
+        json={"args": [], "kwargs": {}},
         headers=_csrf_headers(fresh_client),
     )
     assert with_token.status_code == 200
@@ -619,12 +619,12 @@ def test_bff_replay_token_is_opaque_session_bound_and_single_use(
     call_headers["X-Pytincture-BFF-Token"] = restarted_tokens[0]
     first = fresh_client.post(
         "/example/classcall/example.py/ExampleClass/testfunc",
-        json={},
+        json={"args": [], "kwargs": {}},
         headers=call_headers,
     )
     copied_curl_replay = fresh_client.post(
         "/example/classcall/example.py/ExampleClass/testfunc",
-        json={},
+        json={"args": [], "kwargs": {}},
         headers=call_headers,
     )
     assert first.status_code == 200
@@ -661,7 +661,7 @@ def test_revoked_session_is_rejected(fresh_client, monkeypatch, dummy_module):
     backend_app.revoke_session(session_data["session_id"])
     response = fresh_client.post(
         "/demoapp/classcall/example.py/ExampleClass/testfunc",
-        json={},
+        json={"args": [], "kwargs": {}},
         headers=_csrf_headers(fresh_client),
     )
     assert response.status_code == 401
@@ -1033,7 +1033,7 @@ def test_class_call_noauth(dummy_module, monkeypatch, fresh_client):
     ALLOWED_NOAUTH_CLASSCALLS.extend(allowed_calls)
     fresh_client.cookies.clear()
     response = fresh_client.post(
-        "/example/classcall/example.py/ExampleClass/testfunc", json={"kwargs": {}}
+        "/example/classcall/example.py/ExampleClass/testfunc", json={"args": [], "kwargs": {}}
     )
     assert response.status_code == 200
     json_response = response.json()
@@ -1045,7 +1045,7 @@ def test_unscoped_bff_routes_are_removed(method, fresh_client):
     response = fresh_client.request(
         method,
         "/classcall/worker.py/Worker/ping",
-        json={} if method != "GET" else None,
+        json={"args": [], "kwargs": {}} if method != "GET" else None,
     )
 
     assert response.status_code == 404
@@ -1089,16 +1089,16 @@ def test_noauth_bff_requires_a_real_application_graph_without_method_allowlist(
     ALLOWED_NOAUTH_CLASSCALLS.clear()
 
     public = fresh_client.post(
-        "/portal/classcall/public_data.py/PublicData/read", json={"kwargs": {}}
+        "/portal/classcall/public_data.py/PublicData/read", json={"args": [], "kwargs": {}}
     )
     dormant = fresh_client.post(
-        "/portal/classcall/dormant.py/InternalData/read", json={"kwargs": {}}
+        "/portal/classcall/dormant.py/InternalData/read", json={"args": [], "kwargs": {}}
     )
     administrative = fresh_client.post(
-        "/portal/classcall/admin.py/InternalData/read", json={"kwargs": {}}
+        "/portal/classcall/admin.py/InternalData/read", json={"args": [], "kwargs": {}}
     )
     nonexistent = fresh_client.post(
-        "/ghost/classcall/public_data.py/PublicData/read", json={"kwargs": {}}
+        "/ghost/classcall/public_data.py/PublicData/read", json={"args": [], "kwargs": {}}
     )
 
     assert public.status_code == 200
@@ -1156,7 +1156,7 @@ def test_noauth_bff_rejects_null_origin(dummy_module, monkeypatch, fresh_client)
 
     response = fresh_client.post(
         "/demoapp/classcall/example.py/ExampleClass/testfunc",
-        json={"kwargs": {}},
+        json={"args": [], "kwargs": {}},
         headers={"Origin": "null", "Sec-Fetch-Site": "cross-site"},
     )
 
@@ -1171,7 +1171,7 @@ def test_noauth_bff_rejects_cross_origin_private_network_request(
 
     response = fresh_client.post(
         "/demoapp/classcall/example.py/ExampleClass/testfunc",
-        json={"kwargs": {}},
+        json={"args": [], "kwargs": {}},
         headers={
             "Origin": "https://attacker.example",
             "Sec-Fetch-Site": "cross-site",
@@ -1190,7 +1190,7 @@ def test_noauth_bff_accepts_same_origin_browser_request(
 
     response = fresh_client.post(
         "/demoapp/classcall/example.py/ExampleClass/testfunc",
-        json={"kwargs": {}},
+        json={"args": [], "kwargs": {}},
         headers={
             "Origin": "https://127.0.0.1",
             "Sec-Fetch-Site": "same-origin",
@@ -1208,7 +1208,7 @@ def test_noauth_bff_accepts_trusted_non_browser_json_client(
 
     response = fresh_client.post(
         "/demoapp/classcall/example.py/ExampleClass/testfunc",
-        json={"kwargs": {}},
+        json={"args": [], "kwargs": {}},
     )
 
     assert response.status_code == 200
@@ -1239,7 +1239,7 @@ def test_noauth_bff_does_not_export_a_local_same_named_decorator(
 
     response = fresh_client.post(
         "/admin/classcall/admin.py/Accidental/secret",
-        json={"kwargs": {}},
+        json={"args": [], "kwargs": {}},
     )
 
     assert response.status_code == 404
@@ -1275,7 +1275,7 @@ def test_bff_rebinding_is_rejected_before_module_import(
 
     response = fresh_client.post(
         "/worker/classcall/worker.py/API/read",
-        json={"kwargs": {}},
+        json={"args": [], "kwargs": {}},
     )
 
     assert response.status_code == 404
@@ -1325,7 +1325,7 @@ def test_bff_dispatch_rejects_runtime_class_or_method_replacement_before_constru
 
     response = fresh_client.post(
         "/worker/classcall/worker.py/API/read",
-        json={"kwargs": {}},
+        json={"args": [], "kwargs": {}},
     )
 
     assert response.status_code == 404
@@ -1361,7 +1361,7 @@ def test_bff_dispatch_preserves_inner_class_decorators(
 
     response = fresh_client.post(
         "/worker/classcall/worker.py/API/read",
-        json={"kwargs": {}},
+        json={"args": [], "kwargs": {}},
     )
 
     assert response.status_code == 200
@@ -1384,7 +1384,7 @@ def test_bff_dispatch_preserves_inner_class_decorators(
 def test_every_application_route_rejects_invalid_or_reserved_names(
     fresh_client, method, path
 ):
-    response = fresh_client.request(method, path, json={} if method == "POST" else None)
+    response = fresh_client.request(method, path, json={"args": [], "kwargs": {}} if method == "POST" else None)
     assert response.status_code == 404
 
 
@@ -1394,7 +1394,7 @@ def test_bff_rejects_windows_separator_path(fresh_client, monkeypatch):
     monkeypatch.setattr(backend_app, "require_auth", lambda request: "noauth")
     response = fresh_client.post(
         "/demoapp/classcall/pkg%5Cworker.py/Worker/ping",
-        json={},
+        json={"args": [], "kwargs": {}},
     )
     assert response.status_code == 400
 
@@ -1424,7 +1424,7 @@ def test_appcode_bff_and_public_assets_reject_symlinks(
 
     archive = fresh_client.get("/demoapp/appcode/appcode.pyt")
     bff = fresh_client.post(
-        "/demoapp/classcall/worker.py/Worker/ping", json={}
+        "/demoapp/classcall/worker.py/Worker/ping", json={"args": [], "kwargs": {}}
     )
     asset = fresh_client.get("/demoapp/appcode/secret.png")
     assert archive.status_code == 404
@@ -1470,14 +1470,14 @@ def test_class_call_policy_hook(monkeypatch, fresh_client, tmp_path):
     try:
         response = fresh_client.post(
             "/restricted/classcall/restricted.py/Restricted/secret",
-            json={"kwargs": {}},
+            json={"args": [], "kwargs": {}},
         )
         assert response.status_code == 403
 
         current_user["roles"] = ["admin"]
         response = fresh_client.post(
             "/restricted/classcall/restricted.py/Restricted/secret",
-            json={"kwargs": {}},
+            json={"args": [], "kwargs": {}},
         )
         assert response.status_code == 200
         assert response.json()["ok"] is True
@@ -1522,7 +1522,7 @@ def test_class_call_policy_hook_receives_mapping_for_noauth(monkeypatch, fresh_c
 
     set_bff_policy_hook(policy_hook)
     try:
-        response = fresh_client.post("/public_restricted/classcall/public_restricted.py/PublicRestricted/inspect", json={"kwargs": {}})
+        response = fresh_client.post("/public_restricted/classcall/public_restricted.py/PublicRestricted/inspect", json={"args": [], "kwargs": {}})
         assert response.status_code == 403
         assert seen_user["auth_type"] == "noauth"
         assert seen_user["is_authenticated"] is False
@@ -1552,10 +1552,112 @@ def test_class_call_loads_decorated_module_without_standard_import(monkeypatch, 
     monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "tester@example.com"})
 
     response = fresh_client.post(
-        "/direct_load/classcall/direct_load.py/DirectLoad/ping", json={}
+        "/direct_load/classcall/direct_load.py/DirectLoad/ping", json={"args": [], "kwargs": {}}
     )
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_bff_request_validation_finishes_before_application_import(
+    monkeypatch,
+    fresh_client,
+    tmp_path,
+):
+    import pytincture.backend.app as backend_app
+
+    marker = tmp_path / "module-imported"
+    module = tmp_path / "validated.py"
+    module.write_text(textwrap.dedent(f"""
+        from pathlib import Path
+        from pytincture.dataclass import backend_for_frontend
+
+        Path({str(marker)!r}).write_text("imported")
+
+        @backend_for_frontend
+        class Validated:
+            def run(self, value: int):
+                return {{"value": value}}
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+
+    url = "/validated/classcall/validated.py/Validated/run"
+    invalid_bodies = (
+        '"{\\"args\\":[],\\"kwargs\\":{\\"value\\":1}}"',
+        '{"args":[],"kwargs":{"value":1,"value":2}}',
+        '{"args":[NaN],"kwargs":{}}',
+        '{"args":[[[[[1]]]]],"kwargs":{}}',
+        '{"args":[{"name":"value","type":"int","value":1}],"kwargs":{}}',
+        '{"args":[],"kwargs":{"value":"wrong-type"}}',
+        '{"args":[],"kwargs":{}}',
+    )
+    monkeypatch.setattr(backend_app, "BFF_REQUEST_MAX_DEPTH", 4)
+    for body in invalid_bodies:
+        response = fresh_client.post(
+            url,
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 400
+        assert not marker.exists()
+
+    monkeypatch.setattr(backend_app, "BFF_REQUEST_MAX_BYTES", 20)
+    oversized = fresh_client.post(
+        url,
+        content='{"args":[],"kwargs":{"value":123}}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert oversized.status_code == 413
+    assert not marker.exists()
+
+    monkeypatch.setattr(backend_app, "BFF_REQUEST_MAX_BYTES", 1024 * 1024)
+    monkeypatch.setattr(backend_app, "BFF_REQUEST_MAX_DEPTH", 32)
+    valid = fresh_client.post(
+        url,
+        json={"args": [], "kwargs": {"value": 3}},
+    )
+    assert valid.status_code == 200
+    assert valid.json() == {"value": 3}
+    assert marker.read_text() == "imported"
+
+
+def test_get_bff_rejects_cross_site_browser_metadata(
+    monkeypatch,
+    fresh_client,
+    tmp_path,
+):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "readonly.py").write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_http_methods
+
+        @backend_for_frontend
+        class ReadOnly:
+            @bff_http_methods("GET")
+            def status(self):
+                return {"ready": True}
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    url = "/readonly/classcall/readonly.py/ReadOnly/status"
+
+    cross_site = fresh_client.get(url, headers={"Sec-Fetch-Site": "cross-site"})
+    hostile_origin = fresh_client.get(
+        url,
+        headers={"Origin": "https://attacker.example"},
+    )
+    same_origin = fresh_client.get(url, headers={"Sec-Fetch-Site": "same-origin"})
+
+    assert cross_site.status_code == 403
+    assert hostile_origin.status_code == 403
+    assert same_origin.status_code == 200
+    assert same_origin.json() == {"ready": True}
 
 
 def test_class_call_decorated_constructor_receives_user(monkeypatch, fresh_client, tmp_path):
@@ -1583,7 +1685,7 @@ def test_class_call_decorated_constructor_receives_user(monkeypatch, fresh_clien
     monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "tester@example.com"})
 
     response = fresh_client.post(
-        "/user_aware/classcall/user_aware.py/UserAware/whoami", json={}
+        "/user_aware/classcall/user_aware.py/UserAware/whoami", json={"args": [], "kwargs": {}}
     )
     assert response.status_code == 200
     assert response.json()["email"] == "tester@example.com"
@@ -1655,7 +1757,7 @@ def test_class_call_nested_module_path(monkeypatch, fresh_client, tmp_path):
 
     response = fresh_client.post(
         "/nested_app/classcall/pkg/internal/worker.py/Worker/ping",
-        json={"kwargs": {"value": "hello"}}
+        json={"args": [], "kwargs": {"value": "hello"}}
     )
     assert response.status_code == 200
     assert response.json()["echo"] == "hello"
@@ -1695,7 +1797,7 @@ def test_class_call_noauth_nested_path(monkeypatch, fresh_client, tmp_path):
     }])
 
     response = fresh_client.post(
-        "/nested_app/classcall/pkg/internal/worker.py/Worker/ping", json={}
+        "/nested_app/classcall/pkg/internal/worker.py/Worker/ping", json={"args": [], "kwargs": {}}
     )
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
@@ -1731,10 +1833,10 @@ def test_noauth_bff_grant_does_not_authorize_same_basename(monkeypatch, fresh_cl
     })
 
     allowed = fresh_client.post(
-        "/portal/classcall/public/worker.py/Worker/ping", json={}
+        "/portal/classcall/public/worker.py/Worker/ping", json={"args": [], "kwargs": {}}
     )
     collision = fresh_client.post(
-        "/portal/classcall/private/worker.py/Worker/ping", json={}
+        "/portal/classcall/private/worker.py/Worker/ping", json={"args": [], "kwargs": {}}
     )
 
     assert allowed.status_code == 200
@@ -1770,8 +1872,8 @@ def test_authenticated_session_cannot_cross_application_audience(
     )
     monkeypatch.setattr(backend_app, "_validate_csrf", lambda request, user: None)
 
-    same_app = fresh_client.post("/alpha/classcall/alpha.py/Data/read", json={})
-    other_app = fresh_client.post("/beta/classcall/beta.py/Data/read", json={})
+    same_app = fresh_client.post("/alpha/classcall/alpha.py/Data/read", json={"args": [], "kwargs": {}})
+    other_app = fresh_client.post("/beta/classcall/beta.py/Data/read", json={"args": [], "kwargs": {}})
 
     assert same_app.status_code == 200
     assert other_app.status_code == 403
@@ -1805,7 +1907,7 @@ def test_declared_provider_policy_rejects_other_provider(
     set_bff_policy_hook(lambda **kwargs: None)
     try:
         response = fresh_client.post(
-            "/portal/classcall/portal.py/Restricted/read", json={}
+            "/portal/classcall/portal.py/Restricted/read", json={"args": [], "kwargs": {}}
         )
     finally:
         set_bff_policy_hook(None)
@@ -1859,7 +1961,7 @@ def test_class_call_streaming(monkeypatch, fresh_client, tmp_path):
 
     response = fresh_client.post(
         "/stream_widget/classcall/stream_widget.py/StreamWidget/ticker",
-        json={"kwargs": {"count": 3}}
+        json={"args": [], "kwargs": {"count": 3}}
     )
 
     assert response.status_code == 200
@@ -1890,7 +1992,7 @@ def test_class_call_timeout_returns_gateway_timeout(monkeypatch, fresh_client, t
 
     response = fresh_client.post(
         "/slow_widget/classcall/slow_widget.py/SlowWidget/wait",
-        json={},
+        json={"args": [], "kwargs": {}},
     )
     assert response.status_code == 504
     assert response.json()["detail"] == "Internal server error"
@@ -2305,7 +2407,7 @@ def test_stateless_session_survives_logout_in_another_browser_and_replica(
         another_replica.cookies.set("pytincture_csrf", second_csrf_cookie)
         response = another_replica.post(
             "/demoapp/classcall/example.py/ExampleClass/testfunc",
-            json={"kwargs": {"source": "replica"}},
+            json={"args": [], "kwargs": {"source": "replica"}},
             headers=_csrf_headers(another_replica),
         )
 
@@ -2661,7 +2763,7 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
     backend_app.USER_SESSION_DICT["person@example.com"] = {"stale": True}
     bff_response = fresh_client.post(
         "/demoapp/classcall/example.py/ExampleClass/testfunc",
-        json={},
+        json={"args": [], "kwargs": {}},
         headers=_csrf_headers(fresh_client),
     )
     assert bff_response.status_code == 200
@@ -3013,7 +3115,7 @@ def test_authenticated_session_has_absolute_lifetime(
     fresh_client.cookies.set("session", expired_absolute_cookie)
     response = fresh_client.post(
         "/demoapp/classcall/example.py/ExampleClass/testfunc",
-        json={"kwargs": {}},
+        json={"args": [], "kwargs": {}},
         headers={"X-CSRF-Token": fresh_client.cookies["pytincture_csrf"]},
     )
     assert response.status_code == 401

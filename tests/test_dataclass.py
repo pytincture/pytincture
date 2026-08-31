@@ -115,6 +115,40 @@ def test_bff_http_methods_rejects_unsupported_method():
         bff_http_methods("TRACE")
 
 
+def test_static_manifest_defines_get_as_parameterless_read_only_contract(tmp_path):
+    file_path = tmp_path / "unsafe_get.py"
+    file_path.write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_http_methods
+
+        @backend_for_frontend
+        class UnsafeGet:
+            @bff_http_methods("GET")
+            def read(self, value: int = 1):
+                return value
+    """))
+    with pytest.raises(ValueError, match="parameterless and read-only"):
+        get_bff_manifest(str(file_path))
+
+
+def test_static_manifest_retains_safe_annotation_contracts(tmp_path):
+    file_path = tmp_path / "typed.py"
+    file_path.write_text(textwrap.dedent("""
+        from typing import Optional
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class Typed:
+            def run(self, count: int, labels: list[str], enabled: Optional[bool] = None):
+                return count
+    """))
+    parameters = get_bff_manifest(str(file_path))[("Typed", "run")]["parameters"]
+    assert [parameter["annotation"] for parameter in parameters] == [
+        "int",
+        "list[str]",
+        "Optional[bool]",
+    ]
+
+
 @pytest.mark.parametrize(
     "declaration",
     [
@@ -518,7 +552,9 @@ def test_generate_stub_classes_returns_stub(tmp_path, monkeypatch):
     assert expected_url in stub
     # Also check that required imports are added.
     assert "import json" in stub
-    assert "from js import XMLHttpRequest, JSON" in stub
+    assert "from js import XMLHttpRequest, document" in stub
+    assert "JSON.stringify(json.dumps" not in stub
+    assert "json.dumps(payload, allow_nan=False)" in stub
     assert "from io import StringIO" in stub
 
 

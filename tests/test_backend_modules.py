@@ -931,6 +931,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-H-08-M-25",
         "REVIEW-2026-08-31-H-09",
         "REVIEW-2026-08-31-M-02-M-03",
+        "REVIEW-2026-08-31-M-06-GET",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -987,6 +988,12 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert saml_correlation_controls["sha1_signature_and_digest_rejected"] is True
     assert saml_correlation_controls["session_capped_to_earliest_saml_expiry"] is True
     assert saml_correlation_controls["redis_required"] is False
+    request_controls = dispositions["REVIEW-2026-08-31-M-06-GET"]["controls"]
+    assert request_controls["single_canonical_json_representation"] is True
+    assert request_controls["double_encoded_json_accepted"] is False
+    assert request_controls["static_signature_bound_before_import"] is True
+    assert request_controls["get_browser_metadata_validated"] is True
+    assert request_controls["redis_required"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:

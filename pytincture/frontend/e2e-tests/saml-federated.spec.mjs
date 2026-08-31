@@ -35,7 +35,7 @@ async function callBff(page) {
         const response = await fetch("/e2e_app/classcall/e2e_data.py/E2EData/sync_call", {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
-            body: JSON.stringify({ kwargs: { value: 41 } }),
+            body: JSON.stringify({ args: [], kwargs: { value: 41 } }),
         });
         return { status: response.status, body: await response.text() };
     });
@@ -122,7 +122,7 @@ test("Keycloak SAML login authenticates the packaged app and BFF", async ({ page
         ]));
 
         const anonymousBff = await page.request.post("/e2e_app/classcall/e2e_data.py/E2EData/sync_call", {
-            data: { kwargs: { value: 42 } },
+            data: { args: [], kwargs: { value: 42 } },
         });
         expect(anonymousBff.status()).toBe(401);
 

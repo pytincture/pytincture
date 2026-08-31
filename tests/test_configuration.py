@@ -20,6 +20,9 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "ENABLE_USER_LOGIN": "true",
             "BFF_CALL_TIMEOUT_SECONDS": "12.5",
             "BFF_MAX_CONCURRENCY": "9",
+            "BFF_REQUEST_MAX_BYTES": "524288",
+            "BFF_REQUEST_MAX_DEPTH": "24",
+            "BFF_REQUEST_MAX_ITEMS": "5000",
             "BFF_STREAM_IDLE_TIMEOUT_SECONDS": "4.5",
             "APPCODE_MAX_FILES": "80",
             "REMOTE_STORE_TIMEOUT_SECONDS": "1.25",
@@ -42,6 +45,9 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.enable_user_login is True
     assert config.bff_call_timeout_seconds == 8.0
     assert config.bff_max_concurrency == 9
+    assert config.bff_request_max_bytes == 524288
+    assert config.bff_request_max_depth == 24
+    assert config.bff_request_max_items == 5000
     assert config.bff_stream_idle_timeout_seconds == 4.5
     assert config.appcode_max_files == 80
     assert config.remote_store_timeout_seconds == 1.25
@@ -252,6 +258,7 @@ def test_microsoft_auth_requires_explicit_tenant(tmp_path):
         ({"default_application": "bad-name"}, "Python identifier"),
         ({"default_application": "classcall"}, "Python identifier"),
         ({"bff_max_queue": -1}, "bff_max_queue"),
+        ({"bff_request_max_depth": 0}, "resource limits"),
         ({"password_hash_max_concurrency": 0}, "resource limits"),
         ({"saml_response_max_bytes": 0}, "saml_response_max_bytes"),
         ({"saml_transaction_ttl_seconds": 0}, "saml_transaction_ttl_seconds"),
@@ -686,11 +693,11 @@ def test_invalid_python_file_cannot_disable_unrelated_bff_application(tmp_path):
 
     with TestClient(configured) as client:
         healthy = client.post(
-            "/healthy/classcall/healthy.py/Healthy/ping", json={"kwargs": {}}
+            "/healthy/classcall/healthy.py/Healthy/ping", json={"args": [], "kwargs": {}}
         )
         rejected = client.post(
             "/partially_written/classcall/partially_written.py/Unknown/ping",
-            json={"kwargs": {}},
+            json={"args": [], "kwargs": {}},
         )
     assert healthy.status_code == 200
     assert healthy.json() == {"healthy": True}

@@ -309,7 +309,8 @@ Errors are rendered inside `#maindiv` (if present) and logged to the console, ma
 ### Backend-for-Frontend access policies
 Only classes marked with `@backend_for_frontend` and their public methods/attributes are registered. Unknown targets are rejected from a static manifest before application code is imported or constructed. Methods default to POST.
 
-Use `@bff_http_methods` to opt a side-effect-free method into GET or to select PUT, PATCH, or DELETE:
+Use `@bff_http_methods` to declare a parameterless, read-only, repeatable GET
+method or to select PUT, PATCH, or DELETE:
 
 ```python
 from pytincture.dataclass import backend_for_frontend, bff_http_methods
