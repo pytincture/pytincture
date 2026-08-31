@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from packaging.version import InvalidVersion, Version
 
 from pytincture.backend.safe_paths import validate_application_name
+from pytincture.backend.storage import validate_redis_url
 
 
 _MICROSOFT_SHARED_TENANTS = {"common", "organizations", "consumers"}
@@ -262,7 +263,12 @@ class PytinctureConfig:
         300, "BFF_REPLAY_TOKEN_TTL_SECONDS", "Unused proof lifetime."
     )
     use_redis_instance: bool = _setting(False, "USE_REDIS_INSTANCE", "Use Upstash shared state.")
-    redis_url: str = _setting("", "REDIS_UPSTASH_INSTANCE_URL", "Upstash Redis URL.")
+    redis_url: str = _setting(
+        "",
+        "REDIS_UPSTASH_INSTANCE_URL",
+        "Optional Upstash Redis URL; HTTPS is required except for literal "
+        "loopback development IPs.",
+    )
     redis_token: str = _setting(
         "", "REDIS_UPSTASH_INSTANCE_TOKEN", "Upstash Redis token.", repr=False
     )
@@ -408,8 +414,8 @@ class PytinctureConfig:
             raise ValueError("production authentication requires a strong session_secret")
         if self.use_redis_instance and not (self.redis_url and self.redis_token):
             raise ValueError("Redis shared state requires redis_url and redis_token")
-        if self.use_redis_instance and urlparse(self.redis_url).scheme not in {"http", "https"}:
-            raise ValueError("redis_url must be an absolute HTTP(S) URL")
+        if self.use_redis_instance:
+            object.__setattr__(self, "redis_url", validate_redis_url(self.redis_url))
         if self.enable_mcp:
             if not self.mcp_allowed_hosts or not self.mcp_allowed_origins:
                 raise ValueError("MCP requires exact allowed hosts and origins")

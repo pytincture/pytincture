@@ -48,7 +48,9 @@ password login has independent peer/account limits per worker, so the gateway
 should provide the coordinated outer limit when multiple workers are exposed.
 Optional Upstash operations use short deadlines and a per-worker circuit
 breaker; Redis remains optional and is not used by the default signed-cookie
-session path.
+session path. When that integration is explicitly enabled, its remote URL must
+use HTTPS. Cleartext HTTP is accepted only for local emulators addressed by a
+literal loopback IP such as `127.0.0.1` or `::1`.
 
 Keep `MODULES_PATH` writable only by the deployment principal. Pytincture
 canonicalizes the root, rejects symlink components and cross-platform traversal
