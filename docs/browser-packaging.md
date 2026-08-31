@@ -71,6 +71,11 @@ assets and favicons, but its response receives a no-script sandbox CSP and
 same-origin resource policy so direct navigation cannot become an application
 script context.
 
+Browser Python and manifest-approved widget JavaScript are intentionally
+trusted application code with same-origin authority. Pytincture constrains
+which deployment-approved files enter that boundary; it does not sandbox that
+code from its own application origin.
+
 ## Widget wheels
 
 Declare literal metadata in a local imported module:

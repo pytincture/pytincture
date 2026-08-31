@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "review_response": "accepted",
+  "reviewed_report": "SECURITY_REVIEW_2026-08-30.txt",
+  "review_response_date": "2026-08-30",
+  "recorded_on": "2026-08-31",
+  "dispositions": [
+    {
+      "id": "F-01",
+      "status": "remediated",
+      "title": "Decorator provenance with class-level BFF exports",
+      "intentional_contract": "A Pytincture backend_for_frontend class decorator exports its public methods and public read-only attributes. Method-level export declarations are not required.",
+      "security_boundary": "Static discovery accepts security decorators only when their exact binding is proven to come directly from pytincture or pytincture.dataclass at that point in source order.",
+      "controls": {
+        "class_level_export_preserved": true,
+        "method_level_export_required": false,
+        "exact_pytincture_import_provenance_required": true,
+        "local_same_named_decorators_rejected": true,
+        "unrelated_imports_rejected": true,
+        "rebound_or_shadowed_aliases_rejected": true
+      },
+      "implementation": [
+        "pytincture/dataclass.py",
+        "docs/contracts/bff-v1.md"
+      ],
+      "regression_tests": [
+        "tests/test_dataclass.py::test_static_manifest_rejects_spoofed_or_rebound_export_decorators",
+        "tests/test_dataclass.py::test_static_manifest_rejects_spoofed_or_rebound_security_metadata",
+        "tests/test_dataclass.py::test_static_manifest_accepts_proven_direct_and_module_aliases",
+        "tests/test_dataclass.py::test_static_manifest_tracks_rebinding_in_source_order",
+        "tests/test_dataclass.py::test_static_manifest_rejects_less_common_rebindings",
+        "tests/test_dataclass.py::test_static_manifest_rejects_class_scope_security_decorator_rebinding"
+      ]
+    },
+    {
+      "id": "F-02",
+      "status": "remediated_boundary_with_accepted_architecture",
+      "title": "Same-origin browser trust with application-owned assets",
+      "intentional_contract": "Application-selected browser Python and manifest-approved widget JavaScript execute as trusted same-origin application code. That same-origin execution model is intentional and is not a sandbox boundary.",
+      "security_boundary": "Direct assets are deliberately unauthenticated, but must belong to a real application and an explicit application browser/public/favicon/widget declaration. Python is never public, and SVG responses cannot create a same-origin script context.",
+      "controls": {
+        "same_origin_browser_execution_intentional": true,
+        "real_application_entrypoint_required": true,
+        "explicit_asset_ownership_required": true,
+        "application_scoped_asset_declarations_supported": true,
+        "python_assets_never_public": true,
+        "svg_response_sandboxed_without_script": true
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "docs/browser-packaging.md",
+        "docs/contracts/appcode-v1.md"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_public_assets_require_a_real_app_and_explicit_app_ownership",
+        "tests/test_app.py::test_public_asset_globs_can_be_scoped_per_application",
+        "tests/test_app.py::test_public_svg_assets_are_sandboxed",
+        "pytincture/frontend/e2e-tests/pytincture.spec.mjs::direct SVG navigation cannot execute application-origin script"
+      ]
+    },
+    {
+      "id": "SAML-STATELESS-REPLAY-BOUNDARY",
+      "status": "accepted_architecture",
+      "title": "Stateless SAML browser binding and duplicate-delivery boundary",
+      "intentional_contract": "SAML browser transactions use signed HttpOnly cookies and remain portable across workers without Redis, process memory, or sticky routing.",
+      "security_boundary": "Pytincture rejects cross-browser login CSRF and normal sequential replay. Without shared mutable state, exactly one of two simultaneous raw requests carrying the same valid pre-response cookie and assertion cannot be guaranteed to win.",
+      "optional_control": "A deployment that requires strict simultaneous single-consumption must add a shared atomic transaction-consumption control. That policy does not make Redis a Pytincture requirement.",
+      "controls": {
+        "signed_browser_transaction": true,
+        "exact_in_response_to_required": true,
+        "response_and_assertion_ids_required": true,
+        "sequential_replay_rejected": true,
+        "cross_browser_login_csrf_rejected": true,
+        "cross_worker_portable": true,
+        "redis_required": false,
+        "process_memory_required": false,
+        "strict_simultaneous_single_consumption_built_in": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "security/saml-replay-mitigation.json",
+        "docs/authentication.md"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_saml_acs_rejects_relay_state_copied_to_another_browser",
+        "tests/test_app.py::test_saml_acs_requires_exact_in_response_to",
+        "tests/test_production.py::test_saml_handshake_is_portable_between_workers_without_redis"
+      ]
+    }
+  ]
+}

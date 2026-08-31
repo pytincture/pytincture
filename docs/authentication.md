@@ -85,3 +85,12 @@ replicas require neither Redis nor sticky sessions. If immediate revocation of
 a copied cookie is required, install `pytincture[redis]` and explicitly set
 `USE_REDIS_INSTANCE=true`; authentication then fails closed when that shared
 store is unavailable. See the [production runbook](production-deployment.md).
+
+The signed SAML handshake rejects cross-browser login CSRF and normal
+sequential response replay while remaining portable across workers. As a
+documented stateless boundary, it cannot guarantee which of two simultaneous
+raw requests with the same valid pre-response cookie and assertion is consumed
+first. Deployments requiring strict single-consumption must add shared atomic
+transaction control; this is optional and does not make Redis a framework
+requirement. See the machine-readable
+[`saml-replay-mitigation.json`](../security/saml-replay-mitigation.json).

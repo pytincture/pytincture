@@ -15,6 +15,9 @@ from pytincture.configuration import get_runtime_env
 bff_routes: Dict[str, Dict] = {}
 
 
+# Security contract: class-level export is intentional. Static discovery must
+# prove these decorators came from Pytincture at this point in source order;
+# same-named local/unrelated or subsequently rebound aliases never opt code in.
 _PYTINCTURE_DECORATOR_MODULES = frozenset({"pytincture", "pytincture.dataclass"})
 _PYTINCTURE_DECORATORS = frozenset({
     "backend_for_frontend",

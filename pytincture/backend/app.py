@@ -1715,6 +1715,9 @@ def download_appcode(request: Request, application: str, user=Depends(require_au
     )
 
 
+# Browser Python and approved widget assets intentionally have same-origin
+# application authority. This unauthenticated route is narrower: it exposes
+# only assets owned by a real application, and active SVG receives a sandbox.
 _DEFAULT_PUBLIC_ASSET_EXTENSIONS = {
     ".avif", ".bmp", ".css", ".gif", ".ico", ".jpeg", ".jpg", ".js",
     ".m4a", ".mp3", ".mp4", ".ogg", ".otf", ".png", ".svg", ".ttf",
@@ -2620,6 +2623,9 @@ def _get_saml_role_attribute_keys(provider: Optional[Dict[str, Any]] = None) -> 
     return saml_role_attribute_keys(provider, SAML_ROLE_ATTRIBUTE_KEYS)
 
 
+# This transaction is deliberately signed-browser state so callbacks can land
+# on any worker without Redis or process memory. Strict simultaneous duplicate
+# consumption requires an optional shared atomic deployment control.
 _SAML_RELAY_STATE_SALT = "pytincture-saml-relay-state-v2"
 _SAML_HANDSHAKE_COOKIE_SALT = "pytincture-saml-handshake-cookie-v1"
 _SAML_HANDSHAKE_COOKIE = "pytincture_saml_handshake"
