@@ -178,7 +178,7 @@ pip install ".[dev]"
 - BFF_CALL_TIMEOUT_SECONDS: Maximum non-streaming BFF execution time. Defaults to 30 seconds.
 - BFF_STREAM_MAX_SECONDS: Maximum BFF stream duration. Defaults to 300 seconds.
 - BFF_STREAM_MAX_BYTES: Maximum BFF stream output. Defaults to 10 MiB.
-- BFF_POLICY_HOOK_PATH: Dotted path to a sync or async policy hook. This is the recommended launcher configuration because the hook must be available before application modules are imported or constructed.
+- BFF_POLICY_HOOK_PATH: Dotted path to a sync or async policy hook. This is the recommended launcher configuration because the hook must be available before application modules are imported or constructed. Return `True` or `None` to allow, `False` to deny, or raise an HTTP exception with an explicit status.
 - ENABLE_BFF_REPLAY_TOKENS: Opt-in one-time request proofs for authenticated BFF calls. Generated browser stubs automatically obtain, consume, and refill an in-memory token pool. Defaults to `false`.
 - BFF_REPLAY_TOKEN_BATCH_SIZE: Number of one-time proofs returned in each opaque refill. Defaults to `12`.
 - BFF_REPLAY_TOKEN_LOW_WATERMARK: Refill the browser-side pool when this many proofs remain. Defaults to `3`.

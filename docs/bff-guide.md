@@ -64,11 +64,10 @@ rejected before browser or backend code executes.
 unless a server-side hook is configured before application modules are loaded:
 
 ```python
-from fastapi import HTTPException
-
 def enforce(user, policy, **context):
     if policy.get("role") not in set(user.get("roles", [])):
-        raise HTTPException(status_code=403, detail="Forbidden")
+        return False
+    return True
 
 config = PytinctureConfig(
     modules_path="./apps",
@@ -81,6 +80,16 @@ compatibility `set_bff_policy_hook()` API is public through 1.x.
 Pytincture enforces standard application, provider, issuer, tenant, role, and
 operation predicates before the hook runs; the hook owns application-specific
 metadata such as scopes or account entitlements.
+
+The hook contract is fail-closed: return `True` to allow, `False` to deny with
+403, or `None` for compatibility with hooks that allow by completing normally.
+Raising `HTTPException` preserves its explicit denial status. Other exceptions
+are sanitized as server failures, and any other return type is rejected rather
+than treated as permission.
+
+Generated clients raise a `PytinctureBFFError` before decoding any non-2xx
+response. The error exposes only `status_code`, `operation`, and
+`correlation_id`; the backend response body is intentionally not included.
 
 Sessions and generated BFF routes are scoped to the application used during
 login. Exact module-relative paths are checked against the files packaged for

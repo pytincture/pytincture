@@ -502,6 +502,38 @@
         "tests/test_dataclass.py::test_static_manifest_defines_get_as_parameterless_read_only_contract",
         "tests/test_dataclass.py::test_generate_stub_classes_returns_stub"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-M-07-POLICY",
+      "status": "remediated",
+      "title": "Generated BFF clients and policy decisions fail closed",
+      "intentional_contract": "The class-level BFF export and simple policy-hook API remain unchanged. Generated sync, async, and streaming proxies decode only successful responses; the existing 401 application-login redirect remains supported.",
+      "security_boundary": "Every generated proxy raises a typed PytinctureBFFError for a non-2xx response after the optional one-time replay retry. The error contains only status, operation, and the sanitized X-Request-ID correlation value and never reads or exposes the response body. Policy hooks allow only with True or the backward-compatible None result, deny on False, preserve raised HTTPException statuses, and reject all other return types.",
+      "controls": {
+        "all_proxy_styles_require_2xx": true,
+        "typed_non_2xx_error": true,
+        "error_response_body_exposed": false,
+        "safe_correlation_exposed": true,
+        "login_redirect_401_preserved": true,
+        "policy_false_denies": true,
+        "policy_true_and_none_allow": true,
+        "invalid_policy_return_fails_closed": true,
+        "class_level_export_preserved": true,
+        "redis_required": false
+      },
+      "implementation": [
+        "pytincture/dataclass.py",
+        "pytincture/backend/app.py",
+        "docs/contracts/bff-v1.md",
+        "contracts/public-api-v1.json"
+      ],
+      "regression_tests": [
+        "tests/test_dataclass.py::test_generated_bff_proxies_raise_safe_typed_errors_for_non_2xx",
+        "tests/test_dataclass.py::test_generated_bff_proxies_preserve_401_login_redirect",
+        "tests/test_app.py::test_policy_hook_true_none_false_and_invalid_results",
+        "tests/test_app.py::test_async_policy_runs_before_constructor",
+        "pytincture/frontend/e2e-tests/pytincture.spec.mjs::authenticated packaged and inline apps run through real Pyodide"
+      ]
     }
   ]
 }

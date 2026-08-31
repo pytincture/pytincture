@@ -93,6 +93,14 @@ Authentication, policy, validation, missing export, and method errors retain
 their HTTP status semantics; server errors are sanitized and include a
 correlation id. Responses carry `X-Request-ID`.
 
+Generated sync, async, and streaming proxies decode only 2xx responses. Any
+other response except 401 raises `PytinctureBFFError`, whose stable fields are
+`status_code` (`status` is an alias), `operation`, and `correlation_id`. Its
+message is built only from those fields; generated clients do not read an error
+response body. A 401 keeps the established behavior of redirecting the browser
+to the application login page and returning `None`. A rejected replay proof may
+refill and retry once before a remaining 409 becomes a typed error.
+
 `@bff_stream()` defaults to `text/event-stream` and newline-delimited JSON.
 `raw=True` forwards string/byte chunks without JSON framing. The declared
 `media_type` is preserved.
@@ -102,9 +110,10 @@ correlation id. Responses carry `X-Request-ID`.
 Generated browser classes preserve the exported class, method, and attribute
 names. They construct the route from the module-relative identifier and call
 the declared HTTP method. Sync methods use synchronous browser requests; async
-and streaming methods use asynchronous fetch/iteration behavior. Authentication
-redirects and optional replay-token refill are runtime concerns but may not
-change user method signatures.
+and streaming methods use asynchronous fetch/iteration behavior. Each generated
+BFF module exposes `PytinctureBFFError` for callers that want to catch the typed
+failure. Authentication redirects and optional replay-token refill are runtime
+concerns but may not change user method signatures.
 
 ## Evolution
 

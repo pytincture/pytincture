@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Make generated sync, async, and streaming BFF clients require a 2xx response
+  before decoding. Non-2xx responses raise `PytinctureBFFError` with only the
+  status, operation, and request correlation id; 401 still redirects to login.
+  Policy hooks now treat `False` as denial and reject invalid return types.
 - Canonicalize BFF calls to one `{args, kwargs}` JSON object encoded once;
   reject duplicate keys, non-finite values, excessive structure, malformed
   arguments, and static signature/type mismatches before application import or

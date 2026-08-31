@@ -1,4 +1,6 @@
+import asyncio
 import importlib
+import json
 
 import e2e_widget
 import js
@@ -25,5 +27,38 @@ class e2e_app(MainWindow):
             '<h1>Packaged Pytincture ready</h1>'
             f'<p id="static-import">{STATIC_VALUE}</p>'
             f'<p id="dynamic-import">{dynamic.DYNAMIC_VALUE}</p>'
+            '<output id="bff-error-contract"></output>'
             "</main>"
         )
+
+        def describe_error(error):
+            return {
+                "type": type(error).__name__,
+                "status_code": getattr(error, "status_code", None),
+                "operation": getattr(error, "operation", None),
+                "correlation_id": getattr(error, "correlation_id", None),
+                "message": str(error),
+            }
+
+        async def verify_proxies():
+            service = E2EData()
+            errors = {}
+            try:
+                service.sync_call()
+            except Exception as error:
+                errors["sync"] = describe_error(error)
+            try:
+                await service.async_call()
+            except Exception as error:
+                errors["async"] = describe_error(error)
+            try:
+                async for _ in service.stream_call():
+                    pass
+            except Exception as error:
+                errors["stream"] = describe_error(error)
+            js.document.getElementById("bff-error-contract").textContent = json.dumps(
+                errors
+            )
+
+        if bool(getattr(js.window, "__pytinctureTestBffErrors", False)):
+            asyncio.create_task(verify_proxies())

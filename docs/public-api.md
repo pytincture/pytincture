@@ -62,13 +62,20 @@ Decorated classes may accept `_user` in their constructor. If they do not,
 Pytincture attaches `_user` to the wrapped instance after construction. Names
 beginning with `_` are never exported as BFF operations.
 
+Every generated BFF module also exposes `PytinctureBFFError`. Sync, async, and
+streaming proxies raise it for non-2xx responses other than the established 401
+login redirect. Its stable public fields are `status_code`, `status`,
+`operation`, and `correlation_id`; response bodies are never copied into the
+error.
+
 ### Runtime hooks
 
 The following hooks currently live in `pytincture.backend.app` and remain
 supported while the typed configuration/application-factory API is developed:
 
 - `set_bff_policy_hook(hook)` installs or clears the sync/async authorization
-  hook invoked before a BFF operation.
+  hook invoked before a BFF operation. `True` and `None` allow, `False` denies,
+  and other return values fail closed.
 - `set_user_authenticator(authenticator)` installs or clears the sync/async
   local-user authenticator.
 - `revoke_session(session_id)` revokes a session in the configured revocation

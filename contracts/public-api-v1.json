@@ -86,6 +86,24 @@
       "X-Pytincture-Replay",
       "X-Request-ID"
     ],
+    "generated_error": {
+      "name": "PytinctureBFFError",
+      "fields": [
+        "status_code",
+        "status",
+        "operation",
+        "correlation_id"
+      ],
+      "response_body_included": false
+    },
+    "policy_hook_results": {
+      "allow": [
+        true,
+        null
+      ],
+      "deny": false,
+      "other": "fail-closed"
+    },
     "default_stream_media_type": "text/event-stream",
     "default_stream_framing": "newline-delimited-json"
   },

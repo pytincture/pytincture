@@ -1,6 +1,9 @@
 import ast
+import asyncio
 import os
+import sys
 import textwrap
+import types
 import pytest
 from os import sep
 from pathlib import Path
@@ -556,6 +559,223 @@ def test_generate_stub_classes_returns_stub(tmp_path, monkeypatch):
     assert "JSON.stringify(json.dumps" not in stub
     assert "json.dumps(payload, allow_nan=False)" in stub
     assert "from io import StringIO" in stub
+
+
+def test_generated_bff_proxies_raise_safe_typed_errors_for_non_2xx(
+    tmp_path,
+    monkeypatch,
+):
+    source = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_stream
+
+        @backend_for_frontend
+        class Service:
+            def sync_call(self):
+                return True
+
+            async def async_call(self):
+                return True
+
+            @bff_stream()
+            async def stream_call(self):
+                yield True
+    """)
+    file_path = tmp_path / "service.py"
+    file_path.write_text(source)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    stub = generate_stub_classes(
+        str(file_path),
+        "example.com",
+        "https",
+        application="demoapp",
+    )
+
+    class Headers:
+        def __init__(self, values):
+            self.values = values
+
+        def get(self, name):
+            return self.values.get(name)
+
+    class BrowserResponse:
+        def __init__(self, status):
+            self.status = status
+            self.headers = Headers({"X-Request-ID": f"request-{status}"})
+            self.body = types.SimpleNamespace(
+                getReader=lambda: pytest.fail("error response body was accessed")
+            )
+
+        async def text(self):
+            pytest.fail("error response body was accessed")
+
+    class XhrResponse:
+        def __init__(self, status):
+            self.status = status
+
+        @property
+        def response(self):
+            pytest.fail("error response body was accessed")
+
+        @property
+        def responseText(self):
+            pytest.fail("error response body was accessed")
+
+        def open(self, *args):
+            return None
+
+        def setRequestHeader(self, *args):
+            return None
+
+        def send(self, *args):
+            return None
+
+        def getResponseHeader(self, name):
+            if name == "X-Request-ID":
+                return f"request-{self.status}"
+            if name == "X-Pytincture-Replay":
+                return "rejected" if self.status == 409 else None
+            return None
+
+    browser_state = {"status": 400}
+
+    class XMLHttpRequest:
+        @staticmethod
+        def new():
+            return XhrResponse(browser_state["status"])
+
+    async def fetch(url, options=None):
+        return BrowserResponse(browser_state["status"])
+
+    window = types.SimpleNamespace(
+        location=types.SimpleNamespace(href="https://example.test/demoapp")
+    )
+    js_module = types.ModuleType("js")
+    js_module.XMLHttpRequest = XMLHttpRequest
+    js_module.TextDecoder = object()
+    js_module.document = types.SimpleNamespace(cookie="pytincture_csrf=test")
+    js_module.fetch = fetch
+    js_module.window = window
+    pyodide_module = types.ModuleType("pyodide")
+    pyodide_ffi_module = types.ModuleType("pyodide.ffi")
+    pyodide_ffi_module.to_js = lambda value: value
+    monkeypatch.setitem(sys.modules, "js", js_module)
+    monkeypatch.setitem(sys.modules, "pyodide", pyodide_module)
+    monkeypatch.setitem(sys.modules, "pyodide.ffi", pyodide_ffi_module)
+
+    namespace = {}
+    exec(compile(stub, str(file_path), "exec"), namespace)
+    service = namespace["Service"]()
+    error_type = namespace["PytinctureBFFError"]
+    statuses = (400, 403, 404, 405, 409, 413, 429, 500, 503, 504)
+
+    async def assert_async_and_stream_errors(status):
+        with pytest.raises(error_type) as async_error:
+            await service.fetch(
+                "/demoapp/classcall/service.py/Service/async_call",
+                {"args": [], "kwargs": {}},
+                "POST",
+            )
+        with pytest.raises(error_type) as stream_error:
+            async for _ in service.fetch_stream(
+                "/demoapp/classcall/service.py/Service/stream_call",
+                {"args": [], "kwargs": {}},
+                "POST",
+            ):
+                pass
+        return async_error.value, stream_error.value
+
+    for status in statuses:
+        browser_state["status"] = status
+        with pytest.raises(error_type) as sync_error:
+            service.fetch_sync(
+                "/demoapp/classcall/service.py/Service/sync_call",
+                {"args": [], "kwargs": {}},
+                "POST",
+            )
+        async_error, stream_error = asyncio.run(assert_async_and_stream_errors(status))
+        for error, operation in (
+            (sync_error.value, "Service.sync_call"),
+            (async_error, "Service.async_call"),
+            (stream_error, "Service.stream_call"),
+        ):
+            assert error.status_code == status
+            assert error.operation == operation
+            assert error.correlation_id == f"request-{status}"
+            assert "server-secret" not in str(error)
+
+
+def test_generated_bff_proxies_preserve_401_login_redirect(tmp_path, monkeypatch):
+    source = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_stream
+
+        @backend_for_frontend
+        class Service:
+            def sync_call(self):
+                return True
+
+            async def async_call(self):
+                return True
+
+            @bff_stream()
+            async def stream_call(self):
+                yield True
+    """)
+    file_path = tmp_path / "service.py"
+    file_path.write_text(source)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    stub = generate_stub_classes(
+        str(file_path), "example.com", "https", application="demoapp"
+    )
+
+    class Unauthorized:
+        status = 401
+        response = "private response"
+        responseText = response
+        headers = types.SimpleNamespace(get=lambda name: "request-401")
+        body = None
+
+        def open(self, *args):
+            return None
+
+        def setRequestHeader(self, *args):
+            return None
+
+        def send(self, *args):
+            return None
+
+        def getResponseHeader(self, name):
+            return "request-401"
+
+    async def fetch(url, options=None):
+        return Unauthorized()
+
+    window = types.SimpleNamespace(
+        location=types.SimpleNamespace(href="https://example.test/demoapp")
+    )
+    js_module = types.ModuleType("js")
+    js_module.XMLHttpRequest = types.SimpleNamespace(new=lambda: Unauthorized())
+    js_module.TextDecoder = object()
+    js_module.document = types.SimpleNamespace(cookie="")
+    js_module.fetch = fetch
+    js_module.window = window
+    pyodide_module = types.ModuleType("pyodide")
+    pyodide_ffi_module = types.ModuleType("pyodide.ffi")
+    pyodide_ffi_module.to_js = lambda value: value
+    monkeypatch.setitem(sys.modules, "js", js_module)
+    monkeypatch.setitem(sys.modules, "pyodide", pyodide_module)
+    monkeypatch.setitem(sys.modules, "pyodide.ffi", pyodide_ffi_module)
+    namespace = {}
+    exec(compile(stub, str(file_path), "exec"), namespace)
+    service = namespace["Service"]()
+
+    assert service.sync_call() is None
+
+    async def exercise_async_proxies():
+        assert await service.async_call() is None
+        assert [item async for item in service.stream_call()] == []
+
+    asyncio.run(exercise_async_proxies())
+    assert window.location.href.endswith("/login")
 
 
 def test_generate_stub_classes_requires_application_for_bff_clients(
