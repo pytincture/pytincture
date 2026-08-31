@@ -626,8 +626,14 @@ def test_session_key_rotation_accepts_and_resigns_previous_key():
     assert json.loads(base64.b64decode(decoded)) == {"user": "legacy"}
 
 
-def test_raw_server_files_are_not_public_assets(fresh_client, monkeypatch, tmp_path):
+def test_public_assets_require_a_real_app_and_explicit_app_ownership(
+    fresh_client, monkeypatch, tmp_path
+):
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.delenv("PYTINCTURE_BROWSER_FILES", raising=False)
+    monkeypatch.delenv("PYTINCTURE_PUBLIC_ASSET_PATHS", raising=False)
+    (tmp_path / "demoapp.py").write_text('APP_FAVICON = "logo.png"\n')
+    (tmp_path / "otherapp.py").write_text("# separate application\n")
     (tmp_path / "server.py").write_text("SECRET = 'hidden'\n")
     (tmp_path / ".env").write_text("SECRET=hidden\n")
     (tmp_path / "logo.png").write_bytes(b"png")
@@ -635,6 +641,59 @@ def test_raw_server_files_are_not_public_assets(fresh_client, monkeypatch, tmp_p
     assert fresh_client.get("/demoapp/appcode/server.py").status_code == 404
     assert fresh_client.get("/demoapp/appcode/.env").status_code == 404
     assert fresh_client.get("/demoapp/appcode/logo.png").status_code == 200
+    assert fresh_client.get("/otherapp/appcode/logo.png").status_code == 404
+    assert fresh_client.get("/missingapp/appcode/logo.png").status_code == 404
+
+    monkeypatch.setenv("PYTINCTURE_PUBLIC_ASSET_PATHS", "*.py")
+    assert fresh_client.get("/demoapp/appcode/server.py").status_code == 404
+
+
+def test_public_asset_globs_can_be_scoped_per_application(
+    fresh_client, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setenv(
+        "PYTINCTURE_PUBLIC_ASSET_PATHS",
+        json.dumps({
+            "alpha": ["alpha.html"],
+            "beta": ["beta.html"],
+            "*": ["shared.txt"],
+        }),
+    )
+    (tmp_path / "alpha.py").write_text("# alpha app\n")
+    (tmp_path / "beta.py").write_text("# beta app\n")
+    (tmp_path / "alpha.html").write_text("alpha")
+    (tmp_path / "beta.html").write_text("beta")
+    (tmp_path / "shared.txt").write_text("shared")
+
+    assert fresh_client.get("/alpha/appcode/alpha.html").status_code == 200
+    assert fresh_client.get("/beta/appcode/alpha.html").status_code == 404
+    assert fresh_client.get("/beta/appcode/beta.html").status_code == 200
+    assert fresh_client.get("/alpha/appcode/beta.html").status_code == 404
+    assert fresh_client.get("/alpha/appcode/shared.txt").status_code == 200
+    assert fresh_client.get("/beta/appcode/shared.txt").status_code == 200
+
+
+def test_public_svg_assets_are_sandboxed(fresh_client, monkeypatch, tmp_path):
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    (tmp_path / "demoapp.py").write_text('APP_FAVICON = "logo.svg"\n')
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg"><script>parent.pwned=true</script></svg>'
+    (tmp_path / "logo.svg").write_bytes(svg)
+
+    response = fresh_client.get("/demoapp/appcode/logo.svg")
+    head = fresh_client.head("/demoapp/appcode/logo.svg")
+
+    assert response.status_code == 200
+    assert response.content == svg
+    assert response.headers["content-type"].startswith("image/svg+xml")
+    assert response.headers["content-security-policy"].startswith(
+        "sandbox; default-src 'none'"
+    )
+    assert "script-src" not in response.headers["content-security-policy"]
+    assert response.headers["cross-origin-resource-policy"] == "same-origin"
+    assert head.status_code == 200
+    assert head.content == b""
+    assert head.headers["content-length"] == str(len(svg))
 
 
 def test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not(
@@ -1057,6 +1116,7 @@ def test_appcode_bff_and_public_assets_reject_symlinks(
     (tmp_path / "secret.png").symlink_to(outside / "secret.png")
     (tmp_path / "demoapp.py").write_text("import worker\n", encoding="utf-8")
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setenv("PYTINCTURE_BROWSER_FILES", '["secret.png"]')
     monkeypatch.setattr(backend_app, "require_auth", lambda request: "noauth")
 
     archive = fresh_client.get("/demoapp/appcode/appcode.pyt")
@@ -2891,17 +2951,30 @@ def test_launcher_favicon_folder_supports_external_path(monkeypatch, tmp_path):
 
 
 def test_launcher_favicon_folder_serves_per_app_assets(fresh_client, monkeypatch, tmp_path):
+    modules_root = tmp_path / "modules"
+    modules_root.mkdir()
+    (modules_root / "demoapp.py").write_text("# demo application\n")
     favicon_root = tmp_path / "favicons"
     app_favicon_folder = favicon_root / "demoapp"
     app_favicon_folder.mkdir(parents=True)
     (favicon_root / "favicon.ico").write_bytes(b"shared-icon")
     (app_favicon_folder / "favicon.ico").write_bytes(b"demo-icon")
+    (app_favicon_folder / "safari-pinned-tab.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+    )
+    monkeypatch.setenv("MODULES_PATH", str(modules_root))
     monkeypatch.setenv("PYTINCTURE_FAVICON_FOLDER", str(favicon_root))
 
     response = fresh_client.get("/demoapp/favicon-assets/favicon.ico")
 
     assert response.status_code == 200
     assert response.content == b"demo-icon"
+    assert fresh_client.get("/missing/favicon-assets/favicon.ico").status_code == 404
+    svg = fresh_client.get("/demoapp/favicon-assets/safari-pinned-tab.svg")
+    assert svg.status_code == 200
+    assert svg.headers["content-security-policy"].startswith(
+        "sandbox; default-src 'none'"
+    )
 
 
 def test_app_favicon_setting_overrides_launcher_folder(monkeypatch, tmp_path):

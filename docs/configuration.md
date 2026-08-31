@@ -138,7 +138,7 @@ come from the deployment secret manager rather than committed files.
 | `BFF_POLICY_HOOK_PATH` | Dotted sync/async BFF authorization policy callable. |
 | `LOGIN_HELP_TEXT` | Escaped plain-text login guidance. |
 | `PYTINCTURE_BROWSER_FILES` | JSON list or comma-separated globs added to `appcode.pyt`. |
-| `PYTINCTURE_PUBLIC_ASSET_PATHS` | Globs extending directly served public application assets. |
+| `PYTINCTURE_PUBLIC_ASSET_PATHS` | Unauthenticated direct-asset globs. Lists/CSV are service-wide; a JSON application-to-globs mapping provides per-app scope and `*` declares shared files. |
 | `SAML_ALLOWED_ROLES` | Optional comma-separated SAML role allowlist. |
 | `SAML_DEBUG` | Enable OneLogin SAML diagnostic mode; do not expose assertion data in production logs. |
 | `SAML_DEFAULT_REDIRECT` | Safe post-login path/template. |

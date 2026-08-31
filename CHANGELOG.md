@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Bound direct app assets to real application entrypoints and explicit
+  browser/public/favicon/widget declarations, added per-application public
+  asset globs, permanently denied direct Python-file exposure, and sandboxed
+  SVG/favicon responses against same-origin script execution. Public assets
+  remain intentionally unauthenticated and Redis-free.
 - Require statically discovered BFF export, policy, method, and stream
   decorators to have direct Pytincture import provenance, with source-order
   shadowing detection. The class-level export API and normal aliases remain

@@ -18,6 +18,7 @@ from pytincture.backend.safe_paths import (
     UnsafePath,
     canonical_root,
     decode_python_source,
+    normalize_relative_path,
     read_contained_file,
     resolve_contained_path,
     validate_application_name,
@@ -200,23 +201,9 @@ def configured_browser_files(
 ) -> set[str]:
     """Resolve explicitly configured browser-file globs inside ``modules_root``."""
     modules_root = canonical_root(modules_root)
-    raw = (
-        os.getenv("PYTINCTURE_BROWSER_FILES", "")
-        if raw_patterns is None
-        else raw_patterns
-    ).strip()
-    if not raw:
+    patterns = configured_browser_file_patterns(raw_patterns)
+    if not patterns:
         return set()
-    try:
-        patterns = json.loads(raw)
-    except json.JSONDecodeError:
-        patterns = [value.strip() for value in raw.split(",") if value.strip()]
-    if not isinstance(patterns, list) or any(
-        not isinstance(value, str) for value in patterns
-    ):
-        raise RuntimeError(
-            "PYTINCTURE_BROWSER_FILES must be a JSON list or comma-separated globs"
-        )
 
     selected: set[str] = set()
     scanned_files = 0
@@ -246,6 +233,51 @@ def configured_browser_files(
                         detail="Appcode file-count limit exceeded",
                     )
     return selected
+
+
+def configured_browser_file_patterns(
+    raw_patterns: str | None = None,
+) -> tuple[str, ...]:
+    """Parse the browser-file glob setting without scanning the module root."""
+    raw = (
+        os.getenv("PYTINCTURE_BROWSER_FILES", "")
+        if raw_patterns is None
+        else raw_patterns
+    ).strip()
+    if not raw:
+        return ()
+    try:
+        patterns = json.loads(raw)
+    except json.JSONDecodeError:
+        patterns = [value.strip() for value in raw.split(",") if value.strip()]
+    if not isinstance(patterns, list) or any(
+        not isinstance(value, str) for value in patterns
+    ):
+        raise RuntimeError(
+            "PYTINCTURE_BROWSER_FILES must be a JSON list or comma-separated globs"
+        )
+    return tuple(patterns)
+
+
+def configured_browser_asset_path_selected(
+    relative_path: str,
+    raw_patterns: str | None = None,
+) -> bool:
+    """Return whether a directly served asset is in the configured browser set."""
+    try:
+        normalized = normalize_relative_path(relative_path)
+    except UnsafePath:
+        return False
+    parts = normalized.split("/")
+    if any(
+        part.startswith(".") or part in _EXCLUDED_DIRECTORIES
+        for part in parts[:-1]
+    ) or parts[-1].startswith("."):
+        return False
+    return any(
+        fnmatch.fnmatch(normalized, pattern)
+        for pattern in configured_browser_file_patterns(raw_patterns)
+    )
 
 
 def browser_package_files(

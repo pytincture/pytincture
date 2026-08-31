@@ -381,6 +381,18 @@ test("widget manifests reject corrupt and non-owned executable assets", async ({
     );
 });
 
+test("direct SVG navigation cannot execute application-origin script", async ({ browserName, page }) => {
+    test.skip(browserName !== "chromium", "Response policy is browser-independent and is exercised once.");
+
+    const response = await page.goto("/e2e_app/appcode/active.svg");
+
+    expect(response.status()).toBe(200);
+    expect(response.headers()["content-security-policy"]).toContain(
+        "sandbox; default-src 'none'",
+    );
+    expect(await page.evaluate(() => globalThis.__pytinctureSvgScriptRan === true)).toBe(false);
+});
+
 test("packaged entrypoint failure is rendered without fallback", async ({ browserName, page }, testInfo) => {
     test.skip(browserName !== "chromium", "The lifecycle failure stages are cross-browser unit tested separately.");
     const diagnostics = collectDiagnostics(page);

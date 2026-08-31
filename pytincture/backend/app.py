@@ -65,6 +65,7 @@ from pytincture.backend.browser_packages import (
     AppcodeArchiveCache,
     browser_package_files,
     configured_browser_files,
+    configured_browser_asset_path_selected,
     create_appcode_archive,
     discover_widgetset,
     local_python_imports,
@@ -1690,25 +1691,103 @@ _DEFAULT_PUBLIC_ASSET_EXTENSIONS = {
     ".m4a", ".mp3", ".mp4", ".ogg", ".otf", ".png", ".svg", ".ttf",
     ".wav", ".webm", ".webmanifest", ".webp", ".woff", ".woff2",
 }
+_NEVER_PUBLIC_ASSET_EXTENSIONS = {".py", ".pyc", ".pyi", ".pyo", ".pyw"}
 
 
-def _public_asset_allowed(relative_path: str) -> bool:
-    extension = os.path.splitext(relative_path)[1].lower()
-    if extension in _DEFAULT_PUBLIC_ASSET_EXTENSIONS:
-        return True
+def _configured_public_asset_patterns(application: str) -> tuple[str, ...]:
     raw_patterns = os.getenv("PYTINCTURE_PUBLIC_ASSET_PATHS", "").strip()
     if not raw_patterns:
-        return False
+        return ()
     try:
         patterns = json.loads(raw_patterns)
     except json.JSONDecodeError:
         patterns = [value.strip() for value in raw_patterns.split(",") if value.strip()]
-    if not isinstance(patterns, list):
-        raise RuntimeError("PYTINCTURE_PUBLIC_ASSET_PATHS must be a list of globs")
-    return any(
-        isinstance(pattern, str) and fnmatch.fnmatch(relative_path, pattern)
-        for pattern in patterns
+
+    if isinstance(patterns, dict):
+        selected: list[str] = []
+        for scope, scoped_patterns in patterns.items():
+            if not isinstance(scope, str) or not isinstance(scoped_patterns, list) or any(
+                not isinstance(pattern, str) for pattern in scoped_patterns
+            ):
+                raise RuntimeError(
+                    "PYTINCTURE_PUBLIC_ASSET_PATHS mappings must contain lists of globs"
+                )
+            if scope in {"*", application}:
+                selected.extend(scoped_patterns)
+        return tuple(selected)
+
+    if not isinstance(patterns, list) or any(
+        not isinstance(pattern, str) for pattern in patterns
+    ):
+        raise RuntimeError(
+            "PYTINCTURE_PUBLIC_ASSET_PATHS must be a list, mapping, or comma-separated globs"
+        )
+    # Lists and comma-separated values are the backwards-compatible shared scope.
+    return tuple(patterns)
+
+
+def _declared_app_asset_allowed(
+    application: str,
+    relative_path: str,
+    entrypoint_path: str,
+    entrypoint_source: str,
+) -> bool:
+    extension = os.path.splitext(relative_path)[1].lower()
+    if extension in _NEVER_PUBLIC_ASSET_EXTENSIONS:
+        return False
+
+    configured_public = any(
+        fnmatch.fnmatch(relative_path, pattern)
+        for pattern in _configured_public_asset_patterns(application)
     )
+    if configured_public:
+        return True
+
+    try:
+        favicon_assets = find_app_favicon_assets(
+            entrypoint_path,
+            source_code=entrypoint_source,
+        )
+    except OSError:
+        favicon_assets = []
+    if relative_path in favicon_assets and _is_favicon_asset(
+        os.path.basename(relative_path)
+    ):
+        return True
+
+    if extension not in _DEFAULT_PUBLIC_ASSET_EXTENSIONS:
+        return False
+    return configured_browser_asset_path_selected(
+        relative_path,
+        os.getenv("PYTINCTURE_BROWSER_FILES", ""),
+    )
+
+
+def _read_application_entrypoint(application: str, modules_root: str):
+    try:
+        return read_contained_file(
+            modules_root,
+            f"{application}.py",
+            max_bytes=APPCODE_MAX_FILE_BYTES,
+        )
+    except (OSError, UnsafePath):
+        raise HTTPException(status_code=404, detail="Asset not found") from None
+
+
+def _public_asset_response_headers(secure_file, relative_path: str) -> Dict[str, str]:
+    headers = {
+        "Content-Length": str(secure_file.size),
+        "X-Pytincture-SHA256": secure_file.digest,
+    }
+    if os.path.splitext(relative_path)[1].lower() == ".svg":
+        headers.update({
+            "Content-Security-Policy": (
+                "sandbox; default-src 'none'; style-src 'unsafe-inline'; "
+                "img-src 'self' data:"
+            ),
+            "Cross-Origin-Resource-Policy": "same-origin",
+        })
+    return headers
 
 
 def _normalized_distribution_name(value: str) -> str:
@@ -1752,10 +1831,18 @@ async def public_app_asset(request: Request, application: str, asset_path: str):
     if any(part.startswith(".") for part in normalized.split("/")):
         raise HTTPException(status_code=404, detail="Asset not found")
     modules_root = os.path.realpath(get_modules_path())
-    asset_allowed = _public_asset_allowed(normalized) or _application_widget_wheel_allowed(
+    entrypoint = _read_application_entrypoint(application, modules_root)
+    try:
+        entrypoint_source = decode_python_source(entrypoint.content)
+    except (SyntaxError, UnicodeDecodeError):
+        raise HTTPException(status_code=404, detail="Asset not found") from None
+    asset_allowed = _declared_app_asset_allowed(
         application,
         normalized,
-        modules_root,
+        entrypoint.path,
+        entrypoint_source,
+    ) or _application_widget_wheel_allowed(
+        application, normalized, modules_root
     )
     if not asset_allowed:
         raise HTTPException(status_code=404, detail="Asset not found")
@@ -1767,10 +1854,7 @@ async def public_app_asset(request: Request, application: str, asset_path: str):
     return Response(
         content=b"" if request.method == "HEAD" else secure_file.content,
         media_type=media_type,
-        headers={
-            "Content-Length": str(secure_file.size),
-            "X-Pytincture-SHA256": secure_file.digest,
-        },
+        headers=_public_asset_response_headers(secure_file, normalized),
     )
 
 @app.get("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="getApplicationClassCall", response_model=Any)
@@ -4085,6 +4169,12 @@ async def configured_favicon_asset(
     if asset_name != os.path.basename(asset_name) or not _is_favicon_asset(asset_name):
         raise HTTPException(status_code=404, detail="Favicon asset not found")
 
+    try:
+        validate_application_name(application)
+        _read_application_entrypoint(application, get_modules_path())
+    except (HTTPException, ValueError):
+        raise HTTPException(status_code=404, detail="Favicon asset not found") from None
+
     favicon_directory = _get_configured_favicon_directory(application)
     if favicon_directory is None:
         raise HTTPException(status_code=404, detail="Favicon asset not found")
@@ -4097,7 +4187,7 @@ async def configured_favicon_asset(
     return Response(
         content=b"" if request.method == "HEAD" else secure_file.content,
         media_type=media_type,
-        headers={"Content-Length": str(secure_file.size)},
+        headers=_public_asset_response_headers(secure_file, asset_name),
     )
 
 

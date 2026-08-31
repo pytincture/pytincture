@@ -45,8 +45,13 @@ Python source is included only when it is the entrypoint, reachable through
 static local imports, or explicitly selected. Dynamic imports must be declared
 through `PYTINCTURE_BROWSER_FILES`.
 
-Public assets served separately by `/{application}/appcode/{asset_path}` use a
-separate allowlist and are not implicitly part of this archive contract.
+Public assets served separately by `/{application}/appcode/{asset_path}` are
+unauthenticated and are not implicitly part of this archive contract. The
+application must have a real entrypoint, and each asset must belong to an
+explicit browser/public file declaration, the application's favicon metadata,
+or its authorized widget wheel. Service-wide declarations are intentionally
+shared; application-keyed public declarations provide isolation. Python files
+remain non-public, and SVG responses use a restrictive sandbox CSP.
 
 ## Evolution
 
