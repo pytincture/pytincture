@@ -26,7 +26,6 @@ from typing import (
     Set,
 )
 from urllib.parse import parse_qsl, quote, urlparse, urlsplit, urlunsplit
-from xml.etree import ElementTree
 
 # FastAPI / Starlette
 from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
@@ -2784,52 +2783,6 @@ def _normalize_certificate(value: str) -> str:
     return value.replace("\\n", "\n").strip()
 
 
-def _strip_pem_headers(value: str) -> str:
-    cleaned = value.replace("-----BEGIN CERTIFICATE-----", "")
-    cleaned = cleaned.replace("-----END CERTIFICATE-----", "")
-    return cleaned.replace("\n", "").replace("\r", "").replace(" ", "")
-
-
-def _certificate_fingerprint(value: str) -> Optional[str]:
-    """
-    Return the SHA1 fingerprint for a PEM or raw base64 certificate.
-    """
-    if not value:
-        return None
-    normalized = _normalize_certificate(value)
-    pem_pattern = r"-----BEGIN CERTIFICATE-----\s*(.*?)\s*-----END CERTIFICATE-----"
-    matches = re.findall(pem_pattern, normalized, flags=re.DOTALL)
-    if matches:
-        raw_body = matches[0]
-    else:
-        raw_body = normalized
-    body = "".join(raw_body.split())
-    try:
-        der = base64.b64decode(body)
-    except Exception as exc:
-        logger.debug("Failed to decode certificate for fingerprint", exc_info=exc)
-        return None
-    return hashlib.sha1(der).hexdigest()
-
-
-def _extract_response_certificates(xml_payload: str) -> List[str]:
-    """
-    Extract embedded ds:X509Certificate values from a decoded SAML response.
-    """
-    try:
-        ns = {"ds": "http://www.w3.org/2000/09/xmldsig#"}
-        root = ElementTree.fromstring(xml_payload)
-        nodes = root.findall(".//ds:Signature/ds:KeyInfo/ds:X509Data/ds:X509Certificate", ns)
-        return [
-            (node.text or "").strip()
-            for node in nodes
-            if (node.text or "").strip()
-        ]
-    except Exception as exc:
-        logger.debug("Failed to parse SAML XML certificates", exc_info=exc)
-        return []
-
-
 def _extract_request_origin(request: Request) -> Dict[str, Any]:
     """
     Resolve protocol, host, and port taking reverse proxy headers into account.
@@ -3093,6 +3046,12 @@ def _sanitize_return_to(value: Optional[str]) -> Optional[str]:
         sanitized += f"#{parsed.fragment}"
     return sanitized
 
+
+# Microsoft login consumes only OIDC identity claims. Pytincture neither stores
+# nor refreshes provider tokens, so requesting offline_access would add unused
+# consent and refresh-token exposure.
+_MICROSOFT_OIDC_SCOPES = "openid email profile"
+
 # Create an OAuth object and register supported providers
 if ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH:
     oauth = OAuth(config)
@@ -3125,7 +3084,7 @@ if ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH:
             client_id=config.get("MICROSOFT_CLIENT_ID"),
             client_secret=config.get("MICROSOFT_CLIENT_SECRET"),
             server_metadata_url=f"https://login.microsoftonline.com/{microsoft_tenant_id}/v2.0/.well-known/openid-configuration",
-            client_kwargs={"scope": "openid email profile offline_access"},
+            client_kwargs={"scope": _MICROSOFT_OIDC_SCOPES},
         )
 else:
     oauth = None

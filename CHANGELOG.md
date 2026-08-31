@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Remove first-party SHA-1 usage by deleting unreachable certificate/XML
+  helpers and using SHA-256 for internal module labels, and stop requesting
+  Microsoft's unused `offline_access` permission. Active bounded SAML
+  validation and normal Microsoft login remain unchanged.
 - Record accepted security architecture contracts for class-level BFF exports,
   same-origin browser code, and stateless cross-worker SAML, with a
   machine-readable disposition file mapped to enforced regression tests.

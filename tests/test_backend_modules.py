@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import json
 import sys
 import time
@@ -424,6 +425,9 @@ def test_source_names_are_stable_and_collision_resistant(tmp_path: Path):
     first_name = build_dynamic_module_name(str(first), "Data", str(tmp_path))
     assert first_name == build_dynamic_module_name(str(first), "Data", str(tmp_path))
     assert first_name != build_dynamic_module_name(str(second), "Data", str(tmp_path))
+    assert first_name.endswith(
+        hashlib.sha256(str(first.resolve()).encode("utf-8")).hexdigest()[:12]
+    )
 
 
 def test_mcp_policy_accepts_only_exact_purpose_bound_tools():
