@@ -353,6 +353,17 @@ test("service applications isolate the worker under their application scope", ()
     );
 });
 
+test("default icons follow an explicit same-origin Pyodide frontend root", () => {
+    const config = normalizeConfig({
+        mode: "inline",
+        pyodideBaseUrl: "/frontend/pyodide/0.29.3/full/",
+    });
+    assert.equal(
+        config.materialIconsUrl,
+        "/frontend/vendor/materialdesignicons/materialdesignicons.css",
+    );
+});
+
 test("external browser assets fail closed without explicit SRI", () => {
     const previousDocument = globalThis.document;
     const previousWindow = globalThis.window;

@@ -319,6 +319,16 @@ function serviceFrontendUrl(application, value) {
   }
   return value;
 }
+function alignDefaultMaterialIconsUrl(config) {
+  if (config.application || config.materialIconsUrl !== DEFAULT_CONFIG.materialIconsUrl || isExternalAssetUrl(config.pyodideBaseUrl)) {
+    return config.materialIconsUrl;
+  }
+  const marker = config.pyodideBaseUrl.indexOf("pyodide/");
+  if (marker < 0) {
+    return config.materialIconsUrl;
+  }
+  return `${config.pyodideBaseUrl.slice(0, marker)}vendor/materialdesignicons/materialdesignicons.css`;
+}
 function normalizeConfig(arg1, widgetlib, entrypoint) {
   const resolveDevWidgetHost = (host) => {
     if (host) {
@@ -356,6 +366,7 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
       merged.application,
       merged.materialIconsUrl
     );
+    merged.materialIconsUrl = alignDefaultMaterialIconsUrl(merged);
     return merged;
   }
   const application = arg1 || null;
@@ -380,6 +391,7 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
     config.application,
     config.materialIconsUrl
   );
+  config.materialIconsUrl = alignDefaultMaterialIconsUrl(config);
   return config;
 }
 function preflightConfig(config) {
