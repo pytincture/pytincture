@@ -513,7 +513,7 @@ def test_async_policy_runs_before_constructor(fresh_client, monkeypatch, tmp_pat
 
     async def deny_policy(**kwargs):
         await asyncio.sleep(0)
-        raise HTTPException(status_code=403, detail="Forbidden")
+        return False
 
     set_bff_policy_hook(deny_policy)
     try:
@@ -1518,7 +1518,7 @@ def test_class_call_policy_hook_receives_mapping_for_noauth(monkeypatch, fresh_c
         roles = set(user.get("roles", []))
         required_role = policy.get("custom")
         if required_role and required_role not in roles:
-            raise HTTPException(status_code=403, detail="Forbidden")
+            return False
 
     set_bff_policy_hook(policy_hook)
     try:
@@ -1528,6 +1528,56 @@ def test_class_call_policy_hook_receives_mapping_for_noauth(monkeypatch, fresh_c
         assert seen_user["is_authenticated"] is False
     finally:
         set_bff_policy_hook(None)
+
+
+def test_policy_hook_true_none_false_and_invalid_results(
+    monkeypatch,
+    fresh_client,
+    tmp_path,
+):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "decision.py").write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_policy
+
+        @backend_for_frontend
+        class Decision:
+            @bff_policy(scope="read")
+            def read(self):
+                return {"ok": True}
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(
+        backend_app,
+        "require_auth",
+        lambda request: {"email": "user@example.com"},
+    )
+    decision = {"value": True}
+    set_bff_policy_hook(lambda **kwargs: decision["value"])
+    url = "/decision/classcall/decision.py/Decision/read"
+    try:
+        allowed = fresh_client.post(url, json={"args": [], "kwargs": {}})
+        decision["value"] = None
+        compatible_allow = fresh_client.post(url, json={"args": [], "kwargs": {}})
+        decision["value"] = False
+        denied = fresh_client.post(url, json={"args": [], "kwargs": {}})
+        decision["value"] = "allow"
+        non_raising_client = TestClient(
+            app,
+            base_url="https://127.0.0.1",
+            client=("127.0.0.1", 50000),
+            raise_server_exceptions=False,
+        )
+        invalid = non_raising_client.post(url, json={"args": [], "kwargs": {}})
+    finally:
+        set_bff_policy_hook(None)
+
+    assert allowed.status_code == 200
+    assert compatible_allow.status_code == 200
+    assert denied.status_code == 403
+    assert denied.json() == {"detail": "BFF policy denied the operation"}
+    assert invalid.status_code == 500
+    assert invalid.json()["detail"] == "Internal server error"
 
 
 def test_class_call_loads_decorated_module_without_standard_import(monkeypatch, fresh_client, tmp_path):

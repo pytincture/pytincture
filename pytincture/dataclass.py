@@ -1288,7 +1288,20 @@ def generate_stub_classes(
             "application is required when generating backend_for_frontend clients"
         )
 
-    stub_class_code = ""
+    stub_class_code = """
+class PytinctureBFFError(RuntimeError):
+    \"\"\"A generated BFF request failed without exposing its response body.\"\"\"
+
+    def __init__(self, status_code, operation, correlation_id=None):
+        self.status_code = int(status_code)
+        self.status = self.status_code
+        self.operation = str(operation)
+        self.correlation_id = str(correlation_id) if correlation_id else None
+        message = f"BFF operation {self.operation} failed with HTTP {self.status_code}"
+        if self.correlation_id:
+            message += f" (request {self.correlation_id})"
+        super().__init__(message)
+"""
     class_imports = set()
     all_imports = set()
     used_imports = set()
@@ -1329,6 +1342,12 @@ def generate_stub_classes(
             stub_class_code += f"    _pytincture_replay_key = {replay_key!r}\n"
             stub_class_code += f"    _pytincture_replay_low = {replay_low_watermark!r}\n"
             stub_class_code += "    _pytincture_replay_pool = []\n"
+            stub_class_code += "    def _bff_operation(self, url):\n"
+            stub_class_code += "        method_name = str(url).rstrip('/').rsplit('/', 1)[-1]\n"
+            stub_class_code += "        return f'{self.__class__.__name__}.{method_name}'\n"
+            stub_class_code += "    def _raise_for_bff_status(self, status, url, correlation_id=None):\n"
+            stub_class_code += "        if not 200 <= int(status) < 300:\n"
+            stub_class_code += "            raise PytinctureBFFError(status, self._bff_operation(url), correlation_id)\n"
             stub_class_code += "    def _csrf_token(self):\n"
             stub_class_code += "        for cookie in str(document.cookie).split(';'):\n"
             stub_class_code += "            name, separator, value = cookie.strip().partition('=')\n"
@@ -1406,7 +1425,8 @@ def generate_stub_classes(
             stub_class_code += f"            current_url = window.location.href.rstrip('/')\n"
             stub_class_code += f"            redirect_url = current_url + '/login'\n"
             stub_class_code += f"            window.location.href = redirect_url\n"
-            stub_class_code += f"            return ''\n"
+            stub_class_code += f"            return 'null'\n"
+            stub_class_code += "        self._raise_for_bff_status(req.status, url, req.getResponseHeader('X-Request-ID'))\n"
             stub_class_code += "        if self._pytincture_replay_enabled and len(self._pytincture_replay_pool) <= self._pytincture_replay_low:\n"
             stub_class_code += "            self._refill_pytincture_state_sync()\n"
             stub_class_code += f"        return StringIO(req.response).getvalue()\n"
@@ -1430,7 +1450,8 @@ def generate_stub_classes(
             stub_class_code += f"            current_url = window.location.href.rstrip('/')\n"
             stub_class_code += f"            redirect_url = current_url + '/login'\n"
             stub_class_code += f"            window.location.href = redirect_url\n"
-            stub_class_code += f"            return ''\n"
+            stub_class_code += f"            return 'null'\n"
+            stub_class_code += "        self._raise_for_bff_status(response.status, url, response.headers.get('X-Request-ID'))\n"
             stub_class_code += "        if self._pytincture_replay_enabled and len(self._pytincture_replay_pool) <= self._pytincture_replay_low:\n"
             stub_class_code += "            await self._refill_pytincture_state()\n"
             stub_class_code += f"        return await response.text()\n"
@@ -1473,6 +1494,7 @@ def generate_stub_classes(
                 stub_class_code += f"            redirect_url = current_url + '/login'\n"
                 stub_class_code += f"            window.location.href = redirect_url\n"
                 stub_class_code += f"            return\n"
+                stub_class_code += "        self._raise_for_bff_status(response.status, url, response.headers.get('X-Request-ID'))\n"
                 stub_class_code += "        if self._pytincture_replay_enabled and len(self._pytincture_replay_pool) <= self._pytincture_replay_low:\n"
                 stub_class_code += "            await self._refill_pytincture_state()\n"
                 stub_class_code += f"        reader = response.body.getReader()\n"

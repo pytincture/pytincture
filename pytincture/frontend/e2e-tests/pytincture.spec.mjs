@@ -61,6 +61,7 @@ async function blockExternalWidgetIndex(page) {
 
 async function loginAndStartPackagedApp(page) {
     await page.addInitScript(() => {
+        window.__pytinctureTestBffErrors = true;
         window.__pytinctureLifecycle = [];
         window.addEventListener("pytincture:lifecycle", event => {
             window.__pytinctureLifecycle.push(event.detail);
@@ -172,6 +173,21 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         await expect(page.locator("#static-import")).toHaveText("static-import-ok");
         await expect(page.locator("#dynamic-import")).toHaveText("dynamic-browser-file-ok");
         expect(await page.locator("#e2e-ready").evaluate(element => getComputedStyle(element).color)).toBe("rgb(12, 110, 72)");
+        await expect(page.locator("#bff-error-contract")).not.toHaveText("");
+        const proxyErrors = JSON.parse(await page.locator("#bff-error-contract").textContent());
+        const expectedOperations = {
+            async: "E2EData.async_call",
+            stream: "E2EData.stream_call",
+            sync: "E2EData.sync_call",
+        };
+        expect(Object.keys(proxyErrors).sort()).toEqual(["async", "stream", "sync"]);
+        for (const [style, error] of Object.entries(proxyErrors)) {
+            expect(error.type, style).toBe("PytinctureBFFError");
+            expect(error.status_code, style).toBe(400);
+            expect(error.operation, style).toBe(expectedOperations[style]);
+            expect(error.correlation_id, style).toMatch(/^[A-Za-z0-9._:-]{1,128}$/);
+            expect(error.message, style).not.toContain("missing required");
+        }
 
         const lifecycle = await page.evaluate(() => window.__pytinctureLifecycle);
         const compatibility = lifecycle.find(event => event.type === "compatibility")?.compatibility;

@@ -2202,11 +2202,15 @@ async def class_call(
             )
         if inspect.isawaitable(policy_result):
             try:
-                await asyncio.wait_for(
+                policy_result = await asyncio.wait_for(
                     policy_result, timeout=_remaining_bff_seconds(request)
                 )
             except asyncio.TimeoutError as exc:
                 raise HTTPException(status_code=504, detail="BFF policy timed out") from exc
+        if policy_result is False:
+            raise HTTPException(status_code=403, detail="BFF policy denied the operation")
+        if policy_result is not None and policy_result is not True:
+            raise RuntimeError("BFF policy hooks must return True, False, or None")
 
     def prepare_call():
         module = _load_source_module(

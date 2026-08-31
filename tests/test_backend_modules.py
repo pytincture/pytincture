@@ -932,6 +932,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-H-09",
         "REVIEW-2026-08-31-M-02-M-03",
         "REVIEW-2026-08-31-M-06-GET",
+        "REVIEW-2026-08-31-M-07-POLICY",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -994,6 +995,12 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert request_controls["static_signature_bound_before_import"] is True
     assert request_controls["get_browser_metadata_validated"] is True
     assert request_controls["redis_required"] is False
+    proxy_controls = dispositions["REVIEW-2026-08-31-M-07-POLICY"]["controls"]
+    assert proxy_controls["all_proxy_styles_require_2xx"] is True
+    assert proxy_controls["error_response_body_exposed"] is False
+    assert proxy_controls["policy_false_denies"] is True
+    assert proxy_controls["login_redirect_401_preserved"] is True
+    assert proxy_controls["redis_required"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:
