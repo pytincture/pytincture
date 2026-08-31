@@ -18,11 +18,17 @@ suffix is a transport convention; the payload is a standard ZIP archive.
   named for the application, a direct `MainWindow` subclass, or literal
   `APP_ENTRYPOINT`/`APP_CONFIG["entrypoint"]` metadata identifies it.
 - Statically reachable local Python imports are included recursively.
-- Package `__init__.py` files required by included modules are included.
+- Import traversal stops at a proven BFF module: the module is emitted as a
+  proxy, while imports used only by its server implementation are excluded.
+- Package `__init__.py` files implicitly executed by ordinary browser modules
+  are included and traversed. A package containing only BFF proxy modules is
+  emitted as a namespace package so its server initializer is not exposed.
 - Extra files selected by `PYTINCTURE_BROWSER_FILES` are included with their
   module-root-relative paths.
 - Hidden directories, virtual environments, `node_modules`, `build`, `dist`,
   and `__pycache__` are excluded from automatic discovery.
+- Hidden files and high-confidence credential, private-key, database, and
+  backup filenames are rejected from explicit browser-file selection.
 - Symlinked files/directories are never packaged. Every member is opened
   relative to the canonical modules root with no-follow semantics where the
   operating system supports them.

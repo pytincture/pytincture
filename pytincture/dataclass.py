@@ -500,6 +500,36 @@ def get_bff_manifest(
     return manifest
 
 
+def has_bff_export_class(
+    file_path: str,
+    *,
+    source: str | None = None,
+) -> bool:
+    """Return whether source contains a proven Pytincture BFF class.
+
+    Browser packaging uses this static boundary to include the generated BFF
+    proxy module without following its server-only imports. Keep this check on
+    the same provenance rules as the callable manifest.
+    """
+    if source is None:
+        with open(file_path, "r", encoding="utf-8") as source_file:
+            source = source_file.read()
+    module = ast.parse(source, filename=file_path)
+    module_bindings = _binding_snapshots(module.body)
+    return any(
+        any(
+            _decorator_matches(
+                decorator,
+                decorator_name="backend_for_frontend",
+                bindings=module_bindings[id(class_node)],
+            )[0]
+            for decorator in class_node.decorator_list
+        )
+        for class_node in module.body
+        if isinstance(class_node, ast.ClassDef)
+    )
+
+
 def _constructor_accepts_user_argument(cls) -> Optional[inspect.Parameter]:
     init_method = cls.__dict__.get("__init__")
     if init_method is None or init_method is object.__init__:

@@ -68,6 +68,7 @@ from pytincture.backend.bff import BFFRegistry
 from pytincture.backend.bff import build_bff_registry as _build_bff_registry
 from pytincture.backend.browser_packages import (
     AppcodeArchiveCache,
+    browser_asset_path_is_safe,
     browser_package_files,
     configured_browser_files,
     configured_browser_asset_path_selected,
@@ -1843,6 +1844,8 @@ def _declared_app_asset_allowed(
     entrypoint_path: str,
     entrypoint_source: str,
 ) -> bool:
+    if not browser_asset_path_is_safe(relative_path):
+        return False
     extension = os.path.splitext(relative_path)[1].lower()
     if extension in _NEVER_PUBLIC_ASSET_EXTENSIONS:
         return False

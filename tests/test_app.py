@@ -725,6 +725,7 @@ def test_public_assets_require_a_real_app_and_explicit_app_ownership(
     (tmp_path / "otherapp.py").write_text("# separate application\n")
     (tmp_path / "server.py").write_text("SECRET = 'hidden'\n")
     (tmp_path / ".env").write_text("SECRET=hidden\n")
+    (tmp_path / "credentials.json").write_text('{"token":"hidden"}\n')
     (tmp_path / "logo.png").write_bytes(b"png")
 
     assert fresh_client.get("/demoapp/appcode/server.py").status_code == 404
@@ -735,6 +736,9 @@ def test_public_assets_require_a_real_app_and_explicit_app_ownership(
 
     monkeypatch.setenv("PYTINCTURE_PUBLIC_ASSET_PATHS", "*.py")
     assert fresh_client.get("/demoapp/appcode/server.py").status_code == 404
+
+    monkeypatch.setenv("PYTINCTURE_PUBLIC_ASSET_PATHS", "credentials.json")
+    assert fresh_client.get("/demoapp/appcode/credentials.json").status_code == 404
 
 
 def test_public_asset_globs_can_be_scoped_per_application(

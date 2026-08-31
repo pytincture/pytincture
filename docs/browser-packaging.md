@@ -7,6 +7,14 @@ Pytincture builds `appcode.pyt` from a conservative static graph. It includes:
 - files selected by `PYTINCTURE_BROWSER_FILES`; and
 - browser-safe stubs for decorated BFF modules.
 
+The graph stops at a proven `@backend_for_frontend` module. That module is
+included as a generated browser proxy, but imports reachable only through its
+server implementation are not browser dependencies. A module independently
+imported by browser code is still included through that independent edge.
+Packages containing only BFF proxies use Python namespace-package behavior so
+a server-side package initializer is not copied into the archive. Initializers
+required by ordinary browser modules remain part of the browser graph.
+
 It excludes virtual environments, caches, `node_modules`, build output, server
 implementations, and unrelated files. Archive paths are relative, cannot
 escape the module root, and follow the [appcode v1 contract](contracts/appcode-v1.md).
@@ -39,6 +47,11 @@ server module must still contain a statically discoverable
 does not automatically make arbitrary server code callable or ship it to the
 browser.
 
+Static imports inside ordinary browser modules are conservative: imports under
+`if`, `TYPE_CHECKING`, and other conditional syntax are included because the
+packager does not execute application conditions. Imports inside a BFF module
+remain behind the server boundary described above.
+
 ## Public assets
 
 Images, fonts, media, CSS, and JavaScript assets may be served from
@@ -70,6 +83,12 @@ narrowest setting for each. SVG remains supported for declared application
 assets and favicons, but its response receives a no-script sandbox CSP and
 same-origin resource policy so direct navigation cannot become an application
 script context.
+
+Hidden paths and high-confidence secret material such as credential/secret
+filenames, private-key containers, database files, and backups are rejected
+even when a broad browser/public glob matches them. Import required browser
+Python normally; do not use `PYTINCTURE_BROWSER_FILES` to move server
+configuration into the browser boundary.
 
 Browser Python and manifest-approved widget JavaScript are intentionally
 trusted application code with same-origin authority. Pytincture constrains
