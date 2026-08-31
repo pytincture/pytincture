@@ -588,6 +588,37 @@ def test_saml_replay_mitigation_evidence_matches_the_enforced_runtime():
     )
 
 
+def test_security_review_dispositions_map_contracts_to_regressions():
+    root = Path(__file__).resolve().parents[1]
+    evidence = json.loads(
+        (root / "security" / "review-dispositions.json").read_text()
+    )
+    assert evidence["status"] == "accepted"
+    dispositions = {item["id"]: item for item in evidence["dispositions"]}
+    assert set(dispositions) == {
+        "F-01",
+        "F-02",
+        "SAML-STATELESS-REPLAY-BOUNDARY",
+    }
+    assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
+    assert dispositions["F-01"]["controls"]["method_level_export_required"] is False
+    assert dispositions["F-02"]["controls"][
+        "same_origin_browser_execution_intentional"
+    ] is True
+    saml_controls = dispositions["SAML-STATELESS-REPLAY-BOUNDARY"]["controls"]
+    assert saml_controls["redis_required"] is False
+    assert saml_controls["process_memory_required"] is False
+
+    for disposition in dispositions.values():
+        for relative_path in disposition["implementation"]:
+            assert (root / relative_path).is_file()
+        for test_reference in disposition["regression_tests"]:
+            relative_path, separator, test_name = test_reference.partition("::")
+            test_path = root / relative_path
+            assert test_path.is_file()
+            assert separator and test_name in test_path.read_text()
+
+
 def test_redis_store_accepts_an_injected_client():
     class FakeRedis:
         def __init__(self):

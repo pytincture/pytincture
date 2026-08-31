@@ -5,6 +5,9 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Record accepted security architecture contracts for class-level BFF exports,
+  same-origin browser code, and stateless cross-worker SAML, with a
+  machine-readable disposition file mapped to enforced regression tests.
 - Require HTTPS for explicitly enabled remote Redis/Upstash endpoints while
   retaining literal loopback HTTP for local emulators. Redis remains optional;
   signed-cookie sessions and load balancing do not depend on it.

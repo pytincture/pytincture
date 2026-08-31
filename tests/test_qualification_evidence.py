@@ -191,3 +191,6 @@ def test_ci_generates_standard_evidence_for_every_qualification_track():
     replay_mitigation = "security/saml-replay-mitigation.json"
     assert f"--result saml_replay_mitigation={replay_mitigation}" in workflow
     assert workflow.count(replay_mitigation) >= 2
+    dispositions = "security/review-dispositions.json"
+    assert f"--result security_review_dispositions={dispositions}" in workflow
+    assert workflow.count(dispositions) >= 2

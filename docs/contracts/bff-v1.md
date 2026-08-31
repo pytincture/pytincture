@@ -10,6 +10,8 @@ by Pytincture 1.x.
   exported. Static discovery proves that decorator names and module aliases
   were imported directly from `pytincture.dataclass`; local, unrelated,
   re-exported, or rebound same-named decorators are not security declarations.
+- The class marker intentionally exports every public operation; a separate
+  method-level export marker is not required by the 1.x developer contract.
 - Public methods are operations. Public assigned/annotated attributes are
   read-only `GET` operations.
 - Private names beginning with `_` are not exported.
