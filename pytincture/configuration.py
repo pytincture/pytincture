@@ -189,6 +189,26 @@ class PytinctureConfig:
         "SAML_ACS_RATE_LIMIT_WINDOW_SECONDS",
         "SAML ACS rate-limit window in seconds.",
     )
+    saml_validation_max_concurrency: int = _setting(
+        2,
+        "SAML_VALIDATION_MAX_CONCURRENCY",
+        "Concurrent SAML XML/signature validations per worker.",
+    )
+    saml_validation_max_queue: int = _setting(
+        8,
+        "SAML_VALIDATION_MAX_QUEUE",
+        "Maximum queued SAML validations per worker.",
+    )
+    saml_validation_queue_timeout_seconds: float = _setting(
+        1.0,
+        "SAML_VALIDATION_QUEUE_TIMEOUT_SECONDS",
+        "Maximum SAML validation admission wait.",
+    )
+    saml_validation_timeout_seconds: float = _setting(
+        10.0,
+        "SAML_VALIDATION_TIMEOUT_SECONDS",
+        "Maximum wait for one SAML validation stage.",
+    )
     session_secret: str = _setting(
         "", "SAML_SECRET_KEY", "Session signing secret.", repr=False
     )
@@ -334,6 +354,26 @@ class PytinctureConfig:
     )
     remote_store_cooldown_seconds: float = _setting(
         15.0, "REMOTE_STORE_COOLDOWN_SECONDS", "Open-circuit cooldown."
+    )
+    remote_store_max_concurrency: int = _setting(
+        8,
+        "REMOTE_STORE_MAX_CONCURRENCY",
+        "Concurrent optional shared-store operations per worker.",
+    )
+    remote_store_max_queue: int = _setting(
+        16,
+        "REMOTE_STORE_MAX_QUEUE",
+        "Maximum queued optional shared-store operations per worker.",
+    )
+    remote_store_queue_timeout_seconds: float = _setting(
+        1.0,
+        "REMOTE_STORE_QUEUE_TIMEOUT_SECONDS",
+        "Maximum optional shared-store admission wait.",
+    )
+    readiness_cache_ttl_seconds: float = _setting(
+        1.0,
+        "READINESS_CACHE_TTL_SECONDS",
+        "Short per-worker readiness result cache lifetime.",
     )
     enable_bff_replay_tokens: bool = _setting(
         False, "ENABLE_BFF_REPLAY_TOKENS", "Enable one-time BFF request proofs."
@@ -516,14 +556,24 @@ class PytinctureConfig:
             self.appcode_cache_max_bytes,
             self.appcode_build_max_concurrency,
             self.appcode_build_queue_timeout_seconds,
+            self.saml_validation_max_concurrency,
+            self.saml_validation_queue_timeout_seconds,
+            self.saml_validation_timeout_seconds,
             self.remote_store_timeout_seconds,
             self.remote_store_failure_threshold,
             self.remote_store_cooldown_seconds,
+            self.remote_store_max_concurrency,
+            self.remote_store_queue_timeout_seconds,
+            self.readiness_cache_ttl_seconds,
         )
         if min(positive_limits) <= 0:
             raise ValueError("resource limits must be greater than zero")
         if self.bff_max_queue < 0:
             raise ValueError("bff_max_queue cannot be negative")
+        if self.saml_validation_max_queue < 0:
+            raise ValueError("saml_validation_max_queue cannot be negative")
+        if self.remote_store_max_queue < 0:
+            raise ValueError("remote_store_max_queue cannot be negative")
         execution_mode = self.bff_execution_mode.strip().lower()
         if execution_mode not in {"trusted-thread", "isolated-process"}:
             raise ValueError(
@@ -788,7 +838,8 @@ class PytinctureConfig:
             "bff_replay_issue_window_seconds", "bff_replay_local_max_tokens",
             "bff_replay_local_max_tokens_per_session", "saml_response_max_bytes",
             "saml_acs_rate_limit_attempts", "saml_acs_rate_limit_window_seconds",
-            "saml_transaction_ttl_seconds",
+            "saml_transaction_ttl_seconds", "saml_validation_max_concurrency",
+            "saml_validation_max_queue",
             "login_rate_limit_attempts", "login_rate_limit_window_seconds",
             "login_email_max_chars", "login_password_max_chars",
             "password_hash_max_concurrency", "bff_max_concurrency", "bff_max_queue",
@@ -800,7 +851,8 @@ class PytinctureConfig:
             "appcode_max_total_bytes", "appcode_cache_entries",
             "appcode_cache_max_bytes",
             "appcode_build_max_concurrency",
-            "remote_store_failure_threshold",
+            "remote_store_failure_threshold", "remote_store_max_concurrency",
+            "remote_store_max_queue",
         }
         float_fields = {
             "password_hash_queue_timeout_seconds", "bff_call_timeout_seconds",
@@ -808,7 +860,9 @@ class PytinctureConfig:
             "bff_queue_timeout_seconds", "bff_stream_max_seconds",
             "bff_isolated_cpu_seconds",
             "bff_stream_idle_timeout_seconds", "remote_store_timeout_seconds",
-            "remote_store_cooldown_seconds", "appcode_build_queue_timeout_seconds",
+            "remote_store_cooldown_seconds", "remote_store_queue_timeout_seconds",
+            "readiness_cache_ttl_seconds", "saml_validation_queue_timeout_seconds",
+            "saml_validation_timeout_seconds", "appcode_build_queue_timeout_seconds",
         }
         tuple_fields = {
             "cors_allowed_origins", "allowed_hosts", "previous_session_secrets",

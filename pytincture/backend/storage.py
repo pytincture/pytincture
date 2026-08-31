@@ -2,6 +2,9 @@
 
 import ipaddress
 import json
+import threading
+import time
+from collections import OrderedDict
 from typing import Any
 from urllib.parse import urlparse
 
@@ -32,7 +35,7 @@ def validate_redis_url(redis_url: str) -> str:
 
 
 class RedisDict:
-    """A small mapping facade over Upstash Redis with a read-through cache."""
+    """A small mapping facade over Upstash Redis with an optional bounded cache."""
 
     def __init__(
         self,
@@ -41,13 +44,17 @@ class RedisDict:
         key_prefix: str = "",
         *,
         redis_client: Any = None,
-        cache_reads: bool = True,
+        cache_reads: bool = False,
+        cache_max_entries: int = 256,
+        cache_ttl_seconds: float = 1.0,
         timeout_seconds: float = 2.0,
         failure_threshold: int = 3,
         cooldown_seconds: float = 15.0,
     ):
         if timeout_seconds <= 0:
             raise ValueError("remote store timeout must be greater than zero")
+        if cache_max_entries <= 0 or cache_ttl_seconds <= 0:
+            raise ValueError("remote store cache limits must be greater than zero")
         if redis_client is None:
             redis_url = validate_redis_url(redis_url)
             try:
@@ -79,8 +86,42 @@ class RedisDict:
         self._redis = redis_client
         self._prefix = key_prefix
         self._cache_reads = cache_reads
-        self._cache: dict[str, Any] = {}
+        self._cache_max_entries = cache_max_entries
+        self._cache_ttl_seconds = cache_ttl_seconds
+        self._cache: OrderedDict[str, tuple[float, Any]] = OrderedDict()
+        self._cache_lock = threading.Lock()
         self._circuit = CircuitBreaker(failure_threshold, cooldown_seconds)
+
+    def _cache_get(self, key: str) -> tuple[bool, Any]:
+        if not self._cache_reads:
+            return False, None
+        now = time.monotonic()
+        with self._cache_lock:
+            cached = self._cache.get(key)
+            if cached is None:
+                return False, None
+            expires_at, value = cached
+            if expires_at <= now:
+                self._cache.pop(key, None)
+                return False, None
+            self._cache.move_to_end(key)
+            return True, value
+
+    def _cache_put(self, key: str, value: Any, ttl_seconds: float | None = None) -> None:
+        if not self._cache_reads or value is None:
+            return
+        ttl = self._cache_ttl_seconds
+        if ttl_seconds is not None:
+            ttl = min(ttl, float(ttl_seconds))
+        with self._cache_lock:
+            self._cache[key] = (time.monotonic() + ttl, value)
+            self._cache.move_to_end(key)
+            while len(self._cache) > self._cache_max_entries:
+                self._cache.popitem(last=False)
+
+    def _cache_delete(self, key: str) -> None:
+        with self._cache_lock:
+            self._cache.pop(key, None)
 
     def _call(self, method: str, *args, **kwargs):
         self._circuit.before_call()
@@ -99,52 +140,58 @@ class RedisDict:
         return value
 
     def __getitem__(self, key):
-        if self._cache_reads and key in self._cache:
-            return self._cache[key]
+        found, cached = self._cache_get(key)
+        if found:
+            return cached
         value = self._call("get", self._prefix + key)
         if not value:
-            if self._cache_reads:
-                self._cache[key] = None
             return None
         value = self._decode(value)
-        if self._cache_reads:
-            self._cache[key] = value
+        self._cache_put(key, value)
         return value
 
     def __setitem__(self, key, value):
         serialized = json.dumps(value) if isinstance(value, dict) else str(value)
         self._call("set", self._prefix + key, serialized)
-        if self._cache_reads:
-            self._cache[key] = value
+        self._cache_delete(key)
+        self._cache_put(key, value)
 
     def set_with_ttl(self, key, value, ttl_seconds: int):
         serialized = json.dumps(value) if isinstance(value, dict) else str(value)
         self._call("set", self._prefix + key, serialized, ex=ttl_seconds)
-        if self._cache_reads:
-            self._cache[key] = value
+        self._cache_delete(key)
+        self._cache_put(key, value, ttl_seconds)
 
     def __delitem__(self, key):
-        if self._call("delete", self._prefix + key) == 0:
+        deleted = self._call("delete", self._prefix + key)
+        self._cache_delete(key)
+        if deleted == 0:
             raise KeyError(key)
-        self._cache.pop(key, None)
 
     def pop_atomic(self, key, default=None):
         value = self._call("getdel", self._prefix + key)
-        self._cache.pop(key, None)
+        self._cache_delete(key)
         return default if value is None else self._decode(value)
 
     def __contains__(self, key):
         if key is None:
             return False
-        if self._cache_reads and key in self._cache:
-            return self._cache[key] is not None
+        found, _cached = self._cache_get(key)
+        if found:
+            return True
         exists = self._call("exists", self._prefix + key) == 1
-        if not exists and self._cache_reads:
-            self._cache[key] = None
         return exists
 
     def __len__(self):
-        return sum(value is not None for value in self._cache.values())
+        now = time.monotonic()
+        with self._cache_lock:
+            expired = [
+                key for key, (expires_at, _value) in self._cache.items()
+                if expires_at <= now
+            ]
+            for key in expired:
+                self._cache.pop(key, None)
+            return len(self._cache)
 
     def __iter__(self):
         cursor = "0"

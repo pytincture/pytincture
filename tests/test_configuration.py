@@ -37,6 +37,10 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "SAML_RELAY_STATE_TTL_SECONDS": "480",
             "SAML_ACS_RATE_LIMIT_ATTEMPTS": "30",
             "SAML_ACS_RATE_LIMIT_WINDOW_SECONDS": "45",
+            "SAML_VALIDATION_MAX_CONCURRENCY": "3",
+            "SAML_VALIDATION_MAX_QUEUE": "7",
+            "SAML_VALIDATION_QUEUE_TIMEOUT_SECONDS": "0.75",
+            "SAML_VALIDATION_TIMEOUT_SECONDS": "8.5",
             "BFF_REPLAY_ISSUE_SESSION_LIMIT": "11",
             "BFF_REPLAY_ISSUE_PEER_LIMIT": "22",
             "BFF_REPLAY_ISSUE_WORKER_LIMIT": "33",
@@ -52,6 +56,10 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "BFF_ISOLATED_CPU_SECONDS": "2.5",
             "BFF_ISOLATED_MEMORY_BYTES": "536870912",
             "APP_SPECIFIC_VALUE": "kept",
+            "REMOTE_STORE_MAX_CONCURRENCY": "6",
+            "REMOTE_STORE_MAX_QUEUE": "12",
+            "REMOTE_STORE_QUEUE_TIMEOUT_SECONDS": "0.5",
+            "READINESS_CACHE_TTL_SECONDS": "2.5",
         },
         bff_call_timeout_seconds=8.0,
     )
@@ -77,6 +85,10 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.saml_transaction_ttl_seconds == 480
     assert config.saml_acs_rate_limit_attempts == 30
     assert config.saml_acs_rate_limit_window_seconds == 45
+    assert config.saml_validation_max_concurrency == 3
+    assert config.saml_validation_max_queue == 7
+    assert config.saml_validation_queue_timeout_seconds == 0.75
+    assert config.saml_validation_timeout_seconds == 8.5
     assert config.bff_replay_issue_session_limit == 11
     assert config.bff_replay_issue_peer_limit == 22
     assert config.bff_replay_issue_worker_limit == 33
@@ -91,6 +103,10 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.bff_isolated_max_per_user == 1
     assert config.bff_isolated_cpu_seconds == 2.5
     assert config.bff_isolated_memory_bytes == 536870912
+    assert config.remote_store_max_concurrency == 6
+    assert config.remote_store_max_queue == 12
+    assert config.remote_store_queue_timeout_seconds == 0.5
+    assert config.readiness_cache_ttl_seconds == 2.5
     assert config.environment == {"APP_SPECIFIC_VALUE": "kept"}
     assert config.to_environ()["ENABLE_USER_LOGIN"] == "true"
     assert config.to_environ()["PYTINCTURE_DEV_WHEEL_VERSION"] == "42.0.dev1"

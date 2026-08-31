@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Offload SAML XML/signature validation and optional shared-store work from
+  async request paths under bounded admission and deadlines. Readiness checks
+  are briefly coalesced, and the legacy Redis read cache is disabled by
+  default; its opt-in mode is positive-only, TTL-bound, and size-bound. Redis
+  remains optional and normal browser-carried sessions remain stateless.
 - Stream direct public assets from verified no-follow descriptors in bounded
   chunks, perform file I/O off the event loop, and make HEAD metadata-only.
   Warm appcode archives now validate cached source digests through file and

@@ -37,6 +37,10 @@ browser-carried sessions and optional Redis, are recorded in
   inside `SubjectConfirmationData`. Tune `SAML_ACS_RATE_LIMIT_ATTEMPTS` and
   `SAML_ACS_RATE_LIMIT_WINDOW_SECONDS` alongside an edge rate limit; do not
   disable or bypass the built-in response guard.
+- SAML XML/signature validation is offloaded under a per-worker concurrency
+  gate. Tune `SAML_VALIDATION_MAX_CONCURRENCY`, `SAML_VALIDATION_MAX_QUEUE`,
+  and the queue/runtime deadlines for the worker's CPU budget. A timed-out
+  validation retains its slot until the underlying thread exits.
 - SAML logins use an HttpOnly browser-binding cookie and a one-time transaction
   with exact `InResponseTo`, response-ID, and assertion-ID correlation. Keep
   `AUTH_SESSION_HTTPS_ONLY=true` so cross-site POST binding uses a Secure,
@@ -67,9 +71,14 @@ password login has independent peer/account limits per worker, so the gateway
 should provide the coordinated outer limit when multiple workers are exposed.
 Optional Upstash operations use short deadlines and a per-worker circuit
 breaker; Redis remains optional and is not used by the default signed-cookie
-session path. When that integration is explicitly enabled, its remote URL must
-use HTTPS. Cleartext HTTP is accepted only for local emulators addressed by a
-literal loopback IP such as `127.0.0.1` or `::1`.
+session path. Async readiness, direct page-session revocation checks, and replay
+issuance offload those calls under a bounded per-worker gate. Readiness
+refreshes are coalesced and cached only for `READINESS_CACHE_TTL_SECONDS`.
+Redis reads are uncached by default; an explicit read cache is positive-only,
+bounded by entries and TTL, and invalidated by local writes/deletes. When that
+integration is explicitly enabled, its remote URL must use HTTPS. Cleartext
+HTTP is accepted only for local emulators addressed by a literal loopback IP
+such as `127.0.0.1` or `::1`.
 
 BFF modules are deployment-trusted code. The default `trusted-thread` mode
 preserves low-overhead async, object, and streaming behavior; timed-out worker
@@ -138,7 +147,8 @@ only when it contains 1–128 letters, digits, `.`, `_`, `:`, or `-`.
   can answer; it does not check dependencies.
 - `GET /readyz` is the readiness probe. HTTP 200 means the modules directory,
   frontend entrypoint/runtime, and configured Redis stores are available.
-  HTTP 503 means the worker must not receive traffic.
+  HTTP 503 means the worker must not receive traffic. Concurrent probes share
+  one off-loop refresh and reuse it only for the short configured cache TTL.
 - Do not place either endpoint behind application authentication.
 
 Pytincture emits one-line JSON events on the `pytincture.security` logger.
