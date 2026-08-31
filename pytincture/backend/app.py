@@ -146,6 +146,7 @@ from pytincture.dataclass import (
     add_bff_docs_to_app,
     get_bff_manifest,
     get_parsed_output,
+    verify_bff_runtime_export,
 )
 
 # ========================
@@ -2147,7 +2148,20 @@ async def class_call(
             class_name,
             expected_digest=source_digest or None,
         )
-        cls = getattr(module, class_name)
+        cls = vars(module).get(class_name)
+        try:
+            verify_bff_runtime_export(
+                cls,
+                class_name=class_name,
+                member_name=function_name,
+                operation=operation,
+                source_path=module_file_path,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="BFF operation not exported",
+            ) from exc
         instance = cls(_user=user)
         return getattr(instance, function_name)
 

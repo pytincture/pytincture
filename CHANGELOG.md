@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Bind static BFF operations to exact class and member source identities,
+  reject duplicate definitions and post-export rebinding before module import,
+  track assignment expressions inside comprehensions, require the Pytincture
+  export decorator to be outermost, and verify the runtime wrapper/member
+  before class construction. The class-level export API remains unchanged.
 - Replace long-lived PyPI credentials and in-CI publication with a protected
   OIDC trusted-publisher workflow that accepts only attested wheel/sdist bytes
   from successful release CI for a published, default-branch-reachable tag.

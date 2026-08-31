@@ -267,6 +267,39 @@
         "tests/test_backend_modules.py::test_configured_browser_files_fail_closed_on_sensitive_match",
         "tests/test_app.py::test_public_assets_require_a_real_app_and_explicit_app_ownership"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-H-02",
+      "status": "remediated",
+      "title": "Static BFF authorization is bound to the exact runtime class and member",
+      "intentional_contract": "The class-level backend_for_frontend decorator remains the complete developer export decision; method-level export declarations are not required.",
+      "security_boundary": "The Pytincture export decorator must be the single outermost export decorator. Static discovery rejects duplicate definitions and later class/member bindings before import, records canonical AST definition fingerprints, and dispatch verifies the final Pytincture wrapper, original class, source, and current method before construction.",
+      "controls": {
+        "class_level_export_preserved": true,
+        "method_level_export_required": false,
+        "single_outermost_export_decorator_required": true,
+        "duplicate_class_definitions_rejected": true,
+        "post_definition_class_rebinding_rejected": true,
+        "post_definition_member_rebinding_rejected": true,
+        "comprehension_named_expression_rebinding_tracked": true,
+        "source_definition_fingerprints_recorded": true,
+        "runtime_wrapper_and_member_verified_before_construction": true,
+        "redis_required": false
+      },
+      "implementation": [
+        "pytincture/dataclass.py",
+        "pytincture/backend/app.py",
+        "docs/contracts/bff-v1.md"
+      ],
+      "regression_tests": [
+        "tests/test_dataclass.py::test_static_manifest_tracks_named_expression_rebinding_in_comprehensions",
+        "tests/test_dataclass.py::test_static_manifest_does_not_treat_comprehension_targets_as_module_rebinding",
+        "tests/test_dataclass.py::test_static_manifest_rejects_exported_class_or_member_replacement",
+        "tests/test_dataclass.py::test_static_manifest_requires_bff_export_decorator_to_be_outermost",
+        "tests/test_app.py::test_bff_rebinding_is_rejected_before_module_import",
+        "tests/test_app.py::test_bff_dispatch_rejects_runtime_class_or_method_replacement_before_construction",
+        "tests/test_app.py::test_bff_dispatch_preserves_inner_class_decorators"
+      ]
     }
   ]
 }

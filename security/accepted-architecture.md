@@ -27,6 +27,8 @@ Required controls that remain in scope:
 
 - Prove that security decorators came directly from Pytincture and were not
   rebound or shadowed.
+- Require the Pytincture export decorator to be the single outermost export
+  decorator so another decorator cannot replace its wrapper afterward.
 - Bind static manifest entries to the exact runtime class definition.
 - Exclude private names beginning with `_`.
 - Enforce the application graph, session audience, declared HTTP methods, and
