@@ -24,19 +24,34 @@ _EXCLUDED_DIRECTORIES = {
 
 BFFKey = tuple[str, str, str]
 BFFOperation = dict[str, Any]
+BFFRegistryFailures = dict[str, str]
 
 
-def build_bff_registry(
+def _manifest_failure_reason(exc: Exception) -> str:
+    """Return a stable, non-sensitive reason for rejecting one source file."""
+    if isinstance(exc, SyntaxError):
+        return "invalid_python_syntax"
+    if isinstance(exc, UnicodeDecodeError):
+        return "invalid_python_encoding"
+    if isinstance(exc, UnsafePath):
+        return "unsafe_source_path"
+    if isinstance(exc, OSError):
+        return "unreadable_source"
+    return "invalid_bff_manifest"
+
+
+def _scan_bff_registry(
     modules_root: str,
     manifest_loader: Callable[
         [str], Mapping[tuple[str, str], BFFOperation]
-    ] = get_bff_manifest,
-) -> dict[BFFKey, BFFOperation]:
-    """Discover exported BFF operations without importing application code."""
+    ],
+) -> tuple[dict[BFFKey, BFFOperation], BFFRegistryFailures]:
+    """Build a fail-closed registry while isolating failures to their files."""
     root_path = canonical_root(modules_root)
     registry: dict[BFFKey, BFFOperation] = {}
+    failures: BFFRegistryFailures = {}
     if not os.path.isdir(root_path):
-        return registry
+        return registry, failures
 
     for root, dirs, files in os.walk(root_path):
         dirs[:] = [
@@ -60,15 +75,27 @@ def build_bff_registry(
                 else:
                     file_manifest = manifest_loader(file_path)
             except (OSError, SyntaxError, UnicodeDecodeError, UnsafePath, ValueError) as exc:
-                raise RuntimeError(
-                    f"Unable to build BFF manifest for {relative_path}"
-                ) from exc
+                # No operation from a rejected file enters the authorization
+                # registry. Valid files remain available to unrelated apps.
+                failures[relative_path] = _manifest_failure_reason(exc)
+                continue
             for (class_name, function_name), operation in file_manifest.items():
                 registry[(relative_path, class_name, function_name)] = {
                     **operation,
                     "_source_path": secure_file.path,
                     "_source_digest": secure_file.digest,
                 }
+    return registry, failures
+
+
+def build_bff_registry(
+    modules_root: str,
+    manifest_loader: Callable[
+        [str], Mapping[tuple[str, str], BFFOperation]
+    ] = get_bff_manifest,
+) -> dict[BFFKey, BFFOperation]:
+    """Discover exports; malformed files contribute no callable operations."""
+    registry, _failures = _scan_bff_registry(modules_root, manifest_loader)
     return registry
 
 
@@ -87,6 +114,7 @@ class BFFRegistry:
         self._manifest_loader = manifest_loader
         self.root = canonical_root(modules_root)
         self.operations: dict[BFFKey, BFFOperation] = {}
+        self.failures: BFFRegistryFailures = {}
         self.loaded = False
         self._lock = threading.RLock()
         if autoload:
@@ -96,7 +124,9 @@ class BFFRegistry:
         with self._lock:
             if modules_root is not None:
                 self.root = canonical_root(modules_root)
-            self.operations = build_bff_registry(self.root, self._manifest_loader)
+            self.operations, self.failures = _scan_bff_registry(
+                self.root, self._manifest_loader
+            )
             self.loaded = True
             return self.operations
 
@@ -117,7 +147,8 @@ class BFFRegistry:
                 return None
             try:
                 current = read_contained_file(root, key[0])
-            except UnsafePath:
+            except (OSError, UnsafePath):
+                self.reload(root)
                 return None
             if current.digest != operation.get("_source_digest"):
                 self.reload(root)

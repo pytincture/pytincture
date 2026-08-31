@@ -560,6 +560,36 @@ def test_bff_documentation_is_per_app_and_redacts_defaults(tmp_path):
     assert hidden_license.status_code == 404
 
 
+def test_invalid_python_file_cannot_disable_unrelated_bff_application(tmp_path):
+    (tmp_path / "healthy.py").write_text(
+        "from pytincture.dataclass import backend_for_frontend\n"
+        "@backend_for_frontend\n"
+        "class Healthy:\n"
+        "    def ping(self): return {'healthy': True}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "partially_written.py").write_text(
+        "def deploy_in_progress(\n", encoding="utf-8"
+    )
+
+    configured = create_app(PytinctureConfig(modules_path=str(tmp_path)))
+    backend = configured.state.pytincture_backend
+    assert backend.BFF_REGISTRY_FAILURES == {
+        "partially_written.py": "invalid_python_syntax"
+    }
+
+    with TestClient(configured) as client:
+        healthy = client.post(
+            "/classcall/healthy.py/Healthy/ping", json={"kwargs": {}}
+        )
+        rejected = client.post(
+            "/classcall/partially_written.py/Unknown/ping", json={"kwargs": {}}
+        )
+    assert healthy.status_code == 200
+    assert healthy.json() == {"healthy": True}
+    assert rejected.status_code == 404
+
+
 def test_configuration_reference_document_matches_typed_model():
     documentation = (
         Path(__file__).resolve().parents[1] / "docs" / "configuration.md"
