@@ -28,17 +28,21 @@ declares browser widget metadata. Continue with [service mode](service-mode.md).
 
 ## Standalone mode
 
-Requirements: any static HTTP server; Python is not required on the host.
+Requirements: Pytincture installed while preparing the static site. The
+deployed host itself only needs a static HTTP server.
 
 ```bash
+python -m pip install 'pytincture==1.0.0rc2'
 cd pytincture/examples/quickstart/standalone
+python -m pytincture.assets ./frontend
 python3 -m http.server 8000
 ```
 
 Open <http://127.0.0.1:8000/>. Do not open the HTML through `file://`; browsers
 restrict module, worker, and network behavior for local files. The runnable
 example contains [`index.html`](../examples/quickstart/standalone/index.html)
-and its version-matched `pytincture.min.js` runtime. Continue with
+and a verified, version-matched local runtime exported from the installed
+wheel. Continue with
 [standalone mode](standalone-mode.md).
 
 ## Verify the service

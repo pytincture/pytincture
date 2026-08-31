@@ -25,6 +25,7 @@ dist/*.whl
 pytincture/backend/.env
 fastmcp_stub/*
 pytincture/frontend/node_modules
+examples/quickstart/standalone/frontend/
 pytincture/frontend/playwright-report
 pytincture/frontend/test-results
 pytincture/frontend/test-results-standalone

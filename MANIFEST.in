@@ -3,6 +3,8 @@ include pytincture/frontend/index.html
 include pytincture/frontend/pytincture.js
 include pytincture/frontend/sw.js
 recursive-include pytincture/frontend/dist *
+recursive-include pytincture/frontend/integrity *
+recursive-include pytincture/frontend/vendor/materialdesignicons *
 recursive-include pytincture/frontend/pyodide *
 exclude pytincture/frontend/README.md
 exclude pytincture/frontend/package.json

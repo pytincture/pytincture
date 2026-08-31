@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Make service icons and the standalone runtime fully self-hostable: vendor the
+  Material Design stylesheet/font, publish a versioned runtime/Pyodide/WASM/
+  standard-library integrity manifest, verify installed bytes during static
+  asset export, and require SRI plus anonymous CORS for explicitly external
+  Pyodide scripts or icon CSS. The icon feature and CDN convenience mode remain.
 - Remove the direct local npm publication script. The protected
   `npm-publish.yml` retained-artifact/attestation/OIDC workflow is now the sole
   registry publication path; local build and `npm pack --dry-run` inspection
@@ -74,8 +79,8 @@ set when a release is published.
   unchanged, while same-named local or unrelated decorators can no longer
   create remotely callable operations.
 - Run both checked-in quickstarts under real Pyodide in Chromium, Firefox, and
-  WebKit during CI, and ship the standalone quickstart with its version-matched
-  local runtime so it remains runnable before npm publication.
+  WebKit during CI, exporting the standalone quickstart's verified,
+  version-matched local runtime and Pyodide tree before serving it.
 
 ## 1.0.0rc2 — 2026-08-29
 

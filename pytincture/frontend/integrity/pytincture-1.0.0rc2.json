@@ -1,0 +1,110 @@
+{
+  "schema": 1,
+  "framework_version": "1.0.0rc2",
+  "npm_version": "1.0.0-rc.2",
+  "pyodide_version": "0.29.3",
+  "material_design_icons_version": "7.4.47",
+  "material_design_icons_source": {
+    "package": "@mdi/font",
+    "resolved": "https://registry.npmjs.org/@mdi/font/-/font-7.4.47.tgz",
+    "npm_integrity": "sha512-43MtGpd585SNzHZPcYowu/84Vz2a2g31TvPMTm9uTiCSWzaheQySUcSyUH/46fPnuPQWof2yd0pGBtzee/IQWw=="
+  },
+  "trust_model": "Copy SRI values into the application or verify local bytes before deployment; do not fetch this manifest from the same untrusted asset origin at runtime.",
+  "assets": [
+    {
+      "path": "pytincture.js",
+      "sha256": "5b461b6f4274bfdabfa203a1a005590a86d4431bd3730a29c333808163290685",
+      "sri": "sha384-r9avn9uHKXciHnwBWZv2u3qEXup3iPYfV2Ix8+dRqLYgHKnWs7lmRhEn6byKNjq7"
+    },
+    {
+      "path": "sw.js",
+      "sha256": "1a4fc607cff101ea1fa69bc8899e49f3ea4419e12e2d693aff55ff1ed5467aed",
+      "sri": "sha384-WcceQQqcrOE5hga8TVTSuLrO/m8guxXuRNmWTP2t4gyPfXYNmbAdHd7aHf4usPqH"
+    },
+    {
+      "path": "dist/pytincture.js",
+      "sha256": "5838fd9f07cf04b25c758969180325b6bd032dfe8ca5b3297f9a43a9f0d11f9f",
+      "sri": "sha384-mhRuvs7jhbVZkCuPcdhI3rjMqzx4CCtpXaI+rCILiLcJtowTvw1Nw46TRcTWAQf6"
+    },
+    {
+      "path": "dist/pytincture.js.map",
+      "sha256": "b308c8c6789eaccc9dac7c4a795e1dd07dd84a8527757ab4935ee7e635f8bd90",
+      "sri": "sha384-dvTnj/AEMKUj+OjvKqp6moMBY+JxxiLAFwNkCbSNsMQb9hd2Kpmqw++fifqbT2tZ"
+    },
+    {
+      "path": "dist/pytincture.esm.js",
+      "sha256": "f52896c0d25b792913976563ec6148c87f23a40196a051ed4550e40f1f735e21",
+      "sri": "sha384-6luQIo+4wL1ANo1j/bmD9WYgtZRCPuFMQEYMpJtJpoT6v1aAKd1RrUtURcCqLXan"
+    },
+    {
+      "path": "dist/pytincture.esm.js.map",
+      "sha256": "91f74dc8f9ce390697546bceebc9b6e1111a01fefe6a341c5204da6dc3f56d29",
+      "sri": "sha384-l9oqzrbM3vbUj8fLEFfpHOqClt7Fcoe8YyjUMNPVDiNM4kdOn0eHo6wsiqU/Gm3G"
+    },
+    {
+      "path": "dist/pytincture.min.js",
+      "sha256": "85a1d9e0d3f8e2ed21cc93dc9643cc2658e27a00efc316181e727189d35a6bb9",
+      "sri": "sha384-fEUfRUSObQKIO52R3OUU4oZvz0LywhuGn5a1nPTU9J3HKqQjlqfByLM9ny/WfQPC"
+    },
+    {
+      "path": "dist/pytincture.min.js.map",
+      "sha256": "5644688b2242b2be2b41ad1cf04537ac02f6fb3b7133d2a32fda803169aba3b4",
+      "sri": "sha384-5UvxewUPcYKmObnvX3Vkf905OCRjM/TI1MP1WvY5OqOMGAC/PTjv8PRZ2tiOnhRz"
+    },
+    {
+      "path": "vendor/materialdesignicons/LICENSE",
+      "sha256": "f3bc8715bad84b26396bb42d2abd11f919cf58163be158eab79ecbaabf84cdf2",
+      "sri": "sha384-fskAPZ+YMtNTI0YljpVlLjdtDdm7m1nsCCWR+m1qwoYtDbzIyPFgvuFUYar6oFmd"
+    },
+    {
+      "path": "vendor/materialdesignicons/materialdesignicons.css",
+      "sha256": "16aa2084b73b9360ab28f98c2677a83ff4a96c72a3a5a5b558405e3dd5a39e66",
+      "sri": "sha384-M/06JV0AuFnpqSYgpWFnIFAJ+mS+6+BFkR+j/r1yftwL9jk0vPnDujoi4Us7RXu4"
+    },
+    {
+      "path": "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
+      "sha256": "662fefa8f2f8a95c18588d21774789c107c64e771cbe65a69af46291c4311afc",
+      "sri": "sha384-te6z6DUYMHA8itp+eMFcT94kFbOhZcEyF2ZtDUpF01/xi0QfbBO1MiBsKN/AO6jt"
+    },
+    {
+      "path": "pyodide/0.29.3/sbom.json",
+      "sha256": "c616dc9bee2795795d2de25617079e0701d4b583dbb4e94850f5e79dddef4d0f",
+      "sri": "sha384-Yt5ULHacrARw0vwxyp1x/6BiGDM0lsyu9zKX5CNFNbsKwYmP42wBQfOWh8urC1cs"
+    },
+    {
+      "path": "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl",
+      "sha256": "0ae422514e45d068b8159eb8ec3b2c3f4cbce2e664e26cb81735dbe4af2377a1",
+      "sri": "sha384-3kGGEv3JA3OWtIyNcGLfRBpxhKHBqzZc1VOE6HsGAX0I20w0Fs1wDGCxvXjxhvfN"
+    },
+    {
+      "path": "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl.metadata",
+      "sha256": "557284afce5203191c714e066c7296c213929b173dc3d91649decbeb16a1fb7b",
+      "sri": "sha384-cfrLJPOCogId1aWVEHXssxoI4MurXvL15kR2WdjGQHsadP4VTj48mSlb/9Dbgb8v"
+    },
+    {
+      "path": "pyodide/0.29.3/full/pyodide-lock.json",
+      "sha256": "154ea30df4758bab3c7996409f5e77ca0be40ce5e04412b43459e21b72b027dd",
+      "sri": "sha384-M8EiZCjgqxKbp7A9mPWyj8vC9p9zLrRE8LUE6IqJrRhIut0Z89AvKuBfkSp6RUxI"
+    },
+    {
+      "path": "pyodide/0.29.3/full/pyodide.asm.js",
+      "sha256": "1263f02b5b26099b96112378156f242dd98b39a8201ba7765e5fe3d455c5ce91",
+      "sri": "sha384-H/2VLTcLlId+2q+XryOhG/nGawPSusslAGPNvqdOA4U5cHJX+UFEzL0fEM1jEf0b"
+    },
+    {
+      "path": "pyodide/0.29.3/full/pyodide.asm.wasm",
+      "sha256": "e2f4ee75b325e35eb31bfb8c613d4dd5098f5502c156a97847686875b5025480",
+      "sri": "sha384-W3dDz77bydlUojTtAGEnjta8TodphdFrtejY4+BmoIXgXs1o+W8t6byLJ71jkOyN"
+    },
+    {
+      "path": "pyodide/0.29.3/full/pyodide.js",
+      "sha256": "718d40f1c015dd25ec724cc8fc4e2325d6a45a92ae225121ff6953f224a16f72",
+      "sri": "sha384-Hcsv6LxK5rH9vVB+a/+cLJZR3kIIM2Y851r6waxy+9JInvSROiD1bTMk748pYdat"
+    },
+    {
+      "path": "pyodide/0.29.3/full/python_stdlib.zip",
+      "sha256": "4298b6ee445cb724c3973437da47789752b9e6ff4e26619026b283ec801fc46b",
+      "sri": "sha384-N6oQlVvCCt2KTb4E08U9ctVKPkEv8zlBwyOwgAG1fmS3H5XQA4j0lLbWa+kDvlsU"
+    }
+  ]
+}

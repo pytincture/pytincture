@@ -54,12 +54,13 @@ def test_standalone_quickstart_contains_compilable_browser_python():
     parser.feed(page)
     assert parser.python
     compile("\n".join(parser.python), "standalone-quickstart", "exec")
-    assert parser.runtime_sources == ["./pytincture.min.js"]
-    assert (
+    assert parser.runtime_sources == ["./frontend/dist/pytincture.min.js"]
+    assert not (
         ROOT / "examples" / "quickstart" / "standalone" / "pytincture.min.js"
-    ).read_bytes() == (
-        ROOT / "pytincture" / "frontend" / "dist" / "pytincture.min.js"
-    ).read_bytes()
+    ).exists()
+    assert "python -m pytincture.assets ./frontend" in (
+        ROOT / "docs" / "quickstart.md"
+    ).read_text(encoding="utf-8")
 
 
 def test_configuration_reference_covers_every_backend_environment_setting():

@@ -258,8 +258,11 @@ Load url in browser
 http://localhost:8070/py_ui
 ~~~
 
-## Standalone pytincture.js / CDN Build
-The file under `pytincture/frontend/pytincture.js` can be bundled and published as a standalone runtime for demos that only need a `<script>` tag plus embedded Python.
+## Standalone pytincture.js build
+The file under `pytincture/frontend/pytincture.js` can be bundled as a
+standalone runtime for static sites that only need a `<script>` tag plus
+embedded Python. Production sites should use the verified self-hosted asset
+export documented in [standalone mode](docs/standalone-mode.md).
 
 ### Building the bundle
 1. Install the JS tooling once:
@@ -278,7 +281,7 @@ The file under `pytincture/frontend/pytincture.js` can be bundled and published 
 
 You can run `npm run build:watch` while editing `pytincture/frontend/pytincture.js` to regenerate the bundles automatically.
 
-### Packaging for a CDN
+### Packaging the runtime
 The frontend directory is wired like a normal npm package (`name: @pytincture/runtime`). To inspect the package locally:
 ```
 cd pytincture/frontend
@@ -288,18 +291,18 @@ npm pack --dry-run
 The build synchronizes the npm and browser runtime versions with the Python
 framework version. Official npm publication occurs from the validated GitHub
 release artifacts described below.
-Once published to npm, CDNs such as jsDelivr and UNPKG will expose the runtime automatically, e.g.:
+An exact npm release may be used for controlled demos only when its SRI is
+copied from the trusted release integrity manifest, for example:
 ```
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.2/dist/pytincture.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.2/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
 ```
-You can also point jsDelivr at a Git tag (`https://cdn.jsdelivr.net/gh/<org>/<repo>@<tag>/pytincture/frontend/dist/pytincture.min.js`) if you prefer GitHub releases.
 
 ### Using pytincture.js standalone
-With the CDN script on the page, pytincture auto-detects any `<script type="text/python">` blocks and runs them once Pyodide is ready. Optional helpers:
+With the runtime script on the page, Pytincture auto-detects any `<script type="text/python">` blocks and runs them once Pyodide is ready. Optional helpers:
 
-- Add `window.pytinctureAutoStartConfig = { widgetlib: "dhxpyt", libsSelector: "#micropip-libs" }` before loading the script to override defaults.
+- Add `window.pytinctureAutoStartConfig = { widgetlib: "dhxpyt==0.9.16", libsSelector: "#micropip-libs" }` before loading the script to override defaults.
 - Set `window.pytinctureAutoStartDisabled = true` if you prefer to call `runTinctureApp({...})` manually.
-- Extra Python wheels can be listed in `<script type="text/json" id="micropip-libs">["faker"]</script>`.
+- Extra Python wheels can be listed in `<script type="text/json" id="micropip-libs">["faker==37.0.0"]</script>`.
 
 Errors are rendered inside `#maindiv` (if present) and logged to the console, making it easy to host pure-static demos without the full framework.
 

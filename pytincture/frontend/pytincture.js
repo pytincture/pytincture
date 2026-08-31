@@ -36,8 +36,10 @@ const DEFAULT_CONFIG = {
     requestUuid: null,
     mode: "auto", // 'package', 'inline', or 'auto'
     pyodideBaseUrl: "./frontend/pyodide/0.29.3/full/",
+    pyodideScriptIntegrity: null,
     loadMaterialIcons: true,
-    materialIconsUrl: "https://cdnjs.cloudflare.com/ajax/libs/MaterialDesign-Webfont/7.4.47/css/materialdesignicons.css",
+    materialIconsUrl: "./frontend/vendor/materialdesignicons/materialdesignicons.css",
+    materialIconsIntegrity: null,
     enableBackendLogging: false,
     logEndpoint: "/logs",
     inlineSelector: 'script[type="text/python"]',
@@ -301,6 +303,71 @@ function withSameOriginRequestUuid(value, requestUuid) {
     }
 }
 
+function isExternalAssetUrl(value) {
+    if (!value) {
+        return false;
+    }
+    try {
+        const base = typeof window !== "undefined" && window.location
+            ? window.location.href
+            : "http://pytincture.invalid/";
+        const resolved = new URL(value, base);
+        if (typeof window === "undefined" || !window.location?.origin) {
+            return resolved.origin !== "http://pytincture.invalid";
+        }
+        return resolved.origin !== window.location.origin;
+    } catch (_error) {
+        return false;
+    }
+}
+
+function isValidSubresourceIntegrity(value) {
+    if (typeof value !== "string") {
+        return false;
+    }
+    const expectedBytes = { sha256: 32, sha384: 48, sha512: 64 };
+    const tokens = value.trim().split(/\s+/);
+    if (!tokens.length || !tokens[0] || typeof globalThis.atob !== "function") {
+        return false;
+    }
+    return tokens.every(token => {
+        const match = /^(sha256|sha384|sha512)-([A-Za-z0-9+/]+={0,2})$/.exec(token);
+        if (!match) {
+            return false;
+        }
+        try {
+            return globalThis.atob(match[2]).length === expectedBytes[match[1]];
+        } catch (_error) {
+            return false;
+        }
+    });
+}
+
+function serviceFrontendUrl(application, value) {
+    if (!application || typeof value !== "string") {
+        return value;
+    }
+    if (value.startsWith("frontend/") || value.startsWith("./frontend/")) {
+        return `/${application}/${value.replace(/^\.\//, "")}`;
+    }
+    return value;
+}
+
+function alignDefaultMaterialIconsUrl(config) {
+    if (
+        config.application
+        || config.materialIconsUrl !== DEFAULT_CONFIG.materialIconsUrl
+        || isExternalAssetUrl(config.pyodideBaseUrl)
+    ) {
+        return config.materialIconsUrl;
+    }
+    const marker = config.pyodideBaseUrl.indexOf("pyodide/");
+    if (marker < 0) {
+        return config.materialIconsUrl;
+    }
+    return `${config.pyodideBaseUrl.slice(0, marker)}vendor/materialdesignicons/materialdesignicons.css`;
+}
+
 function normalizeConfig(arg1, widgetlib, entrypoint) {
     const resolveDevWidgetHost = host => {
         if (host) {
@@ -332,10 +399,14 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
         if (!("enableBackendLogging" in arg1)) {
             merged.enableBackendLogging = !!merged.application;
         }
-        if (merged.application && (merged.pyodideBaseUrl.startsWith("frontend/") || merged.pyodideBaseUrl.startsWith("./frontend/"))) {
-            const cleanPath = merged.pyodideBaseUrl.replace(/^\.\//, "");
-            merged.pyodideBaseUrl = ensureTrailingSlash(`/${merged.application}/${cleanPath}`);
-        }
+        merged.pyodideBaseUrl = ensureTrailingSlash(
+            serviceFrontendUrl(merged.application, merged.pyodideBaseUrl),
+        );
+        merged.materialIconsUrl = serviceFrontendUrl(
+            merged.application,
+            merged.materialIconsUrl,
+        );
+        merged.materialIconsUrl = alignDefaultMaterialIconsUrl(merged);
         return merged;
     }
 
@@ -354,10 +425,14 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
         config.serviceWorkerScope = `/${config.application}/`;
     }
     config.enableBackendLogging = !!application;
-    if (config.application && (config.pyodideBaseUrl.startsWith("frontend/") || config.pyodideBaseUrl.startsWith("./frontend/"))) {
-        const cleanPath = config.pyodideBaseUrl.replace(/^\.\//, "");
-        config.pyodideBaseUrl = ensureTrailingSlash(`/${config.application}/${cleanPath}`);
-    }
+    config.pyodideBaseUrl = ensureTrailingSlash(
+        serviceFrontendUrl(config.application, config.pyodideBaseUrl),
+    );
+    config.materialIconsUrl = serviceFrontendUrl(
+        config.application,
+        config.materialIconsUrl,
+    );
+    config.materialIconsUrl = alignDefaultMaterialIconsUrl(config);
     return config;
 }
 
@@ -380,6 +455,22 @@ function preflightConfig(config) {
     }
     if (!config.pyodideBaseUrl) {
         throw new Error("pyodideBaseUrl is required.");
+    }
+    if (isExternalAssetUrl(config.pyodideBaseUrl)) {
+        for (const filename of ["pyodide.js", "pyodide.asm.js"]) {
+            if (!isValidSubresourceIntegrity(config.pyodideScriptIntegrity?.[filename])) {
+                throw new Error(
+                    `External Pyodide requires pyodideScriptIntegrity[${JSON.stringify(filename)}].`,
+                );
+            }
+        }
+    }
+    if (
+        config.loadMaterialIcons
+        && isExternalAssetUrl(config.materialIconsUrl)
+        && !isValidSubresourceIntegrity(config.materialIconsIntegrity)
+    ) {
+        throw new Error("External Material Icons require materialIconsIntegrity.");
     }
     validatePackageRequirement(config.widgetSource || config.widgetlib, {
         label: "Widgetset",
@@ -435,31 +526,56 @@ function preflightPyodide(pyodide) {
     };
 }
 
-function loadScript(url, requestUuid) {
+function loadScript(url, requestUuid, integrity = null) {
     return new Promise((resolve, reject) => {
         const script = document.createElement("script");
         script.src = withSameOriginRequestUuid(url, requestUuid);
+        if (integrity) {
+            script.integrity = integrity;
+            script.crossOrigin = "anonymous";
+        }
         script.onload = resolve;
         script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
         document.head.appendChild(script);
     });
 }
 
-function ensureMaterialIcons(url, requestUuid) {
+function ensureMaterialIcons(url, requestUuid, integrity = null) {
     if (!url) {
-        return;
+        return Promise.resolve();
     }
     const stylesheetUrl = withSameOriginRequestUuid(url, requestUuid);
-    const existing = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).some(link => link.href === stylesheetUrl);
+    const existing = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).find(
+        link => link.href === stylesheetUrl,
+    );
     if (existing) {
-        return;
+        if (
+            integrity
+            && (
+                existing.integrity !== integrity
+                || (isExternalAssetUrl(url) && existing.crossOrigin !== "anonymous")
+            )
+        ) {
+            return Promise.reject(new Error(
+                `Existing stylesheet was not loaded with the required integrity: ${url}`,
+            ));
+        }
+        return Promise.resolve();
     }
-    const link = document.createElement("link");
-    link.href = stylesheetUrl;
-    link.rel = "stylesheet";
-    link.type = "text/css";
-    link.media = "all";
-    document.head.appendChild(link);
+    return new Promise((resolve, reject) => {
+        const link = document.createElement("link");
+        link.href = stylesheetUrl;
+        link.rel = "stylesheet";
+        link.type = "text/css";
+        link.media = "all";
+        if (integrity) {
+            link.integrity = integrity;
+            link.crossOrigin = "anonymous";
+        }
+        link.onload = resolve;
+        link.onerror = () => reject(new Error(`Failed to load stylesheet: ${url}`));
+        document.head.appendChild(link);
+    });
 }
 
 function enableBackendLogging(endpoint) {
@@ -710,6 +826,8 @@ function frameworkAssetUrls(config) {
         : new URL(config.serviceWorkerScope, window.location.href);
     const relativePaths = [
         "pytincture.js",
+        "vendor/materialdesignicons/materialdesignicons.css",
+        "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
         "pyodide/0.29.3/full/pyodide.js",
         "pyodide/0.29.3/full/pyodide.asm.js",
         "pyodide/0.29.3/full/pyodide.asm.wasm",
@@ -789,10 +907,18 @@ async function warmPyodideCache(config) {
 async function ensurePyodideLoaded(config) {
     if (typeof loadPyodide !== "function") {
         window.languagePluginUrl = config.pyodideBaseUrl;
-        await loadScript(`${config.pyodideBaseUrl}pyodide.js`, config.requestUuid);
+        await loadScript(
+            `${config.pyodideBaseUrl}pyodide.js`,
+            config.requestUuid,
+            config.pyodideScriptIntegrity?.["pyodide.js"],
+        );
     }
     if (typeof _createPyodideModule !== "function") {
-        await loadScript(`${config.pyodideBaseUrl}pyodide.asm.js`, config.requestUuid);
+        await loadScript(
+            `${config.pyodideBaseUrl}pyodide.asm.js`,
+            config.requestUuid,
+            config.pyodideScriptIntegrity?.["pyodide.asm.js"],
+        );
     }
 }
 
@@ -1243,7 +1369,11 @@ async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_O
 
     await operations.ensureServiceWorker(config);
     if (config.loadMaterialIcons) {
-        operations.ensureMaterialIcons(config.materialIconsUrl, config.requestUuid);
+        await operations.ensureMaterialIcons(
+            config.materialIconsUrl,
+            config.requestUuid,
+            config.materialIconsIntegrity,
+        );
     }
     Promise.resolve(operations.warmPyodideCache(config)).catch(error => {
         console.warn("Pyodide cache warm failed:", sanitizeDiagnostic(error?.message || error));
@@ -1462,6 +1592,8 @@ globalThis.__pytinctureTesting = Object.freeze({
     frameworkAssetUrls,
     frameworkCacheName,
     normalizeConfig,
+    isExternalAssetUrl,
+    isValidSubresourceIntegrity,
     responseIsPublicImmutable,
     sanitizeConsoleMessage,
     sanitizeDiagnostic,

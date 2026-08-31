@@ -819,6 +819,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-H-02",
         "REVIEW-2026-08-31-H-03",
         "REVIEW-2026-08-31-H-05",
+        "REVIEW-2026-08-31-H-08-M-25",
         "REVIEW-2026-08-31-H-09",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
@@ -864,6 +865,11 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     npm_controls = dispositions["REVIEW-2026-08-31-H-09"]["controls"]
     assert npm_controls["direct_local_registry_publish_available"] is False
     assert npm_controls["protected_oidc_workflow_is_sole_publish_path"] is True
+    asset_controls = dispositions["REVIEW-2026-08-31-H-08-M-25"]["controls"]
+    assert asset_controls["self_hosted_standalone_production_path"] is True
+    assert asset_controls["material_icons_feature_preserved"] is True
+    assert asset_controls["external_pyodide_script_sri_required"] is True
+    assert asset_controls["redis_required"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:

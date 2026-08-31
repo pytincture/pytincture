@@ -41,8 +41,10 @@ function startupFixture(overrides = {}) {
         requestUuid: "request-123",
         mode: "package",
         pyodideBaseUrl: "/pyodide/",
+        pyodideScriptIntegrity: null,
         loadMaterialIcons: false,
         materialIconsUrl: null,
+        materialIconsIntegrity: null,
         libsSelector: null,
         inlineSelector: 'script[type="text/python"]',
         onLifecycleEvent: event => events.push(event),
@@ -345,6 +347,118 @@ test("service applications isolate the worker under their application scope", ()
     assert.equal(config.serviceWorkerUrl, "/sample/frontend/sw.js");
     assert.equal(config.serviceWorkerScope, "/sample/");
     assert.equal(config.pyodideBaseUrl, "/sample/frontend/pyodide/0.29.3/full/");
+    assert.equal(
+        config.materialIconsUrl,
+        "/sample/frontend/vendor/materialdesignicons/materialdesignicons.css",
+    );
+});
+
+test("default icons follow an explicit same-origin Pyodide frontend root", () => {
+    const config = normalizeConfig({
+        mode: "inline",
+        pyodideBaseUrl: "/frontend/pyodide/0.29.3/full/",
+    });
+    assert.equal(
+        config.materialIconsUrl,
+        "/frontend/vendor/materialdesignicons/materialdesignicons.css",
+    );
+});
+
+test("external browser assets fail closed without explicit SRI", () => {
+    const previousDocument = globalThis.document;
+    const previousWindow = globalThis.window;
+    globalThis.document = {};
+    globalThis.window = {
+        location: {
+            href: "https://app.example.test/",
+            origin: "https://app.example.test",
+        },
+    };
+    try {
+        const externalPyodide = normalizeConfig({
+            mode: "inline",
+            pyodideBaseUrl: "https://cdn.example.test/pyodide/0.29.3/full/",
+        });
+        assert.throws(
+            () => DEFAULT_RUNTIME_OPERATIONS.preflightConfig(externalPyodide),
+            /External Pyodide requires pyodideScriptIntegrity/,
+        );
+
+        const externalIcons = normalizeConfig({
+            mode: "inline",
+            loadMaterialIcons: true,
+            materialIconsUrl: "https://cdn.example.test/materialdesignicons.css",
+        });
+        assert.throws(
+            () => DEFAULT_RUNTIME_OPERATIONS.preflightConfig(externalIcons),
+            /External Material Icons require materialIconsIntegrity/,
+        );
+    } finally {
+        globalThis.document = previousDocument;
+        globalThis.window = previousWindow;
+    }
+});
+
+test("external script and stylesheet loaders apply SRI with anonymous CORS", async () => {
+    const previousDocument = globalThis.document;
+    const previousWindow = globalThis.window;
+    const previousLoadPyodide = globalThis.loadPyodide;
+    const previousCreatePyodideModule = globalThis._createPyodideModule;
+    const appended = [];
+    const integrity = "sha384-" + "A".repeat(64);
+    globalThis.window = {
+        location: {
+            href: "https://app.example.test/",
+            origin: "https://app.example.test",
+        },
+    };
+    globalThis.document = {
+        createElement: tagName => ({ tagName }),
+        querySelectorAll: () => [],
+        head: {
+            appendChild: element => {
+                appended.push(element);
+                queueMicrotask(() => element.onload());
+            },
+        },
+    };
+    delete globalThis.loadPyodide;
+    delete globalThis._createPyodideModule;
+    try {
+        const config = normalizeConfig({
+            mode: "inline",
+            pyodideBaseUrl: "https://cdn.example.test/pyodide/0.29.3/full/",
+            pyodideScriptIntegrity: {
+                "pyodide.js": integrity,
+                "pyodide.asm.js": integrity,
+            },
+            materialIconsUrl: "https://cdn.example.test/materialdesignicons.css",
+            materialIconsIntegrity: integrity,
+        });
+        assert.doesNotThrow(() => DEFAULT_RUNTIME_OPERATIONS.preflightConfig(config));
+        await DEFAULT_RUNTIME_OPERATIONS.ensurePyodideLoaded(config);
+        await DEFAULT_RUNTIME_OPERATIONS.ensureMaterialIcons(
+            config.materialIconsUrl,
+            config.requestUuid,
+            config.materialIconsIntegrity,
+        );
+        assert.equal(appended.length, 3);
+        assert.equal(appended.every(element => element.integrity === integrity), true);
+        assert.equal(appended.every(element => element.crossOrigin === "anonymous"), true);
+    } finally {
+        globalThis.document = previousDocument;
+        globalThis.window = previousWindow;
+        if (previousLoadPyodide === undefined) {
+            delete globalThis.loadPyodide;
+        } else {
+            globalThis.loadPyodide = previousLoadPyodide;
+        }
+        if (previousCreatePyodideModule === undefined) {
+            delete globalThis._createPyodideModule;
+        } else {
+            globalThis._createPyodideModule = previousCreatePyodideModule;
+        }
+    }
 });
 
 test("framework caches are namespaced by application, release, and instance uuid", () => {
@@ -375,7 +489,7 @@ test("only same-origin framework URLs receive the instance uuid", () => {
             application: "sample",
             requestUuid: "instance-a",
         }));
-        assert.equal(assets.length, 8);
+        assert.equal(assets.length, 10);
         assert.equal(assets.every(url => (
             new URL(url).pathname.startsWith("/sample/frontend/")
             && new URL(url).searchParams.get("uuid") === "instance-a"

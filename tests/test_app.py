@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from itsdangerous import TimestampSigner
 from urllib.parse import parse_qs, urlencode, urlsplit
+from pytincture import __version__
 
 # Import the app instance and helpers from the module.
 from pytincture.backend.app import (
@@ -2003,7 +2004,8 @@ def test_frontend_runtime_cache_busts_packaged_app_fetch(fresh_client):
     assert "installCacheBustingFetch" not in response.text
     assert "globalThis.fetch =" not in response.text
     assert 'withRequestUuid(`${config.application}/appcode/appcode.pyt`, config.requestUuid)' in response.text
-    assert "loadScript(`${config.pyodideBaseUrl}pyodide.asm.js`, config.requestUuid)" in response.text
+    assert "`${config.pyodideBaseUrl}pyodide.asm.js`" in response.text
+    assert 'config.pyodideScriptIntegrity?.["pyodide.asm.js"]' in response.text
     assert "withSameOriginRequestUuid(url, requestUuid)" in response.text
     assert "cache_bust_url(cleaned)" not in response.text
 
@@ -2048,6 +2050,7 @@ def test_service_worker_only_caches_manifested_framework_assets(fresh_client):
     assert response.headers["service-worker-allowed"] == "/"
     assert response.headers["cache-control"] == "no-store, max-age=0"
     assert "FRAMEWORK_ASSET_PATHS" in response.text
+    assert '"vendor/materialdesignicons/materialdesignicons.css"' in response.text
     assert '"pyodide/0.29.3/full/pyodide.js"' in response.text
     assert 'canonicalUrl.searchParams.set("uuid", REQUEST_UUID)' in response.text
     assert 'url.pathname.includes("/appcode/")' not in response.text
@@ -3046,8 +3049,18 @@ def test_security_headers_and_static_manifest(fresh_client):
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    assert "cdnjs.cloudflare.com" not in response.headers["content-security-policy"]
     assert "camera=()" in response.headers["permissions-policy"]
     assert fresh_client.get("/frontend/pytincture.js").status_code == 200
+    assert fresh_client.get(
+        "/frontend/vendor/materialdesignicons/materialdesignicons.css"
+    ).status_code == 200
+    assert fresh_client.get(
+        "/frontend/vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2"
+    ).status_code == 200
+    assert fresh_client.get(
+        f"/frontend/integrity/pytincture-{__version__}.json"
+    ).status_code == 200
     assert fresh_client.get("/frontend/README.md").status_code == 404
     assert fresh_client.get("/frontend/package.json").status_code == 404
     assert fresh_client.get("/frontend/browser-tests/lifecycle.spec.mjs").status_code == 404

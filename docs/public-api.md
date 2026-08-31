@@ -117,8 +117,10 @@ Two pre-load globals are public:
 | `mode` | `"auto"` | `"package"`, `"inline"`, or automatic selection. |
 | `onLifecycleEvent` | `null` | Callback for stage, compatibility, fallback, error, and ready events. |
 | `pyodideBaseUrl` | bundled path | Trailing-slash base for Pyodide assets. |
+| `pyodideScriptIntegrity` | `null` | Required `pyodide.js`/`pyodide.asm.js` SRI map when `pyodideBaseUrl` is cross-origin. |
 | `loadMaterialIcons` | `true` | Load the Material Design icon stylesheet. |
-| `materialIconsUrl` | CDN URL | Icon stylesheet source. |
+| `materialIconsUrl` | bundled path | Self-hosted Material Design icon stylesheet source. |
+| `materialIconsIntegrity` | `null` | Required SRI value when `materialIconsUrl` is cross-origin. |
 | `enableBackendLogging` | service-dependent | Forward sanitized console messages to the backend. |
 | `logEndpoint` | `"/logs"` | Backend browser-log endpoint. |
 | `inlineSelector` | Python script selector | Locates inline Python blocks. |

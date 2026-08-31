@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 
 const SERVICE_URL = "http://127.0.0.1:8083";
 const STANDALONE_URL = "http://127.0.0.1:8084";
-const BUNDLED_RUNTIME_PATH = "/pytincture.min.js";
+const BUNDLED_RUNTIME_PATH = "/frontend/dist/pytincture.min.js";
 
 function collectDiagnostics(page) {
     const consoleErrors = [];
@@ -68,6 +68,10 @@ test("service quickstart runs the packaged example", async ({ page, request }) =
     expect(compatibility.widgetPackage).toBe("dhxpyt");
     expect(compatibility.widgetVersion).toBe("0.9.16");
     expect(diagnostics.requests.some(url => new URL(url).pathname === "/hello/appcode/appcode.pyt")).toBe(true);
+    expect(diagnostics.requests.some(url => (
+        new URL(url).pathname === "/hello/frontend/vendor/materialdesignicons/materialdesignicons.css"
+    ))).toBe(true);
+    expect(diagnostics.requests.some(url => /(?:cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com)/.test(url))).toBe(false);
 });
 
 test("standalone quickstart runs with its bundled runtime", async ({ page }) => {
@@ -88,4 +92,12 @@ test("standalone quickstart runs with its bundled runtime", async ({ page }) => 
     ));
     expect(runtimeRequest).toBeTruthy();
     expect(new URL(runtimeRequest).origin).toBe(STANDALONE_URL);
+    const selfHostedAssets = diagnostics.requests.filter(url => (
+        new URL(url).pathname.startsWith("/frontend/pyodide/")
+        || new URL(url).pathname.startsWith("/frontend/vendor/materialdesignicons/")
+        || new URL(url).pathname.startsWith("/frontend/dist/")
+    ));
+    expect(selfHostedAssets.length).toBeGreaterThan(5);
+    expect(selfHostedAssets.every(url => new URL(url).origin === STANDALONE_URL)).toBe(true);
+    expect(diagnostics.requests.some(url => /(?:cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com)/.test(url))).toBe(false);
 });

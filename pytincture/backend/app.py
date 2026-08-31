@@ -501,8 +501,8 @@ async def correlation_id_middleware(request: Request, call_next):
         "default-src 'self'; object-src 'none'; base-uri 'self'; "
         "frame-ancestors 'none'; form-action 'self'; "
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; "
-        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
-        "font-src 'self' data: https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self' data:; "
         "img-src 'self' data: https:; connect-src 'self' https:; "
         "worker-src 'self' blob:",
     )
@@ -647,6 +647,9 @@ _PUBLIC_FRAMEWORK_FILES = frozenset({
     "bff-docs.js",
     "vendor/swagger-ui/swagger-ui-bundle.js",
     "vendor/swagger-ui/swagger-ui.css",
+    "vendor/materialdesignicons/materialdesignicons.css",
+    "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
+    f"integrity/pytincture-{__version__}.json",
     "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl",
     "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl.metadata",
     "pyodide/0.29.3/full/pyodide-lock.json",
