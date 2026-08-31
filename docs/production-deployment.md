@@ -49,6 +49,13 @@ Signed session and SAML handshake cookies can be read by any worker sharing the
 signing secret. Redis is only an optional enhancement for immediate
 cross-worker logout revocation and configured one-time BFF replay tokens; it is
 not required to run Pytincture or load balance normal authenticated traffic.
+Replay proofs are disabled by default. If enabled without strict fleet-wide
+semantics, each worker uses a bounded, expiring local proof store and refill
+quotas; a browser may refill after landing on a different worker. If strict
+single consumption across workers is explicitly required, set
+`BFF_REPLAY_REQUIRE_SHARED_STORE=true` and install any provider implementing
+the public `AtomicReplayStore` contract. The optional Redis adapter is one such
+provider, not a framework requirement.
 
 Resource admission counters and the appcode cache are bounded, disposable, and
 local to each worker. They do not contain durable login/session state and do

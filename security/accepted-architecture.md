@@ -177,6 +177,27 @@ Why:
 - A feature requiring atomic shared consumption should expose a pluggable
   store contract or fail closed when enabled without a suitable topology.
 
+## BFF replay proofs are optional and topology-explicit
+
+One-time BFF request proofs remain disabled by default. Enabling the local
+mode creates bounded, disposable per-worker proof state, not login/session
+state. Refills are limited per signed session, direct peer, and worker; the
+local store has fixed session/worker capacities and expiration-indexed cleanup.
+
+Local mode guarantees atomic consumption only inside one worker. A deployment
+that requires strict fleet-wide single consumption must explicitly enable that
+requirement and install any provider implementing the vendor-neutral
+`AtomicReplayStore` contract. Startup fails closed if the provider is absent or
+declares itself local-only. Redis is one optional adapter, not a requirement.
+
+Why:
+
+- Fleet-wide single consumption is inherently a shared atomic-state property.
+- Ordinary BFF calls, browser-carried sessions, SAML handshakes, and load
+  balancing do not depend on replay proofs and remain stateless.
+- Explicit topology selection prevents a per-worker store from silently being
+  mistaken for a fleet-wide guarantee.
+
 ## Stateless logout has a bounded revocation window
 
 Without an optional shared revocation provider, logout deletes the browser's

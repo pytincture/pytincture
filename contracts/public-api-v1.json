@@ -14,7 +14,11 @@
       "pytincture.backend.app": [
         "revoke_session",
         "set_bff_policy_hook",
+        "set_bff_replay_token_store",
         "set_user_authenticator"
+      ],
+      "pytincture.backend.replay": [
+        "AtomicReplayStore"
       ],
       "pytincture.dataclass": [
         "backend_for_frontend",

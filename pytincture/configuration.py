@@ -306,6 +306,41 @@ class PytinctureConfig:
     bff_replay_token_ttl_seconds: int = _setting(
         300, "BFF_REPLAY_TOKEN_TTL_SECONDS", "Unused proof lifetime."
     )
+    bff_replay_issue_session_limit: int = _setting(
+        30,
+        "BFF_REPLAY_ISSUE_SESSION_LIMIT",
+        "Replay-proof refill requests allowed per session and window.",
+    )
+    bff_replay_issue_peer_limit: int = _setting(
+        120,
+        "BFF_REPLAY_ISSUE_PEER_LIMIT",
+        "Replay-proof refill requests allowed per network peer and window.",
+    )
+    bff_replay_issue_worker_limit: int = _setting(
+        1000,
+        "BFF_REPLAY_ISSUE_WORKER_LIMIT",
+        "Replay-proof refill requests allowed per worker and window.",
+    )
+    bff_replay_issue_window_seconds: int = _setting(
+        60,
+        "BFF_REPLAY_ISSUE_WINDOW_SECONDS",
+        "Replay-proof refill quota window in seconds.",
+    )
+    bff_replay_local_max_tokens: int = _setting(
+        10000,
+        "BFF_REPLAY_LOCAL_MAX_TOKENS",
+        "Maximum outstanding replay proofs retained by one worker.",
+    )
+    bff_replay_local_max_tokens_per_session: int = _setting(
+        512,
+        "BFF_REPLAY_LOCAL_MAX_TOKENS_PER_SESSION",
+        "Maximum outstanding replay proofs retained for one session.",
+    )
+    bff_replay_require_shared_store: bool = _setting(
+        False,
+        "BFF_REPLAY_REQUIRE_SHARED_STORE",
+        "Require an atomic store shared by every worker for strict single use.",
+    )
     use_redis_instance: bool = _setting(False, "USE_REDIS_INSTANCE", "Use Upstash shared state.")
     redis_url: str = _setting(
         "",
@@ -454,6 +489,24 @@ class PytinctureConfig:
             raise ValueError("bff_replay_token_low_watermark must be below the batch size")
         if not 10 <= self.bff_replay_token_ttl_seconds <= self.session_max_age_seconds:
             raise ValueError("bff_replay_token_ttl_seconds must fit within the session lifetime")
+        replay_limits = (
+            self.bff_replay_issue_session_limit,
+            self.bff_replay_issue_peer_limit,
+            self.bff_replay_issue_worker_limit,
+            self.bff_replay_issue_window_seconds,
+            self.bff_replay_local_max_tokens,
+            self.bff_replay_local_max_tokens_per_session,
+        )
+        if min(replay_limits) <= 0:
+            raise ValueError("BFF replay issuance and storage limits must be greater than zero")
+        if self.bff_replay_token_batch_size > self.bff_replay_local_max_tokens_per_session:
+            raise ValueError("BFF replay batch size cannot exceed the per-session token limit")
+        if self.bff_replay_local_max_tokens_per_session > self.bff_replay_local_max_tokens:
+            raise ValueError("BFF replay per-session token limit cannot exceed worker capacity")
+        if self.bff_replay_require_shared_store and not self.enable_bff_replay_tokens:
+            raise ValueError(
+                "bff_replay_require_shared_store requires enable_bff_replay_tokens"
+            )
 
         auth_enabled = any(
             (self.enable_user_login, self.enable_google_auth, self.enable_microsoft_auth, self.enable_saml_auth)
@@ -663,6 +716,7 @@ class PytinctureConfig:
         boolean_fields = {
             "enable_user_login", "enable_dev_email_login", "enable_google_auth",
             "enable_microsoft_auth", "enable_saml_auth", "enable_bff_replay_tokens",
+            "bff_replay_require_shared_store",
             "use_redis_instance", "enable_mcp", "trusted_proxy_headers",
             "allow_development_auth_origin",
         }
@@ -670,7 +724,10 @@ class PytinctureConfig:
             "session_max_age_seconds", "session_absolute_max_age_seconds",
             "max_request_body_bytes", "bff_stream_max_bytes",
             "bff_replay_token_batch_size", "bff_replay_token_low_watermark",
-            "bff_replay_token_ttl_seconds", "saml_response_max_bytes",
+            "bff_replay_token_ttl_seconds", "bff_replay_issue_session_limit",
+            "bff_replay_issue_peer_limit", "bff_replay_issue_worker_limit",
+            "bff_replay_issue_window_seconds", "bff_replay_local_max_tokens",
+            "bff_replay_local_max_tokens_per_session", "saml_response_max_bytes",
             "saml_acs_rate_limit_attempts", "saml_acs_rate_limit_window_seconds",
             "saml_transaction_ttl_seconds",
             "login_rate_limit_attempts", "login_rate_limit_window_seconds",

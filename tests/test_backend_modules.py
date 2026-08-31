@@ -40,6 +40,12 @@ from pytincture.backend.pages import (
     find_main_window_subclass,
     normalize_app_asset_path,
 )
+from pytincture.backend.replay import (
+    LocalReplayStore,
+    ReplayAdmissionRejected,
+    SharedReplayStoreAdapter,
+    validate_atomic_replay_store,
+)
 from pytincture.backend.saml import (
     ALLOWED_XML_DIGEST_METHODS,
     ALLOWED_XML_SIGNATURE_METHODS,
@@ -66,6 +72,69 @@ from pytincture.backend.streaming import (
     limited_sync_stream,
 )
 from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate, CircuitOpen
+
+
+def test_local_replay_store_is_bounded_expiration_indexed_and_single_use():
+    now = [100.0]
+    store = LocalReplayStore(3, 2, clock=lambda: now[0])
+
+    store.issue_batch(
+        "session-a",
+        {"one": {"value": 1}, "two": {"value": 2}},
+        10,
+    )
+    assert len(store) == 2
+    with pytest.raises(ReplayAdmissionRejected, match="session"):
+        store.issue_batch("session-a", {"three": {"value": 3}}, 10)
+
+    assert store.consume("one") == {"value": 1}
+    assert store.consume("one") is None
+    store.issue_batch("session-b", {"three": {"value": 3}}, 10)
+    assert len(store) == 2
+
+    now[0] = 111.0
+    assert len(store) == 0
+    assert store.consume("two") is None
+
+    for index in range(20):
+        key = f"rapid-{index}"
+        store.issue_batch("session-a", {key: {"value": index}}, 10)
+        assert store.consume(key) == {"value": index}
+    assert store.expiration_index_size <= store.max_entries * 2
+
+
+def test_local_replay_store_rejects_worker_capacity_without_partial_batch():
+    store = LocalReplayStore(2, 2)
+
+    with pytest.raises(ReplayAdmissionRejected, match="worker"):
+        store.issue_batch(
+            "session-a",
+            {"one": {"value": 1}, "two": {"value": 2}, "three": {"value": 3}},
+            60,
+        )
+
+    assert len(store) == 0
+
+
+def test_shared_replay_adapter_exposes_vendor_neutral_atomic_contract():
+    class AtomicTTLMapping:
+        def __init__(self):
+            self.values = {}
+
+        def set_with_ttl(self, key, value, ttl):
+            self.values[key] = value
+
+        def pop_atomic(self, key, default=None):
+            return self.values.pop(key, default)
+
+    backend = AtomicTTLMapping()
+    store = SharedReplayStoreAdapter(backend)
+    assert validate_atomic_replay_store(store) is store
+    assert store.shared_across_workers is True
+
+    store.issue_batch("session", {"proof": {"session_id": "session"}}, 60)
+    assert store.consume("proof") == {"session_id": "session"}
+    assert store.consume("proof") is None
 
 
 def test_local_python_imports_honors_relative_import_levels(tmp_path):
@@ -933,6 +1002,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-M-02-M-03",
         "REVIEW-2026-08-31-M-06-GET",
         "REVIEW-2026-08-31-M-07-POLICY",
+        "REVIEW-2026-08-31-M-08-REPLAY-ISSUANCE",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1001,6 +1071,13 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert proxy_controls["policy_false_denies"] is True
     assert proxy_controls["login_redirect_401_preserved"] is True
     assert proxy_controls["redis_required"] is False
+    replay_controls = dispositions[
+        "REVIEW-2026-08-31-M-08-REPLAY-ISSUANCE"
+    ]["controls"]
+    assert replay_controls["feature_enabled_by_default"] is False
+    assert replay_controls["expiration_indexed_cleanup"] is True
+    assert replay_controls["strict_shared_mode_fails_closed"] is True
+    assert replay_controls["redis_required"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:

@@ -28,7 +28,7 @@ versions for each release candidate.
 | --- | --- | --- |
 | Service | FastAPI delivery, packaged browser app, BFF, auth, public assets, optional MCP | Python and cross-browser CI. |
 | Standalone | `pytincture.js`, inline Python, Pyodide, micropip, configurable widgetset | Cross-browser CI. |
-| Multiple workers | Shared signing key; Redis required for shared revocation/replay state | Simulated multi-worker shared-state CI. |
+| Multiple workers | Shared signing key; no shared store for normal sessions. Optional atomic provider only for immediate revocation or strict replay-proof single use. | Simulated stateless and shared-state multi-worker CI. |
 | Reverse proxy | Forwarded HTTPS scheme and stable host configuration | Header/topology integration CI and deployment runbook. |
 
 ## Version compatibility rules

@@ -119,6 +119,13 @@ from pytincture.backend.pages import (
 from pytincture.backend.pages import (
     find_main_window_subclass as _find_main_window,
 )
+from pytincture.backend.replay import (
+    AtomicReplayStore,
+    LocalReplayStore,
+    ReplayAdmissionRejected,
+    SharedReplayStoreAdapter,
+    validate_atomic_replay_store,
+)
 from pytincture.backend.saml import (
     SAMLProviderCatalog,
     SlidingWindowRateLimiter,
@@ -559,6 +566,11 @@ async def sanitized_http_exception_handler(request: Request, exc: HTTPException)
         return JSONResponse(
             internal_error_payload(correlation_id),
             status_code=exc.status_code,
+            headers={
+                header: exc.headers[header]
+                for header in ("Retry-After",)
+                if exc.headers and header in exc.headers
+            },
         )
     return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
 
@@ -700,17 +712,22 @@ if  USE_REDIS_INSTANCE == "true":
         cache_reads=False,
         **_remote_store_options,
     )
-    BFF_REPLAY_TOKEN_STORE = RedisDict(
-        redis_url=REDIS_UPSTASH_INSTANCE_URL,
-        redis_token=REDIS_UPSTASH_INSTANCE_TOKEN,
-        key_prefix="bff-replay-token:",
-        cache_reads=False,
-        **_remote_store_options,
+    BFF_REPLAY_TOKEN_STORE: AtomicReplayStore = SharedReplayStoreAdapter(
+        RedisDict(
+            redis_url=REDIS_UPSTASH_INSTANCE_URL,
+            redis_token=REDIS_UPSTASH_INSTANCE_TOKEN,
+            key_prefix="bff-replay-token:",
+            cache_reads=False,
+            **_remote_store_options,
+        )
     )
 else:
     USER_SESSION_DICT = {}
     AUTH_SESSION_REVOCATIONS = {}
-    BFF_REPLAY_TOKEN_STORE = {}
+    BFF_REPLAY_TOKEN_STORE = LocalReplayStore(
+        int(os.getenv("BFF_REPLAY_LOCAL_MAX_TOKENS", "10000")),
+        int(os.getenv("BFF_REPLAY_LOCAL_MAX_TOKENS_PER_SESSION", "512")),
+    )
 
 MODULE_PATH = get_modules_path()
 
@@ -835,6 +852,27 @@ BFF_POLICY_HOOK: Optional[Callable[..., Any]] = None
 USER_AUTHENTICATOR: Optional[Callable[..., Any]] = None
 
 
+def set_bff_replay_token_store(store: AtomicReplayStore) -> AtomicReplayStore:
+    """Install a vendor-neutral atomic store for optional BFF request proofs."""
+
+    global BFF_REPLAY_TOKEN_STORE
+    BFF_REPLAY_TOKEN_STORE = validate_atomic_replay_store(store)
+    return BFF_REPLAY_TOKEN_STORE
+
+
+def validate_bff_replay_store_configuration() -> None:
+    """Fail closed when strict fleet-wide proof consumption is unsupported."""
+
+    if not ENABLE_BFF_REPLAY_TOKENS:
+        return
+    store = validate_atomic_replay_store(BFF_REPLAY_TOKEN_STORE)
+    if BFF_REPLAY_REQUIRE_SHARED_STORE and not store.shared_across_workers:
+        raise RuntimeError(
+            "BFF_REPLAY_REQUIRE_SHARED_STORE requires an atomic replay store "
+            "shared by every worker; configure a custom provider or optional Redis"
+        )
+
+
 def set_bff_policy_hook(hook: Optional[Callable[..., Any]]):
     """
     Register (or clear) a global hook that runs before each backend_for_frontend call.
@@ -876,6 +914,7 @@ def validate_bff_policy_configuration() -> None:
 
 
 app.router.add_event_handler("startup", validate_bff_policy_configuration)
+app.router.add_event_handler("startup", validate_bff_replay_store_configuration)
 
 
 def set_user_authenticator(authenticator: Optional[Callable[..., Any]]):
@@ -1655,23 +1694,6 @@ def _bff_replay_token_key(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def _purge_expired_bff_replay_tokens() -> None:
-    if not isinstance(BFF_REPLAY_TOKEN_STORE, dict):
-        return
-    now = time.time()
-    for key, value in tuple(BFF_REPLAY_TOKEN_STORE.items()):
-        if not isinstance(value, dict) or float(value.get("expires_at", 0)) <= now:
-            BFF_REPLAY_TOKEN_STORE.pop(key, None)
-
-
-def _store_with_optional_ttl(store, key: str, value: Dict[str, Any], ttl: int) -> None:
-    set_with_ttl = getattr(store, "set_with_ttl", None)
-    if callable(set_with_ttl):
-        set_with_ttl(key, value, ttl)
-    else:
-        store[key] = value
-
-
 def _register_bff_replay_client(request: Request, user: Any) -> Optional[Dict[str, Any]]:
     if not ENABLE_BFF_REPLAY_TOKENS:
         return None
@@ -1763,21 +1785,57 @@ def _encrypt_bff_replay_payload(key: bytes, tokens: List[str]) -> str:
 
 
 def _issue_bff_replay_tokens(session_id: str) -> List[str]:
-    _purge_expired_bff_replay_tokens()
     expires_at = time.time() + BFF_REPLAY_TOKEN_TTL_SECONDS
-    issued = []
-    for _ in range(BFF_REPLAY_TOKEN_BATCH_SIZE):
+    issued: list[str] = []
+    records: dict[str, dict[str, Any]] = {}
+    while len(issued) < BFF_REPLAY_TOKEN_BATCH_SIZE:
         token = secrets.token_urlsafe(32)
-        value = {"session_id": session_id, "expires_at": expires_at}
         key = _bff_replay_token_key(token)
-        _store_with_optional_ttl(
-            BFF_REPLAY_TOKEN_STORE,
-            key,
-            value,
+        if key in records:
+            continue
+        records[key] = {
+            "session_id": session_id,
+            "expires_at": expires_at,
+        }
+        issued.append(token)
+    try:
+        BFF_REPLAY_TOKEN_STORE.issue_batch(
+            session_id,
+            records,
             BFF_REPLAY_TOKEN_TTL_SECONDS,
         )
-        issued.append(token)
+    except ReplayAdmissionRejected as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="BFF request-proof capacity is temporarily exhausted",
+            headers={"Retry-After": "1"},
+        ) from exc
     return issued
+
+
+def _bff_replay_peer_key(request: Request) -> str:
+    if request.client is None:
+        return "unknown"
+    return str(request.client.host)[:128]
+
+
+def _admit_bff_replay_issuance(request: Request, session_id: str) -> None:
+    checks = (
+        (BFF_REPLAY_SESSION_ISSUE_LIMITER, session_id),
+        (BFF_REPLAY_PEER_ISSUE_LIMITER, _bff_replay_peer_key(request)),
+        (BFF_REPLAY_WORKER_ISSUE_LIMITER, "worker"),
+    )
+    retry_after = 0
+    for limiter, key in checks:
+        allowed, wait_seconds = limiter.allow(key)
+        if not allowed:
+            retry_after = max(retry_after, wait_seconds)
+    if retry_after:
+        raise HTTPException(
+            status_code=429,
+            detail="BFF request-proof issuance rate exceeded",
+            headers={"Retry-After": str(retry_after)},
+        )
 
 
 def _validate_bff_replay_token(request: Request, user: Any) -> None:
@@ -1796,11 +1854,7 @@ def _validate_bff_replay_token(request: Request, user: Any) -> None:
             headers={"X-Pytincture-Replay": "rejected"},
         )
     key = _bff_replay_token_key(supplied)
-    pop_atomic = getattr(BFF_REPLAY_TOKEN_STORE, "pop_atomic", None)
-    if callable(pop_atomic):
-        token_record = pop_atomic(key, None)
-    else:
-        token_record = BFF_REPLAY_TOKEN_STORE.pop(key, None)
+    token_record = BFF_REPLAY_TOKEN_STORE.consume(key, None)
     if (
         not isinstance(token_record, dict)
         or token_record.get("session_id") != session_id
@@ -1828,6 +1882,7 @@ async def issue_bff_replay_tokens(
     session_id = _bff_replay_subject(request, user)
     if session_id is None:
         raise HTTPException(status_code=401, detail="Authentication required")
+    _admit_bff_replay_issuance(request, session_id)
     client_key = _bff_replay_client_key(request, session_id)
     payload = _encrypt_bff_replay_payload(
         client_key,
@@ -2656,6 +2711,23 @@ ENABLE_BFF_REPLAY_TOKENS = os.getenv("ENABLE_BFF_REPLAY_TOKENS", "false").lower(
 BFF_REPLAY_TOKEN_BATCH_SIZE = int(os.getenv("BFF_REPLAY_TOKEN_BATCH_SIZE", "12"))
 BFF_REPLAY_TOKEN_LOW_WATERMARK = int(os.getenv("BFF_REPLAY_TOKEN_LOW_WATERMARK", "3"))
 BFF_REPLAY_TOKEN_TTL_SECONDS = int(os.getenv("BFF_REPLAY_TOKEN_TTL_SECONDS", "300"))
+BFF_REPLAY_ISSUE_SESSION_LIMIT = int(
+    os.getenv("BFF_REPLAY_ISSUE_SESSION_LIMIT", "30")
+)
+BFF_REPLAY_ISSUE_PEER_LIMIT = int(os.getenv("BFF_REPLAY_ISSUE_PEER_LIMIT", "120"))
+BFF_REPLAY_ISSUE_WORKER_LIMIT = int(
+    os.getenv("BFF_REPLAY_ISSUE_WORKER_LIMIT", "1000")
+)
+BFF_REPLAY_ISSUE_WINDOW_SECONDS = int(
+    os.getenv("BFF_REPLAY_ISSUE_WINDOW_SECONDS", "60")
+)
+BFF_REPLAY_LOCAL_MAX_TOKENS = int(os.getenv("BFF_REPLAY_LOCAL_MAX_TOKENS", "10000"))
+BFF_REPLAY_LOCAL_MAX_TOKENS_PER_SESSION = int(
+    os.getenv("BFF_REPLAY_LOCAL_MAX_TOKENS_PER_SESSION", "512")
+)
+BFF_REPLAY_REQUIRE_SHARED_STORE = (
+    os.getenv("BFF_REPLAY_REQUIRE_SHARED_STORE", "false").lower() == "true"
+)
 if not 1 <= BFF_REPLAY_TOKEN_BATCH_SIZE <= 100:
     raise RuntimeError("BFF_REPLAY_TOKEN_BATCH_SIZE must be between 1 and 100")
 if not 0 <= BFF_REPLAY_TOKEN_LOW_WATERMARK < BFF_REPLAY_TOKEN_BATCH_SIZE:
@@ -2666,6 +2738,36 @@ if not 10 <= BFF_REPLAY_TOKEN_TTL_SECONDS <= AUTH_SESSION_MAX_AGE_SECONDS:
     raise RuntimeError(
         "BFF_REPLAY_TOKEN_TTL_SECONDS must be between 10 seconds and the session maximum age"
     )
+if min(
+    BFF_REPLAY_ISSUE_SESSION_LIMIT,
+    BFF_REPLAY_ISSUE_PEER_LIMIT,
+    BFF_REPLAY_ISSUE_WORKER_LIMIT,
+    BFF_REPLAY_ISSUE_WINDOW_SECONDS,
+    BFF_REPLAY_LOCAL_MAX_TOKENS,
+    BFF_REPLAY_LOCAL_MAX_TOKENS_PER_SESSION,
+) <= 0:
+    raise RuntimeError("BFF replay issuance and storage limits must be greater than zero")
+if BFF_REPLAY_TOKEN_BATCH_SIZE > BFF_REPLAY_LOCAL_MAX_TOKENS_PER_SESSION:
+    raise RuntimeError("BFF replay batch size cannot exceed the per-session token limit")
+if BFF_REPLAY_LOCAL_MAX_TOKENS_PER_SESSION > BFF_REPLAY_LOCAL_MAX_TOKENS:
+    raise RuntimeError("BFF replay per-session token limit cannot exceed worker capacity")
+if BFF_REPLAY_REQUIRE_SHARED_STORE and not ENABLE_BFF_REPLAY_TOKENS:
+    raise RuntimeError(
+        "BFF_REPLAY_REQUIRE_SHARED_STORE requires ENABLE_BFF_REPLAY_TOKENS"
+    )
+BFF_REPLAY_SESSION_ISSUE_LIMITER = SlidingWindowRateLimiter(
+    BFF_REPLAY_ISSUE_SESSION_LIMIT,
+    BFF_REPLAY_ISSUE_WINDOW_SECONDS,
+)
+BFF_REPLAY_PEER_ISSUE_LIMITER = SlidingWindowRateLimiter(
+    BFF_REPLAY_ISSUE_PEER_LIMIT,
+    BFF_REPLAY_ISSUE_WINDOW_SECONDS,
+)
+BFF_REPLAY_WORKER_ISSUE_LIMITER = SlidingWindowRateLimiter(
+    BFF_REPLAY_ISSUE_WORKER_LIMIT,
+    BFF_REPLAY_ISSUE_WINDOW_SECONDS,
+    max_keys=1,
+)
 
 config_data = {
     "GOOGLE_CLIENT_ID": os.getenv("GOOGLE_CLIENT_ID", ""),

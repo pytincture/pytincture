@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Bound the optional, default-off BFF replay-proof feature with per-session,
+  per-peer, and per-worker refill quotas plus expiration-indexed worker/session
+  storage caps. Add a vendor-neutral atomic-store contract and fail startup
+  when strict fleet-wide single use is requested without a shared provider.
+  Ordinary sessions and load balancing remain stateless and Redis-free.
 - Make generated sync, async, and streaming BFF clients require a 2xx response
   before decoding. Non-2xx responses raise `PytinctureBFFError` with only the
   status, operation, and request correlation id; 401 still redirects to login.
