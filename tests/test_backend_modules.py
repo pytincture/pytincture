@@ -816,6 +816,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "FOLLOWUP-F-05",
         "OBS-BFF-REGISTRY-BLAST-RADIUS",
         "REVIEW-2026-08-31-H-01",
+        "REVIEW-2026-08-31-H-02",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -841,6 +842,12 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert archive_controls["bff_server_import_traversal_stops"] is True
     assert archive_controls["independent_browser_imports_preserved"] is True
     assert archive_controls["redis_required"] is False
+    identity_controls = dispositions["REVIEW-2026-08-31-H-02"]["controls"]
+    assert identity_controls["class_level_export_preserved"] is True
+    assert identity_controls[
+        "runtime_wrapper_and_member_verified_before_construction"
+    ] is True
+    assert identity_controls["redis_required"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:

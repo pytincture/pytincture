@@ -10,6 +10,9 @@ by Pytincture 1.x.
   exported. Static discovery proves that decorator names and module aliases
   were imported directly from `pytincture.dataclass`; local, unrelated,
   re-exported, or rebound same-named decorators are not security declarations.
+- `@backend_for_frontend` must be the single outermost export decorator. Other
+  class decorators remain supported beneath it, so the final class they
+  produce is explicitly passed through Pytincture's export boundary.
 - The class marker intentionally exports every public operation; a separate
   method-level export marker is not required by the 1.x developer contract.
 - Public methods are operations. Public assigned/annotated attributes are
@@ -18,6 +21,11 @@ by Pytincture 1.x.
 - Module identifiers are relative POSIX-style paths under `MODULES_PATH` and
   include `.py`.
 - Static manifest validation occurs before application code is imported.
+- Duplicate exported class definitions and any later binding of the exported
+  class or one of its members reject that source file before import. Manifest
+  operations carry source-definition fingerprints and dispatch verifies the
+  final Pytincture wrapper, original class, and current member against them
+  before construction.
 - A source file that is unreadable, unsafe, malformed, or invalidly encoded
   contributes no callable operations and is recorded as rejected. Its failure
   does not remove valid operations from other canonical module paths. A

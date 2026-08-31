@@ -98,12 +98,15 @@ def test_bff_http_methods_and_static_manifest(tmp_path):
     """))
 
     manifest = get_bff_manifest(str(file_path))
-    assert manifest[("Reports", "status")] == {
-        "policy": {"tenant": "acme", "role": "reader"},
-        "http_methods": ("GET",),
-        "kind": "method",
-        "parameters": (),
-    }
+    operation = manifest[("Reports", "status")]
+    assert operation["policy"] == {"tenant": "acme", "role": "reader"}
+    assert operation["http_methods"] == ("GET",)
+    assert operation["kind"] == "method"
+    assert operation["parameters"] == ()
+    assert operation["_class_definition"]["start_line"] == 4
+    assert operation["_member_definition"]["start_line"] == 7
+    assert len(operation["_class_definition"]["sha256"]) == 64
+    assert len(operation["_member_definition"]["sha256"]) == 64
     assert manifest[("Reports", "refresh")]["http_methods"] == ("POST",)
 
 
@@ -274,6 +277,107 @@ def test_static_manifest_rejects_less_common_rebindings(rebind_statement):
     )
 
     assert get_bff_manifest("accidental.py", source=source) == {}
+
+
+def test_static_manifest_tracks_named_expression_rebinding_in_comprehensions():
+    source = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        [(backend_for_frontend := (lambda target: target)) for _ in (0,)]
+
+        @backend_for_frontend
+        class Accidental:
+            def secret(self):
+                return True
+    """)
+
+    assert get_bff_manifest("accidental.py", source=source) == {}
+
+
+def test_static_manifest_does_not_treat_comprehension_targets_as_module_rebinding():
+    source = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        [None for backend_for_frontend in ()]
+
+        @backend_for_frontend
+        class Intended:
+            def status(self):
+                return True
+    """)
+
+    assert set(get_bff_manifest("intended.py", source=source)) == {
+        ("Intended", "status")
+    }
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        textwrap.dedent("""
+            @backend_for_frontend
+            class API:
+                def read(self):
+                    return "public"
+
+            class API:
+                def read(self):
+                    return "internal"
+        """),
+        textwrap.dedent("""
+            @backend_for_frontend
+            class API:
+                def read(self):
+                    return "public"
+
+            API = Internal
+        """),
+        textwrap.dedent("""
+            @backend_for_frontend
+            class API:
+                def read(self):
+                    return "public"
+
+            API.read = Internal.read
+        """),
+        textwrap.dedent("""
+            @backend_for_frontend
+            class API:
+                def read(self):
+                    return "public"
+
+            from unrelated import *
+        """),
+    ],
+)
+def test_static_manifest_rejects_exported_class_or_member_replacement(replacement):
+    source = (
+        "from pytincture.dataclass import backend_for_frontend\n"
+        "class Internal:\n"
+        "    def read(self): return 'internal'\n\n"
+        + replacement
+    )
+
+    with pytest.raises(ValueError, match="BFF class 'API'"):
+        get_bff_manifest("replacement.py", source=source)
+
+
+def test_static_manifest_requires_bff_export_decorator_to_be_outermost():
+    source = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        def replace(target):
+            return target
+
+        @replace
+        @backend_for_frontend
+        class API:
+            def read(self):
+                return "public"
+    """)
+
+    with pytest.raises(ValueError, match="single outermost"):
+        get_bff_manifest("replacement.py", source=source)
 
 
 def test_static_manifest_rejects_class_scope_security_decorator_rebinding():

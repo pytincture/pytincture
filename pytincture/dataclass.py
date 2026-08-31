@@ -1,5 +1,6 @@
 import ast
 from decimal import Subnormal
+import hashlib
 from html import escape
 import os
 import sys
@@ -10,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse
 import inspect
+import textwrap
 from typing import Dict, Any, Mapping
 from pytincture import get_modules_path
 from pytincture.configuration import get_runtime_env
@@ -121,16 +123,32 @@ class _BoundNameVisitor(ast.NodeVisitor):
         return
 
     def visit_ListComp(self, node: ast.ListComp) -> None:
-        return
+        self._visit_comprehension(node, node.elt)
 
     def visit_SetComp(self, node: ast.SetComp) -> None:
-        return
+        self._visit_comprehension(node, node.elt)
 
     def visit_DictComp(self, node: ast.DictComp) -> None:
-        return
+        self._visit_comprehension(node, node.key, node.value)
 
     def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
-        return
+        self._visit_comprehension(node, node.elt)
+
+    def _visit_comprehension(
+        self,
+        node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp,
+        *results: ast.AST,
+    ) -> None:
+        # Comprehension targets are local to the comprehension, but assignment
+        # expressions in its iterable, filters, or result bind in the containing
+        # scope. Track those without treating ``for name in ...`` as a module
+        # rebind.
+        for generator in node.generators:
+            self.visit(generator.iter)
+            for condition in generator.ifs:
+                self.visit(condition)
+        for result in results:
+            self.visit(result)
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         if node.name:
@@ -203,6 +221,74 @@ def _binding_snapshots(
         snapshots[id(statement)] = bindings.copy()
         _apply_binding_statement(bindings, statement)
     return snapshots
+
+
+def _statement_may_bind_name(node: ast.AST, name: str) -> bool:
+    visitor = _BoundNameVisitor()
+    visitor.visit(node)
+    return visitor.has_star_import or name in visitor.names
+
+
+def _definition_start_line(
+    node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef,
+) -> int:
+    return min(
+        [node.lineno, *(decorator.lineno for decorator in node.decorator_list)]
+    )
+
+
+def _definition_identity(node: ast.AST) -> Dict[str, Any]:
+    """Return stable, non-secret source identity for one authorized definition."""
+    fingerprint = hashlib.sha256(
+        ast.dump(node, annotate_fields=True, include_attributes=False).encode("utf-8")
+    ).hexdigest()
+    identity: Dict[str, Any] = {
+        "line": getattr(node, "lineno", None),
+        "end_line": getattr(node, "end_lineno", None),
+        "sha256": fingerprint,
+    }
+    if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        identity["start_line"] = _definition_start_line(node)
+    return identity
+
+
+def _validate_export_binding(
+    statements: list[ast.stmt],
+    class_node: ast.ClassDef,
+    class_bindings: _DecoratorBindings,
+) -> None:
+    """Reject source that can replace a statically authorized class binding."""
+    duplicate_definitions = [
+        statement
+        for statement in statements
+        if isinstance(statement, ast.ClassDef)
+        and statement.name == class_node.name
+    ]
+    if len(duplicate_definitions) != 1:
+        raise ValueError(
+            f"exported BFF class {class_node.name!r} has duplicate definitions"
+        )
+
+    export_indexes = [
+        index
+        for index, decorator in enumerate(class_node.decorator_list)
+        if _decorator_matches(
+            decorator,
+            decorator_name="backend_for_frontend",
+            bindings=class_bindings,
+        )[0]
+    ]
+    if len(export_indexes) != 1 or export_indexes[0] != 0:
+        raise ValueError(
+            "backend_for_frontend must be the single outermost export decorator"
+        )
+
+    class_index = statements.index(class_node)
+    for statement in statements[class_index + 1:]:
+        if _statement_may_bind_name(statement, class_node.name):
+            raise ValueError(
+                f"exported BFF class {class_node.name!r} is rebound after definition"
+            )
 
 
 def _dotted_attribute_name(node: ast.AST) -> Optional[str]:
@@ -463,17 +549,20 @@ def get_bff_manifest(
         )
         if not is_exported:
             continue
+        _validate_export_binding(module.body, class_node, class_bindings)
 
         class_policy = _literal_keyword_metadata(
             class_node.decorator_list,
             decorator_name="bff_policy",
             bindings=class_bindings,
         )
+        class_definition = _definition_identity(class_node)
         member_bindings = _binding_snapshots(class_node.body, class_bindings)
         for member in class_node.body:
             if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 if member.name.startswith("_"):
                     continue
+                member_definition = _definition_identity(member)
                 method_policy = _literal_keyword_metadata(
                     member.decorator_list,
                     decorator_name="bff_policy",
@@ -487,8 +576,11 @@ def get_bff_manifest(
                     ),
                     "kind": "method",
                     "parameters": _manifest_parameters(member),
+                    "_class_definition": class_definition,
+                    "_member_definition": member_definition,
                 }
             elif isinstance(member, (ast.Assign, ast.AnnAssign)):
+                member_definition = _definition_identity(member)
                 targets = member.targets if isinstance(member, ast.Assign) else [member.target]
                 for target in targets:
                     if isinstance(target, ast.Name) and not target.id.startswith("_"):
@@ -496,6 +588,8 @@ def get_bff_manifest(
                             "policy": dict(class_policy),
                             "http_methods": ("GET",),
                             "kind": "attribute",
+                            "_class_definition": class_definition,
+                            "_member_definition": member_definition,
                         }
     return manifest
 
@@ -547,6 +641,125 @@ def _constructor_accepts_user_argument(cls) -> Optional[inspect.Parameter]:
         if parameter.kind == inspect.Parameter.VAR_KEYWORD:
             return parameter
     return None
+
+
+def _runtime_bff_definition_identity(cls) -> Dict[str, Any]:
+    """Capture the decorated class source and direct runtime member identities."""
+    identity: Dict[str, Any] = {
+        "class_name": getattr(cls, "__name__", None),
+        "class_qualname": getattr(cls, "__qualname__", None),
+        "source_path": None,
+        "class_sha256": None,
+        "member_sha256": {},
+        "runtime_attributes": {},
+    }
+    try:
+        source_path = inspect.getsourcefile(cls) or inspect.getfile(cls)
+        identity["source_path"] = os.path.realpath(source_path)
+        source = textwrap.dedent(inspect.getsource(cls))
+        parsed = ast.parse(source, filename=source_path)
+        class_node = next(
+            node
+            for node in parsed.body
+            if isinstance(node, ast.ClassDef) and node.name == cls.__name__
+        )
+    except (OSError, TypeError, SyntaxError, StopIteration):
+        return identity
+
+    identity["class_sha256"] = _definition_identity(class_node)["sha256"]
+    member_sha256: Dict[str, str] = {}
+    for member in class_node.body:
+        if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            member_sha256[member.name] = _definition_identity(member)["sha256"]
+        elif isinstance(member, (ast.Assign, ast.AnnAssign)):
+            targets = member.targets if isinstance(member, ast.Assign) else [member.target]
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    member_sha256[target.id] = _definition_identity(member)["sha256"]
+    identity["member_sha256"] = member_sha256
+    identity["runtime_attributes"] = {
+        member_name: vars(cls)[member_name]
+        for member_name in member_sha256
+        if member_name in vars(cls)
+        and not inspect.isfunction(vars(cls)[member_name])
+        and not isinstance(vars(cls)[member_name], (staticmethod, classmethod))
+    }
+
+    return identity
+
+
+def verify_bff_runtime_export(
+    cls,
+    *,
+    class_name: str,
+    member_name: str,
+    operation: Mapping[str, Any],
+    source_path: str,
+) -> None:
+    """Verify runtime dispatch still resolves the exact static BFF definition."""
+    if not inspect.isclass(cls):
+        raise ValueError("runtime BFF export is not a class")
+    class_dict = vars(cls)
+    if class_dict.get("_pytincture_bff_export") is not True:
+        raise ValueError("runtime BFF class is not a Pytincture export")
+    original = class_dict.get("_pytincture_bff_original")
+    identity = class_dict.get("_pytincture_bff_definition")
+    if not inspect.isclass(original) or not isinstance(identity, Mapping):
+        raise ValueError("runtime BFF export identity is missing")
+
+    expected_class = operation.get("_class_definition")
+    expected_member = operation.get("_member_definition")
+    if not isinstance(expected_class, Mapping) or not isinstance(
+        expected_member, Mapping
+    ):
+        raise ValueError("static BFF definition identity is missing")
+    if (
+        cls.__name__ != class_name
+        or original.__name__ != class_name
+        or identity.get("class_name") != class_name
+        or identity.get("class_qualname") != class_name
+    ):
+        raise ValueError("runtime BFF class identity does not match the manifest")
+    if os.path.realpath(str(identity.get("source_path") or "")) != os.path.realpath(
+        source_path
+    ):
+        raise ValueError("runtime BFF source does not match the manifest")
+    if identity.get("class_sha256") != expected_class.get("sha256"):
+        raise ValueError("runtime BFF class definition does not match the manifest")
+
+    member_sha256 = identity.get("member_sha256")
+    if not isinstance(member_sha256, Mapping) or member_sha256.get(
+        member_name
+    ) != expected_member.get("sha256"):
+        raise ValueError("runtime BFF member definition does not match the manifest")
+    if member_name not in vars(original):
+        raise ValueError("runtime BFF member is not defined on the exported class")
+
+    if operation.get("kind") == "method":
+        current_member = vars(original).get(member_name)
+        if isinstance(current_member, (staticmethod, classmethod)):
+            current_member = current_member.__func__
+        if not inspect.isfunction(current_member):
+            raise ValueError("runtime BFF method identity is missing")
+        try:
+            current_member = inspect.unwrap(current_member)
+        except ValueError as exc:
+            raise ValueError("runtime BFF method identity is invalid") from exc
+        current_code = getattr(current_member, "__code__", None)
+        if current_code is None:
+            raise ValueError("runtime BFF method identity is missing")
+        if os.path.realpath(
+            current_code.co_filename
+        ) != os.path.realpath(source_path):
+            raise ValueError("runtime BFF method source does not match the manifest")
+        if current_code.co_firstlineno != expected_member.get("start_line"):
+            raise ValueError("runtime BFF method does not match the manifest")
+    elif operation.get("kind") == "attribute":
+        runtime_attributes = identity.get("runtime_attributes")
+        if not isinstance(runtime_attributes, Mapping) or member_name not in runtime_attributes:
+            raise ValueError("runtime BFF attribute identity is missing")
+        if vars(original).get(member_name) is not runtime_attributes[member_name]:
+            raise ValueError("runtime BFF attribute does not match the manifest")
 
 def get_method_info_from_node(class_node: ast.ClassDef) -> Dict[str, Any]:
     """Extract method information from a class AST node"""
@@ -743,6 +956,9 @@ def backend_for_frontend(cls):
     BackendForFrontendWrapper.__doc__ = cls.__doc__
     BackendForFrontendWrapper._pytincture_bff_export = True
     BackendForFrontendWrapper._pytincture_bff_original = cls
+    BackendForFrontendWrapper._pytincture_bff_definition = (
+        _runtime_bff_definition_identity(cls)
+    )
 
     return BackendForFrontendWrapper
     

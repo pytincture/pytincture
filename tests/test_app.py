@@ -1170,6 +1170,128 @@ def test_noauth_bff_does_not_export_a_local_same_named_decorator(
     assert response.json() == {"detail": "BFF operation not exported"}
 
 
+def test_bff_rebinding_is_rejected_before_module_import(
+    monkeypatch, fresh_client, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    import_marker = tmp_path / "module-imported"
+    (tmp_path / "worker.py").write_text(textwrap.dedent(f"""
+        from pathlib import Path
+        from pytincture.dataclass import backend_for_frontend
+
+        Path({str(import_marker)!r}).write_text("imported")
+
+        @backend_for_frontend
+        class API:
+            def read(self):
+                return "public"
+
+        class API:
+            def read(self):
+                return "internal"
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+
+    response = fresh_client.post(
+        "/classcall/worker.py/API/read",
+        json={"kwargs": {}},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "BFF operation not exported"}
+    assert not import_marker.exists()
+
+
+@pytest.mark.parametrize(
+    "runtime_replacement",
+    [
+        'globals()["API"] = Internal',
+        'setattr(API._pytincture_bff_original, "read", Internal.read)',
+    ],
+)
+def test_bff_dispatch_rejects_runtime_class_or_method_replacement_before_construction(
+    runtime_replacement, monkeypatch, fresh_client, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    construction_marker = tmp_path / "replacement-constructed"
+    (tmp_path / "worker.py").write_text(textwrap.dedent(f"""
+        from pathlib import Path
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class API:
+            def __init__(self, **kwargs):
+                Path({str(construction_marker)!r}).write_text("constructed")
+
+            def read(self):
+                return "public"
+
+        class Internal:
+            def __init__(self, **kwargs):
+                Path({str(construction_marker)!r}).write_text("constructed")
+
+            def read(self):
+                return "internal"
+
+        {runtime_replacement}
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+
+    response = fresh_client.post(
+        "/classcall/worker.py/API/read",
+        json={"kwargs": {}},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "BFF operation not exported"}
+    assert not construction_marker.exists()
+
+
+def test_bff_dispatch_preserves_inner_class_decorators(
+    monkeypatch, fresh_client, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "worker.py").write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        def identity(target):
+            return target
+
+        @backend_for_frontend
+        @identity
+        class API:
+            def __init__(self, **kwargs):
+                pass
+
+            def read(self):
+                return "public"
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+
+    response = fresh_client.post(
+        "/classcall/worker.py/API/read",
+        json={"kwargs": {}},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == "public"
+
+
 @pytest.mark.parametrize(
     ("method", "path"),
     (
