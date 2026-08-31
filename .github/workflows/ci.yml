@@ -736,6 +736,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install dist/pytincture-*.whl
+          python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.16
+          cp \
+            tests/e2e_apps/dhxpyt-0.9.16-py3-none-any.whl \
+            tests/e2e_apps/dhxpyt-0.9.16+backend-py3-none-any.whl
 
       - name: Run health load budget
         env:
