@@ -21,6 +21,7 @@ from pytincture.backend.bff import BFFRegistry
 from pytincture.backend.browser_packages import (
     AppcodeArchiveCache,
     browser_package_files,
+    configured_browser_asset_path_selected,
     create_appcode_archive,
     discover_widgetset,
     local_python_imports,
@@ -273,6 +274,16 @@ def test_browser_package_discovery_is_transitive_and_explicit(tmp_path: Path):
         "nested.py",
         "theme.css",
     }
+
+
+def test_configured_browser_asset_selection_applies_direct_serving_exclusions():
+    patterns = '["assets/*.png", "build/*.js", ".private/*"]'
+
+    assert configured_browser_asset_path_selected("assets/logo.png", patterns)
+    assert not configured_browser_asset_path_selected("assets/logo.svg", patterns)
+    assert not configured_browser_asset_path_selected("build/runtime.js", patterns)
+    assert not configured_browser_asset_path_selected(".private/secret.txt", patterns)
+    assert not configured_browser_asset_path_selected("../logo.png", patterns)
 
 
 def test_widgetset_discovery_reads_local_metadata_without_importing(tmp_path: Path):

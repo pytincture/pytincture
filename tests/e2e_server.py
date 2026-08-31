@@ -33,7 +33,7 @@ config = PytinctureConfig(
         "AUTH_USER_CLAIMS": '{"e2e@example.com":{"role":"tester"}}',
         "LOGIN_HELP_TEXT": "E2E credentials: e2e@example.com / demo-password",
         "PYTINCTURE_BROWSER_FILES": '["dynamic_module.py", "e2e.css"]',
-        "PYTINCTURE_PUBLIC_ASSET_PATHS": "inline-e2e.html",
+        "PYTINCTURE_PUBLIC_ASSET_PATHS": "inline-e2e.html,active.svg",
     },
 )
 
