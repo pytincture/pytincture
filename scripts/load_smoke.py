@@ -64,7 +64,7 @@ def main() -> int:
     parser.add_argument("--timeout-seconds", type=float, default=5)
     parser.add_argument("--wait-seconds", type=float, default=15)
     parser.add_argument("--p95-budget-ms", type=float, default=500)
-    parser.add_argument("--method", choices=("GET", "POST"), default="GET")
+    parser.add_argument("--method", choices=("GET", "HEAD", "POST"), default="GET")
     parser.add_argument("--body-json")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()

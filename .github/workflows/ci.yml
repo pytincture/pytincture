@@ -736,6 +736,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install dist/pytincture-*.whl
+          python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.16
+          cp \
+            tests/e2e_apps/dhxpyt-0.9.16-py3-none-any.whl \
+            tests/e2e_apps/dhxpyt-0.9.16+backend-py3-none-any.whl
 
       - name: Run health load budget
         env:
@@ -763,6 +767,8 @@ jobs:
             --artifact-manifest dist/SHA256SUMS.json \
             --result health=performance-health.json \
             --result appcode=performance-appcode.json \
+            --result public_asset_head=performance-public_asset_head.json \
+            --result public_asset=performance-public_asset.json \
             --result bff=performance-bff.json \
             --result saturation=performance-saturation.json \
             --output qualification-evidence-performance-service.json

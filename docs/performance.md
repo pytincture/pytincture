@@ -27,9 +27,12 @@ latency for:
 
 - 500 health requests at concurrency 20;
 - 40 generated `appcode.pyt` archives at concurrency 5; and
+- 20 metadata-only HEAD requests for a 5.7 MiB public wheel at concurrency 5;
+- 4 streamed GET requests for that wheel at concurrency 2; and
 - 200 representative BFF calls at concurrency 10.
 
-The resulting `performance-health.json`, `performance-appcode.json`, and
+The resulting `performance-health.json`, `performance-appcode.json`,
+`performance-public_asset_head.json`, `performance-public_asset.json`, and
 `performance-bff.json` files are retained with
 `qualification-evidence-performance-service.json`, which hashes each raw
 result and the validated wheel, source distribution, and npm tarball.

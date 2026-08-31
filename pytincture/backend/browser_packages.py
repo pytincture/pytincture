@@ -11,6 +11,7 @@ import threading
 import zipfile
 from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
@@ -23,6 +24,7 @@ from pytincture.backend.safe_paths import (
     normalize_relative_path,
     read_contained_file,
     resolve_contained_path,
+    stat_contained_file,
     validate_application_name,
 )
 
@@ -68,40 +70,164 @@ _SENSITIVE_BROWSER_NAME_TOKENS = frozenset({
 })
 
 
+@dataclass(frozen=True, slots=True)
+class _AppcodeArchiveCacheEntry:
+    value: bytes
+    source_fingerprint: tuple[tuple[Any, ...], ...]
+    directory_fingerprint: tuple[tuple[Any, ...], ...]
+
+
+def _directory_fingerprint(modules_root: str) -> tuple[tuple[Any, ...], ...]:
+    """Record relevant directory identities without opening file contents."""
+    root = canonical_root(modules_root)
+    fingerprint: list[tuple[Any, ...]] = []
+    for current, directories, _files in os.walk(root, followlinks=False):
+        directories[:] = sorted(
+            directory
+            for directory in directories
+            if not directory.startswith(".")
+            and directory not in _EXCLUDED_DIRECTORIES
+            and not os.path.islink(os.path.join(current, directory))
+        )
+        metadata = os.stat(current, follow_symlinks=False)
+        relative = os.path.relpath(current, root).replace(os.sep, "/")
+        fingerprint.append(
+            (
+                "" if relative == "." else relative,
+                metadata.st_dev,
+                metadata.st_ino,
+                metadata.st_mtime_ns,
+                metadata.st_ctime_ns,
+            )
+        )
+    return tuple(fingerprint)
+
+
+def _source_fingerprint_is_current(
+    modules_root: str,
+    fingerprint: tuple[tuple[Any, ...], ...],
+) -> bool:
+    for (
+        relative_path,
+        device,
+        inode,
+        size,
+        modified_ns,
+        changed_ns,
+        _digest,
+    ) in fingerprint:
+        try:
+            current = stat_contained_file(modules_root, relative_path)
+        except (OSError, UnsafePath):
+            return False
+        if current.identity != (device, inode, size, modified_ns, changed_ns):
+            return False
+    return True
+
+
 class AppcodeArchiveCache:
     """Bounded per-worker cache for public, non-session-specific archives."""
 
-    def __init__(self, max_entries: int):
+    def __init__(self, max_entries: int, max_bytes: int = 128 * 1024 * 1024):
         if max_entries <= 0:
             raise ValueError("archive cache size must be greater than zero")
+        if max_bytes <= 0:
+            raise ValueError("archive cache byte limit must be greater than zero")
         self.max_entries = max_entries
-        self._entries: OrderedDict[tuple[Any, ...], bytes] = OrderedDict()
+        self.max_bytes = max_bytes
+        self._entries: OrderedDict[
+            tuple[Any, ...], _AppcodeArchiveCacheEntry
+        ] = OrderedDict()
+        self._current_bytes = 0
         self._lock = threading.Lock()
 
-    def get(self, key: tuple[Any, ...]) -> bytes | None:
+    @property
+    def current_bytes(self) -> int:
         with self._lock:
-            value = self._entries.get(key)
-            if value is not None:
-                self._entries.move_to_end(key)
-            return value
+            return self._current_bytes
 
-    def put(self, key: tuple[Any, ...], value: bytes) -> None:
+    def _remove_locked(self, key: tuple[Any, ...]) -> None:
+        removed = self._entries.pop(key, None)
+        if removed is not None:
+            self._current_bytes -= len(removed.value)
+
+    def get(self, key: tuple[Any, ...], modules_root: str) -> bytes | None:
         with self._lock:
-            self._entries[key] = value
+            entry = self._entries.get(key)
+        if entry is None:
+            return None
+        try:
+            current = (
+                _source_fingerprint_is_current(
+                    modules_root, entry.source_fingerprint
+                )
+                and _directory_fingerprint(modules_root)
+                == entry.directory_fingerprint
+            )
+        except (OSError, UnsafePath):
+            current = False
+        with self._lock:
+            if self._entries.get(key) is not entry:
+                return None
+            if not current:
+                self._remove_locked(key)
+                return None
             self._entries.move_to_end(key)
-            while len(self._entries) > self.max_entries:
-                self._entries.popitem(last=False)
+            return entry.value
+
+    def put(
+        self,
+        key: tuple[Any, ...],
+        value: bytes,
+        *,
+        modules_root: str,
+        source_fingerprint: tuple[tuple[Any, ...], ...],
+    ) -> None:
+        if len(value) > self.max_bytes:
+            with self._lock:
+                self._remove_locked(key)
+            return
+        try:
+            if not _source_fingerprint_is_current(modules_root, source_fingerprint):
+                return
+            directory_fingerprint = _directory_fingerprint(modules_root)
+        except (OSError, UnsafePath):
+            return
+        entry = _AppcodeArchiveCacheEntry(
+            value=value,
+            source_fingerprint=source_fingerprint,
+            directory_fingerprint=directory_fingerprint,
+        )
+        with self._lock:
+            self._remove_locked(key)
+            self._entries[key] = entry
+            self._current_bytes += len(value)
+            self._entries.move_to_end(key)
+            while (
+                len(self._entries) > self.max_entries
+                or self._current_bytes > self.max_bytes
+            ):
+                _evicted_key, evicted = self._entries.popitem(last=False)
+                self._current_bytes -= len(evicted.value)
 
 
 def _analyze_local_python_module(
     file_path: str,
     modules_root: str,
+    secure_files: dict[str, Any] | None = None,
+    max_file_bytes: int | None = None,
 ) -> tuple[bool, set[str]]:
     """Return the BFF-boundary flag and direct local Python imports."""
     try:
         root = canonical_root(modules_root)
         file_relative = os.path.relpath(file_path, root).replace(os.sep, "/")
-        source_file = read_contained_file(root, file_relative)
+        source_file = None if secure_files is None else secure_files.get(file_path)
+        if source_file is None:
+            source_file = read_contained_file(
+                root, file_relative, max_bytes=max_file_bytes
+            )
+            if secure_files is not None:
+                secure_files[file_path] = source_file
         source = decode_python_source(source_file.content)
         tree = ast.parse(source, filename=source_file.path)
     except UnsafePath:
@@ -375,6 +501,9 @@ def browser_package_files(
     modules_root: str,
     raw_patterns: str | None = None,
     max_files: int | None = None,
+    *,
+    _secure_files: dict[str, Any] | None = None,
+    _max_file_bytes: int | None = None,
 ) -> set[str]:
     """Return the transitive local imports and explicit files for an app."""
     try:
@@ -390,11 +519,18 @@ def browser_package_files(
         try:
             current = pending.pop()
             is_bff_module, imported_files = _analyze_local_python_module(
-                current, root
+                current,
+                root,
+                secure_files=_secure_files,
+                max_file_bytes=_max_file_bytes,
             )
             if not is_bff_module:
                 imported_files |= _browser_package_initializers(current, root)
         except UnsafePath as exc:
+            if "size limit" in str(exc):
+                raise HTTPException(
+                    status_code=413, detail="Appcode file-size limit exceeded"
+                ) from exc
             raise HTTPException(
                 status_code=404, detail="Application import path is unsafe"
             ) from exc
@@ -430,18 +566,42 @@ def create_appcode_archive(
         root = canonical_root(modules_root)
     except (UnsafePath, ValueError) as exc:
         raise HTTPException(status_code=404, detail="Application entrypoint not found") from exc
-    selected = sorted(
-        browser_package_files(application, root, raw_patterns, max_files=max_files)
+    cache_key = (
+        application,
+        host,
+        protocol,
+        raw_patterns or "",
+        max_files,
+        max_file_bytes,
+        max_total_bytes,
     )
-    fingerprint: list[tuple[str, int, int, str]] = []
+    if cache is not None and replay_client is None:
+        cached = cache.get(cache_key, root)
+        if cached is not None:
+            return io.BytesIO(cached)
+
+    discovered_secure_files: dict[str, Any] = {}
+    selected = sorted(
+        browser_package_files(
+            application,
+            root,
+            raw_patterns,
+            max_files=max_files,
+            _secure_files=discovered_secure_files,
+            _max_file_bytes=max_file_bytes,
+        )
+    )
+    fingerprint: list[tuple[Any, ...]] = []
     secure_files = []
     aggregate_bytes = 0
     for file_path in selected:
         relative_path = os.path.relpath(file_path, root).replace(os.sep, "/")
         try:
-            secure_file = read_contained_file(
-                root, relative_path, max_bytes=max_file_bytes
-            )
+            secure_file = discovered_secure_files.get(file_path)
+            if secure_file is None:
+                secure_file = read_contained_file(
+                    root, relative_path, max_bytes=max_file_bytes
+                )
         except UnsafePath as exc:
             detail = (
                 "Appcode file-size limit exceeded"
@@ -455,24 +615,15 @@ def create_appcode_archive(
         fingerprint.append(
             (
                 secure_file.relative_path,
+                secure_file.device,
+                secure_file.inode,
                 secure_file.size,
                 secure_file.modified_ns,
+                secure_file.changed_ns,
                 secure_file.digest,
             )
         )
         secure_files.append(secure_file)
-
-    cache_key = (
-        application,
-        host,
-        protocol,
-        raw_patterns or "",
-        tuple(fingerprint),
-    )
-    if cache is not None and replay_client is None:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return io.BytesIO(cached)
 
     in_memory_zip = io.BytesIO()
     with zipfile.ZipFile(in_memory_zip, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -499,5 +650,10 @@ def create_appcode_archive(
             zip_file.writestr(arcname, payload)
     in_memory_zip.seek(0)
     if cache is not None and replay_client is None:
-        cache.put(cache_key, in_memory_zip.getvalue())
+        cache.put(
+            cache_key,
+            in_memory_zip.getvalue(),
+            modules_root=root,
+            source_fingerprint=tuple(fingerprint),
+        )
     return in_memory_zip

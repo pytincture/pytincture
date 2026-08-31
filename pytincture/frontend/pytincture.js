@@ -953,15 +953,27 @@ await micropip.install(${libLiteral}, deps=False)
 async function probeBackendWheel(url) {
     let response;
     try {
-        response = await fetch(url, { method: "HEAD" });
+        // The GET response carries the content digest. A metadata-only HEAD
+        // intentionally never reads the wheel just to compute a hash.
+        response = await fetch(url);
     } catch (err) {
         console.warn(`Failed to check URL: ${url}`, err);
         return null;
     }
     if (!response.ok) {
+        try {
+            await response.body?.cancel();
+        } catch (_error) {
+            // A failed probe has no body that the runtime needs to retain.
+        }
         return null;
     }
     const sha256 = response.headers?.get?.("x-pytincture-sha256") || "";
+    try {
+        await response.body?.cancel();
+    } catch (_error) {
+        // The subsequent hash-locked micropip request fetches the wheel body.
+    }
     if (!/^[a-f0-9]{64}$/i.test(sha256)) {
         throw new Error("Backend wheel response is missing a valid X-Pytincture-SHA256 header.");
     }

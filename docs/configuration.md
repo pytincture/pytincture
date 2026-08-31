@@ -161,6 +161,7 @@ The contract test checks every row in this table against the dataclass model.
 | `appcode_max_file_bytes` | `APPCODE_MAX_FILE_BYTES` | Maximum source file size in an archive. |
 | `appcode_max_total_bytes` | `APPCODE_MAX_TOTAL_BYTES` | Maximum aggregate source bytes per archive. |
 | `appcode_cache_entries` | `APPCODE_CACHE_ENTRIES` | Per-worker bounded browser archive cache entries. |
+| `appcode_cache_max_bytes` | `APPCODE_CACHE_MAX_BYTES` | Aggregate byte limit for the per-worker browser archive cache. |
 | `appcode_build_max_concurrency` | `APPCODE_BUILD_MAX_CONCURRENCY` | Concurrent archive builds per worker. |
 | `appcode_build_queue_timeout_seconds` | `APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS` | Maximum archive build admission wait. |
 | `dev_wheel_version` | `PYTINCTURE_DEV_WHEEL_VERSION` | Explicit development widget-wheel fallback version. |
