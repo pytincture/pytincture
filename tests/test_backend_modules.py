@@ -593,7 +593,8 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     evidence = json.loads(
         (root / "security" / "review-dispositions.json").read_text()
     )
-    assert evidence["status"] == "accepted"
+    assert evidence["status"] == "passed"
+    assert evidence["review_response"] == "accepted"
     dispositions = {item["id"]: item for item in evidence["dispositions"]}
     assert set(dispositions) == {
         "F-01",

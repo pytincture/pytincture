@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
-  "status": "accepted",
+  "status": "passed",
+  "review_response": "accepted",
   "reviewed_report": "SECURITY_REVIEW_2026-08-30.txt",
   "review_response_date": "2026-08-30",
   "recorded_on": "2026-08-31",
