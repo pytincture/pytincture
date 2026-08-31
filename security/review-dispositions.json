@@ -368,6 +368,29 @@
         "tests/test_application_admission.py::test_local_login_enforces_application_admission_before_session_issuance",
         "tests/test_app.py::test_authenticated_session_cannot_cross_application_audience"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-H-09",
+      "status": "remediated",
+      "title": "npm publication has one protected retained-artifact path",
+      "security_boundary": "Repository scripts cannot publish to npm. The sole registry command is inside the protected npm environment workflow after exact release-run resolution, default-branch ancestry verification, retained-artifact identity validation, and GitHub attestation verification, using trusted-publisher OIDC.",
+      "controls": {
+        "direct_local_registry_publish_available": false,
+        "mutable_local_tool_install_before_publish": false,
+        "locally_rebuilt_worktree_publishable": false,
+        "protected_oidc_workflow_is_sole_publish_path": true,
+        "retained_attested_artifact_required": true,
+        "local_build_and_pack_inspection_preserved": true
+      },
+      "implementation": [
+        ".github/workflows/npm-publish.yml",
+        "docs/releasing.md",
+        "pytincture/frontend/README.md"
+      ],
+      "regression_tests": [
+        "tests/test_release_gates.py::test_npm_publish_requires_attested_release_provenance",
+        "tests/test_release_gates.py::test_protected_workflow_is_the_only_npm_publish_path"
+      ]
     }
   ]
 }

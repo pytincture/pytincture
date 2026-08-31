@@ -70,3 +70,17 @@ SemVer-equivalent (`1.0.0-rc.1`). The browser runtime continues to report the
 canonical Python/framework version. `npm run build` and artifact inspection
 enforce this mapping. The [qualification procedure](release-qualification.md)
 defines evidence and the current go/no-go state.
+
+## Local npm artifact inspection
+
+The only supported npm registry publication path is
+`.github/workflows/npm-publish.yml`. Repository scripts never run `npm publish`
+and local builds never receive registry credentials. To inspect the exact
+package contents without publishing, run:
+
+```bash
+cd pytincture/frontend
+npm ci
+npm run build
+npm pack --dry-run
+```

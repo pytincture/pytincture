@@ -69,6 +69,22 @@ def test_npm_publish_requires_attested_release_provenance():
     assert all("${{" not in block for block in run_blocks)
 
 
+def test_protected_workflow_is_the_only_npm_publish_path():
+    publish_commands = []
+    for root_name in ("scripts", ".github/workflows"):
+        for path in (ROOT / root_name).rglob("*"):
+            if not path.is_file():
+                continue
+            matches = re.findall(r"\bnpm\s+publish\b", path.read_text(errors="ignore"))
+            publish_commands.extend(path.relative_to(ROOT).as_posix() for _ in matches)
+
+    assert publish_commands == [".github/workflows/npm-publish.yml"]
+    assert not (ROOT / "scripts" / "publish_runtime.sh").exists()
+    frontend_readme = (ROOT / "pytincture" / "frontend" / "README.md").read_text()
+    assert "scripts/publish_runtime.sh" not in frontend_readme
+    assert "npm pack --dry-run" in frontend_readme
+
+
 def test_python_publish_requires_oidc_protected_attested_release_provenance():
     release_workflow = (
         ROOT / ".github" / "workflows" / "pypi-publish.yml"

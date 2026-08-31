@@ -819,6 +819,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-H-02",
         "REVIEW-2026-08-31-H-03",
         "REVIEW-2026-08-31-H-05",
+        "REVIEW-2026-08-31-H-09",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -860,6 +861,9 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert admission_controls["checked_before_session_issuance"] is True
     assert admission_controls["sticky_sessions_required"] is False
     assert admission_controls["redis_required"] is False
+    npm_controls = dispositions["REVIEW-2026-08-31-H-09"]["controls"]
+    assert npm_controls["direct_local_registry_publish_available"] is False
+    assert npm_controls["protected_oidc_workflow_is_sole_publish_path"] is True
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:
