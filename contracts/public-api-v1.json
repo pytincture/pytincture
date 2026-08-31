@@ -60,7 +60,7 @@
   },
   "bff": {
     "contract_version": 1,
-    "route": "/classcall/{file_path:path}/{class_name}/{function_name}",
+    "route": "/{application}/classcall/{file_path:path}/{class_name}/{function_name}",
     "http_methods": [
       "DELETE",
       "GET",

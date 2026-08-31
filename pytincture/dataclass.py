@@ -815,7 +815,10 @@ def backend_for_frontend(cls):
     # Register all methods
     for method_name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
         if not method_name.startswith('_'):
-            route_path = f"/classcall/{module_identifier}/{cls.__name__}/{method_name}"
+            route_path = (
+                f"/{{application}}/classcall/{module_identifier}/"
+                f"{cls.__name__}/{method_name}"
+            )
 
             # Get method signature
             sig = inspect.signature(method)
@@ -855,7 +858,12 @@ def backend_for_frontend(cls):
                 'summary': method.__doc__ or f"Call {method_name} on {cls.__name__}",
                 'operationId': operation_id,  # Useful, unique, short, and now truncated if needed
                 'tags': [module_name],
-                'parameters': [],
+                'parameters': [{
+                    'name': 'application',
+                    'in': 'path',
+                    'required': True,
+                    'schema': {'type': 'string'},
+                }],
                 'requestBody': {
                     'content': {
                         'application/json': {
@@ -979,11 +987,17 @@ def add_bff_docs_to_app(
                 continue
             parameters = operation.get("parameters", ())
             documented_routes[
-                f"/classcall/{module_path}/{class_name}/{method_name}"
+                f"/{{application}}/classcall/{module_path}/{class_name}/{method_name}"
             ] = {
                 "summary": f"Call {method_name} on {class_name}",
                 "operationId": f"call_{class_name}_{method_name}"[:50],
                 "tags": [module_path],
+                "parameters": [{
+                    "name": "application",
+                    "in": "path",
+                    "required": True,
+                    "schema": {"type": "string"},
+                }],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1188,7 +1202,7 @@ def generate_stub_classes(
     
     file_identifier = _module_relative_identifier(file_path)
     application_prefix = (
-        f"/{str(application).strip('/')}" if application else ""
+        f"/{str(application).strip('/')}" if application else None
     )
     module = ast.parse(code)
     module_bindings = _binding_snapshots(module.body)
@@ -1213,6 +1227,10 @@ def generate_stub_classes(
 
     if not decorated_class_nodes:
         return code
+    if application_prefix is None:
+        raise ValueError(
+            "application is required when generating backend_for_frontend clients"
+        )
 
     stub_class_code = ""
     class_imports = set()

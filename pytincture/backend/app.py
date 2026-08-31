@@ -1982,24 +1982,18 @@ async def public_app_asset(request: Request, application: str, asset_path: str):
 @app.put("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="putApplicationClassCall", response_model=Any)
 @app.patch("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="patchApplicationClassCall", response_model=Any)
 @app.delete("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="deleteApplicationClassCall", response_model=Any)
-@app.get("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="getClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float]) or StreamingResponse for streaming methods"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
-@app.post("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="postClassCall", response_model=Any, responses={200: {"description": "Any (dynamic based on called function return, suggest annotating as Union[Dict, List, str, int, float]) or StreamingResponse for streaming methods"}, 401: {"description": "HTTPException (if not authorized)"}, 404: {"description": "HTTPException (if file not found)"}, 500: {"description": "HTTPException (if function call fails)"}})
-@app.put("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="putClassCall", response_model=Any)
-@app.patch("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="patchClassCall", response_model=Any)
-@app.delete("/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="deleteClassCall", response_model=Any)
 async def class_call(
     file_path: str,
     class_name: str,
     function_name: str,
     request: Request,
-    application: Optional[str] = None,
+    application: str,
     _admission=Depends(_admit_bff_call),
 ):
-    if application is not None:
-        try:
-            validate_application_name(application)
-        except ValueError:
-            raise HTTPException(status_code=404, detail="Application not found")
+    try:
+        validate_application_name(application)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Application not found")
 
     # Determine if this call is allowed without auth.
     normalized_identifier = _normalize_file_identifier(file_path)
@@ -2026,28 +2020,20 @@ async def class_call(
 
     if not user:
         raise HTTPException(status_code=401, detail="Call not authorized")
-    if not application and isinstance(user, dict) and user.get("is_authenticated") is True:
-        application = str(user.get("application") or "") or None
-        if application is None:
-            raise HTTPException(
-                status_code=403,
-                detail="Session has no application audience; sign in again",
-            )
     _assert_application_audience(user, application)
 
     modules_root = os.path.abspath(get_modules_path())
-    if application:
-        application_identifiers = await _run_bff_thread_stage(
-            request,
-            _application_bff_identifiers,
-            application,
-            modules_root,
+    application_identifiers = await _run_bff_thread_stage(
+        request,
+        _application_bff_identifiers,
+        application,
+        modules_root,
+    )
+    if request_identifier_with_ext not in application_identifiers:
+        raise HTTPException(
+            status_code=404,
+            detail="BFF operation not exported by this application",
         )
-        if request_identifier_with_ext not in application_identifiers:
-            raise HTTPException(
-                status_code=404,
-                detail="BFF operation not exported by this application",
-            )
     fs_relative = request_identifier_with_ext.replace("/", os.sep)
     fs_relative = os.path.normpath(fs_relative)
 

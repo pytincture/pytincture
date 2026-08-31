@@ -52,7 +52,8 @@ Required controls that remain in scope:
 
 - Every call must name a real application and belong to that application's
   browser/BFF graph.
-- Legacy unscoped routes may not expose dormant or unrelated applications.
+- Unscoped BFF routes do not exist; every call names and validates a real
+  application graph.
 - Browser-origin, Fetch Metadata, content-type, resource-limit, and optional
   policy controls still apply.
 

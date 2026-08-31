@@ -686,10 +686,11 @@ def test_invalid_python_file_cannot_disable_unrelated_bff_application(tmp_path):
 
     with TestClient(configured) as client:
         healthy = client.post(
-            "/classcall/healthy.py/Healthy/ping", json={"kwargs": {}}
+            "/healthy/classcall/healthy.py/Healthy/ping", json={"kwargs": {}}
         )
         rejected = client.post(
-            "/classcall/partially_written.py/Unknown/ping", json={"kwargs": {}}
+            "/partially_written/classcall/partially_written.py/Unknown/ping",
+            json={"kwargs": {}},
         )
     assert healthy.status_code == 200
     assert healthy.json() == {"healthy": True}

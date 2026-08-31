@@ -32,7 +32,12 @@ def test_ci_runs_and_retains_every_performance_profile():
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
     assert "python scripts/run_performance_smoke.py" in workflow
     runner = (ROOT / "scripts" / "run_performance_smoke.py").read_text()
+    saturation = (ROOT / "scripts" / "adversarial_load_smoke.py").read_text()
     assert "adversarial_load_smoke.py" in runner
+    assert "/performance_data/classcall/" in runner
+    assert "/performance_data/classcall/" in saturation
+    assert '"/classcall/' not in runner
+    assert '"/classcall/' not in saturation
     assert "performance-saturation.json" in workflow
     assert "pytincture-performance-service" in workflow
     assert "pytincture-performance-${{ matrix.browser }}" in workflow
