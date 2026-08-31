@@ -300,6 +300,39 @@
         "tests/test_app.py::test_bff_dispatch_rejects_runtime_class_or_method_replacement_before_construction",
         "tests/test_app.py::test_bff_dispatch_preserves_inner_class_decorators"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-H-03",
+      "status": "remediated",
+      "title": "Every BFF call is scoped to a real application graph",
+      "intentional_contract": "When authentication is disabled, a Pytincture backend_for_frontend class decorator remains the complete public export decision; no redundant per-method no-auth allowlist is required.",
+      "security_boundary": "The unscoped classcall routes are removed. HTTP, generated-proxy, OpenAPI, and MCP BFF calls name an exact validated application, and the requested canonical module must belong to that application's static browser/BFF dependency graph before dispatch.",
+      "controls": {
+        "unscoped_bff_routes_available": false,
+        "real_application_required": true,
+        "exact_application_graph_membership_required": true,
+        "authenticated_calls_scoped": true,
+        "noauth_calls_scoped": true,
+        "mcp_calls_scoped": true,
+        "class_level_noauth_export_preserved": true,
+        "redundant_method_allowlist_required": false,
+        "redis_required": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/dataclass.py",
+        "contracts/public-api-v1.json",
+        "docs/contracts/bff-v1.md",
+        "docs/migrations/0.10-to-1.0.md"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_unscoped_bff_routes_are_removed",
+        "tests/test_app.py::test_noauth_bff_requires_a_real_application_graph_without_method_allowlist",
+        "tests/test_app.py::test_noauth_bff_grant_does_not_authorize_same_basename",
+        "tests/test_app.py::test_authenticated_session_cannot_cross_application_audience",
+        "tests/test_dataclass.py::test_generate_stub_classes_requires_application_for_bff_clients",
+        "tests/test_contracts.py::test_bff_route_methods_and_generated_stub_match_contract"
+      ]
     }
   ]
 }

@@ -426,7 +426,11 @@ def test_stub_generation_rejects_a_spoofed_stream_decorator(tmp_path, monkeypatc
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
 
     stub = generate_stub_classes(
-        str(file_path), "example.test", "https", source_code=source
+        str(file_path),
+        "example.test",
+        "https",
+        application="reports",
+        source_code=source,
     )
 
     assert "async def fetch_stream" not in stub
@@ -501,19 +505,39 @@ def test_generate_stub_classes_returns_stub(tmp_path, monkeypatch):
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
     
     # Call generate_stub_classes with dummy return values.
-    stub = generate_stub_classes(str(file_path), "example.com", "https")
+    stub = generate_stub_classes(
+        str(file_path), "example.com", "https", application="demoapp"
+    )
     # Sync backend methods should keep synchronous stubs.
     assert "class MyService:" in stub
     assert "async def fetch(self, url, payload=None, method='GET', _replay_retry=True):" in stub
     assert "def foo(self, *args, **kwargs):" in stub
     assert "response = self.fetch_sync(url, payload, 'POST')" in stub
     assert "async def foo(self, *args, **kwargs):" not in stub
-    expected_url = "/classcall/service.py/MyService/foo"
+    expected_url = "/demoapp/classcall/service.py/MyService/foo"
     assert expected_url in stub
     # Also check that required imports are added.
     assert "import json" in stub
     assert "from js import XMLHttpRequest, JSON" in stub
     assert "from io import StringIO" in stub
+
+
+def test_generate_stub_classes_requires_application_for_bff_clients(
+    tmp_path, monkeypatch
+):
+    file_path = tmp_path / "service.py"
+    file_path.write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class Service:
+            def read(self):
+                return True
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+
+    with pytest.raises(ValueError, match="application is required"):
+        generate_stub_classes(str(file_path), "example.com", "https")
 
 
 def test_generate_stub_classes_streaming(tmp_path, monkeypatch):
@@ -533,7 +557,9 @@ def test_generate_stub_classes_streaming(tmp_path, monkeypatch):
     file_path.write_text(dummy_code)
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
 
-    stub = generate_stub_classes(str(file_path), "example.com", "https")
+    stub = generate_stub_classes(
+        str(file_path), "example.com", "https", application="demoapp"
+    )
     assert "class StreamService:" in stub
     assert "async def fetch_stream" in stub
     assert "async def ticker" in stub
@@ -561,7 +587,9 @@ def test_generate_stub_classes_supports_decorator_aliases_and_async_methods(tmp_
     file_path.write_text(dummy_code)
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
 
-    stub = generate_stub_classes(str(file_path), "example.com", "https")
+    stub = generate_stub_classes(
+        str(file_path), "example.com", "https", application="demoapp"
+    )
     assert "class AsyncService:" in stub
     assert "async def fetch(self, url, payload=None, method='GET', _replay_retry=True):" in stub
     assert "async def ticker(self, *args, **kwargs):" in stub
@@ -586,7 +614,9 @@ def test_generate_stub_classes_keeps_sync_alias_methods_sync(tmp_path, monkeypat
     file_path.write_text(dummy_code)
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
 
-    stub = generate_stub_classes(str(file_path), "example.com", "https")
+    stub = generate_stub_classes(
+        str(file_path), "example.com", "https", application="demoapp"
+    )
     assert "def ping(self, *args, **kwargs):" in stub
     assert "response = self.fetch_sync(url, payload, 'POST')" in stub
     assert "async def ping(self, *args, **kwargs):" not in stub
@@ -610,8 +640,10 @@ def test_generate_stub_classes_nested_path(tmp_path, monkeypatch):
     file_path.write_text(dummy_code)
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
 
-    stub = generate_stub_classes(str(file_path), "example.com", "https")
-    expected_url = "/classcall/api/v1/service.py/NestedService/ping"
+    stub = generate_stub_classes(
+        str(file_path), "example.com", "https", application="demoapp"
+    )
+    expected_url = "/demoapp/classcall/api/v1/service.py/NestedService/ping"
     assert expected_url in stub
 
 
@@ -628,7 +660,9 @@ def test_generated_stub_sends_csrf_and_declared_http_method(tmp_path, monkeypatc
     """))
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
 
-    stub = generate_stub_classes(str(file_path), "example.com", "https")
+    stub = generate_stub_classes(
+        str(file_path), "example.com", "https", application="demoapp"
+    )
     assert "X-CSRF-Token" in stub
     assert "pytincture_csrf" in stub
     assert "response = self.fetch_sync(url, payload, 'GET')" in stub
@@ -651,6 +685,7 @@ def test_generated_stub_injects_opaque_replay_state_client(tmp_path, monkeypatch
         str(file_path),
         "example.com",
         "https",
+        application="demoapp",
         replay_client=replay_client,
     )
 
@@ -680,12 +715,13 @@ def test_generated_stub_never_embeds_request_origin(tmp_path, monkeypatch):
         str(file_path),
         hostile_host,
         "protocol-with-'quote",
+        application="demoapp",
         replay_client={"capsule": "opaque", "key": bytes(range(32))},
     )
 
     assert hostile_host not in stub
     assert "protocol-with-" not in stub
-    assert "url = '/classcall/service.py/Service/read'" in stub
+    assert "url = '/demoapp/classcall/service.py/Service/read'" in stub
     assert "'/_pytincture/state'" in stub
     compile(stub, str(file_path), "exec")
 
@@ -706,7 +742,9 @@ def test_get_parsed_output_returns_stub(tmp_path):
     file_path = tmp_path / "service_with_marker.py"
     file_path.write_text(dummy_code_with_marker)
     
-    parsed_output = get_parsed_output(str(file_path), "example.com", "https")
+    parsed_output = get_parsed_output(
+        str(file_path), "example.com", "https", application="demoapp"
+    )
     assert parsed_output is not None
     assert "class MyService:" in parsed_output
     assert "async def fetch(" in parsed_output
@@ -719,7 +757,9 @@ def test_get_parsed_output_returns_stub(tmp_path):
     """)
     file_path2 = tmp_path / "service_without_marker.py"
     file_path2.write_text(dummy_code_without_marker)
-    parsed_output2 = get_parsed_output(str(file_path2), "example.com", "https")
+    parsed_output2 = get_parsed_output(
+        str(file_path2), "example.com", "https", application="demoapp"
+    )
     # In this case, our function returns the original code.
     # (Your code returns stub_code only if stub_code is truthy.)
     assert parsed_output2 is not None

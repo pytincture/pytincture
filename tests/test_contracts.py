@@ -112,6 +112,10 @@ def test_bff_route_methods_and_generated_stub_match_contract(contract, tmp_path)
         if getattr(route, "path", None) == bff_contract["route"]:
             route_methods.update(getattr(route, "methods", set()))
     assert sorted(route_methods) == bff_contract["http_methods"]
+    assert not any(
+        str(getattr(route, "path", "")).startswith("/classcall/")
+        for route in backend_app.app.routes
+    )
 
     module_file = tmp_path / "contract_widget.py"
     module_file.write_text(
@@ -128,11 +132,17 @@ def test_bff_route_methods_and_generated_stub_match_contract(contract, tmp_path)
     previous_modules_path = pytincture.MODULES_PATH
     try:
         set_modules_path(str(tmp_path))
-        stub = generate_stub_classes(str(module_file), "example.test", "https")
+        stub = generate_stub_classes(
+            str(module_file),
+            "example.test",
+            "https",
+            application="contractapp",
+        )
     finally:
         set_modules_path(previous_modules_path)
 
-    rendered_route = bff_contract["route"].replace("{file_path:path}", "contract_widget.py")
+    rendered_route = bff_contract["route"].replace("{application}", "contractapp")
+    rendered_route = rendered_route.replace("{file_path:path}", "contract_widget.py")
     rendered_route = rendered_route.replace("{class_name}", "ContractWidget")
     assert rendered_route.replace("{function_name}", "query") in stub
     for key in bff_contract["request_body_keys"]:

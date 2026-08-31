@@ -41,9 +41,10 @@ The route is:
 
 The application is the signed session audience, and the module must be an
 exact path packaged for that application. The unscoped `/classcall/...` route
-remains a compatibility surface for unauthenticated services and sessions
-that already carry an application audience; new generated proxies always use
-the scoped route.
+was removed before 1.0 because it could not prove application-graph ownership.
+Generated proxies and manually written clients must always use the scoped
+route. In no-auth mode, `@backend_for_frontend` remains the complete public
+export decision; no redundant per-method allowlist is required.
 
 Methods default to `POST`. `@bff_http_methods` may declare `GET`, `POST`,
 `PUT`, `PATCH`, or `DELETE`. A method mismatch returns `405` with `Allow`.

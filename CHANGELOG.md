@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Remove the unscoped `/classcall/...` compatibility routes. Every BFF call,
+  including no-auth and MCP-backed calls, now names a real application and
+  passes exact application graph membership before dispatch. Generated stubs,
+  OpenAPI metadata, and the public contract emit scoped routes only; the class
+  decorator remains the no-auth export decision without a second allowlist.
 - Bind static BFF operations to exact class and member source identities,
   reject duplicate definitions and post-export rebinding before module import,
   track assignment expressions inside comprehensions, require the Pytincture

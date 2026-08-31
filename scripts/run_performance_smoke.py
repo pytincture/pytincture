@@ -16,7 +16,7 @@ PROFILES = {
     "health": {"path": "/healthz"},
     "appcode": {"path": "/e2e_app/appcode/appcode.pyt"},
     "bff": {
-        "path": "/classcall/performance_data.py/PerformanceData/ping",
+        "path": "/performance_data/classcall/performance_data.py/PerformanceData/ping",
         "method": "POST",
         "body_json": '{"kwargs":{"value":1}}',
     },

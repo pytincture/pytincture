@@ -25,7 +25,8 @@ def main() -> int:
     base_url = args.base_url.rstrip("/")
     wait_until_ready(f"{base_url}/readyz", 15)
     slow_url = (
-        f"{base_url}/classcall/performance_data.py/PerformanceData/slow"
+        f"{base_url}/performance_data/classcall/"
+        "performance_data.py/PerformanceData/slow"
     )
     body = b'{"kwargs":{"seconds":0.1}}'
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as pool:
@@ -43,7 +44,8 @@ def main() -> int:
 
     statuses = Counter(status for _, status in results)
     recovery_latency, recovery_status = request_once(
-        f"{base_url}/classcall/performance_data.py/PerformanceData/ping",
+        f"{base_url}/performance_data/classcall/"
+        "performance_data.py/PerformanceData/ping",
         5,
         method="POST",
         body=b'{"kwargs":{"value":2}}',

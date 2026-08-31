@@ -483,7 +483,7 @@ def test_unknown_bff_target_is_rejected_before_module_execution(
     )
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
     monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "user@example.com"})
-    response = fresh_client.post("/classcall/danger.py/Danger/run", json={})
+    response = fresh_client.post("/danger/classcall/danger.py/Danger/run", json={})
     assert response.status_code == 404
     assert not marker.exists()
 
@@ -514,7 +514,9 @@ def test_async_policy_runs_before_constructor(fresh_client, monkeypatch, tmp_pat
 
     set_bff_policy_hook(deny_policy)
     try:
-        response = fresh_client.post("/classcall/restricted.py/Restricted/run", json={})
+        response = fresh_client.post(
+            "/restricted/classcall/restricted.py/Restricted/run", json={}
+        )
     finally:
         set_bff_policy_hook(None)
     assert response.status_code == 403
@@ -537,11 +539,11 @@ def test_state_changing_bff_call_requires_csrf(
         follow_redirects=False,
     )
     without_token = fresh_client.post(
-        "/classcall/example.py/ExampleClass/testfunc", json={}
+        "/demoapp/classcall/example.py/ExampleClass/testfunc", json={}
     )
     assert without_token.status_code == 403
     with_token = fresh_client.post(
-        "/classcall/example.py/ExampleClass/testfunc",
+        "/demoapp/classcall/example.py/ExampleClass/testfunc",
         json={},
         headers=_csrf_headers(fresh_client),
     )
@@ -613,12 +615,12 @@ def test_bff_replay_token_is_opaque_session_bound_and_single_use(
     )["items"]
     call_headers["X-Pytincture-BFF-Token"] = restarted_tokens[0]
     first = fresh_client.post(
-        "/classcall/example.py/ExampleClass/testfunc",
+        "/example/classcall/example.py/ExampleClass/testfunc",
         json={},
         headers=call_headers,
     )
     copied_curl_replay = fresh_client.post(
-        "/classcall/example.py/ExampleClass/testfunc",
+        "/example/classcall/example.py/ExampleClass/testfunc",
         json={},
         headers=call_headers,
     )
@@ -631,7 +633,9 @@ def test_bff_methods_default_to_post(fresh_client, monkeypatch, dummy_module):
 
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
     monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "user@example.com"})
-    response = fresh_client.get("/classcall/example.py/ExampleClass/testfunc")
+    response = fresh_client.get(
+        "/demoapp/classcall/example.py/ExampleClass/testfunc"
+    )
     assert response.status_code == 405
     assert response.headers["allow"] == "POST"
 
@@ -653,7 +657,7 @@ def test_revoked_session_is_rejected(fresh_client, monkeypatch, dummy_module):
     session_data = _decode_session_cookie(fresh_client, backend_app.SAML_SECRET_KEY)
     backend_app.revoke_session(session_data["session_id"])
     response = fresh_client.post(
-        "/classcall/example.py/ExampleClass/testfunc",
+        "/demoapp/classcall/example.py/ExampleClass/testfunc",
         json={},
         headers=_csrf_headers(fresh_client),
     )
@@ -1033,6 +1037,75 @@ def test_class_call_noauth(dummy_module, monkeypatch, fresh_client):
     assert json_response.get("result") == "success"
 
 
+@pytest.mark.parametrize("method", ("GET", "POST", "PUT", "PATCH", "DELETE"))
+def test_unscoped_bff_routes_are_removed(method, fresh_client):
+    response = fresh_client.request(
+        method,
+        "/classcall/worker.py/Worker/ping",
+        json={} if method != "GET" else None,
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
+
+
+def test_noauth_bff_requires_a_real_application_graph_without_method_allowlist(
+    monkeypatch, fresh_client, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    marker = tmp_path / "unrelated-imported"
+    public_source = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class PublicData:
+            def read(self):
+                return {"scope": "portal"}
+    """)
+    unrelated_source = textwrap.dedent(f"""
+        from pathlib import Path
+        from pytincture.dataclass import backend_for_frontend
+
+        Path({str(marker)!r}).write_text("imported")
+
+        @backend_for_frontend
+        class InternalData:
+            def read(self):
+                return {{"scope": "internal"}}
+    """)
+    (tmp_path / "portal.py").write_text("from public_data import PublicData\n")
+    (tmp_path / "public_data.py").write_text(public_source)
+    (tmp_path / "dormant.py").write_text(unrelated_source)
+    (tmp_path / "admin.py").write_text(unrelated_source)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+    ALLOWED_NOAUTH_CLASSCALLS.clear()
+
+    public = fresh_client.post(
+        "/portal/classcall/public_data.py/PublicData/read", json={"kwargs": {}}
+    )
+    dormant = fresh_client.post(
+        "/portal/classcall/dormant.py/InternalData/read", json={"kwargs": {}}
+    )
+    administrative = fresh_client.post(
+        "/portal/classcall/admin.py/InternalData/read", json={"kwargs": {}}
+    )
+    nonexistent = fresh_client.post(
+        "/ghost/classcall/public_data.py/PublicData/read", json={"kwargs": {}}
+    )
+
+    assert public.status_code == 200
+    assert public.json() == {"scope": "portal"}
+    assert dormant.status_code == 404
+    assert administrative.status_code == 404
+    assert nonexistent.status_code == 404
+    assert not marker.exists()
+
+
 def _allow_demoapp_noauth_call():
     ALLOWED_NOAUTH_CLASSCALLS.clear()
     ALLOWED_NOAUTH_CLASSCALLS.append({
@@ -1162,7 +1235,7 @@ def test_noauth_bff_does_not_export_a_local_same_named_decorator(
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
 
     response = fresh_client.post(
-        "/classcall/admin.py/Accidental/secret",
+        "/admin/classcall/admin.py/Accidental/secret",
         json={"kwargs": {}},
     )
 
@@ -1198,7 +1271,7 @@ def test_bff_rebinding_is_rejected_before_module_import(
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
 
     response = fresh_client.post(
-        "/classcall/worker.py/API/read",
+        "/worker/classcall/worker.py/API/read",
         json={"kwargs": {}},
     )
 
@@ -1248,7 +1321,7 @@ def test_bff_dispatch_rejects_runtime_class_or_method_replacement_before_constru
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
 
     response = fresh_client.post(
-        "/classcall/worker.py/API/read",
+        "/worker/classcall/worker.py/API/read",
         json={"kwargs": {}},
     )
 
@@ -1284,7 +1357,7 @@ def test_bff_dispatch_preserves_inner_class_decorators(
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
 
     response = fresh_client.post(
-        "/classcall/worker.py/API/read",
+        "/worker/classcall/worker.py/API/read",
         json={"kwargs": {}},
     )
 
@@ -1317,7 +1390,7 @@ def test_bff_rejects_windows_separator_path(fresh_client, monkeypatch):
 
     monkeypatch.setattr(backend_app, "require_auth", lambda request: "noauth")
     response = fresh_client.post(
-        "/classcall/pkg%5Cworker.py/Worker/ping",
+        "/demoapp/classcall/pkg%5Cworker.py/Worker/ping",
         json={},
     )
     assert response.status_code == 400
@@ -1347,7 +1420,9 @@ def test_appcode_bff_and_public_assets_reject_symlinks(
     monkeypatch.setattr(backend_app, "require_auth", lambda request: "noauth")
 
     archive = fresh_client.get("/demoapp/appcode/appcode.pyt")
-    bff = fresh_client.post("/classcall/worker.py/Worker/ping", json={})
+    bff = fresh_client.post(
+        "/demoapp/classcall/worker.py/Worker/ping", json={}
+    )
     asset = fresh_client.get("/demoapp/appcode/secret.png")
     assert archive.status_code == 404
     assert bff.status_code == 404
@@ -1390,11 +1465,17 @@ def test_class_call_policy_hook(monkeypatch, fresh_client, tmp_path):
 
     set_bff_policy_hook(policy_hook)
     try:
-        response = fresh_client.post("/classcall/restricted.py/Restricted/secret", json={"kwargs": {}})
+        response = fresh_client.post(
+            "/restricted/classcall/restricted.py/Restricted/secret",
+            json={"kwargs": {}},
+        )
         assert response.status_code == 403
 
         current_user["roles"] = ["admin"]
-        response = fresh_client.post("/classcall/restricted.py/Restricted/secret", json={"kwargs": {}})
+        response = fresh_client.post(
+            "/restricted/classcall/restricted.py/Restricted/secret",
+            json={"kwargs": {}},
+        )
         assert response.status_code == 200
         assert response.json()["ok"] is True
     finally:
@@ -1467,7 +1548,9 @@ def test_class_call_loads_decorated_module_without_standard_import(monkeypatch, 
     monkeypatch.setenv("MODULES_PATH", str(modules_dir))
     monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "tester@example.com"})
 
-    response = fresh_client.post("/classcall/direct_load.py/DirectLoad/ping", json={})
+    response = fresh_client.post(
+        "/direct_load/classcall/direct_load.py/DirectLoad/ping", json={}
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
@@ -1496,7 +1579,9 @@ def test_class_call_decorated_constructor_receives_user(monkeypatch, fresh_clien
     monkeypatch.setenv("MODULES_PATH", str(modules_dir))
     monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "tester@example.com"})
 
-    response = fresh_client.post("/classcall/user_aware.py/UserAware/whoami", json={})
+    response = fresh_client.post(
+        "/user_aware/classcall/user_aware.py/UserAware/whoami", json={}
+    )
     assert response.status_code == 200
     assert response.json()["email"] == "tester@example.com"
 
@@ -1530,7 +1615,7 @@ def test_class_call_with_auth(dummy_module, monkeypatch, fresh_client):
     # Override require_auth so that it always returns None.
     monkeypatch.setattr(backend_app, "require_auth", lambda request: None)
     response = fresh_client.post(
-        "/classcall/example.py/ExampleClass/testfunc",
+        "/demoapp/classcall/example.py/ExampleClass/testfunc",
         json={"args": [], "kwargs": {}}
     )
     assert response.status_code == 401
@@ -1557,12 +1642,16 @@ def test_class_call_nested_module_path(monkeypatch, fresh_client, tmp_path):
                 return {"echo": value}
     """)
     (target_dir / "worker.py").write_text(module_code)
+    (modules_dir / "nested_app.py").write_text(
+        "from pkg.internal.worker import Worker\n",
+        encoding="utf-8",
+    )
 
     monkeypatch.setenv("MODULES_PATH", str(modules_dir))
     monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "tester@example.com"})
 
     response = fresh_client.post(
-        "/classcall/pkg/internal/worker.py/Worker/ping",
+        "/nested_app/classcall/pkg/internal/worker.py/Worker/ping",
         json={"kwargs": {"value": "hello"}}
     )
     assert response.status_code == 200
@@ -1766,7 +1855,7 @@ def test_class_call_streaming(monkeypatch, fresh_client, tmp_path):
     monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "tester@example.com"})
 
     response = fresh_client.post(
-        "/classcall/stream_widget.py/StreamWidget/ticker",
+        "/stream_widget/classcall/stream_widget.py/StreamWidget/ticker",
         json={"kwargs": {"count": 3}}
     )
 
@@ -1797,7 +1886,7 @@ def test_class_call_timeout_returns_gateway_timeout(monkeypatch, fresh_client, t
     monkeypatch.setattr(backend_app, "require_auth", lambda request: "noauth")
 
     response = fresh_client.post(
-        "/classcall/slow_widget.py/SlowWidget/wait",
+        "/slow_widget/classcall/slow_widget.py/SlowWidget/wait",
         json={},
     )
     assert response.status_code == 504
@@ -2210,7 +2299,7 @@ def test_stateless_session_survives_logout_in_another_browser_and_replica(
         another_replica.cookies.set("session", second_cookie)
         another_replica.cookies.set("pytincture_csrf", second_csrf_cookie)
         response = another_replica.post(
-            "/classcall/example.py/ExampleClass/testfunc",
+            "/demoapp/classcall/example.py/ExampleClass/testfunc",
             json={"kwargs": {"source": "replica"}},
             headers=_csrf_headers(another_replica),
         )
@@ -2244,7 +2333,7 @@ def test_tampered_and_expired_stateless_sessions_are_rejected(
     fresh_client.cookies.clear()
     fresh_client.cookies.set("session", _tamper_token(valid_cookie))
     tampered_response = fresh_client.get(
-        "/classcall/example.py/ExampleClass/testfunc"
+        "/demoapp/classcall/example.py/ExampleClass/testfunc"
     )
     assert tampered_response.status_code == 401
 
@@ -2259,7 +2348,7 @@ def test_tampered_and_expired_stateless_sessions_are_rejected(
     fresh_client.cookies.clear()
     fresh_client.cookies.set("session", expired_cookie)
     expired_response = fresh_client.get(
-        "/classcall/example.py/ExampleClass/testfunc"
+        "/demoapp/classcall/example.py/ExampleClass/testfunc"
     )
     assert expired_response.status_code == 401
 
@@ -2543,7 +2632,7 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
 
     backend_app.USER_SESSION_DICT["person@example.com"] = {"stale": True}
     bff_response = fresh_client.post(
-        "/classcall/example.py/ExampleClass/testfunc",
+        "/demoapp/classcall/example.py/ExampleClass/testfunc",
         json={},
         headers=_csrf_headers(fresh_client),
     )
@@ -2895,7 +2984,7 @@ def test_authenticated_session_has_absolute_lifetime(
     ).sign(encoded).decode("utf-8")
     fresh_client.cookies.set("session", expired_absolute_cookie)
     response = fresh_client.post(
-        "/classcall/example.py/ExampleClass/testfunc",
+        "/demoapp/classcall/example.py/ExampleClass/testfunc",
         json={"kwargs": {}},
         headers={"X-CSRF-Token": fresh_client.cookies["pytincture_csrf"]},
     )
