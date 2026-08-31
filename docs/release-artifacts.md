@@ -21,7 +21,7 @@ features have explicit extras:
 | `password` | Argon2id or bcrypt local-password verification |
 | `oauth` | Google or Microsoft OAuth/OIDC |
 | `saml` | OneLogin SAML 2.0 and xmlsec |
-| `redis` | Upstash-backed sessions, revocations, and replay tokens |
+| `redis` | Optional Upstash-backed legacy shared state, immediate cross-worker revocation, and replay tokens |
 | `mcp` | FastMCP endpoint generation |
 | `dev` | All feature stacks plus Python test/build/release tools |
 

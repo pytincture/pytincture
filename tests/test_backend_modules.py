@@ -112,6 +112,20 @@ def test_redis_extra_has_actionable_install_hint(monkeypatch):
         RedisDict(redis_url="https://example.invalid", redis_token="token")
 
 
+@pytest.mark.parametrize(
+    "redis_url",
+    (
+        "http://redis.internal:8079",
+        "http://localhost:8079",
+        "redis://127.0.0.1:6379",
+        "https://",
+    ),
+)
+def test_redis_client_rejects_unsafe_or_invalid_urls_before_connecting(redis_url):
+    with pytest.raises(ValueError, match="redis_url"):
+        RedisDict(redis_url=redis_url, redis_token="token")
+
+
 def test_bff_registry_owns_root_and_reload_state(tmp_path: Path):
     first = tmp_path / "first"
     second = tmp_path / "second"

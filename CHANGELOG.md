@@ -5,6 +5,9 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Require HTTPS for explicitly enabled remote Redis/Upstash endpoints while
+  retaining literal loopback HTTP for local emulators. Redis remains optional;
+  signed-cookie sessions and load balancing do not depend on it.
 - Restrict backend widget-wheel routes to the application's exact declared
   distribution/version plus `PYTINCTURE_DEV_WHEEL_VERSION`, preventing stale
   or arbitrary same-name wheels from becoming public while preserving the

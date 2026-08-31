@@ -230,6 +230,53 @@ def test_invalid_configuration_fails_with_actionable_message(tmp_path, overrides
         PytinctureConfig(modules_path=str(tmp_path), **overrides)
 
 
+@pytest.mark.parametrize(
+    "redis_url",
+    (
+        "https://example.upstash.io",
+        "http://127.0.0.1:16379",
+        "http://[::1]:16379",
+    ),
+)
+def test_optional_redis_accepts_https_and_literal_loopback_http(tmp_path, redis_url):
+    config = PytinctureConfig(
+        modules_path=str(tmp_path),
+        use_redis_instance=True,
+        redis_url=f"  {redis_url}  ",
+        redis_token="token",
+    )
+
+    assert config.redis_url == redis_url
+
+
+@pytest.mark.parametrize(
+    "redis_url",
+    (
+        "http://redis.internal:8079",
+        "http://localhost:8079",
+        "http://127.0.0.1.example:8079",
+    ),
+)
+def test_optional_redis_rejects_cleartext_nonliteral_endpoints(tmp_path, redis_url):
+    with pytest.raises(ValueError, match="HTTPS.*literal loopback"):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            use_redis_instance=True,
+            redis_url=redis_url,
+            redis_token="token",
+        )
+
+
+def test_redis_remains_disabled_and_unrequired_by_default(tmp_path):
+    config = PytinctureConfig(
+        modules_path=str(tmp_path),
+        redis_url="http://remote.example:8079",
+    )
+
+    assert config.use_redis_instance is False
+    assert config.redis_token == ""
+
+
 def test_production_authentication_requires_exact_https_origin_controls(tmp_path):
     base = {
         "modules_path": str(tmp_path),

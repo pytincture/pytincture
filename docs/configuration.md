@@ -115,7 +115,7 @@ The contract test checks every row in this table against the dataclass model.
 | `bff_replay_token_low_watermark` | `BFF_REPLAY_TOKEN_LOW_WATERMARK` | Proof-pool refill threshold. |
 | `bff_replay_token_ttl_seconds` | `BFF_REPLAY_TOKEN_TTL_SECONDS` | Unused proof lifetime. |
 | `use_redis_instance` | `USE_REDIS_INSTANCE` | Use Upstash shared state. |
-| `redis_url` | `REDIS_UPSTASH_INSTANCE_URL` | Upstash Redis URL. |
+| `redis_url` | `REDIS_UPSTASH_INSTANCE_URL` | Optional Upstash Redis URL; HTTPS is required except for literal loopback development IPs. |
 | `redis_token` | `REDIS_UPSTASH_INSTANCE_TOKEN` | Upstash Redis token. |
 | `enable_mcp` | `ENABLE_MCP` | Enable the MCP mount. |
 | `mcp_tools` | `MCP_TOOLS` | Explicit MCP-to-BFF tool mappings. |

@@ -1,9 +1,34 @@
-"""Shared state stores used by sessions and one-time BFF tokens."""
+"""Optional shared stores used by revocation and one-time BFF features."""
 
+import ipaddress
 import json
 from typing import Any
+from urllib.parse import urlparse
 
 from pytincture.backend.limits import CircuitBreaker
+
+
+def validate_redis_url(redis_url: str) -> str:
+    """Require TLS except for literal loopback development endpoints."""
+
+    normalized = str(redis_url).strip()
+    try:
+        parsed = urlparse(normalized)
+        hostname = parsed.hostname
+    except ValueError as exc:
+        raise ValueError("redis_url must be an absolute HTTP(S) URL") from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or not hostname:
+        raise ValueError("redis_url must be an absolute HTTP(S) URL")
+    if parsed.scheme == "http":
+        try:
+            is_loopback = ipaddress.ip_address(hostname).is_loopback
+        except ValueError:
+            is_loopback = False
+        if not is_loopback:
+            raise ValueError(
+                "redis_url must use HTTPS unless it targets a literal loopback IP"
+            )
+    return normalized
 
 
 class RedisDict:
@@ -24,6 +49,7 @@ class RedisDict:
         if timeout_seconds <= 0:
             raise ValueError("remote store timeout must be greater than zero")
         if redis_client is None:
+            redis_url = validate_redis_url(redis_url)
             try:
                 from upstash_redis import Redis
             except ImportError as exc:

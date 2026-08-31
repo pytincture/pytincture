@@ -166,7 +166,7 @@ pip install ".[dev]"
 - GOOGLE_CLIENT_ID
 - GOOGLE_CLIENT_SECRET
 - SECRET_KEY: Legacy fallback signing key used only when `SAML_SECRET_KEY` is unset.
-- REDIS_UPSTASH_INSTANCE_URL: Url for upstash redis instance
+- REDIS_UPSTASH_INSTANCE_URL: Optional URL for an Upstash Redis instance. Remote endpoints must use HTTPS; HTTP is accepted only for a literal loopback development IP. Redis is not required for sessions or load balancing.
    example: "http://127.0.0.1:16379"
 - REDIS_UPSTASH_INSTANCE_TOKEN: Redis Upstash token
 - DATABASE_URL: Database connection string
