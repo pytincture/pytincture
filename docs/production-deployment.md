@@ -58,8 +58,10 @@ the public `AtomicReplayStore` contract. The optional Redis adapter is one such
 provider, not a framework requirement.
 
 Resource admission counters and the appcode cache are bounded, disposable, and
-local to each worker. They do not contain durable login/session state and do
-not require sticky routing. Size concurrency settings per worker, then apply a
+local to each worker. The archive LRU is independently capped by
+`APPCODE_CACHE_ENTRIES` and `APPCODE_CACHE_MAX_BYTES`. They do not contain
+durable login/session state and do not require sticky routing. Size concurrency
+settings per worker, then apply a
 gateway-wide request-rate and connection limit across the deployment. Local
 password login has independent peer/account limits per worker, so the gateway
 should provide the coordinated outer limit when multiple workers are exposed.

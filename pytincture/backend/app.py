@@ -18,6 +18,7 @@ import threading
 import time
 import uuid
 import zipfile
+from email.utils import formatdate
 from typing import (
     Any,
     Callable,
@@ -34,7 +35,6 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
-    FileResponse,
     HTMLResponse,
     JSONResponse,
     RedirectResponse,
@@ -155,11 +155,15 @@ from pytincture.backend.saml import (
     provider_value as saml_provider_value,
 )
 from pytincture.backend.safe_paths import (
+    SecureFileHandle,
     UnsafePath,
     decode_python_source,
+    hash_open_file,
     normalize_relative_path,
+    open_contained_file,
     read_contained_file,
     resolve_contained_path,
+    stat_contained_file,
     validate_application_name,
 )
 from pytincture.backend.saml import (
@@ -2029,11 +2033,22 @@ def _read_application_entrypoint(application: str, modules_root: str):
         raise HTTPException(status_code=404, detail="Asset not found") from None
 
 
-def _public_asset_response_headers(secure_file, relative_path: str) -> Dict[str, str]:
+def _public_asset_response_headers(
+    secure_file,
+    relative_path: str,
+    *,
+    digest: str | None = None,
+) -> Dict[str, str]:
+    identity = ":".join(str(value) for value in secure_file.identity)
     headers = {
         "Content-Length": str(secure_file.size),
-        "X-Pytincture-SHA256": secure_file.digest,
+        "ETag": f'"{hashlib.sha256(identity.encode("ascii")).hexdigest()}"',
+        "Last-Modified": formatdate(
+            secure_file.modified_ns / 1_000_000_000, usegmt=True
+        ),
     }
+    if digest is not None:
+        headers["X-Pytincture-SHA256"] = digest
     if os.path.splitext(relative_path)[1].lower() == ".svg":
         headers.update({
             "Content-Security-Policy": (
@@ -2043,6 +2058,90 @@ def _public_asset_response_headers(secure_file, relative_path: str) -> Dict[str,
             "Cross-Origin-Resource-Policy": "same-origin",
         })
     return headers
+
+
+def _resolve_public_asset(
+    application: str,
+    normalized: str,
+    modules_root: str,
+):
+    """Authorize an asset and return metadata without reading its body."""
+    entrypoint = _read_application_entrypoint(application, modules_root)
+    try:
+        entrypoint_source = decode_python_source(entrypoint.content)
+    except (SyntaxError, UnicodeDecodeError):
+        raise HTTPException(status_code=404, detail="Asset not found") from None
+    asset_allowed = _declared_app_asset_allowed(
+        application,
+        normalized,
+        entrypoint.path,
+        entrypoint_source,
+    ) or _application_widget_wheel_allowed(
+        application, normalized, modules_root
+    )
+    if not asset_allowed:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    try:
+        return stat_contained_file(modules_root, normalized)
+    except (OSError, UnsafePath):
+        raise HTTPException(status_code=404, detail="Asset not found") from None
+
+
+async def _stream_public_asset(handle: SecureFileHandle):
+    """Read a verified descriptor incrementally without blocking the event loop."""
+    try:
+        while True:
+            chunk = await run_in_threadpool(os.read, handle.descriptor, 64 * 1024)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        await run_in_threadpool(handle.close)
+
+
+async def _public_file_response(
+    request: Request,
+    root: str,
+    relative_path: str,
+    metadata,
+    *,
+    include_digest: bool = False,
+):
+    media_type = mimetypes.guess_type(metadata.path)[0] or "application/octet-stream"
+    if request.method == "HEAD":
+        return Response(
+            content=b"",
+            media_type=media_type,
+            headers=_public_asset_response_headers(metadata, relative_path),
+        )
+
+    handle = None
+    try:
+        handle = await run_in_threadpool(
+            open_contained_file,
+            root,
+            relative_path,
+            expected=metadata,
+        )
+        digest = (
+            await run_in_threadpool(hash_open_file, handle)
+            if include_digest
+            else None
+        )
+        headers = _public_asset_response_headers(
+            handle.metadata,
+            relative_path,
+            digest=digest,
+        )
+    except (OSError, UnsafePath):
+        if handle is not None:
+            await run_in_threadpool(handle.close)
+        raise HTTPException(status_code=404, detail="Asset not found") from None
+    return StreamingResponse(
+        _stream_public_asset(handle),
+        media_type=media_type,
+        headers=headers,
+    )
 
 
 def _application_widget_wheel_allowed(
@@ -2091,30 +2190,21 @@ async def public_app_asset(request: Request, application: str, asset_path: str):
     if any(part.startswith(".") for part in normalized.split("/")):
         raise HTTPException(status_code=404, detail="Asset not found")
     modules_root = os.path.realpath(get_modules_path())
-    entrypoint = _read_application_entrypoint(application, modules_root)
     try:
-        entrypoint_source = decode_python_source(entrypoint.content)
-    except (SyntaxError, UnicodeDecodeError):
-        raise HTTPException(status_code=404, detail="Asset not found") from None
-    asset_allowed = _declared_app_asset_allowed(
-        application,
+        metadata = await run_in_threadpool(
+            _resolve_public_asset,
+            application,
+            normalized,
+            modules_root,
+        )
+    except (OSError, UnsafePath):
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return await _public_file_response(
+        request,
+        modules_root,
         normalized,
-        entrypoint.path,
-        entrypoint_source,
-    ) or _application_widget_wheel_allowed(
-        application, normalized, modules_root
-    )
-    if not asset_allowed:
-        raise HTTPException(status_code=404, detail="Asset not found")
-    try:
-        secure_file = read_contained_file(modules_root, normalized)
-    except UnsafePath:
-        raise HTTPException(status_code=404, detail="Asset not found")
-    media_type = mimetypes.guess_type(secure_file.path)[0] or "application/octet-stream"
-    return Response(
-        content=b"" if request.method == "HEAD" else secure_file.content,
-        media_type=media_type,
-        headers=_public_asset_response_headers(secure_file, normalized),
+        metadata,
+        include_digest=normalized.lower().endswith(".whl"),
     )
 
 
@@ -2795,6 +2885,9 @@ APPCODE_MAX_FILES = int(os.getenv("APPCODE_MAX_FILES", "512"))
 APPCODE_MAX_FILE_BYTES = int(os.getenv("APPCODE_MAX_FILE_BYTES", str(4 * 1024 * 1024)))
 APPCODE_MAX_TOTAL_BYTES = int(os.getenv("APPCODE_MAX_TOTAL_BYTES", str(32 * 1024 * 1024)))
 APPCODE_CACHE_ENTRIES = int(os.getenv("APPCODE_CACHE_ENTRIES", "16"))
+APPCODE_CACHE_MAX_BYTES = int(
+    os.getenv("APPCODE_CACHE_MAX_BYTES", str(128 * 1024 * 1024))
+)
 APPCODE_BUILD_MAX_CONCURRENCY = int(os.getenv("APPCODE_BUILD_MAX_CONCURRENCY", "2"))
 APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS = float(
     os.getenv("APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS", "1")
@@ -2821,6 +2914,7 @@ if min(
     APPCODE_MAX_FILE_BYTES,
     APPCODE_MAX_TOTAL_BYTES,
     APPCODE_CACHE_ENTRIES,
+    APPCODE_CACHE_MAX_BYTES,
     APPCODE_BUILD_MAX_CONCURRENCY,
     APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS,
 ) <= 0:
@@ -2836,7 +2930,10 @@ BFF_ADMISSION_GATE = AsyncAdmissionGate(
     BFF_MAX_QUEUE,
     BFF_QUEUE_TIMEOUT_SECONDS,
 )
-APPCODE_ARCHIVE_CACHE = AppcodeArchiveCache(APPCODE_CACHE_ENTRIES)
+APPCODE_ARCHIVE_CACHE = AppcodeArchiveCache(
+    APPCODE_CACHE_ENTRIES,
+    APPCODE_CACHE_MAX_BYTES,
+)
 APPCODE_BUILD_GATE = threading.BoundedSemaphore(APPCODE_BUILD_MAX_CONCURRENCY)
 BFF_ISOLATED_EXECUTOR = ProcessIsolatedBFFExecutor(
     max_concurrency=BFF_ISOLATED_MAX_CONCURRENCY,
@@ -4653,8 +4750,9 @@ def build_app_favicon_markup(
     return "\n    ".join(tags)
 
 
-@app.get(
+@app.api_route(
     "/{application}/favicon-assets/{asset_name}",
+    methods=["GET", "HEAD"],
     include_in_schema=False,
 )
 async def configured_favicon_asset(
@@ -4666,7 +4764,9 @@ async def configured_favicon_asset(
 
     try:
         validate_application_name(application)
-        _read_application_entrypoint(application, get_modules_path())
+        await run_in_threadpool(
+            _read_application_entrypoint, application, get_modules_path()
+        )
     except (HTTPException, ValueError):
         raise HTTPException(status_code=404, detail="Favicon asset not found") from None
 
@@ -4675,14 +4775,16 @@ async def configured_favicon_asset(
         raise HTTPException(status_code=404, detail="Favicon asset not found")
 
     try:
-        secure_file = read_contained_file(favicon_directory, asset_name)
-    except UnsafePath:
+        metadata = await run_in_threadpool(
+            stat_contained_file, favicon_directory, asset_name
+        )
+    except (OSError, UnsafePath):
         raise HTTPException(status_code=404, detail="Favicon asset not found")
-    media_type = mimetypes.guess_type(secure_file.path)[0] or "application/octet-stream"
-    return Response(
-        content=b"" if request.method == "HEAD" else secure_file.content,
-        media_type=media_type,
-        headers=_public_asset_response_headers(secure_file, asset_name),
+    return await _public_file_response(
+        request,
+        favicon_directory,
+        asset_name,
+        metadata,
     )
 
 

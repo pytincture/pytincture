@@ -129,7 +129,7 @@ test("Keycloak SAML login authenticates the packaged app and BFF", async ({ page
         const consoleErrors = diagnostics.consoleEntries.filter(entry => entry.type === "error");
         expect(consoleErrors).toEqual([]);
         const completedWheelProbeAborts = diagnostics.failures.filter(entry => (
-            entry.method === "HEAD"
+            entry.method === "GET"
             && entry.failure?.errorText === "net::ERR_ABORTED"
             && entry.url.includes("dhxpyt-0.9.16+backend-py3-none-any.whl")
             && diagnostics.responses.some(response => (

@@ -40,8 +40,12 @@ available. Archive member ordering and compression level are not contractual.
 Construction is subject to configured file-count, individual-file,
 aggregate-source, build-concurrency, and admission-wait limits. Public archives
 without session-specific replay material may be served from a bounded
-per-worker cache keyed by selected-file metadata. Limit failures return `413`;
-temporary build saturation returns `503` with `Retry-After`.
+per-worker cache. A warm lookup validates the digest-bearing source fingerprint
+through no-follow file identity metadata and relevant directory metadata before
+returning immutable cached bytes, without rereading or rehashing unchanged
+sources. The LRU has independent entry-count and aggregate-byte limits. Limit
+failures return `413`; temporary build saturation returns `503` with
+`Retry-After`.
 
 ## Security boundary
 

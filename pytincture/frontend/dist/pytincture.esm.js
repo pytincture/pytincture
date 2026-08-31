@@ -859,18 +859,26 @@ await micropip.install(${libLiteral}, deps=False)
   }
 }
 async function probeBackendWheel(url) {
-  var _a, _b;
+  var _a, _b, _c, _d;
   let response;
   try {
-    response = await fetch(url, { method: "HEAD" });
+    response = await fetch(url);
   } catch (err) {
     console.warn(`Failed to check URL: ${url}`, err);
     return null;
   }
   if (!response.ok) {
+    try {
+      await ((_a = response.body) == null ? void 0 : _a.cancel());
+    } catch (_error) {
+    }
     return null;
   }
-  const sha256 = ((_b = (_a = response.headers) == null ? void 0 : _a.get) == null ? void 0 : _b.call(_a, "x-pytincture-sha256")) || "";
+  const sha256 = ((_c = (_b = response.headers) == null ? void 0 : _b.get) == null ? void 0 : _c.call(_b, "x-pytincture-sha256")) || "";
+  try {
+    await ((_d = response.body) == null ? void 0 : _d.cancel());
+  } catch (_error) {
+  }
   if (!/^[a-f0-9]{64}$/i.test(sha256)) {
     throw new Error("Backend wheel response is missing a valid X-Pytincture-SHA256 header.");
   }

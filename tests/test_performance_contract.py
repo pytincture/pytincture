@@ -18,7 +18,13 @@ def test_performance_budget_contract_covers_roadmap_targets():
         "authenticated_bff_p95_ms",
         "bff_samples",
     }.issubset(browser)
-    for name in ("health", "appcode", "bff"):
+    for name in (
+        "health",
+        "appcode",
+        "public_asset_head",
+        "public_asset",
+        "bff",
+    ):
         assert service[f"{name}_p95_ms"] > 0
         assert service[f"{name}_requests"] > 0
         assert service[f"{name}_concurrency"] > 0
@@ -36,6 +42,8 @@ def test_ci_runs_and_retains_every_performance_profile():
     assert "adversarial_load_smoke.py" in runner
     assert "/performance_data/classcall/" in runner
     assert "/performance_data/classcall/" in saturation
+    assert "public_asset_head" in runner
+    assert "dhxpyt-0.9.16+backend-py3-none-any.whl" in runner
     assert '"/classcall/' not in runner
     assert '"/classcall/' not in saturation
     assert "performance-saturation.json" in workflow

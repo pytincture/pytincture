@@ -614,6 +614,45 @@
         "tests/test_app.py::test_class_call_uses_optional_process_isolation_when_configured",
         "tests/test_configuration.py::test_trusted_bff_execution_remains_the_simple_default"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-M-10-PUBLIC-FILE-APPCODE-CACHE",
+      "status": "remediated",
+      "title": "Public file streaming and byte-bounded appcode caching",
+      "intentional_contract": "Public application assets remain application-owned, unauthenticated deployment files, and appcode archives remain disposable per-worker optimizations. Neither mechanism stores login or session state, requires Redis, or requires sticky routing.",
+      "security_boundary": "Direct assets are authorized using the existing application ownership boundary, opened through no-follow descriptors, and streamed in bounded chunks with blocking filesystem work off the event loop. HEAD reads metadata only. Warm appcode cache hits validate the digest-bearing source fingerprint using device, inode, size, mtime, ctime, and relevant directory metadata before returning immutable bytes; changed metadata forces a full secure reread and SHA-256 rebuild. The LRU enforces both entry-count and aggregate-byte limits.",
+      "controls": {
+        "public_asset_buffered_in_memory": false,
+        "public_asset_reads_off_event_loop": true,
+        "public_asset_nofollow_descriptor": true,
+        "head_reads_asset_body": false,
+        "widget_get_digest_incremental": true,
+        "warm_archive_source_reread": false,
+        "warm_archive_source_rehash": false,
+        "changed_source_forces_digest_rebuild": true,
+        "cache_entry_limit": true,
+        "cache_aggregate_byte_limit": true,
+        "redis_required": false,
+        "sticky_routing_required": false
+      },
+      "implementation": [
+        "pytincture/backend/safe_paths.py",
+        "pytincture/backend/browser_packages.py",
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "pytincture/frontend/pytincture.js",
+        "docs/contracts/appcode-v1.md"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_secure_stat_reads_metadata_without_reading_file_contents",
+        "tests/test_backend_modules.py::test_appcode_warm_cache_uses_metadata_without_rereading_sources",
+        "tests/test_backend_modules.py::test_appcode_cache_enforces_aggregate_byte_budget",
+        "tests/test_app.py::test_large_public_asset_head_is_metadata_only_and_get_streams_off_loop",
+        "tests/test_app.py::test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not",
+        "tests/test_performance_contract.py::test_performance_budget_contract_covers_roadmap_targets",
+        "tests/test_performance_contract.py::test_ci_runs_and_retains_every_performance_profile",
+        "pytincture/frontend/e2e-tests/pytincture.spec.mjs::authenticated packaged and inline apps run through real Pyodide"
+      ]
     }
   ]
 }

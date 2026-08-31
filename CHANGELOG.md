@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Stream direct public assets from verified no-follow descriptors in bounded
+  chunks, perform file I/O off the event loop, and make HEAD metadata-only.
+  Warm appcode archives now validate cached source digests through file and
+  directory identity metadata before any source reread; the per-worker LRU is
+  bounded by aggregate bytes as well as entry count.
 - Bound ordinary BFF JSON responses by configurable serialized bytes, depth,
   and item count, and serialize stream items under the remaining byte budget
   before retaining them. Add an opt-in process executor with killable wall

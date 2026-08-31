@@ -68,6 +68,7 @@ from pytincture.backend.safe_paths import (
     UnsafePath,
     normalize_relative_path,
     read_contained_file,
+    stat_contained_file,
     validate_application_name,
 )
 from pytincture.backend.source_loading import build_dynamic_module_name, load_source_module
@@ -450,6 +451,22 @@ def test_secure_read_supports_nested_packages(tmp_path):
     assert secure.content == b"value = 42\n"
     assert secure.path == str(nested.resolve())
     assert len(secure.digest) == 64
+
+
+def test_secure_stat_reads_metadata_without_reading_file_contents(tmp_path, monkeypatch):
+    import pytincture.backend.safe_paths as safe_paths
+
+    target = tmp_path / "large.bin"
+    target.write_bytes(b"x" * (2 * 1024 * 1024))
+
+    def reject_body_read(*_args, **_kwargs):
+        raise AssertionError("metadata lookup read file contents")
+
+    monkeypatch.setattr(safe_paths.os, "read", reject_body_read)
+    metadata = stat_contained_file(str(tmp_path), "large.bin")
+
+    assert metadata.size == target.stat().st_size
+    assert metadata.path == str(target.resolve())
 
 
 @pytest.mark.skipif(not hasattr(__import__("os"), "symlink"), reason="symlinks unavailable")
@@ -1124,6 +1141,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-M-07-POLICY",
         "REVIEW-2026-08-31-M-08-REPLAY-ISSUANCE",
         "REVIEW-2026-08-31-M-09-BFF-EXECUTION",
+        "REVIEW-2026-08-31-M-10-PUBLIC-FILE-APPCODE-CACHE",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1207,6 +1225,14 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert execution_controls["trusted_execution_default"] is True
     assert execution_controls["process_isolation_mandatory"] is False
     assert execution_controls["redis_required"] is False
+    public_file_controls = dispositions[
+        "REVIEW-2026-08-31-M-10-PUBLIC-FILE-APPCODE-CACHE"
+    ]["controls"]
+    assert public_file_controls["public_asset_buffered_in_memory"] is False
+    assert public_file_controls["head_reads_asset_body"] is False
+    assert public_file_controls["warm_archive_source_reread"] is False
+    assert public_file_controls["cache_aggregate_byte_limit"] is True
+    assert public_file_controls["redis_required"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:
@@ -1464,6 +1490,75 @@ def test_appcode_archive_limits_and_cache(tmp_path):
         create_appcode_archive(
             "", "", "demo", str(tmp_path), parser, max_total_bytes=20
         )
+
+
+def test_appcode_warm_cache_uses_metadata_without_rereading_sources(
+    tmp_path, monkeypatch
+):
+    import pytincture.backend.browser_packages as browser_packages
+
+    (tmp_path / "demo.py").write_text("import helper\nVALUE = 1\n", encoding="utf-8")
+    (tmp_path / "helper.py").write_text("HELPER = 2\n", encoding="utf-8")
+    reads = []
+    parses = []
+    original_read = browser_packages.read_contained_file
+
+    def counted_read(root, relative_path, **kwargs):
+        reads.append(relative_path)
+        return original_read(root, relative_path, **kwargs)
+
+    def parser(path, host, protocol, *, source_code, **kwargs):
+        parses.append(path)
+        return source_code
+
+    monkeypatch.setattr(browser_packages, "read_contained_file", counted_read)
+    cache = AppcodeArchiveCache(4, 1024 * 1024)
+
+    cold = create_appcode_archive("", "", "demo", str(tmp_path), parser, cache=cache)
+    cold_reads = len(reads)
+    warm = create_appcode_archive("", "", "demo", str(tmp_path), parser, cache=cache)
+
+    assert cold.getvalue() == warm.getvalue()
+    assert cold_reads == 2
+    assert len(reads) == cold_reads
+    assert len(parses) == 2
+
+    (tmp_path / "helper.py").write_text("HELPER = 3\n", encoding="utf-8")
+    changed = create_appcode_archive("", "", "demo", str(tmp_path), parser, cache=cache)
+    assert changed.getvalue() != warm.getvalue()
+    assert len(reads) > cold_reads
+
+
+def test_appcode_cache_enforces_aggregate_byte_budget(tmp_path):
+    (tmp_path / "alpha.py").write_text("VALUE = 'alpha'\n", encoding="utf-8")
+    (tmp_path / "beta.py").write_text("VALUE = 'beta'\n", encoding="utf-8")
+    parse_calls = []
+
+    def parser(path, host, protocol, *, source_code, **kwargs):
+        parse_calls.append(Path(path).name)
+        return source_code
+
+    sizing_cache = AppcodeArchiveCache(4, 1024 * 1024)
+    alpha = create_appcode_archive(
+        "", "", "alpha", str(tmp_path), parser, cache=sizing_cache
+    )
+    byte_limited = AppcodeArchiveCache(4, len(alpha.getvalue()) + 16)
+    parse_calls.clear()
+
+    create_appcode_archive("", "", "alpha", str(tmp_path), parser, cache=byte_limited)
+    create_appcode_archive("", "", "beta", str(tmp_path), parser, cache=byte_limited)
+    calls_before_retry = len(parse_calls)
+
+    assert 0 < byte_limited.current_bytes <= byte_limited.max_bytes
+    create_appcode_archive("", "", "alpha", str(tmp_path), parser, cache=byte_limited)
+    assert len(parse_calls) > calls_before_retry
+
+    too_small = AppcodeArchiveCache(4, 1)
+    parse_calls.clear()
+    create_appcode_archive("", "", "alpha", str(tmp_path), parser, cache=too_small)
+    create_appcode_archive("", "", "alpha", str(tmp_path), parser, cache=too_small)
+    assert too_small.current_bytes == 0
+    assert len(parse_calls) == 2
 
 
 def test_remote_store_circuit_opens_and_recovers():

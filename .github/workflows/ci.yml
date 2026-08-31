@@ -763,6 +763,8 @@ jobs:
             --artifact-manifest dist/SHA256SUMS.json \
             --result health=performance-health.json \
             --result appcode=performance-appcode.json \
+            --result public_asset_head=performance-public_asset_head.json \
+            --result public_asset=performance-public_asset.json \
             --result bff=performance-bff.json \
             --result saturation=performance-saturation.json \
             --output qualification-evidence-performance-service.json

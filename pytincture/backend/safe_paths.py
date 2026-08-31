@@ -54,6 +54,55 @@ class SecureFile:
     digest: str
     size: int
     modified_ns: int
+    changed_ns: int
+    device: int
+    inode: int
+
+    @property
+    def identity(self) -> tuple[int, int, int, int, int]:
+        return (
+            self.device,
+            self.inode,
+            self.size,
+            self.modified_ns,
+            self.changed_ns,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SecureFileMetadata:
+    """Identity and size metadata collected through a no-follow open."""
+
+    path: str
+    relative_path: str
+    size: int
+    modified_ns: int
+    changed_ns: int
+    device: int
+    inode: int
+
+    @property
+    def identity(self) -> tuple[int, int, int, int, int]:
+        return (
+            self.device,
+            self.inode,
+            self.size,
+            self.modified_ns,
+            self.changed_ns,
+        )
+
+
+@dataclass(slots=True)
+class SecureFileHandle:
+    """A no-follow file descriptor paired with its verified identity."""
+
+    descriptor: int
+    metadata: SecureFileMetadata
+
+    def close(self) -> None:
+        if self.descriptor >= 0:
+            os.close(self.descriptor)
+            self.descriptor = -1
 
 
 def validate_application_name(value: str) -> str:
@@ -168,16 +217,16 @@ def _open_relative_nofollow(root: str, relative_path: str) -> int:
                 pass
 
 
-def read_contained_file(
+def open_contained_file(
     root: str,
     relative_path: str,
     *,
     max_bytes: int | None = None,
-) -> SecureFile:
-    """Atomically open and read a contained regular file without following links."""
+    expected: SecureFileMetadata | None = None,
+) -> SecureFileHandle:
+    """Open a contained regular file without reading or following links."""
     root_path = canonical_root(root)
     normalized = normalize_relative_path(relative_path)
-    # Resolve first for consistent errors and platforms without openat support.
     path = resolve_contained_path(root_path, normalized)
     try:
         descriptor = _open_relative_nofollow(root_path, normalized)
@@ -193,10 +242,65 @@ def read_contained_file(
             raise UnsafePath("file changed during secure open") from exc
         if (metadata.st_dev, metadata.st_ino) != (current.st_dev, current.st_ino):
             raise UnsafePath("file changed during secure open")
+        if max_bytes is not None and metadata.st_size > max_bytes:
+            raise UnsafePath("file exceeds configured size limit")
+        secure_metadata = SecureFileMetadata(
+            path=path,
+            relative_path=normalized,
+            size=metadata.st_size,
+            modified_ns=metadata.st_mtime_ns,
+            changed_ns=metadata.st_ctime_ns,
+            device=metadata.st_dev,
+            inode=metadata.st_ino,
+        )
+        if expected is not None and secure_metadata.identity != expected.identity:
+            raise UnsafePath("file changed after metadata validation")
+        return SecureFileHandle(descriptor=descriptor, metadata=secure_metadata)
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def stat_contained_file(
+    root: str,
+    relative_path: str,
+    *,
+    max_bytes: int | None = None,
+) -> SecureFileMetadata:
+    """Return no-follow metadata without reading file contents."""
+    handle = open_contained_file(root, relative_path, max_bytes=max_bytes)
+    try:
+        return handle.metadata
+    finally:
+        handle.close()
+
+
+def hash_open_file(handle: SecureFileHandle) -> str:
+    """Hash an open file incrementally and rewind it for subsequent streaming."""
+    digest = hashlib.sha256()
+    os.lseek(handle.descriptor, 0, os.SEEK_SET)
+    while True:
+        chunk = os.read(handle.descriptor, 64 * 1024)
+        if not chunk:
+            break
+        digest.update(chunk)
+    os.lseek(handle.descriptor, 0, os.SEEK_SET)
+    return digest.hexdigest()
+
+
+def read_contained_file(
+    root: str,
+    relative_path: str,
+    *,
+    max_bytes: int | None = None,
+) -> SecureFile:
+    """Atomically open and read a contained regular file without following links."""
+    handle = open_contained_file(root, relative_path, max_bytes=max_bytes)
+    try:
         chunks: list[bytes] = []
         total = 0
         while True:
-            chunk = os.read(descriptor, 64 * 1024)
+            chunk = os.read(handle.descriptor, 64 * 1024)
             if not chunk:
                 break
             total += len(chunk)
@@ -205,12 +309,16 @@ def read_contained_file(
             chunks.append(chunk)
         content = b"".join(chunks)
     finally:
-        os.close(descriptor)
+        handle.close()
+    metadata = handle.metadata
     return SecureFile(
-        path=path,
-        relative_path=normalized,
+        path=metadata.path,
+        relative_path=metadata.relative_path,
         content=content,
         digest=hashlib.sha256(content).hexdigest(),
         size=len(content),
-        modified_ns=metadata.st_mtime_ns,
+        modified_ns=metadata.modified_ns,
+        changed_ns=metadata.changed_ns,
+        device=metadata.device,
+        inode=metadata.inode,
     )

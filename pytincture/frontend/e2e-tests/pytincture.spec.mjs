@@ -220,7 +220,9 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         expect(new URL(widgetRequest.url).searchParams.get("uuid")).toBeTruthy();
         const wheelHead = await request.head(`/e2e_app/appcode/${WIDGET_WHEEL}`);
         expect(wheelHead.ok()).toBe(true);
-        expect(wheelHead.headers()["x-pytincture-sha256"]).toMatch(/^[a-f0-9]{64}$/);
+        expect(wheelHead.headers()["x-pytincture-sha256"]).toBeUndefined();
+        const wheelGet = await request.get(`/e2e_app/appcode/${WIDGET_WHEEL}`);
+        expect(wheelGet.headers()["x-pytincture-sha256"]).toMatch(/^[a-f0-9]{64}$/);
 
         const localFrontendRequests = diagnostics.requests.filter(entry => {
             const url = new URL(entry.url);

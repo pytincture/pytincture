@@ -310,6 +310,11 @@ class PytinctureConfig:
     appcode_cache_entries: int = _setting(
         16, "APPCODE_CACHE_ENTRIES", "Per-worker bounded browser archive cache entries."
     )
+    appcode_cache_max_bytes: int = _setting(
+        128 * 1024 * 1024,
+        "APPCODE_CACHE_MAX_BYTES",
+        "Aggregate byte limit for the per-worker browser archive cache.",
+    )
     appcode_build_max_concurrency: int = _setting(
         2, "APPCODE_BUILD_MAX_CONCURRENCY", "Concurrent archive builds per worker."
     )
@@ -508,6 +513,7 @@ class PytinctureConfig:
             self.appcode_max_file_bytes,
             self.appcode_max_total_bytes,
             self.appcode_cache_entries,
+            self.appcode_cache_max_bytes,
             self.appcode_build_max_concurrency,
             self.appcode_build_queue_timeout_seconds,
             self.remote_store_timeout_seconds,
@@ -792,6 +798,7 @@ class PytinctureConfig:
             "bff_isolated_memory_bytes",
             "bff_stream_max_items", "appcode_max_files", "appcode_max_file_bytes",
             "appcode_max_total_bytes", "appcode_cache_entries",
+            "appcode_cache_max_bytes",
             "appcode_build_max_concurrency",
             "remote_store_failure_threshold",
         }

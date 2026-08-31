@@ -78,6 +78,13 @@ with a JSON mapping; `*` explicitly declares shared files:
 
 `PYTINCTURE_BROWSER_FILES` controls archive inclusion and also permits its
 browser-safe asset types to be fetched directly.
+
+Direct GET responses stream from no-follow file descriptors in bounded chunks,
+with filesystem reads moved off the event loop. HEAD returns size, modification,
+and ETag metadata without reading the asset body. Authorized widget-wheel GET
+responses additionally compute and return `X-Pytincture-SHA256` incrementally;
+the browser uses that value to create the hash-locked micropip URL. HEAD does
+not hash or return the wheel digest.
 `PYTINCTURE_PUBLIC_ASSET_PATHS` controls direct HTTP exposure only—use the
 narrowest setting for each. SVG remains supported for declared application
 assets and favicons, but its response receives a no-script sandbox CSP and

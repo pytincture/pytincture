@@ -124,6 +124,8 @@
     "media_type": "application/zip",
     "download_filename": "appcode.pyt",
     "entrypoint": "{application}.py",
-    "path_format": "relative-posix"
+    "path_format": "relative-posix",
+    "cache_limits": ["entries", "aggregate-bytes"],
+    "warm_validation": "no-follow-source-and-directory-metadata"
   }
 }

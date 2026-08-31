@@ -881,6 +881,54 @@ def test_public_svg_assets_are_sandboxed(fresh_client, monkeypatch, tmp_path):
     assert head.headers["content-length"] == str(len(svg))
 
 
+def test_large_public_asset_head_is_metadata_only_and_get_streams_off_loop(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setenv("PYTINCTURE_PUBLIC_ASSET_PATHS", "large.bin")
+    (tmp_path / "demoapp.py").write_text("# demo application\n")
+    payload = b"x" * (3 * 1024 * 1024 + 17)
+    (tmp_path / "large.bin").write_bytes(payload)
+
+    original_read_contained = backend_app.read_contained_file
+    original_run_in_threadpool = backend_app.run_in_threadpool
+    original_os_read = backend_app.os.read
+    offloaded = []
+    read_sizes = []
+
+    def reject_buffered_asset_read(root, relative_path, **kwargs):
+        assert relative_path != "large.bin"
+        return original_read_contained(root, relative_path, **kwargs)
+
+    async def tracked_threadpool(function, *args, **kwargs):
+        offloaded.append(getattr(function, "__name__", repr(function)))
+        return await original_run_in_threadpool(function, *args, **kwargs)
+
+    def tracked_os_read(descriptor, size):
+        read_sizes.append(size)
+        return original_os_read(descriptor, size)
+
+    monkeypatch.setattr(backend_app, "read_contained_file", reject_buffered_asset_read)
+    monkeypatch.setattr(backend_app, "run_in_threadpool", tracked_threadpool)
+    monkeypatch.setattr(backend_app.os, "read", tracked_os_read)
+
+    head = fresh_client.head("/demoapp/appcode/large.bin")
+    assert head.status_code == 200
+    assert head.content == b""
+    assert head.headers["content-length"] == str(len(payload))
+    assert "open_contained_file" not in offloaded
+
+    offloaded.clear()
+    response = fresh_client.get("/demoapp/appcode/large.bin")
+    assert response.status_code == 200
+    assert response.content == payload
+    assert "_resolve_public_asset" in offloaded
+    assert "open_contained_file" in offloaded
+    assert max(read_sizes) <= 64 * 1024
+
+
 def test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not(
     fresh_client, monkeypatch, tmp_path
 ):
@@ -914,8 +962,11 @@ def test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not(
     assert fresh_client.get(f"/demoapp/appcode/{matching_dev}").status_code == 200
     assert fresh_client.head(f"/demoapp/appcode/{matching_version}").status_code == 200
     assert fresh_client.head(f"/demoapp/appcode/{matching_dev}").status_code == 200
+    assert "x-pytincture-sha256" not in fresh_client.head(
+        f"/demoapp/appcode/{matching_version}"
+    ).headers
     assert (
-        fresh_client.head(f"/demoapp/appcode/{matching_version}").headers[
+        fresh_client.get(f"/demoapp/appcode/{matching_version}").headers[
             "x-pytincture-sha256"
         ]
         == __import__("hashlib").sha256(b"versioned-wheel").hexdigest()
