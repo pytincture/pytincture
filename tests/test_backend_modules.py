@@ -163,6 +163,54 @@ def test_bff_registry_can_defer_filesystem_scanning_until_first_use(tmp_path: Pa
     assert calls == [str(tmp_path / "data.py")]
 
 
+def test_bff_registry_isolates_invalid_source_files_and_recovers(tmp_path: Path):
+    healthy = tmp_path / "healthy.py"
+    healthy.write_text(
+        "from pytincture.dataclass import backend_for_frontend\n"
+        "@backend_for_frontend\n"
+        "class Healthy:\n"
+        "    def ping(self): return True\n",
+        encoding="utf-8",
+    )
+    broken = tmp_path / "broken.py"
+    broken.write_text("def incomplete(\n", encoding="utf-8")
+    invalid_encoding = tmp_path / "invalid_encoding.py"
+    invalid_encoding.write_bytes(b"# coding: utf-8\n\xff\n")
+
+    registry = BFFRegistry(str(tmp_path))
+
+    assert registry.operation(
+        str(tmp_path), "healthy.py", "Healthy", "ping"
+    ) is not None
+    assert registry.operation(
+        str(tmp_path), "broken.py", "Broken", "ping"
+    ) is None
+    assert registry.failures == {
+        "broken.py": "invalid_python_syntax",
+        "invalid_encoding.py": "invalid_python_encoding",
+    }
+
+    broken.write_text(
+        "from pytincture.dataclass import backend_for_frontend\n"
+        "@backend_for_frontend\n"
+        "class Broken:\n"
+        "    def ping(self): return 'recovered'\n",
+        encoding="utf-8",
+    )
+    assert registry.operation(
+        str(tmp_path), "broken.py", "Broken", "ping"
+    ) is None
+    registry.reload()
+    recovered = registry.operation(
+        str(tmp_path), "broken.py", "Broken", "ping"
+    )
+    assert recovered is not None
+    assert "broken.py" not in registry.failures
+    assert registry.failures == {
+        "invalid_encoding.py": "invalid_python_encoding"
+    }
+
+
 @pytest.mark.parametrize(
     "application",
     (
@@ -603,6 +651,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert set(dispositions) == {
         "F-01",
         "F-02",
+        "OBS-BFF-REGISTRY-BLAST-RADIUS",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -613,6 +662,10 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     saml_controls = dispositions["SAML-STATELESS-REPLAY-BOUNDARY"]["controls"]
     assert saml_controls["redis_required"] is False
     assert saml_controls["process_memory_required"] is False
+    registry_controls = dispositions["OBS-BFF-REGISTRY-BLAST-RADIUS"]["controls"]
+    assert registry_controls["invalid_file_operations_denied"] is True
+    assert registry_controls["unrelated_valid_operations_preserved"] is True
+    assert registry_controls["redis_required"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:

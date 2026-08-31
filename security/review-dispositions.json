@@ -87,6 +87,32 @@
         "tests/test_app.py::test_saml_acs_requires_exact_in_response_to",
         "tests/test_production.py::test_saml_handshake_is_portable_between_workers_without_redis"
       ]
+    },
+    {
+      "id": "OBS-BFF-REGISTRY-BLAST-RADIUS",
+      "status": "remediated",
+      "title": "Fail-closed per-file BFF registry discovery",
+      "intentional_contract": "The class decorator remains the complete developer opt-in, while static registry failures are isolated to the exact canonical source file that failed validation.",
+      "security_boundary": "An unreadable, unsafe, malformed, or invalidly encoded file contributes zero callable operations. Other files retain only their own proven exports, and a repaired file must pass a complete rescan before access is restored.",
+      "controls": {
+        "invalid_file_operations_denied": true,
+        "unrelated_valid_operations_preserved": true,
+        "recovery_requires_complete_rescan": true,
+        "policy_bearing_exports_remain_fail_closed": true,
+        "explicit_mcp_targets_remain_fail_closed": true,
+        "redis_required": false,
+        "shared_state_required": false
+      },
+      "implementation": [
+        "pytincture/backend/bff.py",
+        "pytincture/backend/app.py",
+        "docs/contracts/bff-v1.md",
+        "docs/production-deployment.md"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_bff_registry_isolates_invalid_source_files_and_recovers",
+        "tests/test_configuration.py::test_invalid_python_file_cannot_disable_unrelated_bff_application"
+      ]
     }
   ]
 }
