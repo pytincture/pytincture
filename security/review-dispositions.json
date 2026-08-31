@@ -333,6 +333,41 @@
         "tests/test_dataclass.py::test_generate_stub_classes_requires_application_for_bff_clients",
         "tests/test_contracts.py::test_bff_route_methods_and_generated_stub_match_contract"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-H-05",
+      "status": "remediated",
+      "title": "Shared multi-app services can enforce stateless application identity admission",
+      "intentional_contract": "An explicitly single-trust service may retain one global identity policy. A configured per-application policy is required when one service admits different identities to different applications; materially different trust domains should use separate origins and processes.",
+      "security_boundary": "Every authentication flow builds a compact verified identity and evaluates the exact application's configured provider, issuer, tenant, subject, email/domain, and role constraints before issuing a session. The application remains the signed audience, and admission is rechecked whenever that audience is enforced.",
+      "controls": {
+        "single_trust_compatibility_preserved": true,
+        "configured_applications_fail_closed": true,
+        "unlisted_applications_denied_when_configured": true,
+        "provider_issuer_tenant_subject_email_domain_role_constraints": true,
+        "checked_before_session_issuance": true,
+        "checked_during_application_audience_enforcement": true,
+        "separate_origins_recommended_for_different_trust_domains": true,
+        "in_process_state_required": false,
+        "sticky_sessions_required": false,
+        "redis_required": false
+      },
+      "implementation": [
+        "pytincture/backend/application_admission.py",
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "docs/authentication.md",
+        "docs/configuration.md",
+        "security/accepted-architecture.md"
+      ],
+      "regression_tests": [
+        "tests/test_application_admission.py::test_application_admission_is_stateless_and_fails_closed",
+        "tests/test_application_admission.py::test_application_admission_across_identity_providers",
+        "tests/test_application_admission.py::test_application_admission_rejects_invalid_configuration",
+        "tests/test_application_admission.py::test_config_normalizes_application_admission_and_round_trips_to_environment",
+        "tests/test_application_admission.py::test_local_login_enforces_application_admission_before_session_issuance",
+        "tests/test_app.py::test_authenticated_session_cannot_cross_application_audience"
+      ]
     }
   ]
 }

@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Add stateless, fail-closed per-application identity admission for shared
+  multi-app services. Optional rules constrain provider, issuer, tenant,
+  subject, email/domain, and role before session issuance and whenever the
+  signed application audience is enforced. Empty configuration preserves the
+  simple single-trust service model; Redis and sticky sessions are not needed.
 - Remove the unscoped `/classcall/...` compatibility routes. Every BFF call,
   including no-auth and MCP-backed calls, now names a real application and
   passes exact application graph membership before dispatch. Generated stubs,

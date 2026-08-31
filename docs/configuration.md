@@ -44,6 +44,44 @@ It cannot be combined with trusted proxy headers, public host/origin controls,
 or Google, Microsoft, or SAML authentication. This prevents a reverse proxy on
 loopback from laundering a remote request into passwordless development login.
 
+Services that intentionally put applications with different identity rules in
+one process can set `application_admission` (or
+`AUTH_APPLICATION_ADMISSION`) to a JSON application-to-rules mapping:
+
+```python
+config = PytinctureConfig(
+    modules_path="./apps",
+    application_admission={
+        "reports": {
+            "providers": ["microsoft"],
+            "tenants": ["contoso-tenant-id"],
+            "email_domains": ["example.com"],
+            "roles": ["reader", "administrator"],
+        },
+        "admin": {
+            "providers": ["microsoft"],
+            "roles": ["administrator"],
+        },
+    },
+)
+```
+
+Supported rule fields are `providers`, `issuers`, `tenants`, `subjects`,
+`emails`, `email_domains`, and `roles`. A string or list of strings is accepted
+for each field. Values in one field are alternatives, while every configured
+field must match; a roles rule requires at least one matching normalized role.
+Once any application rule is configured, applications missing from the mapping
+fail closed. An empty rule (`"reports": {}`) explicitly admits any globally
+verified identity to that application.
+
+Leaving the mapping empty preserves the service-wide identity policy for a
+single-trust service. The admission decision is repeated before session
+issuance and when the application audience is enforced, uses only signed
+identity claims, and requires no Redis or in-process state. Applications with
+materially different trust domains should still use separate origins and
+processes so a browser/package compromise in one cannot inherit another's
+same-origin authority.
+
 Run production applications with any ASGI server, for example
 `uvicorn my_service:app`. The compatibility `launch_service()` API remains
 available for existing deployments. Both typed and compatibility paths reject
@@ -71,6 +109,7 @@ The contract test checks every row in this table against the dataclass model.
 | `enable_google_auth` | `ENABLE_GOOGLE_AUTH` | Enable Google OAuth. |
 | `enable_microsoft_auth` | `ENABLE_MICROSOFT_AUTH` | Enable Microsoft OAuth. |
 | `enable_saml_auth` | `ENABLE_SAML_AUTH` | Enable SAML authentication. |
+| `application_admission` | `AUTH_APPLICATION_ADMISSION` | JSON per-application identity admission rules. |
 | `allow_development_auth_origin` | `PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN` | Allow request-derived authentication origins in loopback-only development. |
 | `google_client_id` | `GOOGLE_CLIENT_ID` | Google OAuth client id. |
 | `google_client_secret` | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret. |
