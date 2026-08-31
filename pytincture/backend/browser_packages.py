@@ -6,6 +6,7 @@ import importlib
 import io
 import json
 import os
+import re
 import threading
 import zipfile
 from collections import OrderedDict
@@ -14,6 +15,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from pytincture.dataclass import has_bff_export_class
 from pytincture.backend.safe_paths import (
     UnsafePath,
     canonical_root,
@@ -32,6 +34,38 @@ _EXCLUDED_DIRECTORIES = {
     "build",
     "dist",
 }
+
+_SENSITIVE_BROWSER_SUFFIXES = frozenset({
+    ".bak",
+    ".backup",
+    ".db",
+    ".dump",
+    ".jks",
+    ".key",
+    ".kdbx",
+    ".p12",
+    ".pem",
+    ".pfx",
+    ".sqlite",
+    ".sqlite3",
+})
+_SENSITIVE_BROWSER_NAMES = frozenset({
+    "credentials",
+    "credentials.json",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "id_rsa",
+    "secrets",
+    "secrets.json",
+})
+_SENSITIVE_BROWSER_NAME_TOKENS = frozenset({
+    "credential",
+    "credentials",
+    "privatekey",
+    "secret",
+    "secrets",
+})
 
 
 class AppcodeArchiveCache:
@@ -59,19 +93,28 @@ class AppcodeArchiveCache:
                 self._entries.popitem(last=False)
 
 
-def local_python_imports(file_path: str, modules_root: str) -> set[str]:
-    """Return local Python files directly imported by a browser module."""
+def _analyze_local_python_module(
+    file_path: str,
+    modules_root: str,
+) -> tuple[bool, set[str]]:
+    """Return the BFF-boundary flag and direct local Python imports."""
     try:
         root = canonical_root(modules_root)
         file_relative = os.path.relpath(file_path, root).replace(os.sep, "/")
         source_file = read_contained_file(root, file_relative)
-        tree = ast.parse(
-            decode_python_source(source_file.content), filename=source_file.path
-        )
+        source = decode_python_source(source_file.content)
+        tree = ast.parse(source, filename=source_file.path)
     except UnsafePath:
         raise
     except (OSError, SyntaxError, UnicodeDecodeError):
-        return set()
+        return False, set()
+
+    # The packaged form of a BFF module is a browser proxy. Its imports belong
+    # to the server implementation and must not expand the browser dependency
+    # graph. A module imported independently by browser code is still found
+    # through that independent graph edge.
+    if has_bff_export_class(source_file.path, source=source):
+        return True, set()
 
     discovered: set[str] = set()
     for node in ast.walk(tree):
@@ -106,7 +149,57 @@ def local_python_imports(file_path: str, modules_root: str) -> set[str]:
                     if os.path.lexists(candidate):
                         raise
                     continue
-    return discovered
+    return False, discovered
+
+
+def local_python_imports(file_path: str, modules_root: str) -> set[str]:
+    """Return browser imports, stopping at a proven BFF module boundary."""
+    return _analyze_local_python_module(file_path, modules_root)[1]
+
+
+def _browser_package_initializers(file_path: str, modules_root: str) -> set[str]:
+    """Return package initializers implicitly executed by a browser module."""
+    root = canonical_root(modules_root)
+    current = os.path.realpath(file_path)
+    parent = os.path.dirname(current)
+    initializers: set[str] = set()
+    while parent != root and os.path.commonpath((root, parent)) == root:
+        package_init = os.path.join(parent, "__init__.py")
+        relative = os.path.relpath(package_init, root).replace(os.sep, "/")
+        try:
+            resolved = resolve_contained_path(root, relative)
+        except UnsafePath:
+            resolved = ""
+        if resolved and resolved != current:
+            initializers.add(resolved)
+        parent = os.path.dirname(parent)
+    return initializers
+
+
+def browser_asset_path_is_safe(relative_path: str) -> bool:
+    """Reject paths that should never enter or be served from browser files."""
+    try:
+        normalized = normalize_relative_path(relative_path)
+    except UnsafePath:
+        return False
+    parts = normalized.split("/")
+    if any(
+        part.startswith(".") or part in _EXCLUDED_DIRECTORIES
+        for part in parts
+    ):
+        return False
+
+    filename = parts[-1].casefold()
+    if filename.startswith(".env") or filename in _SENSITIVE_BROWSER_NAMES:
+        return False
+    if any(filename.endswith(suffix) for suffix in _SENSITIVE_BROWSER_SUFFIXES):
+        return False
+    tokens = {
+        token
+        for token in re.split(r"[^a-z0-9]+", filename)
+        if token
+    }
+    return not bool(tokens & _SENSITIVE_BROWSER_NAME_TOKENS)
 
 
 def _literal_module_metadata(
@@ -226,6 +319,10 @@ def configured_browser_files(
                 continue
             relative = os.path.relpath(absolute, modules_root).replace(os.sep, "/")
             if any(fnmatch.fnmatch(relative, pattern) for pattern in patterns):
+                if not browser_asset_path_is_safe(relative):
+                    raise RuntimeError(
+                        "PYTINCTURE_BROWSER_FILES selects a hidden or sensitive path"
+                    )
                 selected.add(absolute)
                 if max_files is not None and len(selected) > max_files:
                     raise HTTPException(
@@ -264,16 +361,9 @@ def configured_browser_asset_path_selected(
     raw_patterns: str | None = None,
 ) -> bool:
     """Return whether a directly served asset is in the configured browser set."""
-    try:
-        normalized = normalize_relative_path(relative_path)
-    except UnsafePath:
+    if not browser_asset_path_is_safe(relative_path):
         return False
-    parts = normalized.split("/")
-    if any(
-        part.startswith(".") or part in _EXCLUDED_DIRECTORIES
-        for part in parts[:-1]
-    ) or parts[-1].startswith("."):
-        return False
+    normalized = normalize_relative_path(relative_path)
     return any(
         fnmatch.fnmatch(normalized, pattern)
         for pattern in configured_browser_file_patterns(raw_patterns)
@@ -298,7 +388,12 @@ def browser_package_files(
     pending = [entrypoint]
     while pending:
         try:
-            imported_files = local_python_imports(pending.pop(), root)
+            current = pending.pop()
+            is_bff_module, imported_files = _analyze_local_python_module(
+                current, root
+            )
+            if not is_bff_module:
+                imported_files |= _browser_package_initializers(current, root)
         except UnsafePath as exc:
             raise HTTPException(
                 status_code=404, detail="Application import path is unsafe"
@@ -309,20 +404,6 @@ def browser_package_files(
                 if max_files is not None and len(selected) > max_files:
                     raise HTTPException(status_code=413, detail="Appcode file-count limit exceeded")
                 pending.append(imported)
-    for python_file in tuple(selected):
-        parent = os.path.dirname(python_file)
-        while parent != root and os.path.commonpath((root, parent)) == root:
-            package_init = os.path.join(parent, "__init__.py")
-            try:
-                selected.add(
-                    resolve_contained_path(
-                        root,
-                        os.path.relpath(package_init, root).replace(os.sep, "/"),
-                    )
-                )
-            except UnsafePath:
-                pass
-            parent = os.path.dirname(parent)
     selected |= configured_browser_files(root, raw_patterns, max_files=max_files)
     if max_files is not None and len(selected) > max_files:
         raise HTTPException(status_code=413, detail="Appcode file-count limit exceeded")

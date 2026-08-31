@@ -235,6 +235,38 @@
         "tests/test_contracts.py::test_vendored_pyodide_sbom_and_checksums_validate",
         "tests/test_release_gates.py::test_python_publish_requires_oidc_protected_attested_release_provenance"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-H-01",
+      "status": "remediated",
+      "title": "Server-only imports remain outside browser archives",
+      "intentional_contract": "A proven BFF module is delivered as a generated browser proxy, while its server implementation and imports remain server-only. An independently imported browser module remains part of the browser graph.",
+      "security_boundary": "Static browser dependency traversal stops before following imports from a proven Pytincture BFF module. Packages containing only BFF proxies use namespace-package behavior so a server package initializer is not copied into appcode.pyt.",
+      "controls": {
+        "bff_server_import_traversal_stops": true,
+        "independent_browser_imports_preserved": true,
+        "bff_only_server_package_initializers_excluded": true,
+        "ordinary_browser_package_initializers_traversed": true,
+        "conditional_browser_imports_conservatively_included": true,
+        "hidden_and_sensitive_explicit_files_rejected": true,
+        "redis_required": false
+      },
+      "implementation": [
+        "pytincture/backend/browser_packages.py",
+        "pytincture/backend/app.py",
+        "pytincture/dataclass.py",
+        "docs/browser-packaging.md",
+        "docs/contracts/appcode-v1.md"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_browser_package_stops_at_bff_server_import_boundary",
+        "tests/test_backend_modules.py::test_browser_package_keeps_independently_selected_browser_imports",
+        "tests/test_backend_modules.py::test_bff_only_package_uses_namespace_without_server_initializer",
+        "tests/test_backend_modules.py::test_browser_package_initializer_remains_for_browser_module",
+        "tests/test_backend_modules.py::test_browser_package_conservatively_includes_conditional_browser_imports",
+        "tests/test_backend_modules.py::test_configured_browser_files_fail_closed_on_sensitive_match",
+        "tests/test_app.py::test_public_assets_require_a_real_app_and_explicit_app_ownership"
+      ]
     }
   ]
 }

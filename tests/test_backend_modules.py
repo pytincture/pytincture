@@ -21,6 +21,7 @@ from pytincture.backend.auth import (
 from pytincture.backend.bff import BFFRegistry
 from pytincture.backend.browser_packages import (
     AppcodeArchiveCache,
+    browser_asset_path_is_safe,
     browser_package_files,
     configured_browser_asset_path_selected,
     create_appcode_archive,
@@ -53,6 +54,7 @@ from pytincture.backend.safe_paths import (
     validate_application_name,
 )
 from pytincture.backend.source_loading import build_dynamic_module_name, load_source_module
+from pytincture.dataclass import get_parsed_output
 from pytincture.backend.storage import RedisDict
 from pytincture.backend.streaming import (
     as_streaming_response,
@@ -337,6 +339,162 @@ def test_browser_package_discovery_is_transitive_and_explicit(tmp_path: Path):
         "nested.py",
         "theme.css",
     }
+
+
+def test_browser_package_conservatively_includes_conditional_browser_imports(
+    tmp_path: Path,
+):
+    (tmp_path / "demo.py").write_text(
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import typing_model\n"
+        "if False:\n"
+        "    import conditional_plugin\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "typing_model.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "conditional_plugin.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    files = {Path(path).name for path in browser_package_files("demo", str(tmp_path))}
+    assert files == {"conditional_plugin.py", "demo.py", "typing_model.py"}
+
+
+def test_browser_package_stops_at_bff_server_import_boundary(tmp_path: Path):
+    (tmp_path / "demo.py").write_text(
+        "import browser_helper\nimport bff_data\n", encoding="utf-8"
+    )
+    (tmp_path / "browser_helper.py").write_text(
+        "BROWSER_VALUE = 1\n", encoding="utf-8"
+    )
+    (tmp_path / "bff_data.py").write_text(
+        "from pytincture.dataclass import backend_for_frontend\n"
+        "from server_secret import DATABASE_PASSWORD\n"
+        "@backend_for_frontend\n"
+        "class Data:\n"
+        "    def read(self): return DATABASE_PASSWORD\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "server_secret.py").write_text(
+        "DATABASE_PASSWORD = 'must-not-enter-browser'\n", encoding="utf-8"
+    )
+
+    files = browser_package_files("demo", str(tmp_path))
+    assert {Path(path).name for path in files} == {
+        "demo.py",
+        "browser_helper.py",
+        "bff_data.py",
+    }
+
+    archive = create_appcode_archive(
+        "", "", "demo", str(tmp_path), get_parsed_output
+    )
+    with zipfile.ZipFile(io.BytesIO(archive.getvalue())) as package:
+        assert set(package.namelist()) == {
+            "bff_data.py",
+            "browser_helper.py",
+            "demo.py",
+        }
+        assert "must-not-enter-browser" not in "\n".join(
+            package.read(name).decode("utf-8")
+            for name in package.namelist()
+        )
+
+
+def test_browser_package_keeps_independently_selected_browser_imports(tmp_path: Path):
+    (tmp_path / "demo.py").write_text(
+        "import bff_data\nimport shared_model\n", encoding="utf-8"
+    )
+    (tmp_path / "bff_data.py").write_text(
+        "from pytincture.dataclass import backend_for_frontend\n"
+        "import shared_model\n"
+        "import server_secret\n"
+        "@backend_for_frontend\n"
+        "class Data:\n"
+        "    def read(self): return True\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "shared_model.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "server_secret.py").write_text("SECRET = True\n", encoding="utf-8")
+
+    files = browser_package_files("demo", str(tmp_path))
+    assert {Path(path).name for path in files} == {
+        "demo.py",
+        "bff_data.py",
+        "shared_model.py",
+    }
+
+
+def test_bff_only_package_uses_namespace_without_server_initializer(tmp_path: Path):
+    server_package = tmp_path / "server_package"
+    server_package.mkdir()
+    (tmp_path / "demo.py").write_text("import server_package.bff\n", encoding="utf-8")
+    (server_package / "__init__.py").write_text(
+        "PACKAGE_SECRET = 'must-not-enter-browser'\nimport server_secret\n",
+        encoding="utf-8",
+    )
+    (server_package / "bff.py").write_text(
+        "from pytincture.dataclass import backend_for_frontend\n"
+        "import server_secret\n"
+        "@backend_for_frontend\n"
+        "class Data:\n"
+        "    def read(self): return True\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "server_secret.py").write_text("SECRET = True\n", encoding="utf-8")
+
+    files = {
+        Path(path).relative_to(tmp_path).as_posix()
+        for path in browser_package_files("demo", str(tmp_path))
+    }
+    assert files == {"demo.py", "server_package/bff.py"}
+
+
+def test_browser_package_initializer_remains_for_browser_module(tmp_path: Path):
+    browser_package = tmp_path / "browser_package"
+    browser_package.mkdir()
+    (tmp_path / "demo.py").write_text("import browser_package.ui\n", encoding="utf-8")
+    (browser_package / "__init__.py").write_text(
+        "from . import shared\n", encoding="utf-8"
+    )
+    (browser_package / "ui.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (browser_package / "shared.py").write_text("SHARED = 2\n", encoding="utf-8")
+
+    files = {
+        Path(path).relative_to(tmp_path).as_posix()
+        for path in browser_package_files("demo", str(tmp_path))
+    }
+    assert files == {
+        "browser_package/__init__.py",
+        "browser_package/shared.py",
+        "browser_package/ui.py",
+        "demo.py",
+    }
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        ".env",
+        ".env.production",
+        "config/credentials.json",
+        "config/server_secret.py",
+        "keys/id_rsa",
+        "keys/private.key",
+        "data/app.sqlite3",
+        "backup/settings.bak",
+    ),
+)
+def test_sensitive_browser_file_paths_are_rejected(relative_path):
+    assert not browser_asset_path_is_safe(relative_path)
+
+
+def test_configured_browser_files_fail_closed_on_sensitive_match(tmp_path: Path):
+    (tmp_path / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("TOKEN=must-not-leak\n", encoding="utf-8")
+    (tmp_path / "theme.css").write_text("body {}\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="hidden or sensitive"):
+        browser_package_files("demo", str(tmp_path), '["*"]')
 
 
 def test_configured_browser_asset_selection_applies_direct_serving_exclusions():
@@ -657,6 +815,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "FOLLOWUP-F-04",
         "FOLLOWUP-F-05",
         "OBS-BFF-REGISTRY-BLAST-RADIUS",
+        "REVIEW-2026-08-31-H-01",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -678,6 +837,10 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert dispositions["FOLLOWUP-F-04"]["controls"][
         "pre_transmission_redaction"
     ] is True
+    archive_controls = dispositions["REVIEW-2026-08-31-H-01"]["controls"]
+    assert archive_controls["bff_server_import_traversal_stops"] is True
+    assert archive_controls["independent_browser_imports_preserved"] is True
+    assert archive_controls["redis_required"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:
