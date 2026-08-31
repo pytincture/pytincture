@@ -86,6 +86,12 @@ new process actually received the environment value.
 Never disable signature/certificate validation to work around IdP errors.
 Use metadata at `/{application}/auth/saml/metadata`, confirm entity ID, ACS,
 certificate formatting, clock synchronization, and forwarded HTTPS origin.
+Pytincture accepts response-signed IdPs and assertion-only IdPs. For an
+assertion-only IdP, the signed assertion's `SubjectConfirmationData` must carry
+the exact AuthnRequest `InResponseTo`; an unsigned outer Response cannot supply
+that trusted correlation. SAML signature and digest algorithms must use
+SHA-256 or stronger. SHA-1 and unknown algorithms are rejected before toolkit
+signature processing.
 
 `SAML_REQUESTED_AUTHN_CONTEXT` is a boolean setting: use `true` to request a
 context or `false` (the default) to omit `RequestedAuthnContext` entirely. It
@@ -99,7 +105,9 @@ Use `AUTH_SESSION_CLAIM_KEYS` for small additional trusted claims. Idle expiry
 is controlled by `AUTH_SESSION_MAX_AGE_SECONDS`; the non-sliding upper bound is
 `AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS`. Rotate keys by placing equally strong
 old values in `AUTH_SESSION_PREVIOUS_SECRET_KEYS` for at least the absolute
-session lifetime.
+session lifetime. SAML sessions are additionally capped to the earliest
+`Conditions.NotOnOrAfter`, `SubjectConfirmationData.NotOnOrAfter`, or
+`AuthnStatement.SessionNotOnOrAfter` bound supplied by the validated response.
 
 Login forms and logout use pre-authentication/CSRF checks, and logout is a
 state-changing `POST`. By default, logout clears the browser cookie and the

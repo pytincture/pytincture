@@ -31,8 +31,10 @@ browser-carried sessions and optional Redis, are recorded in
   rejects proxy trust and public configuration, and requires the peer, direct
   Host, and any browser Origin/Referer to use literal loopback IP addresses.
 - SAML responses are decoded and parsed under `SAML_RESPONSE_MAX_BYTES`, use
-  an XML-signature transform allowlist, and are throttled per peer before
-  signature processing. Tune `SAML_ACS_RATE_LIMIT_ATTEMPTS` and
+  XML-signature transform and SHA-256-or-stronger algorithm allowlists, and are
+  throttled per peer before signature processing. Response-signed IdPs are
+  accepted; assertion-only IdPs must sign the exact AuthnRequest correlation
+  inside `SubjectConfirmationData`. Tune `SAML_ACS_RATE_LIMIT_ATTEMPTS` and
   `SAML_ACS_RATE_LIMIT_WINDOW_SECONDS` alongside an edge rate limit; do not
   disable or bypass the built-in response guard.
 - SAML logins use an HttpOnly browser-binding cookie and a one-time transaction

@@ -7,12 +7,15 @@ import re
 import threading
 import time
 from collections import OrderedDict, deque
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
 
 
 XMLDSIG_NAMESPACE = "http://www.w3.org/2000/09/xmldsig#"
+SAML_ASSERTION_NAMESPACE = "urn:oasis:names:tc:SAML:2.0:assertion"
+SAML_PROTOCOL_NAMESPACE = "urn:oasis:names:tc:SAML:2.0:protocol"
 ALLOWED_XML_SIGNATURE_TRANSFORMS = frozenset(
     {
         "http://www.w3.org/2000/09/xmldsig#enveloped-signature",
@@ -24,7 +27,61 @@ ALLOWED_XML_SIGNATURE_TRANSFORMS = frozenset(
         "http://www.w3.org/2006/12/xml-c14n11#WithComments",
     }
 )
+ALLOWED_XML_SIGNATURE_METHODS = frozenset(
+    {
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384",
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512",
+        "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256",
+        "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384",
+        "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512",
+    }
+)
+ALLOWED_XML_DIGEST_METHODS = frozenset(
+    {
+        "http://www.w3.org/2001/04/xmlenc#sha256",
+        "http://www.w3.org/2001/04/xmldsig-more#sha384",
+        "http://www.w3.org/2001/04/xmlenc#sha512",
+    }
+)
 _FORBIDDEN_XML_DECLARATION = re.compile(br"<!\s*(?:DOCTYPE|ENTITY)\b", re.IGNORECASE)
+
+
+def _parse_bounded_xml(xml_payload: bytes | str):
+    try:
+        from lxml import etree
+    except ImportError as exc:  # pragma: no cover - guarded by the SAML extra
+        raise RuntimeError("SAML response validation requires pytincture[saml]") from exc
+    parser = etree.XMLParser(
+        resolve_entities=False,
+        no_network=True,
+        load_dtd=False,
+        huge_tree=False,
+        recover=False,
+    )
+    try:
+        return etree.fromstring(xml_payload, parser=parser)
+    except (etree.XMLSyntaxError, TypeError, ValueError) as exc:
+        raise ValueError("SAMLResponse must contain bounded, well-formed XML") from exc
+
+
+def _validate_signature_algorithms(root) -> None:
+    algorithm_elements = {
+        f"{{{XMLDSIG_NAMESPACE}}}SignatureMethod": (
+            ALLOWED_XML_SIGNATURE_METHODS,
+            "signature",
+        ),
+        f"{{{XMLDSIG_NAMESPACE}}}DigestMethod": (
+            ALLOWED_XML_DIGEST_METHODS,
+            "digest",
+        ),
+    }
+    for element in root.iter():
+        allowed, label = algorithm_elements.get(element.tag, (None, None))
+        if allowed is None:
+            continue
+        if element.get("Algorithm", "") not in allowed:
+            raise ValueError(f"SAMLResponse contains a disallowed {label} algorithm")
 
 
 def validate_saml_response_xml(encoded_response: str, max_decoded_bytes: int) -> bytes:
@@ -46,21 +103,7 @@ def validate_saml_response_xml(encoded_response: str, max_decoded_bytes: int) ->
     if _FORBIDDEN_XML_DECLARATION.search(xml_payload):
         raise ValueError("SAMLResponse cannot contain DTD or entity declarations")
 
-    try:
-        from lxml import etree
-    except ImportError as exc:  # pragma: no cover - guarded by the SAML extra
-        raise RuntimeError("SAML response validation requires pytincture[saml]") from exc
-    parser = etree.XMLParser(
-        resolve_entities=False,
-        no_network=True,
-        load_dtd=False,
-        huge_tree=False,
-        recover=False,
-    )
-    try:
-        root = etree.fromstring(xml_payload, parser=parser)
-    except (etree.XMLSyntaxError, ValueError) as exc:
-        raise ValueError("SAMLResponse must contain bounded, well-formed XML") from exc
+    root = _parse_bounded_xml(xml_payload)
 
     guarded_elements = {
         f"{{{XMLDSIG_NAMESPACE}}}Transform",
@@ -72,7 +115,84 @@ def validate_saml_response_xml(encoded_response: str, max_decoded_bytes: int) ->
         algorithm = element.get("Algorithm", "")
         if algorithm not in ALLOWED_XML_SIGNATURE_TRANSFORMS:
             raise ValueError("SAMLResponse contains a disallowed signature transform")
+
+    _validate_signature_algorithms(root)
     return xml_payload
+
+
+def validate_authenticated_saml_correlation(
+    response_xml: str | bytes,
+    request_id: str,
+) -> None:
+    """Require request correlation to be covered by a toolkit-validated signature."""
+    if not isinstance(request_id, str) or not request_id:
+        raise ValueError("SAML request correlation is required")
+    root = _parse_bounded_xml(response_xml)
+    # This is the toolkit's decrypted, validated document, so it also covers
+    # algorithms that were not visible in the original encrypted assertion.
+    _validate_signature_algorithms(root)
+    if root.tag != f"{{{SAML_PROTOCOL_NAMESPACE}}}Response":
+        raise ValueError("SAML response root is invalid")
+    if root.get("InResponseTo") != request_id:
+        raise ValueError("SAML response correlation does not match the request")
+
+    signature_tag = f"{{{XMLDSIG_NAMESPACE}}}Signature"
+    if root.find(signature_tag) is not None:
+        # process_response() has already cryptographically validated this exact
+        # direct-child Response signature, which covers Response.InResponseTo.
+        return
+
+    assertion_tag = f"{{{SAML_ASSERTION_NAMESPACE}}}Assertion"
+    subject_confirmation_data_tag = (
+        f"{{{SAML_ASSERTION_NAMESPACE}}}Subject/"
+        f"{{{SAML_ASSERTION_NAMESPACE}}}SubjectConfirmation/"
+        f"{{{SAML_ASSERTION_NAMESPACE}}}SubjectConfirmationData"
+    )
+    for assertion in root.findall(assertion_tag):
+        if assertion.find(signature_tag) is None:
+            continue
+        if any(
+            element.get("InResponseTo") == request_id
+            for element in assertion.findall(subject_confirmation_data_tag)
+        ):
+            # The assertion signature validated by process_response() covers
+            # this SubjectConfirmationData correlation value.
+            return
+    raise ValueError(
+        "SAML InResponseTo is not covered by a validated Response signature "
+        "or signed assertion correlation"
+    )
+
+
+def _parse_saml_timestamp(value: str) -> float:
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError("SAML response contains an invalid expiration timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("SAML response expiration timestamp must include a timezone")
+    return parsed.astimezone(timezone.utc).timestamp()
+
+
+def saml_assertion_expirations(response_xml: str | bytes) -> list[float]:
+    """Return signed-response assertion expiry bounds not exposed by the toolkit."""
+    root = _parse_bounded_xml(response_xml)
+    assertion_tag = f"{{{SAML_ASSERTION_NAMESPACE}}}Assertion"
+    expiry_attributes = {
+        f"{{{SAML_ASSERTION_NAMESPACE}}}Conditions": "NotOnOrAfter",
+        f"{{{SAML_ASSERTION_NAMESPACE}}}SubjectConfirmationData": "NotOnOrAfter",
+        f"{{{SAML_ASSERTION_NAMESPACE}}}AuthnStatement": "SessionNotOnOrAfter",
+    }
+    expirations: list[float] = []
+    for assertion in root.findall(assertion_tag):
+        for element in assertion.iter():
+            attribute = expiry_attributes.get(element.tag)
+            if attribute and element.get(attribute):
+                expirations.append(_parse_saml_timestamp(element.get(attribute)))
+    return expirations
 
 
 class SlidingWindowRateLimiter:

@@ -41,10 +41,14 @@ from pytincture.backend.pages import (
     normalize_app_asset_path,
 )
 from pytincture.backend.saml import (
+    ALLOWED_XML_DIGEST_METHODS,
+    ALLOWED_XML_SIGNATURE_METHODS,
     ALLOWED_XML_SIGNATURE_TRANSFORMS,
     SAMLProviderCatalog,
     SlidingWindowRateLimiter,
     allowed_roles,
+    saml_assertion_expirations,
+    validate_authenticated_saml_correlation,
     validate_saml_response_xml,
 )
 from pytincture.backend.safe_paths import (
@@ -710,10 +714,13 @@ def test_saml_response_transform_guard_accepts_only_bounded_safe_algorithms():
         xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
       <ds:Signature><ds:SignedInfo>
         <ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+        <ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
         <ds:Reference><ds:Transforms>
           <ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
           <ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
-        </ds:Transforms></ds:Reference>
+        </ds:Transforms>
+        <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+        </ds:Reference>
       </ds:SignedInfo></ds:Signature>
     </samlp:Response>"""
 
@@ -728,6 +735,108 @@ def test_saml_response_transform_guard_accepts_only_bounded_safe_algorithms():
             base64.b64encode(disallowed).decode("ascii"),
             len(disallowed),
         )
+
+
+@pytest.mark.parametrize(
+    ("element", "algorithm", "message"),
+    (
+        ("SignatureMethod", "http://www.w3.org/2000/09/xmldsig#rsa-sha1", "signature"),
+        ("DigestMethod", "http://www.w3.org/2000/09/xmldsig#sha1", "digest"),
+        ("SignatureMethod", "urn:example:unknown-signature", "signature"),
+        ("DigestMethod", "urn:example:unknown-digest", "digest"),
+    ),
+)
+def test_saml_response_rejects_deprecated_or_unknown_signature_algorithms(
+    element,
+    algorithm,
+    message,
+):
+    response = (
+        '<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" '
+        'xmlns:ds="http://www.w3.org/2000/09/xmldsig#">'
+        f'<ds:{element} Algorithm="{algorithm}"/>'
+        "</samlp:Response>"
+    ).encode()
+    with pytest.raises(ValueError, match=f"disallowed {message} algorithm"):
+        validate_saml_response_xml(
+            base64.b64encode(response).decode("ascii"),
+            len(response),
+        )
+
+
+def test_saml_algorithm_policy_requires_sha256_or_stronger():
+    assert all("sha1" not in value.casefold() for value in ALLOWED_XML_SIGNATURE_METHODS)
+    assert all("sha1" not in value.casefold() for value in ALLOWED_XML_DIGEST_METHODS)
+    assert any("sha256" in value.casefold() for value in ALLOWED_XML_SIGNATURE_METHODS)
+    assert any("sha256" in value.casefold() for value in ALLOWED_XML_DIGEST_METHODS)
+
+
+def test_saml_correlation_accepts_response_or_assertion_signed_evidence():
+    response_signed = b"""<samlp:Response
+      xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+      xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+      xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
+      InResponseTo="request-one">
+      <ds:Signature/>
+      <saml:Assertion/>
+    </samlp:Response>"""
+    assertion_signed = b"""<samlp:Response
+      xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+      xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+      xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
+      InResponseTo="request-one">
+      <saml:Assertion>
+        <ds:Signature/>
+        <saml:Subject><saml:SubjectConfirmation>
+          <saml:SubjectConfirmationData InResponseTo="request-one"/>
+        </saml:SubjectConfirmation></saml:Subject>
+      </saml:Assertion>
+    </samlp:Response>"""
+
+    validate_authenticated_saml_correlation(response_signed, "request-one")
+    validate_authenticated_saml_correlation(assertion_signed, "request-one")
+
+
+@pytest.mark.parametrize(
+    "assertion_correlation",
+    ("", 'InResponseTo="different-request"'),
+)
+def test_assertion_only_saml_correlation_rejects_unsigned_response_rewrapping(
+    assertion_correlation,
+):
+    rewrapped = f"""<samlp:Response
+      xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+      xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+      xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
+      InResponseTo="request-one">
+      <saml:Assertion>
+        <ds:Signature/>
+        <saml:Subject><saml:SubjectConfirmation>
+          <saml:SubjectConfirmationData {assertion_correlation}/>
+        </saml:SubjectConfirmation></saml:Subject>
+      </saml:Assertion>
+    </samlp:Response>"""
+    with pytest.raises(ValueError, match="not covered"):
+        validate_authenticated_saml_correlation(rewrapped, "request-one")
+
+
+def test_saml_assertion_expirations_include_conditions_confirmation_and_session():
+    response = b"""<samlp:Response
+      xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+      xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">
+      <saml:Assertion>
+        <saml:Conditions NotOnOrAfter="2030-01-01T00:00:03Z"/>
+        <saml:Subject><saml:SubjectConfirmation>
+          <saml:SubjectConfirmationData NotOnOrAfter="2030-01-01T00:00:02Z"/>
+        </saml:SubjectConfirmation></saml:Subject>
+        <saml:AuthnStatement SessionNotOnOrAfter="2030-01-01T00:00:01Z"/>
+      </saml:Assertion>
+    </samlp:Response>"""
+    assert saml_assertion_expirations(response) == [
+        1893456003.0,
+        1893456002.0,
+        1893456001.0,
+    ]
 
 
 def test_saml_response_transform_guard_rejects_unsafe_or_oversized_xml():
@@ -821,6 +930,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-H-05",
         "REVIEW-2026-08-31-H-08-M-25",
         "REVIEW-2026-08-31-H-09",
+        "REVIEW-2026-08-31-M-02-M-03",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -870,6 +980,13 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert asset_controls["material_icons_feature_preserved"] is True
     assert asset_controls["external_pyodide_script_sri_required"] is True
     assert asset_controls["redis_required"] is False
+    saml_correlation_controls = dispositions["REVIEW-2026-08-31-M-02-M-03"][
+        "controls"
+    ]
+    assert saml_correlation_controls["unsigned_outer_response_rewrapping_rejected"] is True
+    assert saml_correlation_controls["sha1_signature_and_digest_rejected"] is True
+    assert saml_correlation_controls["session_capped_to_earliest_saml_expiry"] is True
+    assert saml_correlation_controls["redis_required"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:
