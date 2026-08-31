@@ -5,6 +5,10 @@ service at the origin root behind a TLS-terminating reverse proxy. A URL path
 prefix is not supported because application, BFF, frontend, and service-worker
 routes intentionally share the root scope.
 
+The security behaviors Pytincture intentionally retains, including stateless
+browser-carried sessions and optional Redis, are recorded in
+[`security/accepted-architecture.md`](../security/accepted-architecture.md).
+
 ## Required configuration
 
 - Set a stable `SAML_SECRET_KEY` of at least 32 random characters on every
