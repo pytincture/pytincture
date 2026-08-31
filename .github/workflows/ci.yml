@@ -331,7 +331,7 @@ jobs:
         run: npm run build
 
       - name: Verify generated bundles are current
-        run: git diff --exit-code -- pytincture/frontend/package.json pytincture/frontend/package-lock.json pytincture/frontend/dist
+        run: git diff --exit-code -- pytincture/frontend/package.json pytincture/frontend/package-lock.json pytincture/frontend/dist pytincture/frontend/vendor/swagger-ui security/swagger-ui-assets.json
 
       - name: Upload browser failure artifacts
         if: failure()

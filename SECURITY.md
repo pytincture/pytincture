@@ -48,6 +48,11 @@ anonymity is requested. No guaranteed response SLA is currently offered.
 
 The machine-readable dispositions and their regression-test mappings are in
 [`security/review-dispositions.json`](security/review-dispositions.json).
+The exact version, source integrity, license, and file hashes for the vendored
+BFF documentation UI are recorded in
+[`security/swagger-ui-assets.json`](security/swagger-ui-assets.json). Those
+assets are served only from the explicit framework manifest with the service
+instance UUID; the documentation page does not relax CSP for a third-party CDN.
 
 Security fixes may narrow unsafe behavior without the normal deprecation
 period. Release notes will identify impact and migration steps.

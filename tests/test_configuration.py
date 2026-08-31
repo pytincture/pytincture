@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -526,9 +527,37 @@ def test_bff_documentation_is_per_app_and_redacts_defaults(tmp_path):
     with TestClient(first) as first_client, TestClient(second) as second_client:
         first_schema = first_client.get("/bff-docs/openapi.json").text
         second_schema = second_client.get("/bff-docs/openapi.json").text
+        docs_response = first_client.get("/bff-docs")
+        swagger_bundle = first_client.get(
+            "/frontend/vendor/swagger-ui/swagger-ui-bundle.js?uuid=test"
+        )
+        swagger_styles = first_client.get(
+            "/frontend/vendor/swagger-ui/swagger-ui.css?uuid=test"
+        )
+        docs_runtime = first_client.get("/frontend/bff-docs.js?uuid=test")
+        hidden_license = first_client.get("/frontend/vendor/swagger-ui/LICENSE")
     assert "FirstService" in first_schema and "SecondService" not in first_schema
     assert "SecondService" in second_schema and "FirstService" not in second_schema
     assert "must-not-appear" not in first_schema
+    assert docs_response.status_code == 200
+    assert not docs_response.history
+    assert "cdn.jsdelivr.net" not in docs_response.text
+    assert "https://" not in docs_response.text
+    docs_uuid_values = re.findall(r"[?&]uuid=([a-f0-9]{32})", docs_response.text)
+    assert len(docs_uuid_values) == 4
+    assert len(set(docs_uuid_values)) == 1
+    assert docs_response.headers["cache-control"] == "private, no-store, max-age=0"
+    docs_csp = docs_response.headers["content-security-policy"]
+    assert "script-src 'self'" in docs_csp
+    assert "https:" not in docs_csp
+    assert "'unsafe-eval'" not in docs_csp
+    assert swagger_bundle.status_code == 200
+    assert "SwaggerUIBundle" in swagger_bundle.text
+    assert swagger_styles.status_code == 200
+    assert ".swagger-ui" in swagger_styles.text
+    assert docs_runtime.status_code == 200
+    assert "data-openapi-url" not in docs_runtime.text
+    assert hidden_license.status_code == 404
 
 
 def test_configuration_reference_document_matches_typed_model():

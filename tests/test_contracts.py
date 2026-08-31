@@ -1,4 +1,5 @@
 import importlib
+import hashlib
 import io
 import json
 import re
@@ -50,6 +51,32 @@ def test_vendored_pyodide_sbom_and_checksums_validate():
     namespace = {"__name__": "validation_test", "__file__": str(script)}
     exec(compile(script.read_text(), str(script), "exec"), namespace)
     namespace["main"]()
+
+
+def test_vendored_swagger_ui_is_exactly_pinned_and_hash_locked():
+    manifest = json.loads(
+        (ROOT / "security" / "swagger-ui-assets.json").read_text(encoding="utf-8")
+    )
+    package = json.loads(
+        (ROOT / "pytincture" / "frontend" / "package.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["schema"] == 1
+    assert manifest["package"] == "swagger-ui-dist"
+    assert manifest["version"] == package["devDependencies"]["swagger-ui-dist"]
+    assert manifest["source"].endswith(
+        f"swagger-ui-dist-{manifest['version']}.tgz"
+    )
+    assert manifest["npm_integrity"].startswith("sha512-")
+    assert {entry["path"] for entry in manifest["assets"]} == {
+        "pytincture/frontend/vendor/swagger-ui/LICENSE",
+        "pytincture/frontend/vendor/swagger-ui/swagger-ui-bundle.js",
+        "pytincture/frontend/vendor/swagger-ui/swagger-ui.css",
+    }
+    for entry in manifest["assets"]:
+        content = (ROOT / entry["path"]).read_bytes()
+        assert hashlib.sha256(content).hexdigest() == entry["sha256"]
 
 
 def test_javascript_globals_and_config_keys_match_contract(contract):

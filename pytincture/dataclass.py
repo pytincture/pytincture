@@ -1,11 +1,14 @@
 import ast
 from decimal import Subnormal
+from html import escape
 import os
 import sys
 from typing import Optional
-from fastapi import FastAPI
+from urllib.parse import quote
+import uuid
+from fastapi import FastAPI, Request
 from fastapi.openapi.utils import get_openapi
-from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import HTMLResponse
 import inspect
 from typing import Dict, Any, Mapping
 from pytincture import get_modules_path
@@ -716,6 +719,7 @@ def backend_for_frontend(cls):
 def add_bff_docs_to_app(
     app: FastAPI,
     operations: Mapping[tuple[str, str, str], Mapping[str, Any]] | None = None,
+    asset_uuid: str | None = None,
 ):
     """
     Adds BFF-specific OpenAPI documentation to a FastAPI application
@@ -776,6 +780,7 @@ def add_bff_docs_to_app(
     # Ensure docs_path starts with /
     docs_path = f"/{docs_path.lstrip('/')}"
     openapi_path = f"{docs_path}/openapi.json"
+    docs_asset_uuid = asset_uuid or uuid.uuid4().hex
 
     def custom_openapi():
         if not app.openapi_schema:
@@ -831,16 +836,58 @@ def add_bff_docs_to_app(
         return custom_openapi()
 
     @app.get(docs_path, tags=["documentation"])
-    async def get_bff_docs():
+    async def get_bff_docs(request: Request):
         """
         Get the Swagger UI HTML for BFF endpoints
         """
-        return get_swagger_ui_html(
-            openapi_url=openapi_path,
-            title=docs_title,
-            swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
-            swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css"
+        root_path = str(request.scope.get("root_path", "")).rstrip("/")
+        encoded_uuid = quote(docs_asset_uuid, safe="")
+        asset_prefix = f"{root_path}/frontend"
+        swagger_css_url = (
+            f"{asset_prefix}/vendor/swagger-ui/swagger-ui.css?uuid={encoded_uuid}"
         )
+        swagger_js_url = (
+            f"{asset_prefix}/vendor/swagger-ui/swagger-ui-bundle.js?uuid={encoded_uuid}"
+        )
+        docs_js_url = f"{asset_prefix}/bff-docs.js?uuid={encoded_uuid}"
+        schema_url = f"{root_path}{openapi_path}?uuid={encoded_uuid}"
+        content = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape(docs_title)}</title>
+  <link rel="stylesheet" href="{escape(swagger_css_url, quote=True)}">
+</head>
+<body>
+  <div id="swagger-ui" data-openapi-url="{escape(schema_url, quote=True)}"></div>
+  <script defer src="{escape(swagger_js_url, quote=True)}"></script>
+  <script defer src="{escape(docs_js_url, quote=True)}"></script>
+</body>
+</html>
+"""
+        return HTMLResponse(
+            content,
+            headers={
+                "Cache-Control": "private, no-store, max-age=0",
+                "Content-Security-Policy": (
+                    "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
+                    "script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                    "font-src 'self' data:; img-src 'self' data:; "
+                    "connect-src 'self'; form-action 'self'"
+                ),
+            },
+        )
+
+    # The service's one-segment application route is intentionally broad. Keep
+    # this exact framework endpoint ahead of it so the default /bff-docs URL is
+    # not interpreted as an application identifier.
+    docs_route = app.routes[-1]
+    for index, route in enumerate(app.routes[:-1]):
+        if getattr(route, "path", None) == "/{application}":
+            app.routes.pop()
+            app.routes.insert(index, docs_route)
+            break
 
     # Set the custom OpenAPI function
     app.openapi = custom_openapi

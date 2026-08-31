@@ -144,7 +144,7 @@ come from the deployment secret manager rather than committed files.
 | `AUTH_USER_AUTHENTICATOR` | Dotted sync/async local credential verifier. |
 | `AUTH_USER_CLAIMS` | Verified local-user profile claims. |
 | `DEFAULT_APP_USERS` | Compatibility fallback profile source after password verification; prefer `AUTH_USER_CLAIMS`. |
-| `BFF_DOCS_PATH` | Route path for generated BFF API documentation. |
+| `BFF_DOCS_PATH` | Route path for generated BFF API documentation. The interactive UI uses exact, hash-locked Swagger assets packaged in the Python wheel; it makes no CDN request. |
 | `BFF_DOCS_TITLE` | Title for generated BFF API documentation. |
 | `BFF_POLICY_HOOK_PATH` | Dotted sync/async BFF authorization policy callable. |
 | `LOGIN_HELP_TEXT` | Escaped plain-text login guidance. |

@@ -85,6 +85,8 @@ pytincture = [
     "frontend/index.html",
     "frontend/pytincture.js",
     "frontend/sw.js",
+    "frontend/bff-docs.js",
     "frontend/dist/*",
+    "frontend/vendor/swagger-ui/*",
     "frontend/pyodide/**/*",
 ]

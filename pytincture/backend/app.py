@@ -633,6 +633,9 @@ _PUBLIC_FRAMEWORK_FILES = frozenset({
     "dist/pytincture.esm.js.map",
     "dist/pytincture.min.js",
     "dist/pytincture.min.js.map",
+    "bff-docs.js",
+    "vendor/swagger-ui/swagger-ui-bundle.js",
+    "vendor/swagger-ui/swagger-ui.css",
     "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl",
     "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl.metadata",
     "pyodide/0.29.3/full/pyodide-lock.json",
@@ -4228,7 +4231,11 @@ async def configured_favicon_asset(
     )
 
 
-add_bff_docs_to_app(app, operations=reload_bff_registry(get_modules_path()))
+add_bff_docs_to_app(
+    app,
+    operations=reload_bff_registry(get_modules_path()),
+    asset_uuid=FRONTEND_INSTANCE_UUID,
+)
 reload_mcp_tools()
 
 # =================
