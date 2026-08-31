@@ -69,6 +69,55 @@ def test_npm_publish_requires_attested_release_provenance():
     assert all("${{" not in block for block in run_blocks)
 
 
+def test_python_publish_requires_oidc_protected_attested_release_provenance():
+    release_workflow = (
+        ROOT / ".github" / "workflows" / "pypi-publish.yml"
+    ).read_text()
+    ci_workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+
+    assert "environment: pypi" in release_workflow
+    assert "id-token: write" in release_workflow
+    assert "run-id:" in release_workflow
+    assert "release_tag:" in release_workflow
+    assert "gh attestation verify" in release_workflow
+    assert "--signer-workflow" in release_workflow
+    assert "--source-digest" in release_workflow
+    assert "--source-ref" in release_workflow
+    assert "verify_python_release.py" in release_workflow
+    assert (
+        "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33"
+        in release_workflow
+    )
+    assert "PYPI_PASSWORD" not in release_workflow
+    assert "TWINE_PASSWORD" not in release_workflow
+    assert "TWINE_USERNAME" not in release_workflow
+    assert "python-release-artifacts" in ci_workflow
+    assert "Publish validated Python artifacts" not in ci_workflow
+    assert "PYPI_PASSWORD" not in ci_workflow
+
+    action_refs = re.findall(
+        r"^\s+uses:\s+[^@\s]+@([^\s#]+)", release_workflow, re.MULTILINE
+    )
+    assert action_refs
+    assert all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in action_refs)
+
+    run_blocks = re.findall(
+        r"^\s+run:\s*\|\n(?P<body>(?:^\s{10,}.*\n)*)",
+        release_workflow,
+        re.MULTILINE,
+    )
+    assert run_blocks
+    assert all("${{" not in block for block in run_blocks)
+
+
+def test_release_publishers_require_tags_reachable_from_default_branch():
+    for workflow_name in ("npm-publish.yml", "pypi-publish.yml"):
+        workflow = (ROOT / ".github" / "workflows" / workflow_name).read_text()
+        assert "merge_base_commit.sha" in workflow
+        assert '[[ "$merge_base" != "$tag_sha" ]]' in workflow
+        assert "not reachable from the protected default branch" in workflow
+
+
 def complete_record():
     version = "1.0.0rc2"
     return {

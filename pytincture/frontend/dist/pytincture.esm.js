@@ -63,11 +63,82 @@ var LIFECYCLE_STAGES = Object.freeze({
 });
 var loggingInstalled = false;
 var originalConsoleMethods = {};
+var MAX_BROWSER_DIAGNOSTIC_CHARS = 800;
+var MAX_BROWSER_DIAGNOSTIC_DEPTH = 3;
+var MAX_BROWSER_DIAGNOSTIC_ENTRIES = 20;
+var SENSITIVE_DIAGNOSTIC_KEY = /(?:api.?key|assertion|authorization|cookie|credential|csrf|password|private.?key|secret|session|token)/i;
 function sanitizeDiagnostic(value) {
   if (value === null || value === void 0) {
     return "";
   }
-  return String(value).replace(/([?&](?:token|secret|password|authorization|code)=)[^&#\s]*/gi, "$1[redacted]").replace(/\b(token|secret|password|authorization|api[_-]?key|access[_-]?token|id[_-]?token)(\s*[:=]\s*)[^\s,;]+/gi, "$1$2[redacted]").replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]").slice(0, 800);
+  return String(value).replace(/([?&](?:token|secret|password|authorization|code)=)[^&#\s]*/gi, "$1[redacted]").replace(/\b(token|secret|password|authorization|api[_-]?key|access[_-]?token|id[_-]?token|refresh[_-]?token|client[_-]?secret|cookie|session|csrf)(\s*[:=]\s*)[^\s,;]+/gi, "$1$2[redacted]").replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]").slice(0, MAX_BROWSER_DIAGNOSTIC_CHARS);
+}
+function summarizeConsoleValue(value, depth = 0, seen = /* @__PURE__ */ new WeakSet()) {
+  if (value === null || value === void 0) {
+    return value === null ? null : "[undefined]";
+  }
+  if (typeof value === "string") {
+    return sanitizeDiagnostic(value);
+  }
+  if (["number", "boolean"].includes(typeof value)) {
+    return value;
+  }
+  if (["bigint", "function", "symbol"].includes(typeof value)) {
+    return sanitizeDiagnostic(String(value));
+  }
+  if (value instanceof Error) {
+    return {
+      name: sanitizeDiagnostic(value.name),
+      message: sanitizeDiagnostic(value.message)
+    };
+  }
+  if (depth >= MAX_BROWSER_DIAGNOSTIC_DEPTH) {
+    return "[truncated]";
+  }
+  if (seen.has(value)) {
+    return "[circular]";
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const summarized2 = value.slice(0, MAX_BROWSER_DIAGNOSTIC_ENTRIES).map((item) => summarizeConsoleValue(item, depth + 1, seen));
+    if (value.length > MAX_BROWSER_DIAGNOSTIC_ENTRIES) {
+      summarized2.push("[truncated]");
+    }
+    return summarized2;
+  }
+  const summarized = {};
+  let keys;
+  try {
+    keys = Object.keys(value);
+  } catch (_error) {
+    return "[unreadable object]";
+  }
+  for (const key of keys.slice(0, MAX_BROWSER_DIAGNOSTIC_ENTRIES)) {
+    if (SENSITIVE_DIAGNOSTIC_KEY.test(key)) {
+      summarized[key] = "[redacted]";
+      continue;
+    }
+    try {
+      summarized[key] = summarizeConsoleValue(value[key], depth + 1, seen);
+    } catch (_error) {
+      summarized[key] = "[unreadable]";
+    }
+  }
+  if (keys.length > MAX_BROWSER_DIAGNOSTIC_ENTRIES) {
+    summarized.__truncated__ = true;
+  }
+  return summarized;
+}
+function sanitizeConsoleMessage(args) {
+  const parts = args.map((value) => {
+    try {
+      const summarized = summarizeConsoleValue(value);
+      return typeof summarized === "string" ? summarized : JSON.stringify(summarized);
+    } catch (_error) {
+      return "[unreadable]";
+    }
+  });
+  return sanitizeDiagnostic(parts.join(" "));
 }
 function sanitizeResource(value) {
   if (!value) {
@@ -384,7 +455,7 @@ function enableBackendLogging(endpoint) {
       return;
     }
     console[level] = function(...args) {
-      const message = args.map((arg) => typeof arg === "object" ? JSON.stringify(arg) : arg).join(" ");
+      const message = sanitizeConsoleMessage(args);
       sendToBackend(level, message);
       originalConsoleMethods[level](...args);
     };
@@ -1279,6 +1350,8 @@ globalThis.__pytinctureTesting = Object.freeze({
   frameworkCacheName,
   normalizeConfig,
   responseIsPublicImmutable,
+  sanitizeConsoleMessage,
+  sanitizeDiagnostic,
   unregisterOwnedServiceWorker,
   validatePackageRequirement,
   withSameOriginRequestUuid,

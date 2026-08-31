@@ -13,6 +13,7 @@ const {
     normalizeConfig,
     responseIsPublicImmutable,
     runStartup,
+    sanitizeConsoleMessage,
     unregisterOwnedServiceWorker,
     validatePackageRequirement,
     withSameOriginRequestUuid,
@@ -479,4 +480,33 @@ test("lifecycle diagnostics redact credentials and expose compatibility", async 
         cssAssets: 1,
     });
     assert.equal(fixture.events.at(-1).stage, LIFECYCLE_STAGES.READY);
+});
+
+test("browser console forwarding redacts secrets and bounds complex messages", () => {
+    const circular = { label: "safe" };
+    circular.self = circular;
+    const message = sanitizeConsoleMessage([
+        "request?token=url-secret Bearer bearer-secret",
+        {
+            password: "object-secret",
+            nested: {
+                client_secret: "nested-secret",
+                detail: "authorization=inline-secret",
+            },
+            circular,
+        },
+        "x".repeat(2000),
+    ]);
+
+    for (const secret of [
+        "url-secret",
+        "bearer-secret",
+        "object-secret",
+        "nested-secret",
+        "inline-secret",
+    ]) {
+        assert.equal(message.includes(secret), false);
+    }
+    assert.equal(message.includes("[circular]"), true);
+    assert.equal(message.length <= 800, true);
 });

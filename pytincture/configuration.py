@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -20,6 +21,33 @@ from pytincture.backend.storage import validate_redis_url
 
 
 _MICROSOFT_SHARED_TENANTS = {"common", "organizations", "consumers"}
+
+
+def _is_literal_loopback_host(value: str) -> bool:
+    candidate = value.strip()
+    try:
+        return ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        pass
+    try:
+        parsed = urlparse(f"//{candidate}")
+        if not parsed.hostname or parsed.username is not None or parsed.password is not None:
+            return False
+        parsed.port
+        return ipaddress.ip_address(parsed.hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_literal_loopback_origin(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return False
+        parsed.port
+        return ipaddress.ip_address(parsed.hostname).is_loopback
+    except ValueError:
+        return False
 
 
 def _valid_microsoft_tenant_id(value: str) -> bool:
@@ -408,6 +436,27 @@ class PytinctureConfig:
         dev_only = self.enable_user_login and self.enable_dev_email_login and not any(
             (self.enable_google_auth, self.enable_microsoft_auth, self.enable_saml_auth)
         )
+        if self.enable_dev_email_login:
+            if not self.enable_user_login:
+                raise ValueError("enable_dev_email_login requires enable_user_login")
+            if any((self.enable_google_auth, self.enable_microsoft_auth, self.enable_saml_auth)):
+                raise ValueError(
+                    "enable_dev_email_login cannot be combined with production authentication providers"
+                )
+            if self.trusted_proxy_headers:
+                raise ValueError("enable_dev_email_login cannot trust proxy headers")
+            if self.allowed_hosts and not all(
+                _is_literal_loopback_host(host) for host in self.allowed_hosts
+            ):
+                raise ValueError(
+                    "enable_dev_email_login allows only literal loopback allowed_hosts"
+                )
+            if self.canonical_origin and not _is_literal_loopback_origin(
+                self.canonical_origin
+            ):
+                raise ValueError(
+                    "enable_dev_email_login allows only a literal loopback canonical_origin"
+                )
         if auth_enabled and not dev_only and (
             len(self.session_secret) < 32 or len(set(self.session_secret)) < 8
         ):

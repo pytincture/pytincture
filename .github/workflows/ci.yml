@@ -133,6 +133,15 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+      - name: Upload validated Python release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: python-release-artifacts
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+
   optional-extras:
     name: Clean install (${{ matrix.extra }})
     needs: python-package
@@ -293,7 +302,7 @@ jobs:
         working-directory: pytincture/frontend
         run: |
           npm ci
-          npm audit --audit-level=high
+          npm audit --audit-level=low
 
   javascript-runtime:
     name: Validate JavaScript runtime
@@ -734,7 +743,10 @@ jobs:
           PYTINCTURE_DEFAULT_APPLICATION: e2e_app
           BFF_MAX_CONCURRENCY: "2"
           BFF_MAX_QUEUE: "20"
-          BFF_QUEUE_TIMEOUT_SECONDS: "0.05"
+          # Fast BFF calls must tolerate ordinary shared-runner scheduling
+          # jitter. The separate slow-call saturation profile still proves
+          # bounded overload rejection with this timeout.
+          BFF_QUEUE_TIMEOUT_SECONDS: "0.25"
         run: |
           python -m uvicorn pytincture.backend.app:app --host 127.0.0.1 --port 8081 > production-smoke.log 2>&1 &
           server_pid=$!
@@ -810,30 +822,3 @@ jobs:
             dist/*.tar.gz
             dist/*.tgz
             dist/SHA256SUMS.json
-
-  publish-python:
-    name: Publish validated Python artifacts
-    if: github.event_name == 'release'
-    needs:
-      - attest-release-artifacts
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download validated artifacts
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: release-artifacts
-          path: dist
-
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.13"
-
-      - name: Publish exact validated Python artifacts
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
-        run: |
-          python -m pip install 'twine>=6,<7'
-          python -m twine upload --verbose dist/*.whl dist/*.tar.gz

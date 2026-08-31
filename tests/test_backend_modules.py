@@ -651,6 +651,11 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert set(dispositions) == {
         "F-01",
         "F-02",
+        "FOLLOWUP-F-01",
+        "FOLLOWUP-F-02",
+        "FOLLOWUP-F-03",
+        "FOLLOWUP-F-04",
+        "FOLLOWUP-F-05",
         "OBS-BFF-REGISTRY-BLAST-RADIUS",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
@@ -666,6 +671,13 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert registry_controls["invalid_file_operations_denied"] is True
     assert registry_controls["unrelated_valid_operations_preserved"] is True
     assert registry_controls["redis_required"] is False
+    assert dispositions["FOLLOWUP-F-01"]["controls"][
+        "long_lived_pypi_credential_used"
+    ] is False
+    assert dispositions["FOLLOWUP-F-03"]["controls"]["redis_required"] is False
+    assert dispositions["FOLLOWUP-F-04"]["controls"][
+        "pre_transmission_redaction"
+    ] is True
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:

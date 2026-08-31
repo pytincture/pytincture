@@ -469,7 +469,7 @@ async def development_auth_origin_middleware(request: Request, call_next):
     """Fail closed if the local-only dynamic-origin mode is exposed remotely."""
     if (
         ALLOW_DEVELOPMENT_AUTH_ORIGIN
-        and not _is_loopback_development_request(request)
+        and not _is_loopback_network_request(request)
     ):
         return JSONResponse(
             {"detail": "Development authentication is loopback-only"},
@@ -603,6 +603,11 @@ allowed_origins_env = os.environ.get("CORS_ALLOWED_ORIGINS", "")
 allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
 allow_all_methods = ["*"]
 allow_all_headers = ["*"]
+
+if "*" in allowed_origins:
+    raise RuntimeError(
+        "CORS_ALLOWED_ORIGINS cannot use '*' with credentialed requests"
+    )
 
 if allowed_origins:
     app.add_middleware(
@@ -914,20 +919,70 @@ def _allowed_email(email: str) -> bool:
     return allowed_email(email, os.getenv("ALLOWED_EMAILS", ""))
 
 
-def _is_loopback_development_request(request: Request) -> bool:
-    """Return whether the connection peer is a literal loopback address.
+def _is_literal_loopback_host(value: str) -> bool:
+    try:
+        parsed = urlsplit(f"//{value.strip()}")
+        if (
+            not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or not ipaddress.ip_address(parsed.hostname).is_loopback
+        ):
+            return False
+        parsed.port
+        return True
+    except ValueError:
+        return False
 
-    Host and forwarded headers describe the requested origin, not the network
-    peer, and are attacker-controlled unless a trusted proxy replaces them.
-    Development password bypass therefore never consults those headers.
-    """
 
+def _is_literal_loopback_origin(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or not ipaddress.ip_address(parsed.hostname).is_loopback
+        ):
+            return False
+        parsed.port
+        return True
+    except ValueError:
+        return False
+
+
+def _is_loopback_network_request(request: Request) -> bool:
     if request.client is None:
         return False
     try:
         return ipaddress.ip_address(request.client.host).is_loopback
     except ValueError:
         return False
+
+
+def _is_loopback_development_request(request: Request) -> bool:
+    """Return whether passwordless development login is wholly loopback.
+
+    A reverse proxy connected over loopback can otherwise launder a remote
+    request into the password bypass. Forwarded headers are deliberately
+    ignored; the direct Host and any browser Origin/Referer must independently
+    identify a literal loopback IP address.
+    """
+
+    if not _is_loopback_network_request(request):
+        return False
+    if not _is_literal_loopback_host(request.headers.get("host", "")):
+        return False
+
+    for header_name in ("origin", "referer"):
+        header_value = request.headers.get(header_name)
+        if header_value and not _is_literal_loopback_origin(header_value):
+            return False
+    return True
 
 
 def _verify_configured_password(email: str, password: str) -> bool:
@@ -2315,6 +2370,26 @@ DEV_EMAIL_LOGIN_ONLY = bool(
     and ENABLE_USER_LOGIN
     and not (ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH or ENABLE_SAML_AUTH)
 )
+
+if ENABLE_DEV_EMAIL_LOGIN:
+    if not ENABLE_USER_LOGIN:
+        raise RuntimeError("ENABLE_DEV_EMAIL_LOGIN requires ENABLE_USER_LOGIN")
+    if ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH or ENABLE_SAML_AUTH:
+        raise RuntimeError(
+            "ENABLE_DEV_EMAIL_LOGIN cannot be combined with production authentication providers"
+        )
+    if TRUST_PROXY_HEADERS:
+        raise RuntimeError("ENABLE_DEV_EMAIL_LOGIN cannot trust proxy headers")
+    if ALLOWED_HOSTS and not all(
+        _is_literal_loopback_host(host) for host in ALLOWED_HOSTS
+    ):
+        raise RuntimeError(
+            "ENABLE_DEV_EMAIL_LOGIN allows only literal loopback allowed hosts"
+        )
+    if CANONICAL_ORIGIN and not _is_literal_loopback_origin(CANONICAL_ORIGIN):
+        raise RuntimeError(
+            "ENABLE_DEV_EMAIL_LOGIN allows only a literal loopback canonical origin"
+        )
 
 
 def _authentication_enabled() -> bool:

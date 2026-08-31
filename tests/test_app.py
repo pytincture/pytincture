@@ -23,7 +23,7 @@ from pytincture.backend.app import (
     set_bff_policy_hook,
     set_user_authenticator,
 )
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 
 def _decode_session_cookie(client, secret_key):
@@ -91,7 +91,7 @@ def fresh_client(override_env):
     """
     client = TestClient(
         app,
-        base_url="https://testserver",
+        base_url="https://127.0.0.1",
         client=("127.0.0.1", 50000),
     )
     client.cookies.clear()
@@ -325,8 +325,54 @@ def test_password_hash_saturation_rejects_then_recovers(fresh_client, monkeypatc
     assert recovered.status_code == 303
 
 
-@pytest.mark.parametrize("peer", ["127.0.0.1", "::1"])
-def test_development_email_login_accepts_actual_loopback_peer(monkeypatch, peer):
+@pytest.mark.parametrize(
+    ("peer", "base_url"),
+    [("127.0.0.1", "https://127.0.0.1")],
+)
+def test_development_email_login_accepts_literal_loopback_peer_and_host(
+    monkeypatch, peer, base_url
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    with TestClient(
+        app,
+        base_url=base_url,
+        client=(peer, 50000),
+    ) as client:
+        response = client.post(
+            "/demoapp/auth/user",
+            data={"email": "person@example.com", "password": "ignored"},
+            follow_redirects=False,
+        )
+    assert response.status_code == 303
+
+
+def test_development_email_login_accepts_ipv6_literal_loopback_request():
+    import pytincture.backend.app as backend_app
+
+    request = Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "https",
+            "path": "/demoapp/auth/user",
+            "raw_path": b"/demoapp/auth/user",
+            "query_string": b"",
+            "headers": [(b"host", b"[::1]:8070"), (b"origin", b"https://[::1]:8070")],
+            "client": ("::1", 50000),
+            "server": ("::1", 8070),
+        }
+    )
+
+    assert backend_app._is_loopback_development_request(request) is True
+
+
+def test_development_email_login_rejects_public_host_through_loopback_proxy(monkeypatch):
     import pytincture.backend.app as backend_app
 
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
@@ -336,14 +382,16 @@ def test_development_email_login_accepts_actual_loopback_peer(monkeypatch, peer)
     with TestClient(
         app,
         base_url="https://public.example.com",
-        client=(peer, 50000),
+        client=("127.0.0.1", 50000),
     ) as client:
         response = client.post(
             "/demoapp/auth/user",
+            headers={"Origin": "https://public.example.com"},
             data={"email": "person@example.com", "password": "ignored"},
             follow_redirects=False,
         )
-    assert response.status_code == 303
+
+    assert response.status_code == 401
 
 
 def test_authentication_enabled_requires_strong_startup_secret(tmp_path):
@@ -1064,7 +1112,7 @@ def test_noauth_bff_accepts_same_origin_browser_request(
         "/demoapp/classcall/example.py/ExampleClass/testfunc",
         json={"kwargs": {}},
         headers={
-            "Origin": "https://testserver",
+            "Origin": "https://127.0.0.1",
             "Sec-Fetch-Site": "same-origin",
         },
     )
@@ -2008,9 +2056,9 @@ def test_stateless_session_survives_logout_in_another_browser_and_replica(
     assert first_login.status_code == 303
 
     with TestClient(
-        app, base_url="https://testserver", client=("127.0.0.1", 50001)
+        app, base_url="https://127.0.0.1", client=("127.0.0.1", 50001)
     ) as second_browser, TestClient(
-        app, base_url="https://testserver", client=("127.0.0.1", 50002)
+        app, base_url="https://127.0.0.1", client=("127.0.0.1", 50002)
     ) as another_replica:
         second_login = second_browser.post(
             "/demoapp/auth/user",

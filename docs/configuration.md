@@ -38,9 +38,16 @@ routable bind. The application also rejects non-loopback peers if another ASGI
 launch path is used. This escape hatch cannot be combined with proxy trust or
 the production host/origin settings.
 
-Run that application with any ASGI server, for example
+`enable_dev_email_login` has the same fail-closed boundary: the peer and direct
+`Host`, plus any browser `Origin` or `Referer`, must use literal loopback IPs.
+It cannot be combined with trusted proxy headers, public host/origin controls,
+or Google, Microsoft, or SAML authentication. This prevents a reverse proxy on
+loopback from laundering a remote request into passwordless development login.
+
+Run production applications with any ASGI server, for example
 `uvicorn my_service:app`. The compatibility `launch_service()` API remains
-available for existing deployments.
+available for existing deployments. Both typed and compatibility paths reject
+credentialed wildcard CORS; configure exact origins instead of `*`.
 
 Application names are ASCII Python identifiers (`reports_v2`, not
 `reports-v2` or `reports.v2`) and cannot collide with framework route names

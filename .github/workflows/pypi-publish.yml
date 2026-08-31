@@ -1,4 +1,4 @@
-name: Publish npm artifact
+name: Publish Python artifacts
 
 on:
   workflow_run:
@@ -14,20 +14,25 @@ on:
         type: string
 
 permissions:
-  actions: read
-  attestations: read
   contents: read
-  id-token: write
 
 jobs:
-  publish-npm:
-    name: Publish attested npm release artifact
+  verify-python-release:
+    name: Verify attested Python release artifacts
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.event == 'release' &&
       github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
-    environment: npm
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    outputs:
+      already_published: ${{ steps.registry.outputs.already_published }}
+      release_tag: ${{ steps.source.outputs.release_tag }}
+      source_run_id: ${{ steps.source.outputs.source_run_id }}
+      tag_sha: ${{ steps.source.outputs.tag_sha }}
 
     steps:
       - name: Check out trusted publication policy
@@ -36,7 +41,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
-      - name: Resolve published release and successful release run
+      - name: Resolve protected published release and successful release run
         id: source
         env:
           AUTO_RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
@@ -112,7 +117,12 @@ jobs:
           run-id: ${{ steps.source.outputs.source_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify release metadata and npm package identity
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Verify release metadata, package identity, and retained hashes
         id: verify
         env:
           RELEASE_JSON: ${{ steps.source.outputs.release_json }}
@@ -123,57 +133,98 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          verification=$(python scripts/verify_npm_release.py \
+          verification=$(python scripts/verify_python_release.py \
             --repository "$REPOSITORY" \
             --release-tag "$RELEASE_TAG" \
             --tag-sha "$TAG_SHA" \
             --release-json "$RELEASE_JSON" \
             --run-json "$RUN_JSON" \
             --artifact-dir dist)
-          echo "npm_path=$(jq -r .npm_path <<< "$verification")" >> "$GITHUB_OUTPUT"
-          echo "npm_version=$(jq -r .npm_version <<< "$verification")" >> "$GITHUB_OUTPUT"
-          echo "dist_tag=$(jq -r .dist_tag <<< "$verification")" >> "$GITHUB_OUTPUT"
+          echo "python_version=$(jq -r .python_version <<< "$verification")" >> "$GITHUB_OUTPUT"
+          echo "wheel_path=$(jq -r .wheel_path <<< "$verification")" >> "$GITHUB_OUTPUT"
+          echo "sdist_path=$(jq -r .sdist_path <<< "$verification")" >> "$GITHUB_OUTPUT"
 
-      - name: Verify artifact attestation and trusted builder identity
+      - name: Verify artifact attestations and trusted builder identity
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_PATH: ${{ steps.verify.outputs.npm_path }}
           RELEASE_TAG: ${{ steps.source.outputs.release_tag }}
           REPOSITORY: ${{ github.repository }}
+          SDIST_PATH: ${{ steps.verify.outputs.sdist_path }}
           TAG_SHA: ${{ steps.source.outputs.tag_sha }}
+          WHEEL_PATH: ${{ steps.verify.outputs.wheel_path }}
         shell: bash
         run: |
-          gh attestation verify "$NPM_PATH" \
-            --repo "$REPOSITORY" \
-            --signer-workflow "$REPOSITORY/.github/workflows/ci.yml" \
-            --source-digest "$TAG_SHA" \
-            --source-ref "refs/tags/$RELEASE_TAG" \
-            --deny-self-hosted-runners
+          set -euo pipefail
+          for artifact in "$WHEEL_PATH" "$SDIST_PATH"; do
+            gh attestation verify "$artifact" \
+              --repo "$REPOSITORY" \
+              --signer-workflow "$REPOSITORY/.github/workflows/ci.yml" \
+              --source-digest "$TAG_SHA" \
+              --source-ref "refs/tags/$RELEASE_TAG" \
+              --deny-self-hosted-runners
+          done
 
-      - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: "24"
-          registry-url: https://registry.npmjs.org
-          package-manager-cache: false
-
-      - name: Check whether the immutable version already exists
+      - name: Check whether the immutable Python version already exists
         id: registry
         env:
-          NPM_VERSION: ${{ steps.verify.outputs.npm_version }}
+          PYTHON_VERSION: ${{ steps.verify.outputs.python_version }}
         shell: bash
         run: |
-          if npm view "@pytincture/runtime@$NPM_VERSION" version >/dev/null 2>&1; then
+          set -euo pipefail
+          if curl --fail --silent --show-error \
+            "https://pypi.org/pypi/pytincture/$PYTHON_VERSION/json" >/dev/null; then
             echo "already_published=true" >> "$GITHUB_OUTPUT"
-            echo "@pytincture/runtime@$NPM_VERSION is already published; retry is a no-op."
+            echo "pytincture==$PYTHON_VERSION is already published; retry is a no-op."
           else
             echo "already_published=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish exact attested npm artifact with OIDC
-        if: steps.registry.outputs.already_published != 'true'
+  publish-python:
+    name: Publish attested Python release artifacts with OIDC
+    needs: verify-python-release
+    if: needs.verify-python-release.outputs.already_published != 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Download exact retained Python artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: python-release-artifacts
+          path: python-dist
+          run-id: ${{ needs.verify-python-release.outputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Reverify artifact attestations inside the protected publishing job
         env:
-          DIST_TAG: ${{ steps.verify.outputs.dist_tag }}
-          NPM_PATH: ${{ steps.verify.outputs.npm_path }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.verify-python-release.outputs.release_tag }}
+          REPOSITORY: ${{ github.repository }}
+          TAG_SHA: ${{ needs.verify-python-release.outputs.tag_sha }}
         shell: bash
-        run: npm publish "$NPM_PATH" --access public --tag "$DIST_TAG"
+        run: |
+          set -euo pipefail
+          artifact_count=0
+          for artifact in python-dist/*.whl python-dist/*.tar.gz; do
+            [[ -f "$artifact" && ! -L "$artifact" ]] || exit 1
+            artifact_count=$((artifact_count + 1))
+            gh attestation verify "$artifact" \
+              --repo "$REPOSITORY" \
+              --signer-workflow "$REPOSITORY/.github/workflows/ci.yml" \
+              --source-digest "$TAG_SHA" \
+              --source-ref "refs/tags/$RELEASE_TAG" \
+              --deny-self-hosted-runners
+          done
+          [[ "$artifact_count" -eq 2 ]]
+
+      - name: Publish exact artifacts through PyPI Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: python-dist
+          attestations: true
+          print-hash: true

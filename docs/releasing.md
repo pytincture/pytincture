@@ -19,29 +19,37 @@ Only a maintained release commit with green required CI is publishable.
 5. Create and push a signed `v<version>` tag at the green commit. Wait for the
    tag-triggered CI, version/qualification gate, and blocker audit to pass.
 6. Publish a GitHub release from that qualified tag. The release event rebuilds
-   artifacts with the commit timestamp, verifies byte
-   reproducibility/content/hashes, and publishes the exact wheel and sdist.
-   Release CI signs GitHub artifact attestations after every qualification job
-   succeeds. After that release run completes, `npm-publish.yml` verifies the
-   published tag, exact commit, CI workflow identity, attestation, package
-   identity, filename, and SemVer before publishing the retained npm tarball
-   through npm trusted-publisher OIDC. The same workflow supports an idempotent
-   manual retry by published release tag; it resolves the trusted run itself.
+   artifacts with the commit timestamp and verifies byte reproducibility,
+   content, and hashes. Release CI signs GitHub artifact attestations after
+   every qualification job succeeds. After that run completes,
+   `pypi-publish.yml` and `npm-publish.yml` independently verify the published
+   tag, exact commit, protected-default-branch ancestry, CI workflow identity,
+   attestation, package identity, filename, and version. They publish only the
+   exact retained wheel/sdist and npm tarball through registry trusted-publisher
+   OIDC. Both workflows support idempotent retries by published release tag and
+   resolve the trusted release run themselves.
 7. Verify PyPI/npm metadata and install each artifact from the public index in
    a new environment. Attach the generated `SHA256SUMS.json` to the release.
 
 Prerelease npm artifacts are published under the `next` dist-tag; only stable
 releases update `latest`.
 
-There is intentionally no independent GitHub publish workflow. Never upload a
-locally rebuilt file under an existing version.
+Never configure either publisher to accept a caller-selected CI run or locally
+rebuilt file, and never upload a replacement under an existing version.
 
-The npm publisher uses the protected `npm` GitHub environment. Keep required
-reviewers enabled and restrict deployment to protected branches. Publication
-actions are pinned to full commit SHAs, and values derived from release or
-artifact metadata are passed to shell steps through environment variables. Run
-manual tag-based retries from the protected default branch; the tag is an input,
-not the workflow execution ref.
+The publishers use protected `pypi` and `npm` GitHub environments. Keep
+non-self required reviewers enabled and restrict deployments to the protected
+default branch. Protect creation, update, and deletion of `v*` release tags.
+Publication actions are pinned to full commit SHAs, and values derived from
+release or artifact metadata are passed to shell steps through environment
+variables. Run manual tag-based retries from the protected default branch; the
+tag is an input, not the workflow execution ref.
+
+Configure the PyPI trusted publisher for project `pytincture` with owner and
+repository `pytincture/pytincture`, workflow `pypi-publish.yml`, and environment
+`pypi`. Do not configure `PYPI_PASSWORD`, `TWINE_PASSWORD`, or another fallback
+credential. Until that PyPI-side publisher exists, publication fails closed
+after repository verification rather than falling back to a long-lived token.
 
 ## Failed publication
 

@@ -21,7 +21,11 @@ routes intentionally share the root scope.
   trust fails startup unless both fixed host/origin controls are configured.
 - Never set `PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN` in production. It is a
   loopback-only local HTTP compatibility mode.
-- Set explicit `CORS_ALLOWED_ORIGINS`; wildcard credentialed CORS is rejected.
+- Set explicit `CORS_ALLOWED_ORIGINS`; wildcard credentialed CORS is rejected
+  by typed configuration and the compatibility application at startup.
+- Never place `ENABLE_DEV_EMAIL_LOGIN=true` behind a reverse proxy. That mode
+  rejects proxy trust and public configuration, and requires the peer, direct
+  Host, and any browser Origin/Referer to use literal loopback IP addresses.
 - SAML responses are decoded and parsed under `SAML_RESPONSE_MAX_BYTES`, use
   an XML-signature transform allowlist, and are throttled per peer before
   signature processing. Tune `SAML_ACS_RATE_LIMIT_ATTEMPTS` and
