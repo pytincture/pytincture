@@ -69,6 +69,16 @@ session path. When that integration is explicitly enabled, its remote URL must
 use HTTPS. Cleartext HTTP is accepted only for local emulators addressed by a
 literal loopback IP such as `127.0.0.1` or `::1`.
 
+BFF modules are deployment-trusted code. The default `trusted-thread` mode
+preserves low-overhead async, object, and streaming behavior; timed-out worker
+threads retain their admission slot until they actually exit. For a harder
+boundary around non-streaming BFFs, select `BFF_EXECUTION_MODE=isolated-process`
+and size its process/per-user, CPU, memory, wall-time, and result limits. Child
+processes are terminated at wall time. CPU enforcement requires POSIX and the
+address-space limit is enforced on Linux; use container/cgroup limits as the
+fleet boundary on other platforms. Isolated mode does not support streaming
+BFF methods.
+
 Keep `MODULES_PATH` writable only by the deployment principal. Pytincture
 canonicalizes the root, rejects symlink components and cross-platform traversal
 syntax, uses no-follow opens where supported, and verifies BFF source digests

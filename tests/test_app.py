@@ -2134,6 +2134,96 @@ def test_class_call_timeout_returns_gateway_timeout(monkeypatch, fresh_client, t
     assert response.json()["correlation_id"]
 
 
+def test_ordinary_bff_results_are_serialized_under_a_hard_byte_limit(
+    monkeypatch, fresh_client, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "bounded.py").write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+        from fastapi import Response
+
+        @backend_for_frontend
+        class Bounded:
+            def __init__(self, _user): pass
+            def large(self): return {"payload": "x" * 1000}
+            def raw(self): return Response(content=b"x" * 1000)
+            def ping(self): return {"ready": True}
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "BFF_RESULT_MAX_BYTES", 64)
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: "noauth")
+    backend_app.reload_bff_registry(str(tmp_path))
+
+    oversized = fresh_client.post(
+        "/bounded/classcall/bounded.py/Bounded/large",
+        json={"args": [], "kwargs": {}},
+    )
+    recovered = fresh_client.post(
+        "/bounded/classcall/bounded.py/Bounded/ping",
+        json={"args": [], "kwargs": {}},
+    )
+    oversized_response = fresh_client.post(
+        "/bounded/classcall/bounded.py/Bounded/raw",
+        json={"args": [], "kwargs": {}},
+    )
+
+    assert oversized.status_code == 413
+    assert oversized.json() == {"detail": "BFF result byte limit exceeded"}
+    assert oversized_response.status_code == 413
+    assert recovered.status_code == 200
+    assert recovered.json() == {"ready": True}
+
+
+def test_class_call_uses_optional_process_isolation_when_configured(
+    monkeypatch, fresh_client, tmp_path
+):
+    import pytincture.backend.app as backend_app
+    from pytincture.backend.execution import ProcessIsolatedBFFExecutor
+
+    (tmp_path / "isolated.py").write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_stream
+
+        @backend_for_frontend
+        class Isolated:
+            def __init__(self, _user): self.user = _user
+            def ping(self): return {"isolated": True}
+            @bff_stream()
+            async def stream(self):
+                yield "unsupported"
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "BFF_EXECUTION_MODE", "isolated-process")
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: "noauth")
+    monkeypatch.setattr(
+        backend_app,
+        "BFF_ISOLATED_EXECUTOR",
+        ProcessIsolatedBFFExecutor(
+            max_concurrency=1,
+            max_per_user=1,
+            cpu_seconds=2,
+            memory_bytes=64 * 1024 * 1024 * 1024,
+            result_max_bytes=1024,
+            result_max_depth=8,
+            result_max_items=100,
+        ),
+    )
+    backend_app.reload_bff_registry(str(tmp_path))
+
+    response = fresh_client.post(
+        "/isolated/classcall/isolated.py/Isolated/ping",
+        json={"args": [], "kwargs": {}},
+    )
+    stream_response = fresh_client.post(
+        "/isolated/classcall/isolated.py/Isolated/stream",
+        json={"args": [], "kwargs": {}},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"isolated": True}
+    assert stream_response.status_code == 501
+
+
 def test_timed_out_sync_bff_holds_capacity_until_worker_recovers(monkeypatch):
     import time
     from starlette.requests import Request

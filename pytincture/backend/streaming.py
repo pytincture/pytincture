@@ -2,7 +2,6 @@
 
 import asyncio
 import inspect
-import json
 import time
 from collections.abc import AsyncIterable, Callable, Iterable
 from typing import Any
@@ -10,12 +9,34 @@ from typing import Any
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
+from pytincture.backend.results import BFFResultLimitExceeded, encode_bff_result
 
-def serialize_stream_item(item: Any, raw: bool = False) -> str | bytes:
+
+def serialize_stream_item(
+    item: Any,
+    raw: bool = False,
+    *,
+    max_bytes: int | None = None,
+    max_depth: int = 32,
+    max_items: int = 10_000,
+) -> str | bytes:
     if isinstance(item, (bytes, bytearray)):
         data = bytes(item)
+        if max_bytes is not None and len(data) > max_bytes:
+            raise BFFResultLimitExceeded("BFF stream byte limit exceeded")
         return data if raw or data.endswith(b"\n") else data + b"\n"
-    text = item if isinstance(item, str) else json.dumps(item)
+    if isinstance(item, str):
+        if max_bytes is not None and len(item) > max_bytes:
+            raise BFFResultLimitExceeded("BFF stream byte limit exceeded")
+        text = item
+    else:
+        text = encode_bff_result(
+            item,
+            max_bytes=max_bytes if max_bytes is not None else 2**63 - 1,
+            max_depth=max_depth,
+            max_items=max_items,
+            compact=False,
+        ).decode("utf-8")
     return text if raw or text.endswith("\n") else text + "\n"
 
 
@@ -42,7 +63,17 @@ def limited_sync_stream(
             if time.monotonic() - started > max_seconds:
                 reason = "timeout"
                 return
-            serialized = serialize_stream_item(item, raw)
+            remaining_bytes = max_bytes - output_bytes
+            try:
+                serialized = serialize_stream_item(
+                    item,
+                    raw,
+                    max_bytes=remaining_bytes,
+                    max_items=max_items,
+                )
+            except BFFResultLimitExceeded:
+                reason = "byte-limit"
+                return
             output_items += 1
             if output_items > max_items:
                 reason = "item-limit"
@@ -101,7 +132,17 @@ async def limited_async_stream(
                     else "timeout"
                 )
                 return
-            serialized = serialize_stream_item(item, raw)
+            remaining_bytes = max_bytes - output_bytes
+            try:
+                serialized = serialize_stream_item(
+                    item,
+                    raw,
+                    max_bytes=remaining_bytes,
+                    max_items=max_items,
+                )
+            except BFFResultLimitExceeded:
+                reason = "byte-limit"
+                return
             output_items += 1
             if output_items > max_items:
                 reason = "item-limit"

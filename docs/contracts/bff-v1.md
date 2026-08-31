@@ -104,6 +104,12 @@ Authentication, policy, validation, missing export, and method errors retain
 their HTTP status semantics; server errors are sanitized and include a
 correlation id. Responses carry `X-Request-ID`.
 
+Ordinary results are encoded through a bounded iterator before a response is
+created. `BFF_RESULT_MAX_BYTES`, `BFF_RESULT_MAX_DEPTH`, and
+`BFF_RESULT_MAX_ITEMS` cap serialized output and structure; an oversized result
+returns `413`. Stream items are likewise bounded before their serialized bytes
+are retained, in addition to the aggregate stream duration/byte/item limits.
+
 Generated sync, async, and streaming proxies decode only 2xx responses. Any
 other response except 401 raises `PytinctureBFFError`, whose stable fields are
 `status_code` (`status` is an alias), `operation`, and `correlation_id`. Its
@@ -115,6 +121,14 @@ refill and retry once before a remaining 409 becomes a typed error.
 `@bff_stream()` defaults to `text/event-stream` and newline-delimited JSON.
 `raw=True` forwards string/byte chunks without JSON framing. The declared
 `media_type` is preserved.
+
+Trusted application code runs in the normal thread/async execution path by
+default. `BFF_EXECUTION_MODE=isolated-process` is an explicit harder boundary
+for non-streaming methods: each call runs in a killable child with per-worker
+and per-user admission, wall-time, CPU, memory where the operating system
+supports it, and serialized-output limits. Streaming operations return `501`
+in this optional mode. Process isolation is not required for ordinary trusted
+BFF modules and does not change their browser API.
 
 ## Generated proxy behavior
 
