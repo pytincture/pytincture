@@ -170,6 +170,7 @@
       "status": "remediated",
       "title": "Development email login rejects loopback proxy laundering",
       "security_boundary": "Passwordless development login requires a literal-loopback network peer and direct Host, plus a literal-loopback Origin or Referer when present. Proxy trust, public host/origin controls, and production providers are incompatible with the mode.",
+      "scope_note": "This strict passwordless-login boundary is separate from the peer-loopback-only dynamic-origin switch used for local OAuth/SAML acceptance, because standards-based cross-origin POST callbacks may legitimately carry an opaque Origin.",
       "controls": {
         "literal_loopback_peer_required": true,
         "literal_loopback_direct_host_required": true,

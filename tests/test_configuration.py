@@ -463,7 +463,7 @@ def test_dynamic_auth_origin_rejects_non_loopback_requests(tmp_path):
         base_url="http://127.0.0.1",
         client=("127.0.0.1", 50000),
     ) as local_client:
-        accepted = local_client.get("/healthz")
+        accepted = local_client.get("/healthz", headers={"Origin": "null"})
 
     assert rejected.status_code == 403
     assert rejected.json() == {"detail": "Development authentication is loopback-only"}

@@ -469,7 +469,7 @@ async def development_auth_origin_middleware(request: Request, call_next):
     """Fail closed if the local-only dynamic-origin mode is exposed remotely."""
     if (
         ALLOW_DEVELOPMENT_AUTH_ORIGIN
-        and not _is_loopback_development_request(request)
+        and not _is_loopback_network_request(request)
     ):
         return JSONResponse(
             {"detail": "Development authentication is loopback-only"},
@@ -955,24 +955,26 @@ def _is_literal_loopback_origin(value: str) -> bool:
         return False
 
 
-def _is_loopback_development_request(request: Request) -> bool:
-    """Return whether the peer and browser-facing request are literal loopback.
-
-    Host and forwarded headers describe the requested origin, not the network
-    peer. A reverse proxy connected over loopback can otherwise launder a
-    remote request into the development password bypass. Forwarded headers are
-    deliberately ignored; the direct Host and any browser Origin/Referer must
-    independently identify a literal loopback IP address.
-    """
-
+def _is_loopback_network_request(request: Request) -> bool:
     if request.client is None:
         return False
     try:
-        if not ipaddress.ip_address(request.client.host).is_loopback:
-            return False
+        return ipaddress.ip_address(request.client.host).is_loopback
     except ValueError:
         return False
 
+
+def _is_loopback_development_request(request: Request) -> bool:
+    """Return whether passwordless development login is wholly loopback.
+
+    A reverse proxy connected over loopback can otherwise launder a remote
+    request into the password bypass. Forwarded headers are deliberately
+    ignored; the direct Host and any browser Origin/Referer must independently
+    identify a literal loopback IP address.
+    """
+
+    if not _is_loopback_network_request(request):
+        return False
     if not _is_literal_loopback_host(request.headers.get("host", "")):
         return False
 
