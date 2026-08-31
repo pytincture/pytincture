@@ -706,28 +706,50 @@ _BFF_REGISTRY_STATE = BFFRegistry(
     autoload=False,
 )
 BFF_REGISTRY = _BFF_REGISTRY_STATE.operations
+BFF_REGISTRY_FAILURES: Dict[str, str] = {}
+
+
+def _sync_bff_registry_snapshot() -> None:
+    """Publish operation/failure snapshots and log only bounded safe metadata."""
+    global BFF_REGISTRY_ROOT, BFF_REGISTRY, BFF_REGISTRY_FAILURES
+    previous_failures = BFF_REGISTRY_FAILURES
+    BFF_REGISTRY_ROOT = _BFF_REGISTRY_STATE.root
+    BFF_REGISTRY = _BFF_REGISTRY_STATE.operations
+    BFF_REGISTRY_FAILURES = dict(_BFF_REGISTRY_STATE.failures)
+    if BFF_REGISTRY_FAILURES == previous_failures:
+        return
+    if BFF_REGISTRY_FAILURES:
+        structured_log(
+            logger,
+            logging.WARNING,
+            "bff.registry_files_rejected",
+            rejected_count=len(BFF_REGISTRY_FAILURES),
+            rejected_files=",".join(
+                f"{path}:{BFF_REGISTRY_FAILURES[path]}"
+                for path in sorted(BFF_REGISTRY_FAILURES)[:20]
+            )[:2048],
+        )
+    else:
+        structured_log(logger, logging.INFO, "bff.registry_files_recovered")
 
 
 def reload_bff_registry(modules_root: Optional[str] = None):
     """Rebuild exported BFF operations, for example after development-time file changes."""
-    global BFF_REGISTRY_ROOT, BFF_REGISTRY
-    BFF_REGISTRY = _BFF_REGISTRY_STATE.reload(modules_root or get_modules_path())
-    BFF_REGISTRY_ROOT = _BFF_REGISTRY_STATE.root
+    _BFF_REGISTRY_STATE.reload(modules_root or get_modules_path())
+    _sync_bff_registry_snapshot()
     return BFF_REGISTRY
 
 
 def _registered_bff_operation(
     modules_root: str, relative_path: str, class_name: str, function_name: str
 ) -> Optional[Dict[str, Any]]:
-    global BFF_REGISTRY_ROOT, BFF_REGISTRY
     operation = _BFF_REGISTRY_STATE.operation(
         modules_root,
         relative_path,
         class_name,
         function_name,
     )
-    BFF_REGISTRY_ROOT = _BFF_REGISTRY_STATE.root
-    BFF_REGISTRY = _BFF_REGISTRY_STATE.operations
+    _sync_bff_registry_snapshot()
     return operation
 
 try:

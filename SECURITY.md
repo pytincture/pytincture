@@ -45,6 +45,10 @@ anonymity is requested. No guaranteed response SLA is currently offered.
   sessions are not required. A deployment needing strict single-consumption
   across simultaneous duplicate requests must add a shared atomic control as
   an optional deployment policy.
+- BFF discovery is fail-closed per canonical source file. Invalid files export
+  no operations and are tracked as rejected, but cannot deny startup or remove
+  valid exports for unrelated applications. Repair does not restore access
+  until the file passes a complete static rescan.
 
 The machine-readable dispositions and their regression-test mappings are in
 [`security/review-dispositions.json`](security/review-dispositions.json).

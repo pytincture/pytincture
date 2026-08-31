@@ -59,6 +59,16 @@ between discovery and execution. These checks are defense in depth, not a
 replacement for read-only application artifacts and least-privilege filesystem
 permissions.
 
+BFF registry discovery is fail-closed per source file. An unreadable, unsafe,
+malformed, or invalidly encoded Python file contributes no callable operations,
+while valid files in unrelated application graphs remain available. Rejections
+are exposed in the per-app backend's `BFF_REGISTRY_FAILURES` snapshot and logged
+only as bounded relative paths plus stable reason codes. A valid policy-bearing
+export still fails startup when its policy hook is missing, and an explicit MCP
+tool still fails MCP initialization when its exact BFF target is unavailable.
+Use immutable release directories and atomic deployment anyway: an application
+that imports a partially written file can still fail its own browser package.
+
 ## Private-network exposure
 
 State-changing BFF routes require JSON and reject browser requests unless

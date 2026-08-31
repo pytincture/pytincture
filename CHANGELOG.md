@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Isolate static BFF registry failures to their canonical source files: unsafe,
+  unreadable, malformed, or invalidly encoded files now export nothing without
+  denying startup to unrelated applications, and can rejoin only after a full
+  successful rescan. Valid policy and explicit MCP targets remain fail-closed.
 - Restore the interactive BFF API documentation under the enforced CSP by
   packaging an exact, SHA-256-locked Swagger UI release in the Python wheel.
   Documentation assets are same-origin, explicit framework-manifest entries
