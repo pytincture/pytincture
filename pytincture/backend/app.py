@@ -23,6 +23,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Mapping,
     Optional,
     Set,
 )
@@ -71,6 +72,12 @@ from pytincture.backend.application_admission import (
 )
 from pytincture.backend.bff import BFFRegistry
 from pytincture.backend.bff import build_bff_registry as _build_bff_registry
+from pytincture.backend.bff_requests import (
+    BFFArguments,
+    BFFRequestValidationError,
+    parse_canonical_bff_body,
+    validate_bff_arguments,
+)
 from pytincture.backend.browser_packages import (
     AppcodeArchiveCache,
     browser_asset_path_is_safe,
@@ -1522,21 +1529,20 @@ def _validate_preauthentication_request(request: Request, supplied_token: str) -
 
 
 def _validate_bff_browser_request(request: Request) -> None:
-    """Reject drive-by browser mutations while preserving trusted API clients.
+    """Reject drive-by browser calls while preserving trusted API clients.
 
     Browsers identify their initiating origin and fetch site. Non-browser
     clients commonly send neither header and remain supported, but supplying
     either header opts the request into strict browser validation.
     """
-    if request.method in {"GET", "HEAD", "OPTIONS"}:
-        return
-
-    content_type = request.headers.get("content-type", "").partition(";")[0]
-    if content_type.strip().casefold() != "application/json":
-        raise HTTPException(
-            status_code=415,
-            detail="BFF requests require application/json",
-        )
+    is_read_only = request.method in {"GET", "HEAD", "OPTIONS"}
+    if not is_read_only:
+        content_type = request.headers.get("content-type", "").partition(";")[0]
+        if content_type.strip().casefold() != "application/json":
+            raise HTTPException(
+                status_code=415,
+                detail="BFF requests require application/json",
+            )
 
     origin = request.headers.get("origin")
     fetch_site = request.headers.get("sec-fetch-site")
@@ -1554,10 +1560,39 @@ def _validate_bff_browser_request(request: Request) -> None:
     normalized_fetch_site = fetch_site.strip().casefold()
     if normalized_fetch_site != "same-origin":
         raise HTTPException(status_code=403, detail="Fetch Metadata validation failed")
-    if origin is None:
+    if origin is None and not is_read_only:
         # A browser identifying itself through Fetch Metadata must also prove
         # the exact origin for a state-changing dispatcher request.
         raise HTTPException(status_code=403, detail="Origin validation failed")
+
+
+async def _canonical_bff_arguments(
+    request: Request,
+    operation: Mapping[str, Any],
+) -> BFFArguments:
+    if request.method == "GET":
+        body = await request.body()
+        if body:
+            raise HTTPException(status_code=400, detail="GET BFF requests cannot have a body")
+        arguments = BFFArguments((), {})
+    else:
+        body = await request.body()
+        if len(body) > BFF_REQUEST_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="BFF request body is too large")
+        try:
+            arguments = parse_canonical_bff_body(
+                body,
+                max_bytes=BFF_REQUEST_MAX_BYTES,
+                max_depth=BFF_REQUEST_MAX_DEPTH,
+                max_items=BFF_REQUEST_MAX_ITEMS,
+            )
+        except BFFRequestValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        validate_bff_arguments(arguments, operation.get("parameters", ()))
+    except BFFRequestValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return arguments
 
 
 def _release_bff_slot(request: Request) -> None:
@@ -2125,6 +2160,9 @@ async def class_call(
 
     _validate_bff_browser_request(request)
     _validate_csrf(request, user)
+    arguments = await _canonical_bff_arguments(request, operation)
+    args = arguments.args
+    kwargs = arguments.kwargs
     await _run_bff_thread_stage(request, _validate_bff_replay_token, request, user)
     policy = operation.get("policy", {})
     policy_hook = await _run_bff_thread_stage(
@@ -2203,35 +2241,7 @@ async def class_call(
     is_async_gen_function = inspect.isasyncgenfunction(function_obj)
     is_coroutine_function = inspect.iscoroutinefunction(function_obj)
 
-    # 4) If it's a POST, parse JSON body
-    data = {}
-    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
-        try:
-            data = await request.json()
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
-    
-    if isinstance(data, str):
-        try:
-            data = json.loads(str(data))
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
-
     if callable(func):
-        if not isinstance(data, dict):
-            raise HTTPException(status_code=400, detail="BFF request body must be an object")
-        args = data.get("args", [])
-        kwargs = data.get("kwargs", {})
-        if not isinstance(args, list) or not isinstance(kwargs, dict):
-            raise HTTPException(status_code=400, detail="Invalid BFF arguments")
-
-        # Handle structured args format if present
-        if args and isinstance(args[0], dict) and 'value' in args[0]:
-            args = [arg['value'] for arg in args]
-        # Handle if args and kwargs do not exist in data
-        elif "args" not in data and "kwargs" not in data:
-            kwargs = data
-
         def _as_streaming_response(result_obj):
             def log_stream_finish(reason, output_bytes):
                 structured_log(
@@ -2325,7 +2335,7 @@ async def _invoke_mcp_bff(spec: MCPToolSpec, arguments: Dict[str, Any]) -> Any:
         "session_version": AUTH_SESSION_SCHEMA_VERSION,
         "application": spec.application,
     }
-    body = json.dumps({"kwargs": arguments}).encode("utf-8")
+    body = json.dumps({"args": [], "kwargs": arguments}, allow_nan=False).encode("utf-8")
     delivered = False
 
     async def receive():
@@ -2595,6 +2605,9 @@ BFF_CALL_TIMEOUT_SECONDS = float(os.getenv("BFF_CALL_TIMEOUT_SECONDS", "30"))
 BFF_MAX_CONCURRENCY = int(os.getenv("BFF_MAX_CONCURRENCY", "32"))
 BFF_MAX_QUEUE = int(os.getenv("BFF_MAX_QUEUE", "64"))
 BFF_QUEUE_TIMEOUT_SECONDS = float(os.getenv("BFF_QUEUE_TIMEOUT_SECONDS", "2"))
+BFF_REQUEST_MAX_BYTES = int(os.getenv("BFF_REQUEST_MAX_BYTES", str(1024 * 1024)))
+BFF_REQUEST_MAX_DEPTH = int(os.getenv("BFF_REQUEST_MAX_DEPTH", "32"))
+BFF_REQUEST_MAX_ITEMS = int(os.getenv("BFF_REQUEST_MAX_ITEMS", "10000"))
 BFF_STREAM_MAX_SECONDS = float(os.getenv("BFF_STREAM_MAX_SECONDS", "300"))
 BFF_STREAM_MAX_BYTES = int(os.getenv("BFF_STREAM_MAX_BYTES", str(10 * 1024 * 1024)))
 BFF_STREAM_MAX_ITEMS = int(os.getenv("BFF_STREAM_MAX_ITEMS", "10000"))
@@ -2611,6 +2624,9 @@ if min(
     BFF_CALL_TIMEOUT_SECONDS,
     BFF_MAX_CONCURRENCY,
     BFF_QUEUE_TIMEOUT_SECONDS,
+    BFF_REQUEST_MAX_BYTES,
+    BFF_REQUEST_MAX_DEPTH,
+    BFF_REQUEST_MAX_ITEMS,
     BFF_STREAM_MAX_SECONDS,
     BFF_STREAM_MAX_BYTES,
     BFF_STREAM_MAX_ITEMS,

@@ -18,7 +18,7 @@ PROFILES = {
     "bff": {
         "path": "/performance_data/classcall/performance_data.py/PerformanceData/ping",
         "method": "POST",
-        "body_json": '{"kwargs":{"value":1}}',
+        "body_json": '{"args":[],"kwargs":{"value":1}}',
     },
 }
 

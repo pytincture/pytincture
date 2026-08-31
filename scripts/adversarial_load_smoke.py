@@ -28,7 +28,7 @@ def main() -> int:
         f"{base_url}/performance_data/classcall/"
         "performance_data.py/PerformanceData/slow"
     )
-    body = b'{"kwargs":{"seconds":0.1}}'
+    body = b'{"args":[],"kwargs":{"seconds":0.1}}'
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as pool:
         results = list(
             pool.map(
@@ -48,7 +48,7 @@ def main() -> int:
         "performance_data.py/PerformanceData/ping",
         5,
         method="POST",
-        body=b'{"kwargs":{"value":2}}',
+        body=b'{"args":[],"kwargs":{"value":2}}',
     )
     health_latency, health_status = request_once(f"{base_url}/healthz", 5)
     report = {

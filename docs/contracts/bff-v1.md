@@ -59,14 +59,25 @@ For body-bearing methods, the canonical JSON body is:
 ```
 
 Generated stubs may send positional values in `args` and named values in
-`kwargs`. For compatibility, the backend also accepts structured positional
-entries containing a `value`, and treats a body without `args`/`kwargs` as
-keyword arguments. New stubs must emit the canonical form.
+`kwargs`. This is the only accepted representation: the body itself cannot be
+a JSON string, both keys are required, additional top-level keys are rejected,
+and legacy structured positional entries are not auto-unwrapped. This strict
+pre-1.0 boundary avoids a permanent double-decoding compatibility mode.
+
+Before application code is imported or a BFF class is constructed, Pytincture
+rejects duplicate keys, non-finite numbers, excessive bytes/nesting/items,
+malformed `args`/`kwargs`, signature binding errors, missing/unexpected
+arguments, and values that conflict with common static annotations such as
+`str`, `bool`, `int`, `float`, `list[T]`, `dict[K, V]`, `Optional`, `Union`,
+and `Literal`. Application-specific annotations remain application-owned, but
+argument names/counts are still bound statically.
 
 State-changing dispatcher requests require `Content-Type: application/json`.
-Browser requests must supply the exact service `Origin`; when Fetch Metadata is
-present it must also report `Sec-Fetch-Site: same-origin`. Cross-site,
-same-site, opaque/null-origin, and malformed browser contexts are rejected.
+Declaring GET is an explicit developer promise that the operation is
+parameterless, read-only, safe to repeat, and bodyless. Browser requests that
+send an Origin must supply the exact service Origin; Fetch Metadata, when
+present, must report `Sec-Fetch-Site: same-origin` for GET and mutations.
+Cross-site, same-site, opaque/null-origin, and malformed browser contexts are rejected.
 Trusted non-browser clients may omit both browser headers, but cannot send
 conflicting browser metadata.
 

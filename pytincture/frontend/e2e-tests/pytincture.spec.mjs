@@ -93,7 +93,7 @@ async function callAuthenticatedBff(page) {
                     "Content-Type": "application/json",
                     "X-CSRF-Token": csrfToken,
                 },
-                body: JSON.stringify({ kwargs }),
+                body: JSON.stringify({ args: [], kwargs }),
             });
             return { status: response.status, body: await response.text() };
         };
@@ -121,7 +121,7 @@ async function measureAuthenticatedBff(page, sampleCount) {
                     "Content-Type": "application/json",
                     "X-CSRF-Token": csrfToken,
                 },
-                body: JSON.stringify({ kwargs: { value: index } }),
+                body: JSON.stringify({ args: [], kwargs: { value: index } }),
             });
             if (!response.ok) {
                 throw new Error(`BFF performance sample failed with HTTP ${response.status}`);

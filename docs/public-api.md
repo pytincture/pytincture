@@ -45,7 +45,8 @@ Import these decorators from `pytincture.dataclass`:
 - `@backend_for_frontend` exports public methods and public attributes from a
   class and produces the browser-side proxy.
 - `@bff_http_methods(*methods)` opts a method into one or more of `GET`,
-  `POST`, `PUT`, `PATCH`, and `DELETE`. Undeclared methods use `POST`.
+  `POST`, `PUT`, `PATCH`, and `DELETE`. Undeclared methods use `POST`; GET is a
+  parameterless, read-only, repeatable operation contract.
 - `@bff_policy(**metadata)` attaches literal policy metadata. A server-side
   hook is required at startup; standard audience/provider/issuer/tenant/role/
   operation predicates are enforced before the hook.

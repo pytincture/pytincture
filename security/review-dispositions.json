@@ -463,6 +463,45 @@
         "tests/test_app.py::test_saml_acs_creates_compact_session_that_authorizes_bff_calls",
         "tests/test_production.py::test_saml_handshake_is_portable_between_workers_without_redis"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-M-06-GET",
+      "status": "remediated",
+      "title": "BFF requests are canonical and validated before application execution",
+      "intentional_contract": "The class-level BFF decorator remains the complete export opt-in. Body-bearing calls use exactly one JSON object with args and kwargs; GET is an explicit parameterless, read-only, repeatable developer contract.",
+      "security_boundary": "Pytincture reads and validates the bounded raw body against duplicate-key, finite-number, depth/item, canonical-shape, static signature, and common annotation rules before importing the target module, constructing its class, running application code, or consuming an optional replay proof. Generated browser and MCP clients encode the canonical object once. Browser Origin and Fetch Metadata checks cover GET as well as mutations.",
+      "controls": {
+        "single_canonical_json_representation": true,
+        "double_encoded_json_accepted": false,
+        "legacy_bare_kwargs_accepted": false,
+        "duplicate_keys_rejected": true,
+        "non_finite_numbers_rejected": true,
+        "body_depth_and_item_limits": true,
+        "static_signature_bound_before_import": true,
+        "common_annotations_checked_before_import": true,
+        "generated_clients_encode_once": true,
+        "get_parameterless_read_only_contract": true,
+        "get_browser_metadata_validated": true,
+        "class_level_export_preserved": true,
+        "redis_required": false
+      },
+      "implementation": [
+        "pytincture/backend/bff_requests.py",
+        "pytincture/backend/app.py",
+        "pytincture/dataclass.py",
+        "docs/contracts/bff-v1.md",
+        "contracts/public-api-v1.json"
+      ],
+      "regression_tests": [
+        "tests/test_bff_requests.py::test_canonical_bff_body_has_one_json_representation",
+        "tests/test_bff_requests.py::test_canonical_bff_body_rejects_duplicate_keys_and_non_finite_numbers",
+        "tests/test_bff_requests.py::test_canonical_bff_body_enforces_byte_depth_and_item_limits",
+        "tests/test_bff_requests.py::test_static_signature_binding_validates_shape_and_common_annotations",
+        "tests/test_app.py::test_bff_request_validation_finishes_before_application_import",
+        "tests/test_app.py::test_get_bff_rejects_cross_site_browser_metadata",
+        "tests/test_dataclass.py::test_static_manifest_defines_get_as_parameterless_read_only_contract",
+        "tests/test_dataclass.py::test_generate_stub_classes_returns_stub"
+      ]
     }
   ]
 }

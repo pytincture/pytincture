@@ -31,10 +31,15 @@ Import `Reports` normally from browser application code. During packaging,
 Pytincture removes the implementation and emits a proxy with matching public
 methods. Private names and undecorated classes are never registered.
 
-Methods default to POST. Declare GET only for side-effect-free operations.
+Methods default to POST. Declaring GET is an explicit contract that the method
+is parameterless, read-only, safe to repeat, and bodyless.
 Cookie-authenticated state-changing calls include the CSRF token automatically.
-All state-changing calls use JSON. Pytincture also validates exact Origin and
-Fetch Metadata on browser requests, including BFFs intentionally exposed
+All state-changing calls use one canonical `{ "args": [], "kwargs": {} }`
+JSON object. Generated clients encode it once. Pytincture rejects aliases,
+duplicate keys, non-finite values, excessive nesting/items, and static
+signature/type mismatches before importing or constructing application code.
+Pytincture also validates exact Origin and
+Fetch Metadata on browser requests, including read-only GETs and BFFs intentionally exposed
 without authentication. API clients such as server-to-server jobs may omit
 both browser headers; if either is supplied it must describe a same-origin
 browser request.

@@ -401,8 +401,9 @@ def bff_policy(**metadata):
 def bff_http_methods(*methods: str):
     """Declare the HTTP methods permitted for a BFF operation.
 
-    BFF methods default to POST. GET is intended only for side-effect-free
-    operations; PUT, PATCH, and DELETE are also supported for explicit APIs.
+    BFF methods default to POST. Declaring GET is an explicit promise that the
+    operation is parameterless, read-only, and safe to repeat; PUT, PATCH, and
+    DELETE are also supported for explicit APIs.
     """
     normalized = tuple(dict.fromkeys(str(method).upper() for method in methods))
     supported = {"GET", "POST", "PUT", "PATCH", "DELETE"}
@@ -477,6 +478,18 @@ def _declared_http_methods(
     return ("POST",)
 
 
+def _manifest_annotation(annotation: ast.expr | None) -> str:
+    if annotation is None:
+        return "Any"
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        return annotation.value[:256]
+    try:
+        rendered = ast.unparse(annotation)
+    except (TypeError, ValueError):
+        return "Any"
+    return rendered[:256] or "Any"
+
+
 def _manifest_parameters(member: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[dict, ...]:
     """Describe a method signature without importing or evaluating its module."""
     positional = [*member.args.posonlyargs, *member.args.args]
@@ -493,7 +506,7 @@ def _manifest_parameters(member: ast.FunctionDef | ast.AsyncFunctionDef) -> tupl
             "name": argument.arg,
             "kind": "positional_only" if index < positional_only else "positional_or_keyword",
             "required": default_node is None,
-            "annotation": argument.annotation.id if isinstance(argument.annotation, ast.Name) else "Any",
+            "annotation": _manifest_annotation(argument.annotation),
         }
         if default_node is not None:
             try:
@@ -503,13 +516,18 @@ def _manifest_parameters(member: ast.FunctionDef | ast.AsyncFunctionDef) -> tupl
                 parameter["default_supported"] = False
         parameters.append(parameter)
     if member.args.vararg is not None:
-        parameters.append({"name": member.args.vararg.arg, "kind": "var_positional", "required": False, "annotation": "Any"})
+        parameters.append({
+            "name": member.args.vararg.arg,
+            "kind": "var_positional",
+            "required": False,
+            "annotation": _manifest_annotation(member.args.vararg.annotation),
+        })
     for argument, default_node in zip(member.args.kwonlyargs, member.args.kw_defaults):
         parameter = {
             "name": argument.arg,
             "kind": "keyword_only",
             "required": default_node is None,
-            "annotation": argument.annotation.id if isinstance(argument.annotation, ast.Name) else "Any",
+            "annotation": _manifest_annotation(argument.annotation),
         }
         if default_node is not None:
             try:
@@ -519,7 +537,12 @@ def _manifest_parameters(member: ast.FunctionDef | ast.AsyncFunctionDef) -> tupl
                 parameter["default_supported"] = False
         parameters.append(parameter)
     if member.args.kwarg is not None:
-        parameters.append({"name": member.args.kwarg.arg, "kind": "var_keyword", "required": False, "annotation": "Any"})
+        parameters.append({
+            "name": member.args.kwarg.arg,
+            "kind": "var_keyword",
+            "required": False,
+            "annotation": _manifest_annotation(member.args.kwarg.annotation),
+        })
     return tuple(parameters)
 
 
@@ -568,14 +591,20 @@ def get_bff_manifest(
                     decorator_name="bff_policy",
                     bindings=member_bindings[id(member)],
                 )
+                http_methods = _declared_http_methods(
+                    member.decorator_list,
+                    bindings=member_bindings[id(member)],
+                )
+                parameters = _manifest_parameters(member)
+                if "GET" in http_methods and parameters:
+                    raise ValueError(
+                        "GET BFF operations must be parameterless and read-only"
+                    )
                 manifest[(class_node.name, member.name)] = {
                     "policy": {**class_policy, **method_policy},
-                    "http_methods": _declared_http_methods(
-                        member.decorator_list,
-                        bindings=member_bindings[id(member)],
-                    ),
+                    "http_methods": http_methods,
                     "kind": "method",
-                    "parameters": _manifest_parameters(member),
+                    "parameters": parameters,
                     "_class_definition": class_definition,
                     "_member_definition": member_definition,
                 }
@@ -872,14 +901,7 @@ def backend_for_frontend(cls):
                                 'properties': {
                                     'args': {
                                         'type': 'array',
-                                        'items': {
-                                            'type': 'object',
-                                            'properties': {
-                                                'name': {'type': 'string'},
-                                                'type': {'type': 'string'},
-                                                'value': {'type': 'string'}
-                                            }
-                                        },
+                                        'items': {},
                                         'description': 'Positional arguments in order: ' + 
                                             ', '.join([f"{p['name']}: {p['type']}" for p in param_list])
                                     },
@@ -895,7 +917,9 @@ def backend_for_frontend(cls):
                                             if param.name != 'self'
                                         }
                                     }
-                                }
+                                },
+                                'required': ['args', 'kwargs'],
+                                'additionalProperties': False,
                             }
                         }
                     }
@@ -969,7 +993,25 @@ def backend_for_frontend(cls):
     )
 
     return BackendForFrontendWrapper
-    
+
+
+def _bff_annotation_json_type(annotation: str) -> str:
+    normalized = str(annotation or "Any").replace("typing.", "")
+    base = normalized.split("[", 1)[0]
+    return {
+        "str": "string",
+        "int": "integer",
+        "float": "number",
+        "bool": "boolean",
+        "dict": "object",
+        "Dict": "object",
+        "Mapping": "object",
+        "list": "array",
+        "List": "array",
+        "Sequence": "array",
+    }.get(base, "string")
+
+
 def add_bff_docs_to_app(
     app: FastAPI,
     operations: Mapping[tuple[str, str, str], Mapping[str, Any]] | None = None,
@@ -986,6 +1028,16 @@ def add_bff_docs_to_app(
             if operation.get("kind") != "method":
                 continue
             parameters = operation.get("parameters", ())
+            keyword_parameters = [
+                parameter
+                for parameter in parameters
+                if parameter.get("kind")
+                in {"positional_or_keyword", "keyword_only"}
+            ]
+            has_var_keyword = any(
+                parameter.get("kind") == "var_keyword"
+                for parameter in parameters
+            )
             documented_routes[
                 f"/{{application}}/classcall/{module_path}/{class_name}/{method_name}"
             ] = {
@@ -1004,27 +1056,31 @@ def add_bff_docs_to_app(
                             "schema": {
                                 "type": "object",
                                 "properties": {
+                                    "args": {
+                                        "type": "array",
+                                        "items": {},
+                                    },
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
                                             parameter["name"]: {
-                                                "type": (
-                                                    parameter.get("annotation", "string")
-                                                    if parameter.get("annotation")
-                                                    in {"string", "integer", "number", "boolean", "object", "array"}
-                                                    else "string"
+                                                "type": _bff_annotation_json_type(
+                                                    parameter.get("annotation", "Any")
                                                 )
                                             }
-                                            for parameter in parameters
+                                            for parameter in keyword_parameters
                                         },
                                         "required": [
                                             parameter["name"]
-                                            for parameter in parameters
+                                            for parameter in keyword_parameters
                                             if parameter.get("required")
+                                            and parameter.get("kind") == "keyword_only"
                                         ],
-                                        "additionalProperties": False,
+                                        "additionalProperties": has_var_keyword,
                                     }
                                 },
+                                "required": ["args", "kwargs"],
+                                "additionalProperties": False,
                             }
                         }
                     }
@@ -1339,7 +1395,7 @@ def generate_stub_classes(
             stub_class_code += "        if replay_token:\n"
             stub_class_code += "            req.setRequestHeader('X-Pytincture-BFF-Token', replay_token)\n"
             stub_class_code += "        if payload and method != 'GET':\n"
-            stub_class_code += "            req.send(JSON.stringify(json.dumps(payload)))\n"
+            stub_class_code += "            req.send(json.dumps(payload, allow_nan=False))\n"
             stub_class_code += "        else:\n"
             stub_class_code += "            req.send()\n"
             stub_class_code += "        if _replay_retry and req.status == 409 and str(req.getResponseHeader('X-Pytincture-Replay')) == 'rejected':\n"
@@ -1356,7 +1412,7 @@ def generate_stub_classes(
             stub_class_code += f"        return StringIO(req.response).getvalue()\n"
             stub_class_code += f"\n"
             stub_class_code += f"    async def fetch(self, url, payload=None, method='GET', _replay_retry=True):\n"
-            stub_class_code += f"        from js import fetch, JSON, window\n"
+            stub_class_code += f"        from js import fetch, window\n"
             stub_class_code += f"        from pyodide.ffi import to_js\n"
             stub_class_code += f"        options = {{'method': method, 'headers': {{'Content-Type': 'application/json'}}}}\n"
             stub_class_code += "        replay_token = await self._take_pytincture_state()\n"
@@ -1365,7 +1421,7 @@ def generate_stub_classes(
             stub_class_code += "        if replay_token:\n"
             stub_class_code += "            options['headers']['X-Pytincture-BFF-Token'] = replay_token\n"
             stub_class_code += f"        if payload is not None and method != 'GET':\n"
-            stub_class_code += f"            options['body'] = JSON.stringify(json.dumps(payload))\n"
+            stub_class_code += f"            options['body'] = json.dumps(payload, allow_nan=False)\n"
             stub_class_code += f"        response = await fetch(url, to_js(options))\n"
             stub_class_code += "        if _replay_retry and response.status == 409 and response.headers.get('X-Pytincture-Replay') == 'rejected':\n"
             stub_class_code += "            self._pytincture_replay_pool.clear()\n"
@@ -1398,11 +1454,13 @@ def generate_stub_classes(
                 stub_class_code += f"        from pyodide.ffi import to_js\n"
                 stub_class_code += f"        options = {{'method': method, 'headers': {{'Content-Type': 'application/json'}}}}\n"
                 stub_class_code += "        replay_token = await self._take_pytincture_state()\n"
-                stub_class_code += f"        options['headers']['X-CSRF-Token'] = self._csrf_token()\n"
+                stub_class_code += f"        if method != 'GET':\n"
+                stub_class_code += f"            options['headers']['X-CSRF-Token'] = self._csrf_token()\n"
                 stub_class_code += "        if replay_token:\n"
                 stub_class_code += "            options['headers']['X-Pytincture-BFF-Token'] = replay_token\n"
                 stub_class_code += f"        body_payload = payload if payload is not None else {{'args': [], 'kwargs': {{}}}}\n"
-                stub_class_code += f"        options['body'] = JSON.stringify(json.dumps(body_payload))\n"
+                stub_class_code += f"        if method != 'GET':\n"
+                stub_class_code += f"            options['body'] = json.dumps(body_payload, allow_nan=False)\n"
                 stub_class_code += f"        response = await fetch(url, to_js(options))\n"
                 stub_class_code += "        if _replay_retry and response.status == 409 and response.headers.get('X-Pytincture-Replay') == 'rejected':\n"
                 stub_class_code += "            self._pytincture_replay_pool.clear()\n"
@@ -1492,7 +1550,7 @@ def generate_stub_classes(
     all_imports.add("import base64")
     all_imports.add("import hashlib")
     all_imports.add("import hmac")
-    all_imports.add("from js import XMLHttpRequest, JSON, document")
+    all_imports.add("from js import XMLHttpRequest, document")
     all_imports.add("from io import StringIO")
     for imp in all_imports:
         stub_class_code = f"{imp}\n" + stub_class_code

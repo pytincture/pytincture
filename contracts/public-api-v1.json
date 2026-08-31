@@ -75,6 +75,9 @@
       "args",
       "kwargs"
     ],
+    "request_body_representation": "single-canonical-json-object",
+    "request_validation_before_application_import": true,
+    "get_contract": "parameterless-read-only-repeatable-bodyless",
     "request_headers": [
       "X-CSRF-Token",
       "X-Pytincture-BFF-Token"
