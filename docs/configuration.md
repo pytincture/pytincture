@@ -163,6 +163,13 @@ The contract test checks every row in this table against the dataclass model.
 | `bff_replay_token_batch_size` | `BFF_REPLAY_TOKEN_BATCH_SIZE` | Proofs issued per refill. |
 | `bff_replay_token_low_watermark` | `BFF_REPLAY_TOKEN_LOW_WATERMARK` | Proof-pool refill threshold. |
 | `bff_replay_token_ttl_seconds` | `BFF_REPLAY_TOKEN_TTL_SECONDS` | Unused proof lifetime. |
+| `bff_replay_issue_session_limit` | `BFF_REPLAY_ISSUE_SESSION_LIMIT` | Replay-proof refill requests allowed per session and window. |
+| `bff_replay_issue_peer_limit` | `BFF_REPLAY_ISSUE_PEER_LIMIT` | Replay-proof refill requests allowed per network peer and window. |
+| `bff_replay_issue_worker_limit` | `BFF_REPLAY_ISSUE_WORKER_LIMIT` | Replay-proof refill requests allowed per worker and window. |
+| `bff_replay_issue_window_seconds` | `BFF_REPLAY_ISSUE_WINDOW_SECONDS` | Replay-proof refill quota window in seconds. |
+| `bff_replay_local_max_tokens` | `BFF_REPLAY_LOCAL_MAX_TOKENS` | Maximum outstanding replay proofs retained by one worker. |
+| `bff_replay_local_max_tokens_per_session` | `BFF_REPLAY_LOCAL_MAX_TOKENS_PER_SESSION` | Maximum outstanding replay proofs retained for one session. |
+| `bff_replay_require_shared_store` | `BFF_REPLAY_REQUIRE_SHARED_STORE` | Require an atomic store shared by every worker for strict single use. |
 | `use_redis_instance` | `USE_REDIS_INSTANCE` | Use Upstash shared state. |
 | `redis_url` | `REDIS_UPSTASH_INSTANCE_URL` | Optional Upstash Redis URL; HTTPS is required except for literal loopback development IPs. |
 | `redis_token` | `REDIS_UPSTASH_INSTANCE_TOKEN` | Upstash Redis token. |

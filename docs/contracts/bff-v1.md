@@ -86,6 +86,17 @@ protection is enabled, generated stubs additionally carry
 `X-Pytincture-BFF-Token`; rejected or expired proofs return `409` with
 `X-Pytincture-Replay: rejected` and the stub may refill and retry once.
 
+Replay proofs are disabled by default. When enabled, refill admission is
+bounded independently per signed session, direct network peer, and worker.
+The built-in single-worker store has fixed worker/session capacities and uses
+an expiration index, so expiry cleanup does not scan a growing mapping. This
+optional local mode does not provide cross-worker single consumption. A
+deployment that explicitly sets `BFF_REPLAY_REQUIRE_SHARED_STORE=true` must
+install an `AtomicReplayStore` through `set_bff_replay_token_store()` (or use
+the optional Redis adapter); startup fails closed until the provider declares
+and implements fleet-wide atomic consumption. Normal sessions, BFF calls, and
+load balancing do not require this feature or any shared store.
+
 ## Response
 
 Non-streaming return values are FastAPI JSON responses. Timeouts return `504`.

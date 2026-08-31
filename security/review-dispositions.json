@@ -534,6 +534,43 @@
         "tests/test_app.py::test_async_policy_runs_before_constructor",
         "pytincture/frontend/e2e-tests/pytincture.spec.mjs::authenticated packaged and inline apps run through real Pyodide"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-M-08-REPLAY-ISSUANCE",
+      "status": "remediated",
+      "title": "Optional BFF replay-proof issuance is bounded and topology-explicit",
+      "intentional_contract": "BFF replay proofs remain disabled by default. Normal signed-cookie sessions, SAML handshakes, BFF calls, and load balancing remain stateless and require neither Redis, process-memory session storage, nor sticky routing.",
+      "security_boundary": "When replay proofs are enabled, refill requests are limited per signed session, direct peer, and worker. The local store has fixed per-session and worker capacities, expiration-indexed cleanup, and atomic single-worker consumption. Strict fleet-wide single consumption is accepted only through a provider implementing the vendor-neutral AtomicReplayStore contract and declaring shared cross-worker atomicity; strict mode fails startup with a local-only provider.",
+      "controls": {
+        "feature_enabled_by_default": false,
+        "session_refill_quota": true,
+        "peer_refill_quota": true,
+        "worker_refill_quota": true,
+        "local_worker_capacity_bounded": true,
+        "local_session_capacity_bounded": true,
+        "expiration_indexed_cleanup": true,
+        "full_batch_rejected_atomically": true,
+        "pluggable_atomic_store_contract": true,
+        "strict_shared_mode_fails_closed": true,
+        "redis_is_optional_adapter": true,
+        "redis_required": false
+      },
+      "implementation": [
+        "pytincture/backend/replay.py",
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "docs/contracts/bff-v1.md",
+        "security/accepted-architecture.md"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_local_replay_store_is_bounded_expiration_indexed_and_single_use",
+        "tests/test_backend_modules.py::test_local_replay_store_rejects_worker_capacity_without_partial_batch",
+        "tests/test_backend_modules.py::test_shared_replay_adapter_exposes_vendor_neutral_atomic_contract",
+        "tests/test_app.py::test_bff_replay_refills_have_session_peer_and_worker_quotas",
+        "tests/test_app.py::test_bff_replay_refill_rejects_full_local_store_without_partial_issue",
+        "tests/test_configuration.py::test_strict_replay_fails_startup_with_only_a_local_store",
+        "tests/test_configuration.py::test_strict_replay_accepts_a_custom_shared_atomic_store_without_redis"
+      ]
     }
   ]
 }

@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from itsdangerous import TimestampSigner
 from urllib.parse import parse_qs, urlencode, urlsplit
 from pytincture import __version__
+from pytincture.backend.replay import LocalReplayStore
 
 # Import the app instance and helpers from the module.
 from pytincture.backend.app import (
@@ -81,7 +82,11 @@ def override_env(monkeypatch):
     monkeypatch.setattr(backend_app, "APPLICATION_ADMISSION", {})
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {})
     monkeypatch.setattr(backend_app, "AUTH_SESSION_REVOCATIONS", {})
-    monkeypatch.setattr(backend_app, "BFF_REPLAY_TOKEN_STORE", {})
+    monkeypatch.setattr(
+        backend_app,
+        "BFF_REPLAY_TOKEN_STORE",
+        LocalReplayStore(10_000, 512),
+    )
     set_user_authenticator(None)
     ALLOWED_NOAUTH_CLASSCALLS.clear()
     yield
@@ -629,6 +634,86 @@ def test_bff_replay_token_is_opaque_session_bound_and_single_use(
     )
     assert first.status_code == 200
     assert copied_curl_replay.status_code == 409
+
+
+def _prepare_bff_replay_refill(fresh_client, monkeypatch, dummy_module):
+    import ast
+    import re
+    import pytincture.backend.app as backend_app
+    from pytincture.backend.saml import SlidingWindowRateLimiter
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_BFF_REPLAY_TOKENS", True)
+    monkeypatch.setattr(backend_app, "BFF_REPLAY_TOKEN_BATCH_SIZE", 4)
+    monkeypatch.setattr(
+        backend_app,
+        "AUTH_LOGIN_RATE_LIMITER",
+        SlidingWindowRateLimiter(20, 60),
+    )
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    backend_app.reload_bff_registry(str(dummy_module))
+    login = fresh_client.post(
+        "/example/auth/user",
+        data={"email": "person@example.com", "password": "local"},
+        follow_redirects=False,
+    )
+    assert login.status_code == 303
+    package = fresh_client.get("/example/appcode/appcode.pyt")
+    assert package.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(package.content)) as archive:
+        stub = archive.read("example.py").decode("utf-8")
+    capsule_match = re.search(r"_pytincture_replay_capsule = (.+)", stub)
+    assert capsule_match
+    return {
+        **_csrf_headers(fresh_client),
+        "X-Pytincture-Client": ast.literal_eval(capsule_match.group(1)),
+    }
+
+
+@pytest.mark.parametrize(
+    "limiter_name",
+    (
+        "BFF_REPLAY_SESSION_ISSUE_LIMITER",
+        "BFF_REPLAY_PEER_ISSUE_LIMITER",
+        "BFF_REPLAY_WORKER_ISSUE_LIMITER",
+    ),
+)
+def test_bff_replay_refills_have_session_peer_and_worker_quotas(
+    fresh_client, monkeypatch, dummy_module, limiter_name
+):
+    import pytincture.backend.app as backend_app
+    from pytincture.backend.saml import SlidingWindowRateLimiter
+
+    headers = _prepare_bff_replay_refill(fresh_client, monkeypatch, dummy_module)
+    monkeypatch.setattr(
+        backend_app,
+        limiter_name,
+        SlidingWindowRateLimiter(1, 60, max_keys=10),
+    )
+
+    assert fresh_client.post("/_pytincture/state", headers=headers).status_code == 200
+    rejected = fresh_client.post("/_pytincture/state", headers=headers)
+    assert rejected.status_code == 429
+    assert rejected.headers["retry-after"] == "60"
+    assert rejected.json() == {"detail": "BFF request-proof issuance rate exceeded"}
+
+
+def test_bff_replay_refill_rejects_full_local_store_without_partial_issue(
+    fresh_client, monkeypatch, dummy_module
+):
+    import pytincture.backend.app as backend_app
+
+    headers = _prepare_bff_replay_refill(fresh_client, monkeypatch, dummy_module)
+    store = LocalReplayStore(3, 3)
+    monkeypatch.setattr(backend_app, "BFF_REPLAY_TOKEN_STORE", store)
+
+    rejected = fresh_client.post("/_pytincture/state", headers=headers)
+    assert rejected.status_code == 503
+    assert rejected.headers["retry-after"] == "1"
+    assert len(store) == 0
 
 
 def test_bff_methods_default_to_post(fresh_client, monkeypatch, dummy_module):

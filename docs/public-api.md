@@ -76,6 +76,10 @@ supported while the typed configuration/application-factory API is developed:
 - `set_bff_policy_hook(hook)` installs or clears the sync/async authorization
   hook invoked before a BFF operation. `True` and `None` allow, `False` denies,
   and other return values fail closed.
+- `set_bff_replay_token_store(store)` installs a provider implementing
+  `pytincture.backend.replay.AtomicReplayStore` for the optional BFF request-
+  proof feature. Providers explicitly declare whether consumption is atomic
+  across workers; strict shared mode fails startup for a local-only provider.
 - `set_user_authenticator(authenticator)` installs or clears the sync/async
   local-user authenticator.
 - `revoke_session(session_id)` revokes a session in the configured revocation

@@ -36,6 +36,12 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "SAML_RELAY_STATE_TTL_SECONDS": "480",
             "SAML_ACS_RATE_LIMIT_ATTEMPTS": "30",
             "SAML_ACS_RATE_LIMIT_WINDOW_SECONDS": "45",
+            "BFF_REPLAY_ISSUE_SESSION_LIMIT": "11",
+            "BFF_REPLAY_ISSUE_PEER_LIMIT": "22",
+            "BFF_REPLAY_ISSUE_WORKER_LIMIT": "33",
+            "BFF_REPLAY_ISSUE_WINDOW_SECONDS": "44",
+            "BFF_REPLAY_LOCAL_MAX_TOKENS": "555",
+            "BFF_REPLAY_LOCAL_MAX_TOKENS_PER_SESSION": "111",
             "APP_SPECIFIC_VALUE": "kept",
         },
         bff_call_timeout_seconds=8.0,
@@ -61,9 +67,101 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.saml_transaction_ttl_seconds == 480
     assert config.saml_acs_rate_limit_attempts == 30
     assert config.saml_acs_rate_limit_window_seconds == 45
+    assert config.bff_replay_issue_session_limit == 11
+    assert config.bff_replay_issue_peer_limit == 22
+    assert config.bff_replay_issue_worker_limit == 33
+    assert config.bff_replay_issue_window_seconds == 44
+    assert config.bff_replay_local_max_tokens == 555
+    assert config.bff_replay_local_max_tokens_per_session == 111
     assert config.environment == {"APP_SPECIFIC_VALUE": "kept"}
     assert config.to_environ()["ENABLE_USER_LOGIN"] == "true"
     assert config.to_environ()["PYTINCTURE_DEV_WHEEL_VERSION"] == "42.0.dev1"
+
+
+def test_replay_proofs_remain_optional_and_do_not_require_redis(tmp_path):
+    config = PytinctureConfig(modules_path=str(tmp_path))
+
+    assert config.enable_bff_replay_tokens is False
+    assert config.bff_replay_require_shared_store is False
+    assert config.use_redis_instance is False
+
+
+def test_strict_shared_replay_requires_the_optional_feature(tmp_path):
+    with pytest.raises(ValueError, match="requires enable_bff_replay_tokens"):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            bff_replay_require_shared_store=True,
+        )
+
+
+def test_strict_replay_fails_startup_with_only_a_local_store(tmp_path):
+    application = create_app(
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            enable_bff_replay_tokens=True,
+            bff_replay_require_shared_store=True,
+        )
+    )
+
+    with (
+        pytest.raises(RuntimeError, match="shared by every worker"),
+        TestClient(application),
+    ):
+        pass
+
+
+def test_strict_replay_accepts_a_custom_shared_atomic_store_without_redis(tmp_path):
+    class SharedAtomicStore:
+        shared_across_workers = True
+
+        def __init__(self):
+            self.values = {}
+
+        def issue_batch(self, subject, records, ttl_seconds):
+            self.values.update(records)
+
+        def consume(self, key, default=None):
+            return self.values.pop(key, default)
+
+    config = PytinctureConfig(
+        modules_path=str(tmp_path),
+        enable_bff_replay_tokens=True,
+        bff_replay_require_shared_store=True,
+    )
+    first = create_app(config)
+    second = create_app(config)
+    shared = SharedAtomicStore()
+    first.state.pytincture_backend.set_bff_replay_token_store(shared)
+    second.state.pytincture_backend.set_bff_replay_token_store(shared)
+
+    with TestClient(first), TestClient(second):
+        shared.issue_batch("session", {"proof": {"session_id": "session"}}, 60)
+        assert second.state.pytincture_backend.BFF_REPLAY_TOKEN_STORE.consume(
+            "proof"
+        ) == {"session_id": "session"}
+        assert first.state.pytincture_backend.BFF_REPLAY_TOKEN_STORE.consume(
+            "proof"
+        ) is None
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    (
+        {"bff_replay_issue_session_limit": 0},
+        {"bff_replay_issue_peer_limit": 0},
+        {"bff_replay_issue_worker_limit": 0},
+        {"bff_replay_issue_window_seconds": 0},
+        {"bff_replay_local_max_tokens": 0},
+        {"bff_replay_local_max_tokens_per_session": 0},
+        {
+            "bff_replay_local_max_tokens": 10,
+            "bff_replay_local_max_tokens_per_session": 11,
+        },
+    ),
+)
+def test_replay_proof_limits_fail_closed(tmp_path, overrides):
+    with pytest.raises(ValueError, match="BFF replay|replay"):
+        PytinctureConfig(modules_path=str(tmp_path), **overrides)
 
 
 def test_cors_origins_use_the_backend_csv_format(tmp_path):
