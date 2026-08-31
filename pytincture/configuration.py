@@ -277,6 +277,11 @@ class PytinctureConfig:
     trusted_proxy_headers: bool = _setting(
         False, "PYTINCTURE_TRUST_PROXY_HEADERS", "Trust forwarded host/protocol headers."
     )
+    allow_development_auth_origin: bool = _setting(
+        False,
+        "PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN",
+        "Allow request-derived authentication origins in loopback-only development.",
+    )
     log_level: str = _setting(
         "INFO", "PYTINCTURE_LOG_LEVEL", "Structured application log level."
     )
@@ -499,6 +504,54 @@ class PytinctureConfig:
                 for pattern in self.allowed_hosts
             ):
                 raise ValueError("canonical_origin host must be included in allowed_hosts")
+
+        if self.allow_development_auth_origin:
+            if not auth_enabled:
+                raise ValueError(
+                    "allow_development_auth_origin requires an enabled authentication provider"
+                )
+            if self.session_https_only is not False:
+                raise ValueError(
+                    "allow_development_auth_origin requires session_https_only=false"
+                )
+            if self.allowed_hosts or self.canonical_origin:
+                raise ValueError(
+                    "allow_development_auth_origin cannot be combined with production host/origin settings"
+                )
+            if self.trusted_proxy_headers:
+                raise ValueError(
+                    "allow_development_auth_origin cannot trust proxy headers"
+                )
+
+        production_auth = bool(
+            auth_enabled
+            and not dev_only
+            and not self.allow_development_auth_origin
+        )
+        if production_auth:
+            if not self.allowed_hosts:
+                raise ValueError(
+                    "production authentication requires exact allowed_hosts"
+                )
+            if any("*" in host for host in self.allowed_hosts):
+                raise ValueError(
+                    "production authentication requires exact allowed_hosts without wildcards"
+                )
+            if not self.canonical_origin:
+                raise ValueError(
+                    "production authentication requires canonical_origin"
+                )
+            if urlparse(self.canonical_origin).scheme != "https":
+                raise ValueError(
+                    "production authentication requires an HTTPS canonical_origin"
+                )
+
+        if self.trusted_proxy_headers and (
+            not self.allowed_hosts or not self.canonical_origin
+        ):
+            raise ValueError(
+                "trusted_proxy_headers requires allowed_hosts and canonical_origin"
+            )
         normalized_log_level = self.log_level.strip().upper()
         if normalized_log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError("log_level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
@@ -516,6 +569,7 @@ class PytinctureConfig:
             "enable_user_login", "enable_dev_email_login", "enable_google_auth",
             "enable_microsoft_auth", "enable_saml_auth", "enable_bff_replay_tokens",
             "use_redis_instance", "enable_mcp", "trusted_proxy_headers",
+            "allow_development_auth_origin",
         }
         integer_fields = {
             "session_max_age_seconds", "session_absolute_max_age_seconds",

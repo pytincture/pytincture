@@ -24,10 +24,19 @@ config = PytinctureConfig(
 app = create_app(config)
 ```
 
-For an internet-facing service, also set `allowed_hosts` to its public
-hostname(s) and `canonical_origin` to the external origin used for OAuth/SAML
-callbacks. Forwarded headers are ignored unless `trusted_proxy_headers=True`;
-enable that only behind a proxy that replaces client-supplied forwarded values.
+When authentication is enabled outside explicit development modes,
+`allowed_hosts` must contain exact public hostnames and `canonical_origin` must
+be the one external HTTPS origin used for OAuth/SAML callbacks. Wildcard hosts
+and request-derived production callback origins are rejected. Forwarded headers
+are ignored unless `trusted_proxy_headers=True`; enabling proxy trust also
+requires both fixed controls and a proxy that replaces client-supplied values.
+
+For a local HTTP authentication test, set
+`allow_development_auth_origin=True` and `session_https_only=False`. The
+supported launcher then binds only to a literal loopback address and rejects a
+routable bind. The application also rejects non-loopback peers if another ASGI
+launch path is used. This escape hatch cannot be combined with proxy trust or
+the production host/origin settings.
 
 Run that application with any ASGI server, for example
 `uvicorn my_service:app`. The compatibility `launch_service()` API remains
@@ -55,6 +64,7 @@ The contract test checks every row in this table against the dataclass model.
 | `enable_google_auth` | `ENABLE_GOOGLE_AUTH` | Enable Google OAuth. |
 | `enable_microsoft_auth` | `ENABLE_MICROSOFT_AUTH` | Enable Microsoft OAuth. |
 | `enable_saml_auth` | `ENABLE_SAML_AUTH` | Enable SAML authentication. |
+| `allow_development_auth_origin` | `PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN` | Allow request-derived authentication origins in loopback-only development. |
 | `google_client_id` | `GOOGLE_CLIENT_ID` | Google OAuth client id. |
 | `google_client_secret` | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret. |
 | `microsoft_client_id` | `MICROSOFT_CLIENT_ID` | Microsoft OAuth client id. |

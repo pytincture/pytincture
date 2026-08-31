@@ -45,6 +45,7 @@ config = PytinctureConfig(
     modules_path=str(ROOT),
     default_application="e2e_app",
     enable_saml_auth=True,
+    allow_development_auth_origin=True,
     saml_idp_entity_id=IDP_BASE_URL,
     saml_idp_sso_url=f"{IDP_BASE_URL}/protocol/saml",
     saml_idp_x509_cert=idp_certificate,

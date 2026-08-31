@@ -6,6 +6,18 @@ modes require a stable `SAML_SECRET_KEY` with at least 32 random characters
 and sufficient character variety. Despite its historical name, this key signs
 all Pytincture sessions.
 
+Production authentication also requires exact `PYTINCTURE_ALLOWED_HOSTS` and
+one HTTPS `PYTINCTURE_CANONICAL_ORIGIN`. Pytincture uses that fixed origin for
+OAuth and SAML URLs instead of trusting the request `Host`. Proxy-header trust
+is accepted only when both controls are configured.
+
+Local HTTP auth testing can explicitly set
+`PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN=true` and
+`AUTH_SESSION_HTTPS_ONLY=false`. The supported launcher confines this mode to a
+literal loopback listener, and the application rejects non-loopback peers even
+under another ASGI launcher. It cannot be combined with trusted proxy headers
+or production host/origin controls.
+
 ## Local password login
 
 Set `ENABLE_USER_LOGIN=true` and provide either `AUTH_PASSWORD_HASHES` or an

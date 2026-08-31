@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Require exact allowed hosts and one canonical HTTPS origin whenever
+  production authentication is enabled, and reject incomplete trusted-proxy
+  configurations. Local HTTP authentication remains available through an
+  explicit loopback-only development switch, with signed-cookie sessions and
+  no Redis requirement.
 - Bound direct app assets to real application entrypoints and explicit
   browser/public/favicon/widget declarations, added per-application public
   asset globs, permanently denied direct Python-file exposure, and sandboxed

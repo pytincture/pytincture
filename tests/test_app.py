@@ -369,6 +369,47 @@ def test_authentication_enabled_requires_strong_startup_secret(tmp_path):
     assert "Authentication requires SAML_SECRET_KEY" in result.stderr
 
 
+def test_legacy_backend_requires_fixed_production_auth_origin(tmp_path):
+    environment = os.environ.copy()
+    environment.update({
+        "MODULES_PATH": str(tmp_path),
+        "ENABLE_USER_LOGIN": "true",
+        "ENABLE_DEV_EMAIL_LOGIN": "false",
+        "ENABLE_GOOGLE_AUTH": "false",
+        "ENABLE_MICROSOFT_AUTH": "false",
+        "ENABLE_SAML_AUTH": "false",
+        "PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN": "false",
+        "PYTINCTURE_TRUST_PROXY_HEADERS": "false",
+        "SAML_SECRET_KEY": "0123456789abcdef" * 2,
+        "PYTHONPATH": str(Path(__file__).parents[1]),
+    })
+    environment.pop("PYTINCTURE_ALLOWED_HOSTS", None)
+    environment.pop("PYTINCTURE_CANONICAL_ORIGIN", None)
+
+    missing_hosts = subprocess.run(
+        [sys.executable, "-c", "import pytincture.backend.app"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert missing_hosts.returncode != 0
+    assert "requires exact PYTINCTURE_ALLOWED_HOSTS" in missing_hosts.stderr
+
+    environment["PYTINCTURE_ALLOWED_HOSTS"] = "service.example"
+    environment["PYTINCTURE_CANONICAL_ORIGIN"] = "https://service.example"
+    configured = subprocess.run(
+        [sys.executable, "-c", "import pytincture.backend.app"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert configured.returncode == 0, configured.stderr
+
+
 def test_dependency_routes_reject_missing_authenticated_session(
     fresh_client, monkeypatch, tmp_path
 ):
