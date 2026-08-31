@@ -15,7 +15,64 @@
       "versionInfo": "0.29.3",
       "downloadLocation": "https://github.com/pyodide/pyodide/releases/tag/0.29.3",
       "filesAnalyzed": true,
-      "licenseConcluded": "Apache-2.0"
+      "licenseConcluded": "Apache-2.0",
+      "hasFiles": [
+        "SPDXRef-File-pyodide-lock",
+        "SPDXRef-File-pyodide-js",
+        "SPDXRef-File-pyodide-asm-js",
+        "SPDXRef-File-pyodide-wasm"
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/pyodide/pyodide@0.29.3"
+        }
+      ]
+    },
+    {
+      "name": "cpython",
+      "SPDXID": "SPDXRef-Package-CPython",
+      "versionInfo": "3.13.2",
+      "downloadLocation": "https://www.python.org/downloads/release/python-3132/",
+      "filesAnalyzed": true,
+      "licenseConcluded": "Python-2.0",
+      "hasFiles": ["SPDXRef-File-python-stdlib"],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:generic/cpython@3.13.2"
+        }
+      ]
+    },
+    {
+      "name": "micropip",
+      "SPDXID": "SPDXRef-Package-Micropip",
+      "versionInfo": "0.11.0",
+      "downloadLocation": "https://github.com/pyodide/micropip/releases/tag/0.11.0",
+      "filesAnalyzed": true,
+      "licenseConcluded": "MPL-2.0",
+      "hasFiles": [
+        "SPDXRef-File-micropip-wheel",
+        "SPDXRef-File-micropip-metadata"
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/micropip@0.11.0"
+        }
+      ]
+    },
+    {
+      "name": "emscripten",
+      "SPDXID": "SPDXRef-Package-Emscripten",
+      "versionInfo": "4.0.9",
+      "downloadLocation": "https://github.com/emscripten-core/emscripten/releases/tag/4.0.9",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "comment": "Build-tool identity recorded by the vendored Pyodide lock; no separate Emscripten package file is shipped."
     }
   ],
   "files": [
@@ -28,6 +85,12 @@
     {"fileName": "full/python_stdlib.zip", "SPDXID": "SPDXRef-File-python-stdlib", "checksums": [{"algorithm": "SHA256", "checksumValue": "4298b6ee445cb724c3973437da47789752b9e6ff4e26619026b283ec801fc46b"}]}
   ],
   "relationships": [
-    {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-Pyodide"}
+    {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-Pyodide"},
+    {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-CPython"},
+    {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-Micropip"},
+    {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-Emscripten"},
+    {"spdxElementId": "SPDXRef-Package-Pyodide", "relationshipType": "CONTAINS", "relatedSpdxElement": "SPDXRef-Package-CPython"},
+    {"spdxElementId": "SPDXRef-Package-Pyodide", "relationshipType": "CONTAINS", "relatedSpdxElement": "SPDXRef-Package-Micropip"},
+    {"spdxElementId": "SPDXRef-Package-Emscripten", "relationshipType": "BUILD_TOOL_OF", "relatedSpdxElement": "SPDXRef-Package-Pyodide"}
   ]
 }

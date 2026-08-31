@@ -3,6 +3,7 @@
   "status": "passed",
   "review_response": "accepted",
   "reviewed_report": "SECURITY_REVIEW_2026-08-30.txt",
+  "followup_reviewed_report": "Daybreak follow-up findings received 2026-08-31",
   "review_response_date": "2026-08-30",
   "recorded_on": "2026-08-31",
   "dispositions": [
@@ -112,6 +113,125 @@
       "regression_tests": [
         "tests/test_backend_modules.py::test_bff_registry_isolates_invalid_source_files_and_recovers",
         "tests/test_configuration.py::test_invalid_python_file_cannot_disable_unrelated_bff_application"
+      ]
+    },
+    {
+      "id": "FOLLOWUP-F-01",
+      "status": "repository_controls_remediated_external_activation_required",
+      "title": "PyPI trusted publication provenance",
+      "security_boundary": "Python publication has no repository secret or arbitrary-run input. It accepts only exact attested wheel and sdist bytes from successful release CI for a published tag whose commit is reachable from the protected default branch, then crosses a protected pypi environment into PyPI OIDC.",
+      "external_activation": "Before the next release, the PyPI project owner must register pytincture/pytincture, workflow pypi-publish.yml, environment pypi as a trusted publisher. The repository workflow fails closed until that external registration exists.",
+      "controls": {
+        "long_lived_pypi_credential_used": false,
+        "trusted_publishing_oidc_required": true,
+        "protected_environment_required": true,
+        "non_self_review_required": true,
+        "published_release_required": true,
+        "protected_default_branch_ancestry_required": true,
+        "exact_successful_release_run_required": true,
+        "artifact_attestation_required": true,
+        "exact_package_identity_version_and_hash_required": true
+      },
+      "implementation": [
+        ".github/workflows/pypi-publish.yml",
+        ".github/workflows/ci.yml",
+        ".github/workflows/npm-publish.yml",
+        "scripts/verify_python_release.py",
+        "docs/releasing.md"
+      ],
+      "regression_tests": [
+        "tests/test_python_release_provenance.py::test_python_artifacts_require_exact_identity_version_and_hashes",
+        "tests/test_release_gates.py::test_python_publish_requires_oidc_protected_attested_release_provenance",
+        "tests/test_release_gates.py::test_release_publishers_require_tags_reachable_from_default_branch"
+      ]
+    },
+    {
+      "id": "FOLLOWUP-F-02",
+      "status": "remediated",
+      "title": "Compatibility application rejects credentialed wildcard CORS",
+      "security_boundary": "Both typed configuration and the supported compatibility application reject CORS_ALLOWED_ORIGINS=* before serving requests because credentialed CORS requires explicit origins.",
+      "controls": {
+        "typed_wildcard_cors_rejected": true,
+        "compatibility_wildcard_cors_rejected": true,
+        "credentialed_explicit_origins_preserved": true
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "docs/production-deployment.md"
+      ],
+      "regression_tests": [
+        "tests/test_configuration.py::test_legacy_app_rejects_credentialed_wildcard_cors",
+        "tests/test_configuration.py::test_invalid_configuration_fails_with_actionable_message"
+      ]
+    },
+    {
+      "id": "FOLLOWUP-F-03",
+      "status": "remediated",
+      "title": "Development email login rejects loopback proxy laundering",
+      "security_boundary": "Passwordless development login requires a literal-loopback network peer and direct Host, plus a literal-loopback Origin or Referer when present. Proxy trust, public host/origin controls, and production providers are incompatible with the mode.",
+      "controls": {
+        "literal_loopback_peer_required": true,
+        "literal_loopback_direct_host_required": true,
+        "literal_loopback_browser_origin_required_when_present": true,
+        "forwarded_headers_ignored": true,
+        "proxy_configuration_rejected": true,
+        "public_configuration_rejected": true,
+        "redis_required": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "docs/authentication.md"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_development_email_login_rejects_public_host_through_loopback_proxy",
+        "tests/test_app.py::test_development_email_login_accepts_literal_loopback_peer_and_host",
+        "tests/test_configuration.py::test_development_email_login_rejects_proxy_and_public_auth_configuration",
+        "tests/test_configuration.py::test_legacy_app_rejects_unsafe_development_email_configuration"
+      ]
+    },
+    {
+      "id": "FOLLOWUP-F-04",
+      "status": "remediated",
+      "title": "Browser console diagnostics are sanitized before transmission",
+      "security_boundary": "Console forwarding redacts sensitive keys and token-shaped values, bounds object depth and entries, handles cycles and unreadable values, and caps the serialized message at 800 characters before fetch constructs the request body.",
+      "controls": {
+        "pre_transmission_redaction": true,
+        "maximum_message_characters": 800,
+        "maximum_object_depth": 3,
+        "maximum_entries_per_container": 20,
+        "forwarding_can_be_disabled": true
+      },
+      "implementation": [
+        "pytincture/frontend/pytincture.js",
+        "docs/public-api.md"
+      ],
+      "regression_tests": [
+        "pytincture/frontend/tests/lifecycle.test.mjs::browser console forwarding redacts secrets and bounds complex messages"
+      ]
+    },
+    {
+      "id": "FOLLOWUP-F-05",
+      "status": "remediated",
+      "title": "Dependency monitoring and vendored runtime inventory coverage",
+      "security_boundary": "Dependabot covers pip, npm, and GitHub Actions; CI fails npm audit at low severity; and the checksum-validated vendored SBOM explicitly inventories Pyodide, CPython, micropip, and the Emscripten build tool against runtime metadata.",
+      "controls": {
+        "dependabot_pip": true,
+        "dependabot_npm": true,
+        "dependabot_github_actions": true,
+        "npm_audit_minimum_severity": "low",
+        "vendored_pyodide_component_inventory_verified": true
+      },
+      "implementation": [
+        ".github/dependabot.yml",
+        ".github/workflows/ci.yml",
+        "pytincture/frontend/pyodide/0.29.3/sbom.json",
+        "scripts/validate_vendored_pyodide.py"
+      ],
+      "regression_tests": [
+        "tests/test_contracts.py::test_vendored_pyodide_sbom_and_checksums_validate",
+        "tests/test_release_gates.py::test_python_publish_requires_oidc_protected_attested_release_provenance"
       ]
     }
   ]

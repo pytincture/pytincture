@@ -1402,7 +1402,7 @@ requires-dist = [
     { name = "python3-saml", marker = "extra == 'dev'", specifier = ">=1.16,<2" },
     { name = "python3-saml", marker = "extra == 'saml'", specifier = ">=1.16,<2" },
     { name = "starlette", specifier = ">=1.6,<2" },
-    { name = "twine", marker = "extra == 'dev'", specifier = ">=6,<7" },
+    { name = "twine", marker = "extra == 'dev'", specifier = ">=6,<8" },
     { name = "upstash-redis", marker = "extra == 'dev'", specifier = ">=1.2,<2" },
     { name = "upstash-redis", marker = "extra == 'redis'", specifier = ">=1.2,<2" },
     { name = "uvicorn", specifier = ">=0.34,<1" },

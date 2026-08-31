@@ -29,10 +29,13 @@ python -c 'from argon2 import PasswordHasher; print(PasswordHasher().hash("chang
 ```
 
 `ENABLE_DEV_EMAIL_LOGIN=true` bypasses password verification only when the
-actual network peer is a loopback IP address; `Host` and forwarded headers
-cannot enable it. With `launch_service()`, the development mode automatically
-binds to `127.0.0.1` unless another literal loopback `host` is supplied, and a
-routable bind is rejected. It must never be enabled in production.
+actual network peer and direct browser-facing `Host` are literal loopback IP
+addresses. Any supplied `Origin` or `Referer` must also use a literal loopback
+IP; forwarded headers cannot enable it. Typed configuration rejects this mode
+with proxy trust, public host/origin settings, or a production identity
+provider. With `launch_service()`, the development mode automatically binds to
+`127.0.0.1` unless another literal loopback `host` is supplied, and a routable
+bind is rejected. It must never be enabled in production.
 `LOGIN_HELP_TEXT` is escaped plain text suitable for disposable demo
 credentials.
 

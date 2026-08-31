@@ -1,5 +1,7 @@
 import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,7 +18,6 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
         {
             "MODULES_PATH": str(tmp_path),
             "ENABLE_USER_LOGIN": "true",
-            "ENABLE_DEV_EMAIL_LOGIN": "true",
             "BFF_CALL_TIMEOUT_SECONDS": "12.5",
             "BFF_MAX_CONCURRENCY": "9",
             "BFF_STREAM_IDLE_TIMEOUT_SECONDS": "4.5",
@@ -27,6 +28,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "PYTINCTURE_ALLOWED_HOSTS": "app.example.test,api.example.test",
             "PYTINCTURE_CANONICAL_ORIGIN": "https://app.example.test/",
             "PYTINCTURE_DEV_WHEEL_VERSION": "42.0.dev1",
+            "SAML_SECRET_KEY": "0123456789abcdef0123456789abcdef",
             "SAML_RESPONSE_MAX_BYTES": "262144",
             "SAML_RELAY_STATE_TTL_SECONDS": "480",
             "SAML_ACS_RATE_LIMIT_ATTEMPTS": "30",
@@ -67,6 +69,70 @@ def test_cors_origins_use_the_backend_csv_format(tmp_path):
     assert config.to_environ()["CORS_ALLOWED_ORIGINS"] == (
         "https://one.example,https://two.example"
     )
+
+
+def test_legacy_app_rejects_credentialed_wildcard_cors(tmp_path):
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "CORS_ALLOWED_ORIGINS": "*",
+            "MODULES_PATH": str(tmp_path),
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", "import pytincture.backend.app"],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "cannot use '*' with credentialed requests" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("environment_override", "message"),
+    [
+        ({"PYTINCTURE_TRUST_PROXY_HEADERS": "true"}, "cannot trust proxy headers"),
+        (
+            {"PYTINCTURE_ALLOWED_HOSTS": "public.example.test"},
+            "literal loopback allowed hosts",
+        ),
+        (
+            {"PYTINCTURE_CANONICAL_ORIGIN": "https://public.example.test"},
+            "literal loopback canonical origin",
+        ),
+        (
+            {"ENABLE_GOOGLE_AUTH": "true"},
+            "cannot be combined with production authentication providers",
+        ),
+    ],
+)
+def test_legacy_app_rejects_unsafe_development_email_configuration(
+    tmp_path, environment_override, message
+):
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "ENABLE_DEV_EMAIL_LOGIN": "true",
+            "ENABLE_USER_LOGIN": "true",
+            "MODULES_PATH": str(tmp_path),
+            **environment_override,
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", "import pytincture.backend.app"],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert message in result.stderr
 
 
 def test_saml_limits_do_not_constrain_services_with_saml_disabled(tmp_path):
@@ -334,6 +400,46 @@ def test_dynamic_auth_origin_is_explicit_loopback_development_only(tmp_path):
     assert config.canonical_origin is None
 
 
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"trusted_proxy_headers": True}, "cannot trust proxy headers"),
+        ({"allowed_hosts": ("app.example.test",)}, "literal loopback allowed_hosts"),
+        (
+            {"canonical_origin": "https://app.example.test"},
+            "literal loopback canonical_origin",
+        ),
+        (
+            {"enable_google_auth": True},
+            "cannot be combined with production authentication providers",
+        ),
+    ],
+)
+def test_development_email_login_rejects_proxy_and_public_auth_configuration(
+    tmp_path, overrides, message
+):
+    with pytest.raises(ValueError, match=message):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            enable_user_login=True,
+            enable_dev_email_login=True,
+            **overrides,
+        )
+
+
+def test_development_email_login_allows_explicit_literal_loopback_controls(tmp_path):
+    config = PytinctureConfig(
+        modules_path=str(tmp_path),
+        enable_user_login=True,
+        enable_dev_email_login=True,
+        allowed_hosts=("127.0.0.1",),
+        canonical_origin="http://127.0.0.1",
+    )
+
+    assert config.allowed_hosts == ("127.0.0.1",)
+    assert config.canonical_origin == "http://127.0.0.1"
+
+
 def test_dynamic_auth_origin_rejects_non_loopback_requests(tmp_path):
     (tmp_path / "demo.py").write_text('APP_TITLE = "Demo"\n', encoding="utf-8")
     application = create_app(
@@ -348,13 +454,13 @@ def test_dynamic_auth_origin_rejects_non_loopback_requests(tmp_path):
 
     with TestClient(
         application,
-        base_url="http://localhost",
+        base_url="http://127.0.0.1",
         client=("203.0.113.7", 50000),
     ) as remote_client:
         rejected = remote_client.get("/healthz")
     with TestClient(
         application,
-        base_url="http://localhost",
+        base_url="http://127.0.0.1",
         client=("127.0.0.1", 50000),
     ) as local_client:
         accepted = local_client.get("/healthz")

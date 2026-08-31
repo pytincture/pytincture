@@ -87,6 +87,13 @@ Pytincture exposes one function on `window`:
 `window.PytinctureLifecycleError` exposes the stable `stage`, `code`,
 `resource`, `requestId`, `correlationId`, and sanitized `rootCause` fields.
 
+When backend console forwarding is enabled, the browser sends only a bounded
+diagnostic summary. Sensitive keys and token-like string values are redacted,
+object traversal is depth/entry limited, cycles are replaced, and the final
+message is capped at 800 characters before the request is created. This is
+defense in depth: application code must not write credentials or secrets to the
+browser console, and deployments may set `enableBackendLogging: false`.
+
 The legacy positional form `runTinctureApp(application, widgetlib,
 entrypoint)` remains supported through 1.x but object configuration is the
 recommended form.

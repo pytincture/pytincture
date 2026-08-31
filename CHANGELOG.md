@@ -5,6 +5,18 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Replace long-lived PyPI credentials and in-CI publication with a protected
+  OIDC trusted-publisher workflow that accepts only attested wheel/sdist bytes
+  from successful release CI for a published, default-branch-reachable tag.
+  The npm publisher now enforces the same tag ancestry boundary.
+- Reject credentialed wildcard CORS in the compatibility application, and
+  require passwordless development login requests to have a literal-loopback
+  peer, direct Host, and browser origin while rejecting proxy/public/production
+  provider combinations.
+- Redact and structurally bound browser console diagnostics before transmission;
+  expand Dependabot to npm and GitHub Actions, fail npm audit from low severity,
+  and inventory Pyodide's CPython, micropip, and Emscripten components in the
+  verified vendored SBOM.
 - Isolate static BFF registry failures to their canonical source files: unsafe,
   unreadable, malformed, or invalidly encoded files now export nothing without
   denying startup to unrelated applications, and can rejoin only after a full

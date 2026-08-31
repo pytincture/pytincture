@@ -27,6 +27,9 @@ anonymity is requested. No guaranteed response SLA is currently offered.
   Firewall; production deployments must provide appropriate controls.
 - Redis, identity providers, proxies, dhxpyt/widgetsets, Pyodide packages, and
   application code have their own security responsibilities.
+- Browser console forwarding is bounded and redacts common credential forms
+  before transmission, but applications must still keep secrets out of browser
+  logs and may disable forwarding.
 
 ## Intentional framework contracts
 
@@ -49,6 +52,10 @@ anonymity is requested. No guaranteed response SLA is currently offered.
   no operations and are tracked as rejected, but cannot deny startup or remove
   valid exports for unrelated applications. Repair does not restore access
   until the file passes a complete static rescan.
+- Python and npm publication accept only attested artifacts from a successful
+  release-triggered CI run for a published, protected-default-branch-reachable
+  tag. Registry publication uses protected GitHub environments and OIDC trusted
+  publishing; long-lived registry credentials are not an accepted fallback.
 
 The machine-readable dispositions and their regression-test mappings are in
 [`security/review-dispositions.json`](security/review-dispositions.json).
