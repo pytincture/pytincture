@@ -145,6 +145,14 @@ The contract test checks every row in this table against the dataclass model.
 | `bff_request_max_bytes` | `BFF_REQUEST_MAX_BYTES` | Maximum canonical BFF JSON body size. |
 | `bff_request_max_depth` | `BFF_REQUEST_MAX_DEPTH` | Maximum canonical BFF JSON nesting depth. |
 | `bff_request_max_items` | `BFF_REQUEST_MAX_ITEMS` | Maximum aggregate BFF JSON container items. |
+| `bff_result_max_bytes` | `BFF_RESULT_MAX_BYTES` | Maximum serialized bytes in one ordinary BFF result. |
+| `bff_result_max_depth` | `BFF_RESULT_MAX_DEPTH` | Maximum ordinary BFF result nesting depth. |
+| `bff_result_max_items` | `BFF_RESULT_MAX_ITEMS` | Maximum aggregate ordinary BFF result items. |
+| `bff_execution_mode` | `BFF_EXECUTION_MODE` | BFF execution mode: trusted-thread or isolated-process. |
+| `bff_isolated_max_concurrency` | `BFF_ISOLATED_MAX_CONCURRENCY` | Concurrent optional isolated BFF child processes per worker. |
+| `bff_isolated_max_per_user` | `BFF_ISOLATED_MAX_PER_USER` | Concurrent optional isolated BFF child processes per user. |
+| `bff_isolated_cpu_seconds` | `BFF_ISOLATED_CPU_SECONDS` | CPU-time limit for one optional isolated BFF child. |
+| `bff_isolated_memory_bytes` | `BFF_ISOLATED_MEMORY_BYTES` | Address-space limit for one optional isolated BFF child. |
 | `bff_stream_max_seconds` | `BFF_STREAM_MAX_SECONDS` | Maximum BFF stream duration. |
 | `bff_stream_max_bytes` | `BFF_STREAM_MAX_BYTES` | Maximum BFF stream bytes. |
 | `bff_stream_max_items` | `BFF_STREAM_MAX_ITEMS` | Maximum BFF stream items. |

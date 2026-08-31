@@ -95,6 +95,13 @@ from pytincture.backend.diagnostics import (
     sanitized_validation_errors,
     structured_log,
 )
+from pytincture.backend.execution import (
+    IsolatedBFFInvocation,
+    IsolatedExecutionFailed,
+    IsolatedExecutionRejected,
+    IsolatedExecutionTimeout,
+    ProcessIsolatedBFFExecutor,
+)
 from pytincture.backend.mcp import (
     MCPToolSpec,
     build_jwt_verifier,
@@ -126,6 +133,7 @@ from pytincture.backend.replay import (
     SharedReplayStoreAdapter,
     validate_atomic_replay_store,
 )
+from pytincture.backend.results import BFFResultLimitExceeded, encode_bff_result
 from pytincture.backend.saml import (
     SAMLProviderCatalog,
     SlidingWindowRateLimiter,
@@ -2109,6 +2117,44 @@ async def public_app_asset(request: Request, application: str, asset_path: str):
         headers=_public_asset_response_headers(secure_file, normalized),
     )
 
+
+def _bounded_bff_result(result: Any, *, return_raw: bool = False):
+    if isinstance(result, Response):
+        body = getattr(result, "body", None)
+        if not isinstance(body, (bytes, bytearray)):
+            raise HTTPException(
+                status_code=500,
+                detail="Unsupported BFF response type",
+            )
+        if len(body) > BFF_RESULT_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="BFF result byte limit exceeded")
+        return result
+    try:
+        payload = encode_bff_result(
+            result,
+            max_bytes=BFF_RESULT_MAX_BYTES,
+            max_depth=BFF_RESULT_MAX_DEPTH,
+            max_items=BFF_RESULT_MAX_ITEMS,
+        )
+    except BFFResultLimitExceeded as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    if return_raw:
+        return result
+    return Response(content=payload, media_type="application/json")
+
+
+def _isolated_bff_subject(request: Request, user: Any) -> str:
+    session_id = request.session.get("session_id")
+    if isinstance(session_id, str) and session_id:
+        return session_id
+    if isinstance(user, dict):
+        for key in ("subject", "sub", "email", "client_id"):
+            value = user.get(key)
+            if value:
+                return hashlib.sha256(str(value).encode("utf-8")).hexdigest()
+    return "noauth"
+
+
 @app.get("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="getApplicationClassCall", response_model=Any)
 @app.post("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="postApplicationClassCall", response_model=Any)
 @app.put("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="putApplicationClassCall", response_model=Any)
@@ -2267,6 +2313,47 @@ async def class_call(
         if policy_result is not None and policy_result is not True:
             raise RuntimeError("BFF policy hooks must return True, False, or None")
 
+    if BFF_EXECUTION_MODE == "isolated-process":
+        if operation.get("stream", {}).get("enabled"):
+            raise HTTPException(
+                status_code=501,
+                detail="Streaming BFF operations require trusted execution mode",
+            )
+        invocation = IsolatedBFFInvocation(
+            module_path=module_file_path,
+            modules_root=modules_root,
+            class_name=class_name,
+            member_name=function_name,
+            source_digest=source_digest,
+            operation=operation,
+            user=user,
+            args=tuple(args),
+            kwargs=dict(kwargs),
+            subject=_isolated_bff_subject(request, user),
+            wall_time_seconds=_remaining_bff_seconds(request),
+        )
+        try:
+            payload = await _run_bff_thread_stage(
+                request,
+                BFF_ISOLATED_EXECUTOR.execute,
+                invocation,
+            )
+        except IsolatedExecutionRejected as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Isolated BFF capacity is temporarily exhausted",
+                headers={"Retry-After": "1"},
+            ) from exc
+        except IsolatedExecutionTimeout as exc:
+            raise HTTPException(status_code=504, detail="BFF call timed out") from exc
+        except BFFResultLimitExceeded as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except IsolatedExecutionFailed as exc:
+            raise RuntimeError("Isolated BFF execution failed") from exc
+        if request.scope.get("pytincture.return_raw_result"):
+            return json.loads(payload)
+        return Response(content=payload, media_type="application/json")
+
     def prepare_call():
         module = _load_source_module(
             module_file_path,
@@ -2339,19 +2426,35 @@ async def class_call(
             async def collect_items():
                 nonlocal collected_bytes
                 async for item in result:
-                    collected_items.append(item)
-                    if len(collected_items) > BFF_STREAM_MAX_ITEMS:
+                    if len(collected_items) >= BFF_STREAM_MAX_ITEMS:
                         raise HTTPException(status_code=413, detail="BFF result item limit exceeded")
-                    collected_bytes += len(json.dumps(item, default=str).encode("utf-8"))
+                    try:
+                        encoded_item = encode_bff_result(
+                            item,
+                            max_bytes=max(1, BFF_RESULT_MAX_BYTES - collected_bytes),
+                            max_depth=BFF_RESULT_MAX_DEPTH,
+                            max_items=BFF_RESULT_MAX_ITEMS,
+                        )
+                    except BFFResultLimitExceeded as exc:
+                        raise HTTPException(status_code=413, detail=str(exc)) from exc
+                    collected_bytes += len(encoded_item)
                     if collected_bytes > BFF_STREAM_MAX_BYTES:
                         raise HTTPException(status_code=413, detail="BFF result byte limit exceeded")
+                    collected_items.append(item)
             try:
                 await asyncio.wait_for(
                     collect_items(), timeout=_remaining_bff_seconds(request)
                 )
             except asyncio.TimeoutError as exc:
                 raise HTTPException(status_code=504, detail="BFF call timed out") from exc
-            return collected_items
+            finally:
+                close = getattr(result, "aclose", None)
+                if callable(close):
+                    await close()
+            return _bounded_bff_result(
+                collected_items,
+                return_raw=bool(request.scope.get("pytincture.return_raw_result")),
+            )
 
         if is_coroutine_function:
             try:
@@ -2363,12 +2466,18 @@ async def class_call(
         else:
             result = await _run_bff_thread_stage(request, func, *args, **kwargs)
 
-        if is_streaming:
+        if is_streaming or isinstance(result, StreamingResponse):
             return _as_streaming_response(result)
 
-        return result
+        return _bounded_bff_result(
+            result,
+            return_raw=bool(request.scope.get("pytincture.return_raw_result")),
+        )
 
-    return func
+    return _bounded_bff_result(
+        func,
+        return_raw=bool(request.scope.get("pytincture.return_raw_result")),
+    )
 
 
 async def _invoke_mcp_bff(spec: MCPToolSpec, arguments: Dict[str, Any]) -> Any:
@@ -2420,6 +2529,7 @@ async def _invoke_mcp_bff(spec: MCPToolSpec, arguments: Dict[str, Any]) -> Any:
         "state": {},
         "session": {"user": user, "session_id": f"mcp:{subject}"},
         "pytincture.mcp_user": user,
+        "pytincture.return_raw_result": True,
     }
     request = Request(scope, receive)
     admission = _admit_bff_call(request)
@@ -2667,6 +2777,16 @@ BFF_QUEUE_TIMEOUT_SECONDS = float(os.getenv("BFF_QUEUE_TIMEOUT_SECONDS", "2"))
 BFF_REQUEST_MAX_BYTES = int(os.getenv("BFF_REQUEST_MAX_BYTES", str(1024 * 1024)))
 BFF_REQUEST_MAX_DEPTH = int(os.getenv("BFF_REQUEST_MAX_DEPTH", "32"))
 BFF_REQUEST_MAX_ITEMS = int(os.getenv("BFF_REQUEST_MAX_ITEMS", "10000"))
+BFF_RESULT_MAX_BYTES = int(os.getenv("BFF_RESULT_MAX_BYTES", str(10 * 1024 * 1024)))
+BFF_RESULT_MAX_DEPTH = int(os.getenv("BFF_RESULT_MAX_DEPTH", "32"))
+BFF_RESULT_MAX_ITEMS = int(os.getenv("BFF_RESULT_MAX_ITEMS", "10000"))
+BFF_EXECUTION_MODE = os.getenv("BFF_EXECUTION_MODE", "trusted-thread").strip().lower()
+BFF_ISOLATED_MAX_CONCURRENCY = int(os.getenv("BFF_ISOLATED_MAX_CONCURRENCY", "4"))
+BFF_ISOLATED_MAX_PER_USER = int(os.getenv("BFF_ISOLATED_MAX_PER_USER", "2"))
+BFF_ISOLATED_CPU_SECONDS = float(os.getenv("BFF_ISOLATED_CPU_SECONDS", "30"))
+BFF_ISOLATED_MEMORY_BYTES = int(
+    os.getenv("BFF_ISOLATED_MEMORY_BYTES", str(1024 * 1024 * 1024))
+)
 BFF_STREAM_MAX_SECONDS = float(os.getenv("BFF_STREAM_MAX_SECONDS", "300"))
 BFF_STREAM_MAX_BYTES = int(os.getenv("BFF_STREAM_MAX_BYTES", str(10 * 1024 * 1024)))
 BFF_STREAM_MAX_ITEMS = int(os.getenv("BFF_STREAM_MAX_ITEMS", "10000"))
@@ -2686,6 +2806,13 @@ if min(
     BFF_REQUEST_MAX_BYTES,
     BFF_REQUEST_MAX_DEPTH,
     BFF_REQUEST_MAX_ITEMS,
+    BFF_RESULT_MAX_BYTES,
+    BFF_RESULT_MAX_DEPTH,
+    BFF_RESULT_MAX_ITEMS,
+    BFF_ISOLATED_MAX_CONCURRENCY,
+    BFF_ISOLATED_MAX_PER_USER,
+    BFF_ISOLATED_CPU_SECONDS,
+    BFF_ISOLATED_MEMORY_BYTES,
     BFF_STREAM_MAX_SECONDS,
     BFF_STREAM_MAX_BYTES,
     BFF_STREAM_MAX_ITEMS,
@@ -2700,6 +2827,10 @@ if min(
     raise RuntimeError("BFF timeout and stream limits must be greater than zero")
 if BFF_MAX_QUEUE < 0:
     raise RuntimeError("BFF_MAX_QUEUE cannot be negative")
+if BFF_EXECUTION_MODE not in {"trusted-thread", "isolated-process"}:
+    raise RuntimeError("BFF_EXECUTION_MODE must be trusted-thread or isolated-process")
+if BFF_ISOLATED_MAX_PER_USER > BFF_ISOLATED_MAX_CONCURRENCY:
+    raise RuntimeError("BFF_ISOLATED_MAX_PER_USER cannot exceed isolated concurrency")
 BFF_ADMISSION_GATE = AsyncAdmissionGate(
     BFF_MAX_CONCURRENCY,
     BFF_MAX_QUEUE,
@@ -2707,6 +2838,15 @@ BFF_ADMISSION_GATE = AsyncAdmissionGate(
 )
 APPCODE_ARCHIVE_CACHE = AppcodeArchiveCache(APPCODE_CACHE_ENTRIES)
 APPCODE_BUILD_GATE = threading.BoundedSemaphore(APPCODE_BUILD_MAX_CONCURRENCY)
+BFF_ISOLATED_EXECUTOR = ProcessIsolatedBFFExecutor(
+    max_concurrency=BFF_ISOLATED_MAX_CONCURRENCY,
+    max_per_user=BFF_ISOLATED_MAX_PER_USER,
+    cpu_seconds=BFF_ISOLATED_CPU_SECONDS,
+    memory_bytes=BFF_ISOLATED_MEMORY_BYTES,
+    result_max_bytes=BFF_RESULT_MAX_BYTES,
+    result_max_depth=BFF_RESULT_MAX_DEPTH,
+    result_max_items=BFF_RESULT_MAX_ITEMS,
+) if BFF_EXECUTION_MODE == "isolated-process" else None
 ENABLE_BFF_REPLAY_TOKENS = os.getenv("ENABLE_BFF_REPLAY_TOKENS", "false").lower() == "true"
 BFF_REPLAY_TOKEN_BATCH_SIZE = int(os.getenv("BFF_REPLAY_TOKEN_BATCH_SIZE", "12"))
 BFF_REPLAY_TOKEN_LOW_WATERMARK = int(os.getenv("BFF_REPLAY_TOKEN_LOW_WATERMARK", "3"))

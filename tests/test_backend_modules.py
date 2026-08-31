@@ -33,6 +33,12 @@ from pytincture.backend.diagnostics import (
     request_correlation_id,
     sanitized_validation_errors,
 )
+from pytincture.backend.execution import (
+    IsolatedBFFInvocation,
+    IsolatedExecutionRejected,
+    IsolatedExecutionTimeout,
+    ProcessIsolatedBFFExecutor,
+)
 from pytincture.backend.mcp import parse_tool_specs
 from pytincture.backend.pages import (
     EntryPointDiscoveryError,
@@ -46,6 +52,7 @@ from pytincture.backend.replay import (
     SharedReplayStoreAdapter,
     validate_atomic_replay_store,
 )
+from pytincture.backend.results import BFFResultLimitExceeded, encode_bff_result
 from pytincture.backend.saml import (
     ALLOWED_XML_DIGEST_METHODS,
     ALLOWED_XML_SIGNATURE_METHODS,
@@ -65,6 +72,7 @@ from pytincture.backend.safe_paths import (
 )
 from pytincture.backend.source_loading import build_dynamic_module_name, load_source_module
 from pytincture.dataclass import get_parsed_output
+from pytincture.dataclass import get_bff_manifest
 from pytincture.backend.storage import RedisDict
 from pytincture.backend.streaming import (
     as_streaming_response,
@@ -72,6 +80,118 @@ from pytincture.backend.streaming import (
     limited_sync_stream,
 )
 from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate, CircuitOpen
+
+
+def test_bff_result_encoder_stops_at_byte_depth_and_item_limits():
+    assert encode_bff_result({"ok": True}, max_bytes=32) == b'{"ok":true}'
+    with pytest.raises(BFFResultLimitExceeded, match="byte"):
+        encode_bff_result("x" * 33, max_bytes=32)
+    with pytest.raises(BFFResultLimitExceeded, match="nesting"):
+        encode_bff_result([[[1]]], max_bytes=100, max_depth=2)
+    with pytest.raises(BFFResultLimitExceeded, match="item"):
+        encode_bff_result([1, 2, 3], max_bytes=100, max_items=2)
+
+
+def _isolated_test_invocation(path, operation, member, *, wall_time=2.0):
+    return IsolatedBFFInvocation(
+        module_path=str(path),
+        modules_root=str(path.parent),
+        class_name="Worker",
+        member_name=member,
+        source_digest=hashlib.sha256(path.read_bytes()).hexdigest(),
+        operation=operation,
+        user={"email": "user@example.test"},
+        args=(),
+        kwargs={},
+        subject="session-one",
+        wall_time_seconds=wall_time,
+    )
+
+
+def test_optional_process_executor_kills_cpu_work_and_recovers(tmp_path):
+    source = """
+from pytincture.dataclass import backend_for_frontend
+
+@backend_for_frontend
+class Worker:
+    def __init__(self, _user):
+        self.user = _user
+
+    def spin(self):
+        while True:
+            pass
+
+    def ping(self):
+        return {"ready": True}
+"""
+    module_path = tmp_path / "isolated_worker.py"
+    module_path.write_text(source, encoding="utf-8")
+    manifest = get_bff_manifest(str(module_path))
+    executor = ProcessIsolatedBFFExecutor(
+        max_concurrency=1,
+        max_per_user=1,
+        cpu_seconds=5,
+        memory_bytes=64 * 1024 * 1024 * 1024,
+        result_max_bytes=1024,
+        result_max_depth=8,
+        result_max_items=100,
+    )
+
+    with pytest.raises(IsolatedExecutionTimeout):
+        executor.execute(
+            _isolated_test_invocation(
+                module_path,
+                manifest[("Worker", "spin")],
+                "spin",
+                wall_time=0.2,
+            )
+        )
+    assert executor.active_users == {}
+    assert json.loads(
+        executor.execute(
+            _isolated_test_invocation(
+                module_path,
+                manifest[("Worker", "ping")],
+                "ping",
+            )
+        )
+    ) == {"ready": True}
+
+
+def test_optional_process_executor_enforces_per_user_and_output_limits(tmp_path):
+    module_path = tmp_path / "isolated_output.py"
+    module_path.write_text(
+        """
+from pytincture.dataclass import backend_for_frontend
+
+@backend_for_frontend
+class Worker:
+    def __init__(self, _user): pass
+    def large(self): return "x" * 100
+""",
+        encoding="utf-8",
+    )
+    operation = get_bff_manifest(str(module_path))[("Worker", "large")]
+    executor = ProcessIsolatedBFFExecutor(
+        max_concurrency=1,
+        max_per_user=1,
+        cpu_seconds=2,
+        memory_bytes=64 * 1024 * 1024 * 1024,
+        result_max_bytes=16,
+        result_max_depth=8,
+        result_max_items=100,
+    )
+
+    executor._acquire("session-one")
+    try:
+        with pytest.raises(IsolatedExecutionRejected, match="capacity"):
+            executor._acquire("session-one")
+    finally:
+        executor._release("session-one")
+    with pytest.raises(BFFResultLimitExceeded):
+        executor.execute(
+            _isolated_test_invocation(module_path, operation, "large")
+        )
 
 
 def test_local_replay_store_is_bounded_expiration_indexed_and_single_use():
@@ -1003,6 +1123,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-M-06-GET",
         "REVIEW-2026-08-31-M-07-POLICY",
         "REVIEW-2026-08-31-M-08-REPLAY-ISSUANCE",
+        "REVIEW-2026-08-31-M-09-BFF-EXECUTION",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1078,6 +1199,14 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert replay_controls["expiration_indexed_cleanup"] is True
     assert replay_controls["strict_shared_mode_fails_closed"] is True
     assert replay_controls["redis_required"] is False
+    execution_controls = dispositions[
+        "REVIEW-2026-08-31-M-09-BFF-EXECUTION"
+    ]["controls"]
+    assert execution_controls["ordinary_result_byte_limit"] is True
+    assert execution_controls["timed_out_thread_slot_retained"] is True
+    assert execution_controls["trusted_execution_default"] is True
+    assert execution_controls["process_isolation_mandatory"] is False
+    assert execution_controls["redis_required"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:
@@ -1156,7 +1285,24 @@ def test_sync_stream_closes_source_at_byte_limit():
         )
     ) == ["first\n"]
     assert closed == [True]
-    assert reasons == [("byte-limit", 13)]
+    # The rejected second item is never retained as serialized output.
+    assert reasons == [("byte-limit", 6)]
+
+
+def test_stream_rejects_one_oversized_item_before_retaining_serialized_bytes():
+    reasons = []
+    chunks = list(
+        limited_sync_stream(
+            iter([{"payload": "x" * 100_000}]),
+            raw=False,
+            max_seconds=10,
+            max_bytes=64,
+            on_finish=lambda reason, size: reasons.append((reason, size)),
+        )
+    )
+
+    assert chunks == []
+    assert reasons == [("byte-limit", 0)]
 
 
 def test_async_stream_timeout_closes_source():

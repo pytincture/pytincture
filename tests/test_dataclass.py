@@ -823,6 +823,36 @@ def test_generate_stub_classes_streaming(tmp_path, monkeypatch):
     assert "yield json.loads(line)" in stub
 
 
+def test_static_manifest_records_streaming_without_changing_decorator_forms(tmp_path):
+    file_path = tmp_path / "stream_manifest.py"
+    file_path.write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_stream
+
+        @backend_for_frontend
+        class StreamService:
+            @bff_stream
+            async def default_stream(self):
+                yield 1
+
+            @bff_stream(raw=True, media_type="application/octet-stream")
+            async def raw_stream(self):
+                yield b"x"
+    """))
+
+    manifest = get_bff_manifest(str(file_path))
+
+    assert manifest[("StreamService", "default_stream")]["stream"] == {
+        "enabled": True,
+        "raw": False,
+        "media_type": "text/event-stream",
+    }
+    assert manifest[("StreamService", "raw_stream")]["stream"] == {
+        "enabled": True,
+        "raw": True,
+        "media_type": "application/octet-stream",
+    }
+
+
 def test_generate_stub_classes_supports_decorator_aliases_and_async_methods(tmp_path, monkeypatch):
     """
     Stub generation should work with module-qualified decorators and async methods.

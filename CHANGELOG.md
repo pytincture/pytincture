@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Bound ordinary BFF JSON responses by configurable serialized bytes, depth,
+  and item count, and serialize stream items under the remaining byte budget
+  before retaining them. Add an opt-in process executor with killable wall
+  time, CPU/memory/output limits, and worker/per-user admission; trusted thread
+  execution remains the default and process isolation is not mandatory.
 - Bound the optional, default-off BFF replay-proof feature with per-session,
   per-peer, and per-worker refill quotas plus expiration-indexed worker/session
   storage caps. Add a vendor-neutral atomic-store contract and fail startup

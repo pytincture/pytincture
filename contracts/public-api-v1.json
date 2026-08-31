@@ -81,6 +81,13 @@
     ],
     "request_body_representation": "single-canonical-json-object",
     "request_validation_before_application_import": true,
+    "ordinary_response_limits": [
+      "bytes",
+      "depth",
+      "items"
+    ],
+    "default_execution_mode": "trusted-thread",
+    "optional_execution_mode": "isolated-process",
     "get_contract": "parameterless-read-only-repeatable-bodyless",
     "request_headers": [
       "X-CSRF-Token",

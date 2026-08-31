@@ -250,6 +250,42 @@ class PytinctureConfig:
     bff_request_max_items: int = _setting(
         10000, "BFF_REQUEST_MAX_ITEMS", "Maximum aggregate BFF JSON container items."
     )
+    bff_result_max_bytes: int = _setting(
+        10 * 1024 * 1024,
+        "BFF_RESULT_MAX_BYTES",
+        "Maximum serialized bytes in one ordinary BFF result.",
+    )
+    bff_result_max_depth: int = _setting(
+        32, "BFF_RESULT_MAX_DEPTH", "Maximum ordinary BFF result nesting depth."
+    )
+    bff_result_max_items: int = _setting(
+        10000, "BFF_RESULT_MAX_ITEMS", "Maximum aggregate ordinary BFF result items."
+    )
+    bff_execution_mode: str = _setting(
+        "trusted-thread",
+        "BFF_EXECUTION_MODE",
+        "BFF execution mode: trusted-thread or isolated-process.",
+    )
+    bff_isolated_max_concurrency: int = _setting(
+        4,
+        "BFF_ISOLATED_MAX_CONCURRENCY",
+        "Concurrent optional isolated BFF child processes per worker.",
+    )
+    bff_isolated_max_per_user: int = _setting(
+        2,
+        "BFF_ISOLATED_MAX_PER_USER",
+        "Concurrent optional isolated BFF child processes per user.",
+    )
+    bff_isolated_cpu_seconds: float = _setting(
+        30.0,
+        "BFF_ISOLATED_CPU_SECONDS",
+        "CPU-time limit for one optional isolated BFF child.",
+    )
+    bff_isolated_memory_bytes: int = _setting(
+        1024 * 1024 * 1024,
+        "BFF_ISOLATED_MEMORY_BYTES",
+        "Address-space limit for one optional isolated BFF child.",
+    )
     bff_stream_max_seconds: float = _setting(
         300.0, "BFF_STREAM_MAX_SECONDS", "Maximum BFF stream duration."
     )
@@ -457,6 +493,13 @@ class PytinctureConfig:
             self.bff_request_max_bytes,
             self.bff_request_max_depth,
             self.bff_request_max_items,
+            self.bff_result_max_bytes,
+            self.bff_result_max_depth,
+            self.bff_result_max_items,
+            self.bff_isolated_max_concurrency,
+            self.bff_isolated_max_per_user,
+            self.bff_isolated_cpu_seconds,
+            self.bff_isolated_memory_bytes,
             self.bff_stream_max_seconds,
             self.bff_stream_max_bytes,
             self.bff_stream_max_items,
@@ -475,6 +518,16 @@ class PytinctureConfig:
             raise ValueError("resource limits must be greater than zero")
         if self.bff_max_queue < 0:
             raise ValueError("bff_max_queue cannot be negative")
+        execution_mode = self.bff_execution_mode.strip().lower()
+        if execution_mode not in {"trusted-thread", "isolated-process"}:
+            raise ValueError(
+                "bff_execution_mode must be trusted-thread or isolated-process"
+            )
+        object.__setattr__(self, "bff_execution_mode", execution_mode)
+        if self.bff_isolated_max_per_user > self.bff_isolated_max_concurrency:
+            raise ValueError(
+                "bff_isolated_max_per_user cannot exceed isolated concurrency"
+            )
         development_widget_version = self.dev_wheel_version.strip()
         try:
             Version(development_widget_version)
@@ -734,6 +787,9 @@ class PytinctureConfig:
             "login_email_max_chars", "login_password_max_chars",
             "password_hash_max_concurrency", "bff_max_concurrency", "bff_max_queue",
             "bff_request_max_bytes", "bff_request_max_depth", "bff_request_max_items",
+            "bff_result_max_bytes", "bff_result_max_depth", "bff_result_max_items",
+            "bff_isolated_max_concurrency", "bff_isolated_max_per_user",
+            "bff_isolated_memory_bytes",
             "bff_stream_max_items", "appcode_max_files", "appcode_max_file_bytes",
             "appcode_max_total_bytes", "appcode_cache_entries",
             "appcode_build_max_concurrency",
@@ -743,6 +799,7 @@ class PytinctureConfig:
             "password_hash_queue_timeout_seconds", "bff_call_timeout_seconds",
             "password_hash_timeout_seconds",
             "bff_queue_timeout_seconds", "bff_stream_max_seconds",
+            "bff_isolated_cpu_seconds",
             "bff_stream_idle_timeout_seconds", "remote_store_timeout_seconds",
             "remote_store_cooldown_seconds", "appcode_build_queue_timeout_seconds",
         }

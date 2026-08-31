@@ -243,6 +243,12 @@ Why:
 Required controls that remain in scope are bounded admission, time, request,
 result, and stream sizes; safe failure behavior; and an optional isolated
 executor for deployments that deliberately run less-trusted application code.
+Ordinary results are byte/depth/item bounded before a response is retained.
+Stream items are serialized under the remaining byte budget before being
+retained. The opt-in process executor provides killable wall-time execution,
+per-worker/per-user admission, CPU limits on POSIX, address-space limits on
+Linux, and the same output boundary. It intentionally rejects streaming BFFs;
+trusted mode remains the default and keeps current streaming/object behavior.
 
 ## HSTS remains an edge responsibility
 

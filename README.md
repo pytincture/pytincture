@@ -176,6 +176,8 @@ pip install ".[dev]"
 - PYTINCTURE_DEV_WHEEL_VERSION: Explicit backend development-widget fallback version (`99.99.99` by default). The runtime requests the declared real version first.
 - MAX_REQUEST_BODY_BYTES: Maximum request body size. Defaults to 2 MiB.
 - BFF_CALL_TIMEOUT_SECONDS: Maximum non-streaming BFF execution time. Defaults to 30 seconds.
+- BFF_RESULT_MAX_BYTES / BFF_RESULT_MAX_DEPTH / BFF_RESULT_MAX_ITEMS: Bound ordinary serialized BFF responses before they are returned. Defaults to 10 MiB, 32 levels, and 10,000 aggregate items.
+- BFF_EXECUTION_MODE: `trusted-thread` by default. Set `isolated-process` only when non-streaming BFFs need a killable child-process boundary; configure `BFF_ISOLATED_MAX_CONCURRENCY`, `BFF_ISOLATED_MAX_PER_USER`, `BFF_ISOLATED_CPU_SECONDS`, and `BFF_ISOLATED_MEMORY_BYTES` for that mode.
 - BFF_STREAM_MAX_SECONDS: Maximum BFF stream duration. Defaults to 300 seconds.
 - BFF_STREAM_MAX_BYTES: Maximum BFF stream output. Defaults to 10 MiB.
 - BFF_POLICY_HOOK_PATH: Dotted path to a sync or async policy hook. This is the recommended launcher configuration because the hook must be available before application modules are imported or constructed. Return `True` or `None` to allow, `False` to deny, or raise an HTTP exception with an explicit status.

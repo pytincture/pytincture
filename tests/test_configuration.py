@@ -42,6 +42,14 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "BFF_REPLAY_ISSUE_WINDOW_SECONDS": "44",
             "BFF_REPLAY_LOCAL_MAX_TOKENS": "555",
             "BFF_REPLAY_LOCAL_MAX_TOKENS_PER_SESSION": "111",
+            "BFF_RESULT_MAX_BYTES": "65536",
+            "BFF_RESULT_MAX_DEPTH": "12",
+            "BFF_RESULT_MAX_ITEMS": "200",
+            "BFF_EXECUTION_MODE": "isolated-process",
+            "BFF_ISOLATED_MAX_CONCURRENCY": "3",
+            "BFF_ISOLATED_MAX_PER_USER": "1",
+            "BFF_ISOLATED_CPU_SECONDS": "2.5",
+            "BFF_ISOLATED_MEMORY_BYTES": "536870912",
             "APP_SPECIFIC_VALUE": "kept",
         },
         bff_call_timeout_seconds=8.0,
@@ -73,6 +81,14 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.bff_replay_issue_window_seconds == 44
     assert config.bff_replay_local_max_tokens == 555
     assert config.bff_replay_local_max_tokens_per_session == 111
+    assert config.bff_result_max_bytes == 65536
+    assert config.bff_result_max_depth == 12
+    assert config.bff_result_max_items == 200
+    assert config.bff_execution_mode == "isolated-process"
+    assert config.bff_isolated_max_concurrency == 3
+    assert config.bff_isolated_max_per_user == 1
+    assert config.bff_isolated_cpu_seconds == 2.5
+    assert config.bff_isolated_memory_bytes == 536870912
     assert config.environment == {"APP_SPECIFIC_VALUE": "kept"}
     assert config.to_environ()["ENABLE_USER_LOGIN"] == "true"
     assert config.to_environ()["PYTINCTURE_DEV_WHEEL_VERSION"] == "42.0.dev1"
@@ -161,6 +177,29 @@ def test_strict_replay_accepts_a_custom_shared_atomic_store_without_redis(tmp_pa
 )
 def test_replay_proof_limits_fail_closed(tmp_path, overrides):
     with pytest.raises(ValueError, match="BFF replay|replay"):
+        PytinctureConfig(modules_path=str(tmp_path), **overrides)
+
+
+def test_trusted_bff_execution_remains_the_simple_default(tmp_path):
+    config = PytinctureConfig(modules_path=str(tmp_path))
+
+    assert config.bff_execution_mode == "trusted-thread"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    (
+        {"bff_execution_mode": "container"},
+        {"bff_result_max_bytes": 0},
+        {"bff_result_max_depth": 0},
+        {"bff_result_max_items": 0},
+        {"bff_isolated_max_concurrency": 1, "bff_isolated_max_per_user": 2},
+        {"bff_isolated_cpu_seconds": 0},
+        {"bff_isolated_memory_bytes": 0},
+    ),
+)
+def test_bff_result_and_isolation_limits_fail_closed(tmp_path, overrides):
+    with pytest.raises(ValueError, match="BFF|bff|greater than zero"):
         PytinctureConfig(modules_path=str(tmp_path), **overrides)
 
 

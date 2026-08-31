@@ -478,6 +478,38 @@ def _declared_http_methods(
     return ("POST",)
 
 
+def _declared_stream(
+    decorators: list[ast.expr],
+    *,
+    bindings: _DecoratorBindings,
+) -> dict[str, Any]:
+    for decorator in decorators:
+        matches, decorator_node = _decorator_matches(
+            decorator,
+            decorator_name="bff_stream",
+            bindings=bindings,
+        )
+        if not matches:
+            continue
+        if not isinstance(decorator_node, ast.Call):
+            return {
+                "enabled": True,
+                "raw": False,
+                "media_type": "text/event-stream",
+            }
+        metadata = _literal_keyword_metadata(
+            [decorator_node], decorator_name="bff_stream", bindings=bindings
+        )
+        if decorator_node.args or set(metadata) - {"raw", "media_type"}:
+            raise ValueError("bff_stream accepts only raw and media_type options")
+        raw = metadata.get("raw", False)
+        media_type = metadata.get("media_type", "text/event-stream")
+        if not isinstance(raw, bool) or not isinstance(media_type, str) or not media_type:
+            raise ValueError("bff_stream options must be a boolean and non-empty string")
+        return {"enabled": True, "raw": raw, "media_type": media_type[:256]}
+    return {"enabled": False, "raw": False, "media_type": "application/json"}
+
+
 def _manifest_annotation(annotation: ast.expr | None) -> str:
     if annotation is None:
         return "Any"
@@ -596,6 +628,10 @@ def get_bff_manifest(
                     bindings=member_bindings[id(member)],
                 )
                 parameters = _manifest_parameters(member)
+                stream = _declared_stream(
+                    member.decorator_list,
+                    bindings=member_bindings[id(member)],
+                )
                 if "GET" in http_methods and parameters:
                     raise ValueError(
                         "GET BFF operations must be parameterless and read-only"
@@ -605,6 +641,7 @@ def get_bff_manifest(
                     "http_methods": http_methods,
                     "kind": "method",
                     "parameters": parameters,
+                    "stream": stream,
                     "_class_definition": class_definition,
                     "_member_definition": member_definition,
                 }
