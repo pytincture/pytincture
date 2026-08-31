@@ -974,6 +974,38 @@ def test_noauth_bff_accepts_trusted_non_browser_json_client(
     assert response.status_code == 200
 
 
+def test_noauth_bff_does_not_export_a_local_same_named_decorator(
+    monkeypatch, fresh_client, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "admin.py").write_text(textwrap.dedent("""
+        def backend_for_frontend(cls):
+            return cls
+
+        @backend_for_frontend
+        class Accidental:
+            def __init__(self, **kwargs):
+                pass
+
+            def secret(self):
+                return {"exposed": True}
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+
+    response = fresh_client.post(
+        "/classcall/admin.py/Accidental/secret",
+        json={"kwargs": {}},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "BFF operation not exported"}
+
+
 @pytest.mark.parametrize(
     ("method", "path"),
     (

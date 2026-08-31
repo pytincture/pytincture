@@ -111,6 +111,223 @@ def test_bff_http_methods_rejects_unsupported_method():
     with pytest.raises(ValueError):
         bff_http_methods("TRACE")
 
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "def backend_for_frontend(cls): return cls",
+        "from unrelated import backend_for_frontend",
+        (
+            "from pytincture.dataclass import backend_for_frontend\n"
+            "backend_for_frontend = lambda cls: cls"
+        ),
+        (
+            "import pytincture.dataclass as dc\n"
+            "dc.backend_for_frontend = lambda cls: cls"
+        ),
+    ],
+)
+def test_static_manifest_rejects_spoofed_or_rebound_export_decorators(declaration):
+    source = declaration + textwrap.dedent("""
+
+        @backend_for_frontend
+        class Accidental:
+            def secret(self):
+                return True
+    """)
+    if " as dc" in declaration:
+        source = source.replace("@backend_for_frontend", "@dc.backend_for_frontend")
+
+    assert get_bff_manifest("accidental.py", source=source) == {}
+
+
+@pytest.mark.parametrize(
+    ("decorator_name", "declaration", "expected"),
+    [
+        (
+            "bff_policy",
+            "def bff_policy(**metadata): return lambda target: target",
+            {"policy": {}, "http_methods": ("POST",)},
+        ),
+        (
+            "bff_policy",
+            "from unrelated import bff_policy",
+            {"policy": {}, "http_methods": ("POST",)},
+        ),
+        (
+            "bff_policy",
+            (
+                "from pytincture.dataclass import bff_policy\n"
+                "bff_policy = lambda **metadata: (lambda target: target)"
+            ),
+            {"policy": {}, "http_methods": ("POST",)},
+        ),
+        (
+            "bff_http_methods",
+            "def bff_http_methods(*methods): return lambda target: target",
+            {"policy": {}, "http_methods": ("POST",)},
+        ),
+        (
+            "bff_http_methods",
+            "from unrelated import bff_http_methods",
+            {"policy": {}, "http_methods": ("POST",)},
+        ),
+        (
+            "bff_http_methods",
+            (
+                "from pytincture.dataclass import bff_http_methods\n"
+                "bff_http_methods = lambda *methods: (lambda target: target)"
+            ),
+            {"policy": {}, "http_methods": ("POST",)},
+        ),
+    ],
+)
+def test_static_manifest_rejects_spoofed_or_rebound_security_metadata(
+    decorator_name, declaration, expected
+):
+    argument = 'role="admin"' if decorator_name == "bff_policy" else '"GET"'
+    source = (
+        "from pytincture.dataclass import backend_for_frontend\n"
+        + declaration
+        + textwrap.dedent(f"""
+
+            @backend_for_frontend
+            class Reports:
+                @{decorator_name}({argument})
+                def status(self):
+                    return True
+        """)
+    )
+
+    operation = get_bff_manifest("reports.py", source=source)[("Reports", "status")]
+    assert operation["policy"] == expected["policy"]
+    assert operation["http_methods"] == expected["http_methods"]
+
+
+def test_static_manifest_accepts_proven_direct_and_module_aliases():
+    source = textwrap.dedent("""
+        from pytincture.dataclass import (
+            backend_for_frontend as expose,
+            bff_http_methods as methods,
+            bff_policy as policy,
+        )
+
+        @expose
+        @policy(tenant="acme")
+        class Reports:
+            @methods("GET")
+            @policy(role="reader")
+            def status(self):
+                return True
+    """)
+
+    operation = get_bff_manifest("reports.py", source=source)[("Reports", "status")]
+    assert operation["policy"] == {"tenant": "acme", "role": "reader"}
+    assert operation["http_methods"] == ("GET",)
+
+
+def test_static_manifest_tracks_rebinding_in_source_order():
+    source = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class Intended:
+            def status(self):
+                return True
+
+        backend_for_frontend = lambda cls: cls
+
+        @backend_for_frontend
+        class Accidental:
+            def secret(self):
+                return True
+    """)
+
+    assert set(get_bff_manifest("ordered.py", source=source)) == {
+        ("Intended", "status")
+    }
+
+
+@pytest.mark.parametrize(
+    "rebind_statement",
+    [
+        "match value:\n    case backend_for_frontend:\n        pass",
+        (
+            "@(backend_for_frontend := (lambda target: target))\n"
+            "def helper():\n"
+            "    pass"
+        ),
+    ],
+)
+def test_static_manifest_rejects_less_common_rebindings(rebind_statement):
+    source = (
+        "from pytincture.dataclass import backend_for_frontend\n"
+        "value = object()\n"
+        + rebind_statement
+        + textwrap.dedent("""
+
+            @backend_for_frontend
+            class Accidental:
+                def secret(self):
+                    return True
+        """)
+    )
+
+    assert get_bff_manifest("accidental.py", source=source) == {}
+
+
+def test_static_manifest_rejects_class_scope_security_decorator_rebinding():
+    source = textwrap.dedent("""
+        from pytincture.dataclass import (
+            backend_for_frontend,
+            bff_http_methods,
+            bff_policy,
+        )
+
+        @backend_for_frontend
+        class Reports:
+            bff_policy = lambda **metadata: (lambda target: target)
+
+            @bff_policy(role="admin")
+            def private_status(self):
+                return True
+
+            bff_http_methods = lambda *methods: (lambda target: target)
+
+            @bff_http_methods("GET")
+            def mutate(self):
+                return True
+    """)
+
+    manifest = get_bff_manifest("reports.py", source=source)
+    assert manifest[("Reports", "private_status")]["policy"] == {}
+    assert manifest[("Reports", "mutate")]["http_methods"] == ("POST",)
+
+
+def test_stub_generation_rejects_a_spoofed_stream_decorator(tmp_path, monkeypatch):
+    source = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        def bff_stream(**metadata):
+            return lambda target: target
+
+        @backend_for_frontend
+        class Reports:
+            @bff_stream(raw=True)
+            async def status(self):
+                return {"ready": True}
+    """)
+    file_path = tmp_path / "reports.py"
+    file_path.write_text(source)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+
+    stub = generate_stub_classes(
+        str(file_path), "example.test", "https", source_code=source
+    )
+
+    assert "async def fetch_stream" not in stub
+    assert "async def status(self, *args, **kwargs):" in stub
+
 # --------------------------------------------
 # Tests for get_imports_used_in_class
 # --------------------------------------------
@@ -167,6 +384,8 @@ def test_generate_stub_classes_returns_stub(tmp_path, monkeypatch):
     """
     # Note: The marker '@backend_for_frontend' must appear in the code.
     dummy_code = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
         @backend_for_frontend
         class MyService:
             def foo(self, a):
@@ -198,6 +417,8 @@ def test_generate_stub_classes_streaming(tmp_path, monkeypatch):
     Streaming methods should generate async stub methods that iterate over the stream.
     """
     dummy_code = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_stream
+
         @backend_for_frontend
         class StreamService:
             @bff_stream()
@@ -274,6 +495,8 @@ def test_generate_stub_classes_nested_path(tmp_path, monkeypatch):
     nested_dir = tmp_path / "api" / "v1"
     nested_dir.mkdir(parents=True)
     dummy_code = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
         @backend_for_frontend
         class NestedService:
             def ping(self):
@@ -369,6 +592,8 @@ def test_get_parsed_output_returns_stub(tmp_path):
     """
     # Case 1: File contains the marker.
     dummy_code_with_marker = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
         @backend_for_frontend
         class MyService:
             def foo(self, a):

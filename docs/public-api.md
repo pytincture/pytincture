@@ -52,6 +52,11 @@ Import these decorators from `pytincture.dataclass`:
 - `@bff_stream(raw=False, media_type="text/event-stream")` marks a method as
   streaming. Non-raw values use newline-delimited JSON framing.
 
+The static authorization registry proves these declarations came directly
+from `pytincture.dataclass`. Direct aliases and qualified module aliases are
+supported; local functions, unrelated imports, re-exported wrappers, and names
+rebound after import are intentionally ignored even when their names match.
+
 Decorated classes may accept `_user` in their constructor. If they do not,
 Pytincture attaches `_user` to the wrapped instance after construction. Names
 beginning with `_` are never exported as BFF operations.
