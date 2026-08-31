@@ -18,6 +18,10 @@ by Pytincture 1.x.
 - Module identifiers are relative POSIX-style paths under `MODULES_PATH` and
   include `.py`.
 - Static manifest validation occurs before application code is imported.
+- A source file that is unreadable, unsafe, malformed, or invalidly encoded
+  contributes no callable operations and is recorded as rejected. Its failure
+  does not remove valid operations from other canonical module paths. A
+  repaired file must pass a complete static rescan before it can be called.
 
 ## HTTP request
 
