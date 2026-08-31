@@ -9,6 +9,7 @@ import io
 import ipaddress
 import json
 import logging
+import math
 import mimetypes
 import os
 import re
@@ -114,7 +115,9 @@ from pytincture.backend.pages import (
 from pytincture.backend.saml import (
     SAMLProviderCatalog,
     SlidingWindowRateLimiter,
+    saml_assertion_expirations,
     split_csv,
+    validate_authenticated_saml_correlation,
     validate_saml_response_xml,
 )
 from pytincture.backend.saml import (
@@ -1383,6 +1386,7 @@ def _set_authenticated_user(
     user_info: Any,
     *,
     application: str,
+    authentication_expires_at: Optional[float] = None,
     **identity_overrides: Any,
 ) -> Dict[str, Any]:
     session_user = _build_auth_session_user(user_info, **identity_overrides)
@@ -1397,6 +1401,15 @@ def _set_authenticated_user(
     request.session["session_id"] = secrets.token_urlsafe(24)
     request.session["csrf_token"] = secrets.token_urlsafe(32)
     request.session["auth_issued_at"] = int(time.time())
+    if authentication_expires_at is not None:
+        if (
+            not isinstance(authentication_expires_at, (int, float))
+            or not math.isfinite(authentication_expires_at)
+            or authentication_expires_at <= time.time()
+        ):
+            _clear_auth_session(request)
+            raise HTTPException(status_code=401, detail="Authentication has expired")
+        request.session["auth_expires_at"] = float(authentication_expires_at)
     return session_user
 
 
@@ -1434,6 +1447,14 @@ def require_auth(request: Request):
             not isinstance(issued_at, (int, float))
             or issued_at > time.time() + 60
             or time.time() - issued_at > AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS
+        ):
+            _clear_auth_session(request)
+            return None
+        auth_expires_at = request.session.get("auth_expires_at")
+        if auth_expires_at is not None and (
+            not isinstance(auth_expires_at, (int, float))
+            or not math.isfinite(auth_expires_at)
+            or auth_expires_at <= time.time()
         ):
             _clear_auth_session(request)
             return None
@@ -3084,6 +3105,7 @@ def _build_saml_settings(request: Request, application: str, provider: Optional[
         "idp": idp_settings,
         "security": {
             "requestedAuthnContext": SAML_REQUESTED_AUTHN_CONTEXT,
+            "rejectDeprecatedAlgorithm": True,
         },
     }
 
@@ -3445,6 +3467,35 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
     ):
         raise HTTPException(status_code=400, detail="Invalid SAML response correlation")
 
+    response_xml = saml_auth.get_last_response_xml()
+    try:
+        validate_authenticated_saml_correlation(response_xml, request_id)
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid SAML response correlation") from exc
+
+    saml_expirations: List[float] = []
+    for getter_name in (
+        "get_session_expiration",
+        "get_last_assertion_not_on_or_after",
+    ):
+        getter = getattr(saml_auth, getter_name, None)
+        if callable(getter):
+            value = getter()
+            if value is not None:
+                if (
+                    not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                ):
+                    raise HTTPException(status_code=400, detail="Invalid SAML response expiry")
+                saml_expirations.append(float(value))
+    try:
+        saml_expirations.extend(saml_assertion_expirations(response_xml))
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid SAML response expiry") from exc
+    authentication_expires_at = min(saml_expirations) if saml_expirations else None
+    if authentication_expires_at is not None and authentication_expires_at <= time.time():
+        raise HTTPException(status_code=400, detail="SAML response has expired")
+
     replay_proof = _saml_replay_proof(transaction_id, response_id, assertion_id)
     previous_replay_proof = str(request.session.get("saml_replay_proof", ""))
     if previous_replay_proof and hmac.compare_digest(
@@ -3529,7 +3580,12 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
         if email_attr.lower() not in allowed_emails:
             raise HTTPException(status_code=401, detail="Not authorized")
 
-    _set_authenticated_user(request, user_info, application=application)
+    _set_authenticated_user(
+        request,
+        user_info,
+        application=application,
+        authentication_expires_at=authentication_expires_at,
+    )
     request.session["saml_replay_proof"] = replay_proof
 
     cached_redirect = _sanitize_return_to(consumed_transaction.get("return_to"))

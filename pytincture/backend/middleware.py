@@ -2,6 +2,7 @@
 
 import base64
 import json
+import math
 import time
 
 from fastapi import HTTPException
@@ -46,11 +47,20 @@ class RotatingSessionMiddleware(SessionMiddleware):
                     scope["session"] = json.loads(base64.b64decode(decoded))
                     user = scope["session"].get("user")
                     issued_at = scope["session"].get("auth_issued_at")
+                    auth_expires_at = scope["session"].get("auth_expires_at")
                     if isinstance(user, dict) and user.get("is_authenticated") is True:
                         if (
                             not isinstance(issued_at, (int, float))
                             or issued_at > time.time() + 60
                             or time.time() - issued_at > self.absolute_max_age
+                            or (
+                                auth_expires_at is not None
+                                and (
+                                    not isinstance(auth_expires_at, (int, float))
+                                    or not math.isfinite(auth_expires_at)
+                                    or auth_expires_at <= time.time()
+                                )
+                            )
                         ):
                             scope["session"] = {}
                             initial_session_was_empty = False
@@ -88,7 +98,18 @@ class RotatingSessionMiddleware(SessionMiddleware):
                         json.dumps(scope["session"]).encode("utf-8")
                     )
                     signed = self.signer.sign(data).decode("utf-8")
-                    max_age = f"Max-Age={self.max_age}; " if self.max_age else ""
+                    response_max_age = self.max_age
+                    auth_expires_at = scope["session"].get("auth_expires_at")
+                    if isinstance(auth_expires_at, (int, float)) and math.isfinite(
+                        auth_expires_at
+                    ):
+                        response_max_age = min(
+                            response_max_age,
+                            max(1, math.ceil(auth_expires_at - time.time())),
+                        )
+                    max_age = (
+                        f"Max-Age={response_max_age}; " if response_max_age else ""
+                    )
                     headers.append(
                         "Set-Cookie",
                         f"{self.session_cookie}={signed}; path={self.path}; "

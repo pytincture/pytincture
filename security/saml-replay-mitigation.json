@@ -7,6 +7,10 @@
     "dedicated_httponly_handshake_cookie": true,
     "signed_expiring_browser_transaction": true,
     "exact_in_response_to_required": true,
+    "in_response_to_must_be_covered_by_validated_signature": true,
+    "assertion_only_idp_requires_signed_subject_confirmation": true,
+    "sha256_or_stronger_signature_and_digest_required": true,
+    "browser_session_capped_to_saml_expiry": true,
     "response_and_assertion_ids_required": true,
     "signed_browser_session_replay_proof": true,
     "handshake_cookie_cleared_after_success": true,
@@ -25,6 +29,8 @@
     "tests/test_app.py::test_saml_acs_rejects_relay_state_copied_to_another_browser",
     "tests/test_app.py::test_saml_acs_requires_exact_in_response_to",
     "tests/test_app.py::test_saml_acs_creates_compact_session_that_authorizes_bff_calls",
+    "tests/test_backend_modules.py::test_assertion_only_saml_correlation_rejects_unsigned_response_rewrapping",
+    "tests/test_backend_modules.py::test_saml_response_rejects_deprecated_or_unknown_signature_algorithms",
     "tests/test_production.py::test_saml_handshake_is_portable_between_workers_without_redis",
     "pytincture/frontend/e2e-tests/saml-federated.spec.mjs"
   ]

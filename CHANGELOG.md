@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Require SAML request correlation to be authenticated by either the validated
+  Response signature or an exact `InResponseTo` inside the validated assertion
+  signature, reject SHA-1 and unknown XML signature/digest algorithms, and cap
+  the browser session to the earliest assertion/session expiry. Assertion-only
+  IdPs remain supported, and the handshake remains stateless and Redis-free.
 - Make service icons and the standalone runtime fully self-hostable: vendor the
   Material Design stylesheet/font, publish a versioned runtime/Pyodide/WASM/
   standard-library integrity manifest, verify installed bytes during static

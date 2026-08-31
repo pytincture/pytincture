@@ -100,6 +100,16 @@ def test_saml_handshake_is_portable_between_workers_without_redis(tmp_path):
         def get_last_assertion_id(self):
             return "assertion-on-worker-two"
 
+        def get_last_response_xml(self):
+            return """<samlp:Response
+              xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+              xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+              xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
+              InResponseTo="request-from-worker-one">
+              <ds:Signature/>
+              <saml:Assertion/>
+            </samlp:Response>"""
+
         def get_attributes(self):
             return {"email": ["person@example.com"]}
 

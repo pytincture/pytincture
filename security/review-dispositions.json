@@ -430,6 +430,39 @@
         "pytincture/frontend/browser-tests/lifecycle.spec.mjs::browser rejects an asset whose SRI does not match",
         "pytincture/frontend/example-tests/quickstarts.spec.mjs::standalone quickstart runs with its bundled runtime"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-M-02-M-03",
+      "status": "remediated",
+      "title": "SAML request correlation and algorithms are cryptographically bounded",
+      "intentional_contract": "Response-signed and assertion-only SAML identity providers remain supported. Assertion-only providers must place the exact AuthnRequest correlation inside the signed assertion.",
+      "security_boundary": "After python3-saml validates the certificate and signature, Pytincture requires Response.InResponseTo to match the signed browser transaction and proves that value is covered either by the direct Response signature or by exact SubjectConfirmationData.InResponseTo in the direct signed assertion. XML signature and digest methods must be SHA-256 or stronger, and the signed-cookie session expires at the earliest validated SAML assertion/session bound.",
+      "controls": {
+        "response_signed_idps_supported": true,
+        "assertion_only_idps_supported_with_signed_correlation": true,
+        "unsigned_outer_response_rewrapping_rejected": true,
+        "sha1_signature_and_digest_rejected": true,
+        "unknown_signature_and_digest_rejected": true,
+        "session_capped_to_earliest_saml_expiry": true,
+        "stateless_handshake_preserved": true,
+        "sticky_sessions_required": false,
+        "redis_required": false
+      },
+      "implementation": [
+        "pytincture/backend/saml.py",
+        "pytincture/backend/app.py",
+        "pytincture/backend/middleware.py",
+        "docs/authentication.md",
+        "security/saml-replay-mitigation.json"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_saml_correlation_accepts_response_or_assertion_signed_evidence",
+        "tests/test_backend_modules.py::test_assertion_only_saml_correlation_rejects_unsigned_response_rewrapping",
+        "tests/test_backend_modules.py::test_saml_response_rejects_deprecated_or_unknown_signature_algorithms",
+        "tests/test_backend_modules.py::test_saml_assertion_expirations_include_conditions_confirmation_and_session",
+        "tests/test_app.py::test_saml_acs_creates_compact_session_that_authorizes_bff_calls",
+        "tests/test_production.py::test_saml_handshake_is_portable_between_workers_without_redis"
+      ]
     }
   ]
 }

@@ -8,6 +8,7 @@ import tempfile
 import asyncio
 import subprocess
 import sys
+import time
 import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
@@ -2537,6 +2538,22 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
         def get_last_assertion_id(self):
             return "ONELOGIN_assertion"
 
+        def get_last_response_xml(self):
+            return """<samlp:Response
+              xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+              xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+              xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
+              InResponseTo="ONELOGIN_original_request">
+              <ds:Signature/>
+              <saml:Assertion/>
+            </samlp:Response>"""
+
+        def get_session_expiration(self):
+            return time.time() + 120
+
+        def get_last_assertion_not_on_or_after(self):
+            return time.time() + 90
+
         def get_nameid(self):
             return "person@example.com"
 
@@ -2611,6 +2628,7 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
     assert "attributes" not in user["saml"]
     assert "session_index" not in user["saml"]
     assert "saml_session_index" not in session_data
+    assert 0 < session_data["auth_expires_at"] - time.time() <= 90
     assert len(session_data["saml_replay_proof"]) == 64
     assert "ONELOGIN_response" not in fresh_client.cookies["session"]
     assert "ONELOGIN_assertion" not in fresh_client.cookies["session"]
@@ -2618,6 +2636,12 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
         backend_app._SAML_HANDSHAKE_COOKIE in value and "Max-Age=0" in value
         for value in response.headers.get_list("set-cookie")
     )
+    session_cookie_header = next(
+        value
+        for value in response.headers.get_list("set-cookie")
+        if value.startswith("session=")
+    )
+    assert "Max-Age=90" in session_cookie_header or "Max-Age=89" in session_cookie_header
     # Even a raw client that restores the consumed handshake cookie is rejected
     # by the replay proof carried in the signed browser session.
     fresh_client.cookies.set(
@@ -3566,6 +3590,7 @@ def test_saml_requested_authn_context_is_disabled_by_default():
     request_xml = OneLogin_Saml2_Authn_Request(saml_settings).get_xml()
 
     assert settings["security"]["requestedAuthnContext"] is False
+    assert settings["security"]["rejectDeprecatedAlgorithm"] is True
     assert "RequestedAuthnContext" not in request_xml
 
 
