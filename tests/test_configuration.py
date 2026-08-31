@@ -25,6 +25,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "MCP_ALLOWED_ORIGINS": '["https://mcp.example.test"]',
             "PYTINCTURE_ALLOWED_HOSTS": "app.example.test,api.example.test",
             "PYTINCTURE_CANONICAL_ORIGIN": "https://app.example.test/",
+            "PYTINCTURE_DEV_WHEEL_VERSION": "42.0.dev1",
             "SAML_RESPONSE_MAX_BYTES": "262144",
             "SAML_RELAY_STATE_TTL_SECONDS": "480",
             "SAML_ACS_RATE_LIMIT_ATTEMPTS": "30",
@@ -45,6 +46,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.mcp_allowed_origins == ("https://mcp.example.test",)
     assert config.allowed_hosts == ("app.example.test", "api.example.test")
     assert config.canonical_origin == "https://app.example.test"
+    assert config.dev_wheel_version == "42.0.dev1"
     assert config.trusted_proxy_headers is False
     assert config.saml_response_max_bytes == 262144
     assert config.saml_transaction_ttl_seconds == 480
@@ -52,6 +54,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.saml_acs_rate_limit_window_seconds == 45
     assert config.environment == {"APP_SPECIFIC_VALUE": "kept"}
     assert config.to_environ()["ENABLE_USER_LOGIN"] == "true"
+    assert config.to_environ()["PYTINCTURE_DEV_WHEEL_VERSION"] == "42.0.dev1"
 
 
 def test_cors_origins_use_the_backend_csv_format(tmp_path):
@@ -72,6 +75,43 @@ def test_saml_limits_do_not_constrain_services_with_saml_disabled(tmp_path):
         saml_response_max_bytes=2048,
     )
     assert config.enable_saml_auth is False
+
+
+def test_development_widget_version_is_validated_and_rendered(tmp_path):
+    (tmp_path / "demo.py").write_text(
+        'import demo_widget\nAPP_TITLE = "Demo"\n', encoding="utf-8"
+    )
+    (tmp_path / "demo_widget.py").write_text(
+        '__widgetset__ = "demo-widget"\n__version__ = "1.2.3"\n',
+        encoding="utf-8",
+    )
+    declared_wheel = "demo_widget-1.2.3-py3-none-any.whl"
+    development_wheel = "demo_widget-42.0.dev1-py3-none-any.whl"
+    default_development_wheel = "demo_widget-99.99.99-py3-none-any.whl"
+    for wheel in (declared_wheel, development_wheel, default_development_wheel):
+        (tmp_path / wheel).write_bytes(wheel.encode("ascii"))
+    with pytest.raises(ValueError, match="dev_wheel_version"):
+        PytinctureConfig(modules_path=str(tmp_path), dev_wheel_version="not a version")
+
+    application = create_app(
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            default_application="demo",
+            dev_wheel_version="42.0.dev1",
+        )
+    )
+    with TestClient(application) as client:
+        response = client.get("/demo")
+        declared = client.get(f"/demo/appcode/{declared_wheel}")
+        development = client.get(f"/demo/appcode/{development_wheel}")
+        rejected_default = client.get(f"/demo/appcode/{default_development_wheel}")
+
+    assert response.status_code == 200
+    assert 'devWheelVersion: "42.0.dev1"' in response.text
+    assert "***DEV_WHEEL_VERSION***" not in response.text
+    assert declared.status_code == 200
+    assert development.status_code == 200
+    assert rejected_default.status_code == 404
 
 
 def test_legacy_secret_key_is_an_environment_fallback(tmp_path):

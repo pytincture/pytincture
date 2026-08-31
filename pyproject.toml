@@ -23,6 +23,7 @@ dependencies = [
     "fastapi>=0.115,<1",
     "itsdangerous>=2.2,<3",
     "markupsafe>=3,<4",
+    "packaging>=24,<27",
     "pydantic>=2.10,<3",
     "python-multipart>=0.0.20,<1",
     "starlette>=1.6,<2",

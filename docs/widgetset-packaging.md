@@ -45,8 +45,9 @@ metadata. Keep asset order explicit when one script depends on another.
 - Explicit wheel sources include `#sha256=<64 hex>`.
 - A Pytincture backend computes the wheel SHA-256 and exposes it in
   `X-Pytincture-SHA256`; the runtime adds that lock before giving the backend
-  URL to micropip. The normal real-version-first, `99.99.99`-last fallback is
-  unchanged.
+  URL to micropip. The backend serves only the application's declared version
+  and `PYTINCTURE_DEV_WHEEL_VERSION`; the normal real-version-first,
+  `99.99.99`-last default fallback is unchanged.
 - Automatic dependency installation is disabled. Applications list every
   additional browser dependency as its own exact or hash-locked entry in
   `#micropip-libs`.
