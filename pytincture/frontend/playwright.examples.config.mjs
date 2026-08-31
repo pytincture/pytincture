@@ -31,7 +31,7 @@ export default defineConfig({
             timeout: 30_000,
         },
         {
-            command: `"${examplePython}" -m http.server 8084 --bind 127.0.0.1 --directory ../../examples/quickstart/standalone 2>&1 | tee ../../tests/quickstart-standalone.log`,
+            command: `"${examplePython}" -m pytincture.assets ../../examples/quickstart/standalone/frontend && "${examplePython}" -m http.server 8084 --bind 127.0.0.1 --directory ../../examples/quickstart/standalone 2>&1 | tee ../../tests/quickstart-standalone.log`,
             cwd: frontendDirectory,
             port: 8084,
             reuseExistingServer: !process.env.CI,

@@ -88,5 +88,7 @@ pytincture = [
     "frontend/bff-docs.js",
     "frontend/dist/*",
     "frontend/vendor/swagger-ui/*",
+    "frontend/vendor/materialdesignicons/**/*",
+    "frontend/integrity/*",
     "frontend/pyodide/**/*",
 ]

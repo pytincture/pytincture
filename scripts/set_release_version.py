@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -56,23 +55,10 @@ def main() -> None:
             r"@pytincture/runtime@[^/]+/dist/",
             f"@pytincture/runtime@{npm_version}/dist/",
         )
-    for relative_path in (
-        "docs/standalone-mode.md",
-    ):
-        replace_all(
-            ROOT / relative_path,
-            r"pytincture/pytincture@v[^/]+/pytincture/frontend/dist/",
-            f"pytincture/pytincture@v{python_version}/pytincture/frontend/dist/",
-        )
-
     subprocess.run(
         ["npm", "run", "build"],
         cwd=ROOT / "pytincture" / "frontend",
         check=True,
-    )
-    shutil.copyfile(
-        ROOT / "pytincture" / "frontend" / "dist" / "pytincture.min.js",
-        ROOT / "examples" / "quickstart" / "standalone" / "pytincture.min.js",
     )
     subprocess.run(["uv", "lock"], cwd=ROOT, check=True)
     print(f"Synchronized Python/browser {python_version} and npm {npm_version}")

@@ -1,6 +1,9 @@
 # @pytincture/runtime
 
-Standalone build of `pytincture.js`, the Pyodide bootstrapper used by the pytincture framework. It can be loaded directly from a CDN to run embedded Python snippets (or zipped pytincture apps) with no backend.
+Standalone build of `pytincture.js`, the Pyodide bootstrapper used by the
+Pytincture framework. Production sites should export the verified, self-hosted
+runtime and Pyodide set from the Python wheel; exact CDN URLs remain an
+explicit convenience mode and require SRI.
 
 ## Validation
 
@@ -19,13 +22,13 @@ error fields.
 <!DOCTYPE html>
 <html>
   <head>
-    <script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.2/dist/pytincture.min.js"></script>
+    <script src="./frontend/dist/pytincture.min.js"></script>
   </head>
   <body>
     <div id="maindiv" style="width:100%;height:100vh;"></div>
 
     <script type="text/json" id="micropip-libs">
-      ["faker"]
+      ["faker==37.0.0"]
     </script>
 
     <script type="text/python">
@@ -62,7 +65,7 @@ Before the script tag loads, you may set the following globals:
 ```html
 <script>
   window.pytinctureAutoStartConfig = {
-    widgetlib: "dhxpyt",
+    widgetlib: "dhxpyt==0.9.16",
     libsSelector: "#micropip-libs",
     pyodideBaseUrl: "./frontend/pyodide/0.29.3/full/",
     enableServiceWorker: true,
@@ -71,7 +74,7 @@ Before the script tag loads, you may set the following globals:
   // Disable auto-start if you want to call runTinctureApp manually:
   // window.pytinctureAutoStartDisabled = true;
 </script>
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime/dist/pytincture.min.js"></script>
+<script src="./frontend/dist/pytincture.min.js"></script>
 ```
 
 Manual start (if auto-start is disabled):
@@ -79,7 +82,7 @@ Manual start (if auto-start is disabled):
 ```js
 runTinctureApp({
   mode: "inline",
-  widgetlib: "dhxpyt",
+  widgetlib: "dhxpyt==0.9.16",
   enableBackendLogging: false
 });
 ```
@@ -142,10 +145,18 @@ npm run build
 npm pack --dry-run
 ```
 
-Once published, load from jsDelivr/UNPKG:
+For controlled demos, an exact published version can be loaded from a CDN only
+with the matching SRI copied from the trusted release integrity manifest:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.2/dist/pytincture.min.js"></script>
+<script
+  src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.2/dist/pytincture.min.js"
+  integrity="sha384-<trusted-manifest-value>"
+  crossorigin="anonymous"></script>
 ```
 
-Replace `0.9.20` with the framework version you need, or omit it to use `@latest`.
+See [`docs/standalone-mode.md`](../../docs/standalone-mode.md) for the local
+asset export and external Pyodide/icon integrity configuration.
+
+Always use the exact framework version and its matching trusted SRI; mutable
+tags are unsupported for external production assets.

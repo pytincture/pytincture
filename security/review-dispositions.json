@@ -391,6 +391,45 @@
         "tests/test_release_gates.py::test_npm_publish_requires_attested_release_provenance",
         "tests/test_release_gates.py::test_protected_workflow_is_the_only_npm_publish_path"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-H-08-M-25",
+      "status": "remediated_with_explicit_trust_boundary",
+      "title": "Standalone and shared browser assets are self-hosted or independently integrity-locked",
+      "intentional_contract": "Browser Python and manifest-approved widget JavaScript remain trusted application-origin code. CDN loading remains available only as an explicit convenience mode using immutable versions and trusted SRI values.",
+      "security_boundary": "Service mode serves a vendored Material Design stylesheet/font and no longer permits cdnjs in its CSP. The Python wheel exports a complete self-hosted runtime, Pyodide, WASM, standard library, and icon tree only after verifying a versioned SHA-256/SRI manifest. Cross-origin Pyodide scripts and icon CSS fail preflight without explicit SRI and anonymous CORS. A manifest fetched from the same untrusted CDN is documented as insufficient.",
+      "controls": {
+        "self_hosted_service_assets_default": true,
+        "self_hosted_standalone_production_path": true,
+        "material_icons_feature_preserved": true,
+        "service_cdn_dependency_removed": true,
+        "versioned_runtime_pyodide_wasm_stdlib_manifest": true,
+        "export_verifies_bytes_before_copy": true,
+        "external_pyodide_script_sri_required": true,
+        "external_icon_stylesheet_sri_required": true,
+        "external_asset_anonymous_cors_required": true,
+        "cdn_mode_explicit_convenience_only": true,
+        "same_origin_browser_trust_model_preserved": true,
+        "redis_required": false
+      },
+      "implementation": [
+        "pytincture/assets.py",
+        "pytincture/frontend/pytincture.js",
+        "pytincture/frontend/generate-integrity-manifest.mjs",
+        "pytincture/frontend/vendor/materialdesignicons/materialdesignicons.css",
+        "docs/standalone-mode.md",
+        "examples/quickstart/standalone/index.html"
+      ],
+      "regression_tests": [
+        "tests/test_assets.py::test_browser_asset_export_is_verified_and_self_contained",
+        "tests/test_assets.py::test_browser_asset_export_rejects_tampered_installed_bytes",
+        "tests/test_contracts.py::test_browser_asset_integrity_manifest_covers_runtime_dependencies",
+        "tests/test_app.py::test_security_headers_and_static_manifest",
+        "pytincture/frontend/tests/lifecycle.test.mjs::external browser assets fail closed without explicit SRI",
+        "pytincture/frontend/tests/lifecycle.test.mjs::external script and stylesheet loaders apply SRI with anonymous CORS",
+        "pytincture/frontend/browser-tests/lifecycle.spec.mjs::browser rejects an asset whose SRI does not match",
+        "pytincture/frontend/example-tests/quickstarts.spec.mjs::standalone quickstart runs with its bundled runtime"
+      ]
     }
   ]
 }

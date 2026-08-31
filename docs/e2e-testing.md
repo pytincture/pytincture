@@ -16,7 +16,8 @@ application in Chromium, Firefox, and WebKit. The fixture verifies:
 
 The two checked-in quickstarts also run unchanged in Chromium, Firefox, and
 WebKit. CI installs the candidate Python wheel, launches the service example,
-serves the standalone example and its version-matched local runtime, and
+exports and verifies the standalone example's version-matched local runtime,
+Pyodide, and icon assets from the candidate, serves them without a CDN, and
 requires both pages to reach the ready lifecycle state with no console, page,
 request, or server failures.
 

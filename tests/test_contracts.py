@@ -1,4 +1,5 @@
 import importlib
+import base64
 import hashlib
 import io
 import json
@@ -77,6 +78,57 @@ def test_vendored_swagger_ui_is_exactly_pinned_and_hash_locked():
     for entry in manifest["assets"]:
         content = (ROOT / entry["path"]).read_bytes()
         assert hashlib.sha256(content).hexdigest() == entry["sha256"]
+
+
+def test_browser_asset_integrity_manifest_covers_runtime_dependencies():
+    import pytincture
+
+    frontend = ROOT / "pytincture" / "frontend"
+    manifest = json.loads(
+        (frontend / "integrity" / f"pytincture-{pytincture.__version__}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    package = json.loads((frontend / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads((frontend / "package-lock.json").read_text(encoding="utf-8"))
+    mdi_lock = lock["packages"]["node_modules/@mdi/font"]
+    assert manifest["schema"] == 1
+    assert manifest["framework_version"] == pytincture.__version__
+    assert manifest["npm_version"] == package["version"]
+    assert manifest["pyodide_version"] == "0.29.3"
+    assert manifest["material_design_icons_version"] == "7.4.47"
+    assert manifest["material_design_icons_source"] == {
+        "package": "@mdi/font",
+        "resolved": mdi_lock["resolved"],
+        "npm_integrity": mdi_lock["integrity"],
+    }
+    expected = {
+        "pytincture.js",
+        "sw.js",
+        "dist/pytincture.js",
+        "dist/pytincture.js.map",
+        "dist/pytincture.esm.js",
+        "dist/pytincture.esm.js.map",
+        "dist/pytincture.min.js",
+        "dist/pytincture.min.js.map",
+        "vendor/materialdesignicons/LICENSE",
+        "vendor/materialdesignicons/materialdesignicons.css",
+        "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
+        "pyodide/0.29.3/sbom.json",
+        "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl",
+        "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl.metadata",
+        "pyodide/0.29.3/full/pyodide-lock.json",
+        "pyodide/0.29.3/full/pyodide.asm.js",
+        "pyodide/0.29.3/full/pyodide.asm.wasm",
+        "pyodide/0.29.3/full/pyodide.js",
+        "pyodide/0.29.3/full/python_stdlib.zip",
+    }
+    assert {entry["path"] for entry in manifest["assets"]} == expected
+    for entry in manifest["assets"]:
+        content = (frontend / entry["path"]).read_bytes()
+        assert hashlib.sha256(content).hexdigest() == entry["sha256"]
+        expected_sri = base64.b64encode(hashlib.sha384(content).digest()).decode()
+        assert entry["sri"] == f"sha384-{expected_sri}"
 
 
 def test_javascript_globals_and_config_keys_match_contract(contract):

@@ -16,17 +16,20 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "integrity",
+    "vendor/materialdesignicons"
   ],
   "scripts": {
     "sync-version": "node sync-version.mjs",
-    "build": "npm run sync-version && npm run sync-swagger-ui && node build.mjs",
+    "build": "npm run sync-version && npm run sync-swagger-ui && npm run sync-material-icons && node build.mjs && node generate-integrity-manifest.mjs",
     "build:watch": "node build.mjs --watch",
     "test": "node --test tests/*.test.mjs",
     "test:browser": "playwright test",
     "test:e2e": "playwright test --config playwright.e2e.config.mjs",
     "test:examples": "playwright test --config playwright.examples.config.mjs",
     "sync-swagger-ui": "node sync-swagger-ui.mjs",
+    "sync-material-icons": "node sync-material-icons.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -40,6 +43,7 @@
     "enabled": false
   },
   "devDependencies": {
+    "@mdi/font": "7.4.47",
     "@playwright/test": "1.62.1",
     "esbuild": "^0.28.1",
     "swagger-ui-dist": "5.32.14"

@@ -14,6 +14,10 @@
       "pytincture/frontend/dist/pytincture.js",
       "pytincture/frontend/dist/pytincture.esm.js",
       "pytincture/frontend/dist/pytincture.min.js",
+      "pytincture/frontend/integrity/pytincture-*.json",
+      "pytincture/frontend/vendor/materialdesignicons/LICENSE",
+      "pytincture/frontend/vendor/materialdesignicons/materialdesignicons.css",
+      "pytincture/frontend/vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
       "pytincture/frontend/vendor/swagger-ui/LICENSE",
       "pytincture/frontend/vendor/swagger-ui/swagger-ui-bundle.js",
       "pytincture/frontend/vendor/swagger-ui/swagger-ui.css",
@@ -55,7 +59,11 @@
       "package.json",
       "dist/pytincture.js",
       "dist/pytincture.esm.js",
-      "dist/pytincture.min.js"
+      "dist/pytincture.min.js",
+      "integrity/pytincture-*.json",
+      "vendor/materialdesignicons/LICENSE",
+      "vendor/materialdesignicons/materialdesignicons.css",
+      "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2"
     ],
     "forbidden_prefixes": [
       "node_modules/",

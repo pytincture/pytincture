@@ -158,3 +158,20 @@ test("browser emits an explicit fallback and ready event for a missing package",
     expect(result.at(-1).type).toBe("ready");
     expect(JSON.stringify(result)).not.toContain("private");
 });
+
+test("browser rejects an asset whose SRI does not match", async ({ page }) => {
+    await openHarness(page);
+    const result = await page.evaluate(async () => {
+        try {
+            await window.PytinctureTestRuntime.DEFAULT_RUNTIME_OPERATIONS.ensureMaterialIcons(
+                "/tests/fixtures/integrity.css",
+                "integrity-test",
+                `sha384-${"A".repeat(64)}`,
+            );
+            return null;
+        } catch (error) {
+            return error.message;
+        }
+    });
+    expect(result).toContain("Failed to load stylesheet");
+});
