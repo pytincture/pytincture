@@ -3,8 +3,10 @@
 The backend is assembled by `pytincture.create_app()`. Each call loads an
 isolated compatibility facade and owns its FastAPI routes, configuration,
 BFF registry, session stores, middleware, and MCP mount. The legacy
-`pytincture.backend.app:app` import remains supported for the launcher and
-existing integrations.
+`pytincture.backend.app:app` import remains available as a deprecated
+compatibility path for existing integrations, but it now applies the same
+fail-closed `PytinctureConfig` validation as `create_app()` before assembling
+any routes. New launchers and integrations should call `create_app()`.
 
 Focused backend modules keep policy and infrastructure testable without
 creating a service or mutating process-global environment state:

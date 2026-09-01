@@ -1249,6 +1249,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-M-17-WIDGET-TRUST",
         "REVIEW-2026-08-31-M-15-M-16-M-18-PREAUTH-CSRF",
         "REVIEW-2026-08-31-M-24-CONTAINER-GUIDANCE",
+        "REVIEW-2026-08-31-CONFIG-FACTORY-ISOLATION",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1397,6 +1398,14 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert container_controls["future_digest_reference_required"] is True
     assert container_controls["future_sbom_required"] is True
     assert container_controls["future_signature_or_attestation_required"] is True
+    factory_controls = dispositions[
+        "REVIEW-2026-08-31-CONFIG-FACTORY-ISOLATION"
+    ]["controls"]
+    assert factory_controls["typed_validation_all_startup_paths"] is True
+    assert factory_controls["non_finite_limits_rejected"] is True
+    assert factory_controls["factory_environment_process_global_mutation"] is False
+    assert factory_controls["concurrent_factories_isolated"] is True
+    assert factory_controls["redis_required"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:

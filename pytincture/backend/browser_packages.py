@@ -21,6 +21,7 @@ from fastapi import HTTPException
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
+from pytincture.configuration import get_runtime_env
 from pytincture.dataclass import has_bff_export_class
 from pytincture.backend.safe_paths import (
     UnsafePath,
@@ -575,7 +576,7 @@ def configured_browser_file_patterns(
 ) -> tuple[str, ...]:
     """Parse the browser-file glob setting without scanning the module root."""
     raw = (
-        os.getenv("PYTINCTURE_BROWSER_FILES", "")
+        get_runtime_env("PYTINCTURE_BROWSER_FILES", "")
         if raw_patterns is None
         else raw_patterns
     ).strip()

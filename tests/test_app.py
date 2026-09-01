@@ -535,7 +535,7 @@ def test_authentication_enabled_requires_strong_startup_secret(tmp_path):
         timeout=30,
     )
     assert result.returncode != 0
-    assert "Authentication requires SAML_SECRET_KEY" in result.stderr
+    assert "production authentication requires a strong session_secret" in result.stderr
 
 
 def test_legacy_backend_requires_fixed_production_auth_origin(tmp_path):
@@ -564,7 +564,7 @@ def test_legacy_backend_requires_fixed_production_auth_origin(tmp_path):
         timeout=30,
     )
     assert missing_hosts.returncode != 0
-    assert "requires exact PYTINCTURE_ALLOWED_HOSTS" in missing_hosts.stderr
+    assert "production authentication requires exact allowed_hosts" in missing_hosts.stderr
 
     environment["PYTINCTURE_ALLOWED_HOSTS"] = "service.example"
     environment["PYTINCTURE_CANONICAL_ORIGIN"] = "https://service.example"

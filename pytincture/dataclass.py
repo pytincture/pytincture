@@ -1129,8 +1129,8 @@ def add_bff_docs_to_app(
             }
 
     # Get configuration from environment variables or use defaults
-    docs_path = os.getenv("BFF_DOCS_PATH", "bff-docs")
-    docs_title = os.getenv("BFF_DOCS_TITLE", "pyTincture BFF API")
+    docs_path = get_runtime_env("BFF_DOCS_PATH", "bff-docs")
+    docs_title = get_runtime_env("BFF_DOCS_TITLE", "pyTincture BFF API")
     
     # Ensure docs_path starts with /
     docs_path = f"/{docs_path.lstrip('/')}"

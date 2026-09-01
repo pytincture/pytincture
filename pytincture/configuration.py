@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import math
 import os
 import re
 from contextlib import contextmanager
@@ -635,6 +636,24 @@ class PytinctureConfig:
             self.remote_store_queue_timeout_seconds,
             self.readiness_cache_ttl_seconds,
         )
+        floating_limits = (
+            self.saml_validation_queue_timeout_seconds,
+            self.saml_validation_timeout_seconds,
+            self.password_hash_queue_timeout_seconds,
+            self.password_hash_timeout_seconds,
+            self.bff_call_timeout_seconds,
+            self.bff_queue_timeout_seconds,
+            self.bff_isolated_cpu_seconds,
+            self.bff_stream_max_seconds,
+            self.bff_stream_idle_timeout_seconds,
+            self.appcode_build_queue_timeout_seconds,
+            self.remote_store_timeout_seconds,
+            self.remote_store_cooldown_seconds,
+            self.remote_store_queue_timeout_seconds,
+            self.readiness_cache_ttl_seconds,
+        )
+        if not all(math.isfinite(value) for value in floating_limits):
+            raise ValueError("floating-point resource limits must be finite")
         if min(positive_limits) <= 0:
             raise ValueError("resource limits must be greater than zero")
         if self.bff_max_queue < 0:
