@@ -5,24 +5,24 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## Current decision: NO-GO pending rc3, observation, and edge evidence
+## Current decision: NO-GO pending observation and edge evidence
 
-Signed GitHub prereleases and PyPI artifacts are published for `1.0.0rc1` and
-`1.0.0rc2`. Subsequent external review produced additional hardening that is
-present on `main` but not in the published rc2 artifacts, so the repository is
-preparing `1.0.0rc3` as the next qualification target. Rc3 is not recorded as
-passed until its signed tag, release artifacts, hashes, and complete
-latest-candidate acceptance evidence exist. The matching retained npm tarballs
-are validated and integrity-checked; npm registry publication remains a
-deferred distribution task and does not block the approved observation track.
+Signed GitHub prereleases exist for `1.0.0rc1`, `1.0.0rc2`, and `1.0.0rc3`.
+Rc3 contains the post-rc2 external-review hardening and is now the latest
+qualified candidate. Its exact retained wheel, source distribution, and npm
+tarball are attested, integrity-recorded, and covered by the complete release
+acceptance matrix. The protected PyPI and npm OIDC publishers independently
+verified those bytes and are waiting for non-self environment approval;
+registry publication is a distribution task and does not invalidate the
+candidate evidence or reset the approved observation track.
 
 The release manager approved the successful `pytincture_example` run, so the
 formal 30-day observation period began at `2026-08-29T02:08:06Z` and cannot
 complete before `2026-09-28T02:08:06Z`. RC2 has complete historical
 standalone, authenticated BFF, federated SAML, upgrade/rollback, performance,
-security/defect, and repository-policy evidence. Rc3 must repeat that matrix
-after publication. The release remains NO-GO until rc3 qualification passes,
-the time gate completes, a production-edge review records the deployed HTTPS
+security/defect, and repository-policy evidence. Rc3 repeated and passed that
+complete matrix after publication. The release remains NO-GO until the time
+gate completes, a production-edge review records the deployed HTTPS
 redirect, HSTS, canonical-origin, and trusted-proxy controls, and the release
 manager approves the final decision. The Starlette security blocker remains
 resolved by requiring the patched 1.6 release line and allowing no
@@ -70,6 +70,33 @@ Published and retained rc2 evidence:
   and
 - security, defect, and live repository-policy audit:
   <https://github.com/pytincture/pytincture/issues/143#issuecomment-5466263350>.
+
+Published and retained rc3 evidence:
+
+- signed tag and GitHub prerelease:
+  <https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc3>;
+- green tag qualification run:
+  <https://github.com/pytincture/pytincture/actions/runs/33462978685>;
+- green release/attestation run and all latest-candidate representative-app
+  evidence:
+  <https://github.com/pytincture/pytincture/actions/runs/33463168037>;
+- wheel SHA-256:
+  `e5aaa4efb9e64573180967a75fba785b0c7fab15c2d45b2eddcbdbc5482a1de3`;
+- source-distribution SHA-256:
+  `b745583bd5f61a1125e85b11db5097f8f5c3034534d1cbb3594ebdab22fa1b27`;
+- retained npm tarball SHA-256:
+  `47fcb8ddf64fea2bd590dbd313e3d36017ea3299931b18903d9c62536bfdd95f`;
+- security, defect, and live repository-policy audit:
+  <https://github.com/pytincture/pytincture/issues/143#issuecomment-5488070319>;
+- protected PyPI publisher:
+  <https://github.com/pytincture/pytincture/actions/runs/33463409672>; and
+- protected npm publisher:
+  <https://github.com/pytincture/pytincture/actions/runs/33463409587>.
+
+The protected publisher jobs are intentionally waiting for required non-self
+environment approval. Their pre-publication stages verified the trusted
+release run, exact retained hashes, package identity, attestation, and version
+immutability. No environment protection was bypassed.
 
 ## Evidence required after each RC
 
@@ -138,8 +165,8 @@ its tracking issue is accidentally closed.
    hashes and CI evidence into the qualification record in a follow-up PR.
 4. Run representative applications and begin the observation log.
 5. Resolve discovered blockers, publish/record the next release candidate, and
-   repeat every latest-RC exercise. Post-rc2 security hardening is targeted for
-   `1.0.0rc3`.
+   repeat every latest-RC exercise. Rc3 now records the completed post-rc2
+   security hardening and repeated latest-candidate matrix.
 6. After at least 30 days from the approved observation start, complete
    security/defect audits, execute rollback, and record an explicit `go` or
    `no-go` decision with approvers.

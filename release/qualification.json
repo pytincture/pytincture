@@ -30,6 +30,19 @@
       },
       "status": "passed",
       "notes": "Signed GitHub prerelease, attested wheel/source distribution, and PyPI 1.0.0rc2 are published. The matching retained npm tarball is attested; npm registry approval remains a deferred distribution task."
+    },
+    {
+      "version": "1.0.0rc3",
+      "published_at": "2026-09-01T02:36:23Z",
+      "commit_sha": "6b49958c7e9cc11547db15d3d0c47feb4baad1a8",
+      "ci_url": "https://github.com/pytincture/pytincture/actions/runs/33463168037",
+      "artifacts": {
+        "wheel": "e5aaa4efb9e64573180967a75fba785b0c7fab15c2d45b2eddcbdbc5482a1de3",
+        "sdist": "b745583bd5f61a1125e85b11db5097f8f5c3034534d1cbb3594ebdab22fa1b27",
+        "npm": "47fcb8ddf64fea2bd590dbd313e3d36017ea3299931b18903d9c62536bfdd95f"
+      },
+      "status": "passed",
+      "notes": "The signed GitHub prerelease is published; the exact wheel, source distribution, and npm tarball are retained and attested. The protected PyPI and npm OIDC publishers verified those artifacts and are waiting for non-self environment approval; registry publication is a distribution task and does not invalidate candidate qualification."
     }
   ],
   "representative_applications": {
@@ -41,6 +54,19 @@
         "status": "passed",
         "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33288079592",
         "commit_sha": "9757ce29fe13863118177a244efefc88aa5b194a",
+        "browser": "chromium",
+        "widgetset": "dhxpyt==0.9.16+backend",
+        "console_errors": 0,
+        "visible_url_clean": true,
+        "findings": []
+      },
+      {
+        "application": "wheel-only standalone fixture",
+        "version": "1.0.0rc3",
+        "tested_at": "2026-09-01T02:38:05Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33463168037",
+        "commit_sha": "6b49958c7e9cc11547db15d3d0c47feb4baad1a8",
         "browser": "chromium",
         "widgetset": "dhxpyt==0.9.16+backend",
         "console_errors": 0,
@@ -73,6 +99,21 @@
           "webkit": 13.0
         },
         "findings": []
+      },
+      {
+        "application": "authenticated BFF fixture",
+        "version": "1.0.0rc3",
+        "tested_at": "2026-09-01T02:40:02Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33463168037",
+        "commit_sha": "6b49958c7e9cc11547db15d3d0c47feb4baad1a8",
+        "browsers": ["chromium", "firefox", "webkit"],
+        "authenticated_bff_p95_ms": {
+          "chromium": 15.5,
+          "firefox": 14.0,
+          "webkit": 13.0
+        },
+        "findings": []
       }
     ],
     "federated_auth": [
@@ -90,6 +131,22 @@
         "saml_transform_mitigation": "passed",
         "saml_replay_mitigation": "passed",
         "findings": []
+      },
+      {
+        "application": "Keycloak SAML fixture",
+        "version": "1.0.0rc3",
+        "tested_at": "2026-09-01T02:38:51Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33463168037",
+        "commit_sha": "6b49958c7e9cc11547db15d3d0c47feb4baad1a8",
+        "provider": "Keycloak 26.7.2",
+        "browser": "chromium",
+        "requested_authn_context": false,
+        "console_errors": 0,
+        "saml_transform_mitigation": "passed",
+        "saml_replay_mitigation": "passed",
+        "redis_required": false,
+        "findings": []
       }
     ]
   },
@@ -102,6 +159,15 @@
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33288079592",
       "commit_sha": "9757ce29fe13863118177a244efefc88aa5b194a",
       "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "server-secret exclusion"]
+    },
+    {
+      "from_version": "0.10.7",
+      "version": "1.0.0rc3",
+      "tested_at": "2026-09-01T02:38:04Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33463168037",
+      "commit_sha": "6b49958c7e9cc11547db15d3d0c47feb4baad1a8",
+      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "server-secret exclusion"]
     }
   ],
   "rollback_exercises": [
@@ -113,6 +179,16 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33288079592",
       "commit_sha": "9757ce29fe13863118177a244efefc88aa5b194a",
+      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "baseline equivalence"]
+    },
+    {
+      "from_version": "1.0.0rc3",
+      "version": "1.0.0rc3",
+      "to_version": "0.10.7",
+      "tested_at": "2026-09-01T02:38:04Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33463168037",
+      "commit_sha": "6b49958c7e9cc11547db15d3d0c47feb4baad1a8",
       "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "baseline equivalence"]
     }
   ],
@@ -152,6 +228,27 @@
         "firefox": 16.0,
         "webkit": 13.0
       }
+    },
+    {
+      "application": "release service and browser fixtures",
+      "version": "1.0.0rc3",
+      "tested_at": "2026-09-01T02:40:02Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33463168037",
+      "commit_sha": "6b49958c7e9cc11547db15d3d0c47feb4baad1a8",
+      "service": {
+        "health_p95_ms": 26.34,
+        "bff_p95_ms": 72.951,
+        "appcode_p95_ms": 118.873,
+        "failures": 0,
+        "saturation_rejections": 18,
+        "recovered": true
+      },
+      "browser_authenticated_bff_p95_ms": {
+        "chromium": 15.5,
+        "firefox": 14.0,
+        "webkit": 13.0
+      }
     }
   ],
   "repository_policy_reviews": [
@@ -161,6 +258,17 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5466263350",
       "required_checks": 16,
+      "enforce_admins": true,
+      "require_code_owner_reviews": true,
+      "required_approving_review_count": 1,
+      "require_last_push_approval": true
+    },
+    {
+      "version": "1.0.0rc3",
+      "tested_at": "2026-09-01T02:41:00Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5488070319",
+      "required_checks": 19,
       "enforce_admins": true,
       "require_code_owner_reviews": true,
       "required_approving_review_count": 1,
@@ -177,6 +285,15 @@
       "open_critical": 0,
       "open_high": 0,
       "scope": "Daybreak findings #172-#185, dependency audit, SAML mitigation evidence, release acceptance matrix"
+    },
+    {
+      "version": "1.0.0rc3",
+      "tested_at": "2026-09-01T02:41:00Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5488070319",
+      "open_critical": 0,
+      "open_high": 0,
+      "scope": "Daybreak findings and dispositions through #240, dependency and secret audits, SAML mitigation evidence, exact artifact attestations, and complete release acceptance matrix"
     }
   ],
   "defect_audits": [
@@ -188,12 +305,21 @@
       "open_p0": 0,
       "open_p1": 0,
       "open_release_blockers": 0
+    },
+    {
+      "version": "1.0.0rc3",
+      "tested_at": "2026-09-01T02:41:00Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5488070319",
+      "open_p0": 0,
+      "open_p1": 0,
+      "open_release_blockers": 0
     }
   ],
   "final_decision": {
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1 and RC2 historical evidence is recorded and passing. Post-rc2 security hardening requires a published and fully qualified 1.0.0rc3 before final promotion. The release remains NO-GO until rc3 passes the complete latest-candidate matrix, the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS evidence is recorded, and the release manager makes the final decision."
+    "notes": "RC1, RC2, and RC3 evidence is recorded and passing. RC3 includes the post-rc2 security hardening and passed the complete latest-candidate matrix. The release remains NO-GO until the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS/canonical-origin/trusted-proxy evidence is recorded, protected registry distribution tasks complete, and the release manager makes the final decision."
   }
 }
