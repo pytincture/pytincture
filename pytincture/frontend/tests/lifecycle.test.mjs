@@ -125,7 +125,7 @@ test("reports package-install failures", async () => {
 });
 
 test("browser package requirements must be exact or hash-pinned wheels", () => {
-    assert.doesNotThrow(() => validatePackageRequirement("dhxpyt==0.9.17"));
+    assert.doesNotThrow(() => validatePackageRequirement("dhxpyt==0.9.18"));
     assert.doesNotThrow(() => validatePackageRequirement(
         "https://widgets.example/widget-1.0-py3-none-any.whl#sha256=" + "a".repeat(64),
         { allowPackagePin: false },
@@ -143,12 +143,12 @@ test("the built-in dhxpyt release verifies the complete PyPI wheel", async () =>
     pyodide.runPythonAsync = async source => calls.push(source);
 
     const installedSource = await DEFAULT_RUNTIME_OPERATIONS.installWidgetset(pyodide, {
-        widgetlib: "dhxpyt==0.9.17",
+        widgetlib: "dhxpyt==0.9.18",
         widgetSource: null,
         requestUuid: "backend-instance",
     });
 
-    assert.equal(installedSource, BUILTIN_WIDGET_WHEEL_LOCKS["dhxpyt==0.9.17"]);
+    assert.equal(installedSource, BUILTIN_WIDGET_WHEEL_LOCKS["dhxpyt==0.9.18"]);
     assert.match(installedSource, /^https:\/\/files\.pythonhosted\.org\//);
     assert.match(installedSource, /#sha256=[a-f0-9]{64}$/);
     assert.equal(calls.length, 1);
@@ -185,17 +185,17 @@ test("widget asset loader is manifest-only and verifies ownership and hashes", a
         generatedPython = source;
         return JSON.stringify({
             widgetPackage: "dhxpyt",
-            widgetVersion: "0.9.17",
+            widgetVersion: "0.9.18",
             javascriptAssets: 9,
             cssAssets: 4,
-            assetManifest: "Pytincture compatibility lock dhxpyt@0.9.17",
+            assetManifest: "Pytincture compatibility lock dhxpyt@0.9.18",
             dhxAvailable: true,
         });
     };
     const report = await DEFAULT_RUNTIME_OPERATIONS.loadWidgetsetAssets(
         pyodide,
-        normalizeConfig({ application: "sample", widgetlib: "dhxpyt==0.9.17" }),
-        "dhxpyt==0.9.17",
+        normalizeConfig({ application: "sample", widgetlib: "dhxpyt==0.9.18" }),
+        "dhxpyt==0.9.18",
     );
 
     assert.equal(report.javascriptAssets, 9);
@@ -203,7 +203,7 @@ test("widget asset loader is manifest-only and verifies ownership and hashes", a
     assert.match(generatedPython, /asset_path not in owned_files/);
     assert.match(generatedPython, /Widget asset integrity check failed/);
     assert.match(generatedPython, /hashlib\.sha256/);
-    assert.equal(BUILTIN_WIDGET_ASSET_MANIFESTS["dhxpyt@0.9.17"].assets.length, 13);
+    assert.equal(BUILTIN_WIDGET_ASSET_MANIFESTS["dhxpyt@0.9.18"].assets.length, 13);
 });
 
 test("backend fallback locks the wheel hash and disables transitive installs", async () => {

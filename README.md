@@ -303,7 +303,7 @@ copied from the trusted release integrity manifest, for example:
 ### Using pytincture.js standalone
 With the runtime script on the page, Pytincture auto-detects any `<script type="text/python">` blocks and runs them once Pyodide is ready. Optional helpers:
 
-- Add `window.pytinctureAutoStartConfig = { widgetlib: "dhxpyt==0.9.17", libsSelector: "#micropip-libs" }` before loading the script to override defaults.
+- Add `window.pytinctureAutoStartConfig = { widgetlib: "dhxpyt==0.9.18", libsSelector: "#micropip-libs" }` before loading the script to override defaults.
 - Set `window.pytinctureAutoStartDisabled = true` if you prefer to call `runTinctureApp({...})` manually.
 - Extra Python wheels can be listed in `<script type="text/json" id="micropip-libs">["faker==37.0.0"]</script>`.
 

@@ -43,7 +43,7 @@ def test_ci_runs_and_retains_every_performance_profile():
     assert "/performance_data/classcall/" in runner
     assert "/performance_data/classcall/" in saturation
     assert "public_asset_head" in runner
-    assert "dhxpyt-0.9.17+backend-py3-none-any.whl" in runner
+    assert "dhxpyt-0.9.18+backend-py3-none-any.whl" in runner
     assert '"/classcall/' not in runner
     assert '"/classcall/' not in saturation
     assert "performance-saturation.json" in workflow

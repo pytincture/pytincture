@@ -8,12 +8,12 @@ from pytincture import PytinctureConfig, create_app
 
 
 ROOT = Path(__file__).resolve().parent / "e2e_apps"
-WIDGET_VERSION = "0.9.17+backend"
+WIDGET_VERSION = "0.9.18+backend"
 WIDGET_WHEEL = ROOT / f"dhxpyt-{WIDGET_VERSION}-py3-none-any.whl"
 
 if not WIDGET_WHEEL.is_file():
     raise RuntimeError(
-        f"Missing {WIDGET_WHEEL.name}; download dhxpyt==0.9.17 without dependencies "
+        f"Missing {WIDGET_WHEEL.name}; download dhxpyt==0.9.18 without dependencies "
         f"and copy the wheel to {WIDGET_WHEEL.name}"
     )
 

@@ -4,13 +4,13 @@ var PytinctureRuntime = (() => {
   var FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
   var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc3";
   var BUILTIN_WIDGET_WHEEL_LOCKS = Object.freeze({
-    "dhxpyt==0.9.17": "https://files.pythonhosted.org/packages/b0/0f/ffd11784d6c4695702ad6c99a9a347af41caa992f4124de7d5472bf3b6be/dhxpyt-0.9.17-py3-none-any.whl#sha256=d354717a276989df44c802d060171122ebed5432cb4cc5e64812a4b89bb41914"
+    "dhxpyt==0.9.18": "https://files.pythonhosted.org/packages/0c/e7/b48e045156c7b4bf20778597991d7dfe591fd46ada5267b747e2d5977244/dhxpyt-0.9.18-py3-none-any.whl#sha256=acd8db34547c6b61c83a01958e9545ee724564859e5bcb53713ae3c872234fbe"
   });
   var BUILTIN_WIDGET_ASSET_MANIFESTS = Object.freeze({
-    "dhxpyt@0.9.17": {
+    "dhxpyt@0.9.18": {
       schema: 1,
       package: "dhxpyt",
-      version: "0.9.17",
+      version: "0.9.18",
       assets: [
         { path: "dhxpyt/dhxsrc/suite.css", type: "css", sha256: "bbfb8928fce1a99acf5a6f610c99625eea8b31e0f62b4cb5b31b6ccb684a1719" },
         { path: "dhxpyt/dhxsrc/fonts/inter.css", type: "css", sha256: "868d674eb57814ea39415af15132b4077ccdc081b1c8e15cf31e652e12bf3cc9" },
@@ -18,7 +18,7 @@ var PytinctureRuntime = (() => {
         { path: "dhxpyt/dhxsrc/suite.js", type: "javascript", sha256: "e4d99a233660aae3afeb62d2aba546269bf5fe59ed4489481848ac0de53f9d2c" },
         { path: "dhxpyt/dhxsrc/cardflow.js", type: "javascript", sha256: "a589ff5e7adb642b70c06b018f06789bff8da4c41520915830dd4c7aefc8658b" },
         { path: "dhxpyt/dhxsrc/cardpanel.js", type: "javascript", sha256: "25e1befe91f86b1de5f738b934f6887c094b1c35d1a634a58c3cdb98c0e41715" },
-        { path: "dhxpyt/dhxsrc/chat.js", type: "javascript", sha256: "7cd119c503b804d7594d2c12ed43d0ffd5a3db56fcdedd89d834dfc08009434a" },
+        { path: "dhxpyt/dhxsrc/chat.js", type: "javascript", sha256: "fa7420e2955db78d62317fa566209fefbf90eba042894bff6841754f32223c10" },
         { path: "dhxpyt/dhxsrc/kanban.css", type: "css", sha256: "155a5ea4b5589b1fa0c2b51ea7c9007e8939b1484d037f7ea04eaea9a03d1abb" },
         { path: "dhxpyt/dhxsrc/kanban.js", type: "javascript", sha256: "186950aa79b1a09525b78c808a6a62e4cfc052e1de6afe834eab64cbb94b9acb" },
         { path: "dhxpyt/dhxsrc/kanban_board.js", type: "javascript", sha256: "053a4d55b2c43171ce41b4888b0a89f123afbfe49ef5adbf540491b156626c55" },
@@ -31,7 +31,7 @@ var PytinctureRuntime = (() => {
   var DEFAULT_CONFIG = {
     application: null,
     entrypoint: null,
-    widgetlib: "dhxpyt==0.9.17",
+    widgetlib: "dhxpyt==0.9.18",
     widgetSource: null,
     widgetAssetManifest: null,
     requestUuid: null,

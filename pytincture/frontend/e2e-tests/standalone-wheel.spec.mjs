@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 
 
-const REAL_WIDGET_WHEEL = "dhxpyt-0.9.17+backend-py3-none-any.whl";
+const REAL_WIDGET_WHEEL = "dhxpyt-0.9.18+backend-py3-none-any.whl";
 const DEV_WIDGET_WHEEL = "dhxpyt-99.99.99-py3-none-any.whl";
 
 function collectDiagnostics(page) {
@@ -91,7 +91,7 @@ test("standalone app runs from the Python wheel runtime", async ({ page, request
         expect(ready).toBeTruthy();
         expect(ready.compatibility.runtimeVersion).toBe(health.version);
         expect(ready.compatibility.widgetPackage).toBe("dhxpyt");
-        expect(ready.compatibility.widgetVersion).toBe("0.9.17");
+        expect(ready.compatibility.widgetVersion).toBe("0.9.18");
         expect(ready.compatibility.dhxAvailable).toBe(true);
         expect(ready.compatibility.javascriptAssets).toBeGreaterThan(0);
         expect(ready.compatibility.cssAssets).toBeGreaterThan(0);

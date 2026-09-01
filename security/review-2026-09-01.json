@@ -25,7 +25,7 @@
       "potential_user_breakage": true,
       "compatibility_note": "Artifact titles and identifiers now render as text; applications relying on raw HTML there must use an explicit sanitized rich-content path. Normal chat and BFF use is unchanged.",
       "implementation": [
-        "dhxpyt 0.9.17",
+        "dhxpyt 0.9.18",
         "security/widget-wheel-locks.json",
         "pytincture/frontend/pytincture.js"
       ],
@@ -44,7 +44,7 @@
       "potential_user_breakage": true,
       "compatibility_note": "Same-origin interactive scripts, parent-DOM access, network-capable previews, and automatic Python execution no longer work. Plain text, code, and passive media previews remain supported.",
       "implementation": [
-        "dhxpyt 0.9.17",
+        "dhxpyt 0.9.18",
         "security/widget-wheel-locks.json",
         "pytincture/frontend/pytincture.js"
       ],
@@ -63,7 +63,7 @@
       "potential_user_breakage": true,
       "compatibility_note": "Markup inserted as ordinary Grid, Listbox, Combobox, CardFlow, or CardPanel data is escaped. Sanitized rich-content options and trusted developer-supplied DOM templates remain explicit APIs.",
       "implementation": [
-        "dhxpyt 0.9.17",
+        "dhxpyt 0.9.18",
         "security/widget-wheel-locks.json",
         "pytincture/frontend/pytincture.js"
       ],
@@ -153,12 +153,22 @@
     {
       "id": "REVIEW-2026-09-01-M3",
       "severity": "medium",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/271",
       "title": "Weak artifact messaging and unbounded plaintext chat persistence",
       "disposition": "capability-bind messages and bound/minimize persistence",
       "potential_user_breakage": true,
-      "compatibility_note": "Oversized histories and logs will be truncated or evicted, and direct postMessage integrations must use the bound preview channel."
+      "compatibility_note": "Oversized histories and logs are truncated or evicted, direct postMessage integrations must use the bound preview channel, and artifact-console text is excluded from model requests unless explicitly enabled. Existing applications that supplied storageKey retain local persistence; applications without an explicit persistence choice no longer store chat content.",
+      "implementation": [
+        "dhxpyt 0.9.18",
+        "security/widget-wheel-locks.json",
+        "pytincture/frontend/pytincture.js"
+      ],
+      "regression_tests": [
+        "dhxpyt/tests/test_security_contract.py",
+        "dhxpyt/tests/security_browser.spec.mjs::chat bounds persistence and model context",
+        "pytincture/frontend/tests/lifecycle.test.mjs::the built-in dhxpyt release verifies the complete PyPI wheel"
+      ]
     },
     {
       "id": "REVIEW-2026-09-01-M4",

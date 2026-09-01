@@ -1323,12 +1323,13 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert statuses["REVIEW-2026-09-01-H5"] == "remediated"
     assert statuses["REVIEW-2026-09-01-M1"] == "remediated"
     assert statuses["REVIEW-2026-09-01-M2"] == "remediated"
-    assert list(statuses.values()).count("open") == 5
+    assert statuses["REVIEW-2026-09-01-M3"] == "remediated"
+    assert list(statuses.values()).count("open") == 4
     wheel_locks = json.loads(
         (root / "security" / "widget-wheel-locks.json").read_text()
     )
     assert wheel_locks["schema_version"] == 1
-    assert wheel_locks["locks"][0]["requirement"] == "dhxpyt==0.9.17"
+    assert wheel_locks["locks"][0]["requirement"] == "dhxpyt==0.9.18"
     assert len(wheel_locks["locks"][0]["sha256"]) == 64
     assert all(
         item["issue"].startswith("https://github.com/pytincture/")

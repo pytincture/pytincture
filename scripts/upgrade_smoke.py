@@ -21,7 +21,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="pytincture-upgrade-") as directory:
         root = Path(directory)
         (root / "widget.py").write_text(
-            '__widgetset__ = "dhxpyt"\n__version__ = "0.9.17"\nclass MainWindow:\n    pass\n',
+            '__widgetset__ = "dhxpyt"\n__version__ = "0.9.18"\nclass MainWindow:\n    pass\n',
             encoding="utf-8",
         )
         (root / "data.py").write_text(
