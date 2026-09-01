@@ -110,7 +110,8 @@ For every release candidate, record:
 - browser and service performance evidence satisfying the versioned budgets;
 - an administrator-run release branch-protection audit;
 - a production-edge review proving HTTPS redirects, HSTS, canonical origin,
-  and trusted proxy-header handling for the latest RC;
+  and trusted proxy-header handling for the latest RC, captured with the live
+  `scripts/audit_production_edge.py` probe and its versioned evidence schema;
 - a security review reporting zero open critical/high findings; and
 - a defect audit reporting zero open P0/P1 issues.
 
