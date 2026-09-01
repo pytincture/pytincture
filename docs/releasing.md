@@ -38,6 +38,11 @@ releases update `latest`.
 Never configure either publisher to accept a caller-selected CI run or locally
 rebuilt file, and never upload a replacement under an existing version.
 
+Pytincture does not currently publish an official container image. Do not add
+container pull or run guidance until a protected tagged-release workflow
+publishes immutable version and digest references, generates an SBOM, and
+signs or attests the image. Mutable tags are not production pins.
+
 The publishers use protected `pypi` and `npm` GitHub environments. Keep
 non-self required reviewers enabled and restrict deployments to the protected
 default branch. Protect creation, update, and deletion of `v*` release tags.

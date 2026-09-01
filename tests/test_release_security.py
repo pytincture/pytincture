@@ -121,6 +121,19 @@ def test_ci_uses_frozen_python_inputs_and_release_security_gates():
     assert "scan_repository_secrets.py" in workflow
 
 
+def test_docs_do_not_recommend_an_unsupported_mutable_container_image():
+    documentation = [ROOT / "README.md", *sorted((ROOT / "docs").rglob("*.md"))]
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in documentation)
+
+    assert "pytincture/pytincture:latest" not in combined.casefold()
+    assert re.search(
+        r"\bdocker\s+(?:run|pull)\b[^\n]*:latest\b",
+        combined,
+        flags=re.IGNORECASE,
+    ) is None
+    assert "does not currently publish an official container image" in combined
+
+
 def test_frozen_lock_has_no_drift():
     result = subprocess.run(
         ["uv", "lock", "--check"], cwd=ROOT, check=False, capture_output=True, text=True

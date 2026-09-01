@@ -885,6 +885,31 @@
         "tests/test_app.py::test_oversized_authenticator_claims_fail_login_without_session",
         "tests/test_production.py::test_signed_session_cookie_is_portable_between_workers"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-M-24-CONTAINER-GUIDANCE",
+      "status": "remediated_by_removing_unsupported_guidance",
+      "title": "Unsupported mutable container recommendation removed",
+      "intentional_contract": "Pytincture currently publishes verified Python and npm artifacts, not an official container image. Applications may build deployment-owned images from exact verified releases.",
+      "security_boundary": "Documentation does not recommend a mutable or unsupported Pytincture image. Official container guidance remains blocked until a protected tagged-release workflow publishes immutable version and digest references, generates an SBOM, and signs or attests the image.",
+      "controls": {
+        "official_container_currently_published": false,
+        "unsupported_dockerhub_image_recommended": false,
+        "mutable_container_tag_recommended": false,
+        "future_protected_release_required": true,
+        "future_digest_reference_required": true,
+        "future_sbom_required": true,
+        "future_signature_or_attestation_required": true,
+        "redis_required": false,
+        "runtime_state_added": false
+      },
+      "implementation": [
+        "README.md",
+        "docs/releasing.md"
+      ],
+      "regression_tests": [
+        "tests/test_release_security.py::test_docs_do_not_recommend_an_unsupported_mutable_container_image"
+      ]
     }
   ]
 }

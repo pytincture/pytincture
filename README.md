@@ -252,15 +252,14 @@ Tests include:
   - tests/test_launcher.py: Tests for the uvicorn launcher and process management.
 
 
-## Docker Quick Start Example built from https://github.com/pytincture/pytincture_example
-  Run the docker image directly from Dockerhub
-~~~
-docker run -p8070:8070 -i pytincture/pytincture:latest
-~~~
-Load url in browser
-~~~
-http://localhost:8070/py_ui
-~~~
+## Container status
+
+This repository does not currently publish or support a Pytincture container
+image. Install the verified Python release from PyPI, or build a
+deployment-owned image from an exact Pytincture version and your application.
+Do not treat a mutable container tag as a production pin. A future official
+image must be tied to a protected release, published by digest, accompanied by
+an SBOM, and signed or attested before it is documented here.
 
 ## Standalone pytincture.js build
 The file under `pytincture/frontend/pytincture.js` can be bundled as a
