@@ -2,9 +2,19 @@
   "schema_version": 1,
   "reviewed_commit": "a6608412b8a8f3a71ee98b8900bf31a7a91eeb2b",
   "recorded_on": "2026-09-01",
-  "status": "remediation_in_progress",
+  "status": "remediated",
   "summary": "All five High and seven Medium findings are accepted for remediation. None requires changing Pytincture's class-level BFF decorator contract or making Redis, process-memory sessions, or sticky routing mandatory.",
   "external_controls_document": "security/external-controls.json",
+  "validation": {
+    "python_full_suite": "613 passed",
+    "frontend_unit_suite": "32 passed",
+    "packaged_app_browser_matrix": "9 passed, 6 intentionally skipped by browser capability",
+    "repository_quickstarts": "6 passed across Chromium, Firefox, and WebKit",
+    "standalone_python_wheel": "passed in Chromium from a non-editable clean wheel environment",
+    "federated_saml": "passed in Chromium against pinned Keycloak 26.7.2",
+    "independent_release_rebuilds": "two clean frozen builds produced byte-identical wheel, sdist, and npm artifacts",
+    "dhxpyt_security_suite": "4 Python contract tests and 2 Chromium browser tests passed before 0.9.18 publication"
+  },
   "architecture_constraints": {
     "class_level_bff_export_preserved": true,
     "pluggable_widgetsets_preserved": true,

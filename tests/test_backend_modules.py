@@ -1313,7 +1313,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     active_review = json.loads(
         (root / evidence["active_review_tracking_document"]).read_text()
     )
-    assert active_review["status"] == "remediation_in_progress"
+    assert active_review["status"] == "remediated"
     assert len(active_review["findings"]) == 12
     statuses = {item["id"]: item["status"] for item in active_review["findings"]}
     assert statuses["REVIEW-2026-09-01-H1"] == "remediated"
