@@ -24,6 +24,7 @@ config = PytinctureConfig(
     allow_development_auth_origin=True,
     session_secret="pytincture-e2e-session-secret-0123456789abcdef",
     session_https_only=False,
+    browser_connect_origins=("https://api.example.test",),
     environment={
         "ALLOWED_EMAILS": "e2e@example.com",
         "AUTH_PASSWORD_HASHES": (
