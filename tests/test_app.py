@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import time
+import httpx
 import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
@@ -610,7 +611,13 @@ def test_unknown_bff_target_is_rejected_before_module_execution(
     assert not marker.exists()
 
 
-def test_async_policy_runs_before_constructor(fresh_client, monkeypatch, tmp_path):
+@pytest.mark.parametrize("async_execution_mode", ["event-loop", "worker-thread"])
+def test_async_policy_runs_before_constructor(
+    fresh_client,
+    monkeypatch,
+    tmp_path,
+    async_execution_mode,
+):
     import pytincture.backend.app as backend_app
 
     marker = tmp_path / "constructed"
@@ -629,6 +636,11 @@ def test_async_policy_runs_before_constructor(fresh_client, monkeypatch, tmp_pat
     """))
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
     monkeypatch.setattr(backend_app, "require_auth", lambda request: {"roles": []})
+    monkeypatch.setattr(
+        backend_app,
+        "BFF_ASYNC_EXECUTION_MODE",
+        async_execution_mode,
+    )
 
     async def deny_policy(**kwargs):
         await asyncio.sleep(0)
@@ -2454,7 +2466,13 @@ def test_policy_bearing_export_fails_startup_without_hook(monkeypatch, tmp_path)
         backend_app._validate_bff_policy_configuration()
 
 
-def test_class_call_streaming(monkeypatch, fresh_client, tmp_path):
+@pytest.mark.parametrize("async_execution_mode", ["event-loop", "worker-thread"])
+def test_class_call_streaming(
+    monkeypatch,
+    fresh_client,
+    tmp_path,
+    async_execution_mode,
+):
     """
     Streaming-enabled methods should return a streaming response.
     """
@@ -2475,6 +2493,11 @@ def test_class_call_streaming(monkeypatch, fresh_client, tmp_path):
     (modules_dir / "stream_widget.py").write_text(module_code)
 
     monkeypatch.setenv("MODULES_PATH", str(modules_dir))
+    monkeypatch.setattr(
+        backend_app,
+        "BFF_ASYNC_EXECUTION_MODE",
+        async_execution_mode,
+    )
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {"tester@example.com": {"email": "tester@example.com"}})
     monkeypatch.setattr(backend_app, "require_auth", lambda request: {"email": "tester@example.com"})
 
@@ -2516,6 +2539,75 @@ def test_class_call_timeout_returns_gateway_timeout(monkeypatch, fresh_client, t
     assert response.status_code == 504
     assert response.json()["detail"] == "Internal server error"
     assert response.json()["correlation_id"]
+
+
+def test_opt_in_async_worker_mode_keeps_health_responsive(
+    monkeypatch,
+    tmp_path,
+):
+    import pytincture.backend.app as backend_app
+
+    started_marker = tmp_path / "async-started"
+    (tmp_path / "busy_async.py").write_text(textwrap.dedent(f"""
+        import time
+        from pathlib import Path
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class BusyAsync:
+            async def run(self):
+                Path({str(started_marker)!r}).write_text("started")
+                deadline = time.monotonic() + 0.4
+                while time.monotonic() < deadline:
+                    pass
+                return {{"done": True}}
+
+            async def echo_timeout_detail(self, timeout_detail):
+                return timeout_detail
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "BFF_ASYNC_EXECUTION_MODE", "worker-thread")
+    monkeypatch.setattr(backend_app, "BFF_CALL_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: "noauth")
+    backend_app.reload_bff_registry(str(tmp_path))
+
+    async def exercise():
+        transport = httpx.ASGITransport(
+            app=app,
+            client=("127.0.0.1", 50000),
+        )
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://127.0.0.1",
+        ) as client:
+            started = time.monotonic()
+            call = asyncio.create_task(client.post(
+                "/busy_async/classcall/busy_async.py/BusyAsync/run",
+                json={"args": [], "kwargs": {}},
+            ))
+            while not started_marker.exists():
+                if time.monotonic() - started > 1:
+                    await call
+                    raise AssertionError("async BFF did not start")
+                await asyncio.sleep(0.005)
+            health = await client.get("/healthz")
+            health_elapsed = time.monotonic() - started
+            response = await call
+            echo = await client.post(
+                "/busy_async/classcall/busy_async.py/BusyAsync/echo_timeout_detail",
+                json={"args": [], "kwargs": {"timeout_detail": "application value"}},
+            )
+            return health, health_elapsed, response, echo
+
+    health, health_elapsed, response, echo = asyncio.run(exercise())
+
+    assert health.status_code == 200
+    assert health.json()["status"] == "ok"
+    assert health_elapsed < 0.3
+    assert response.status_code == 200
+    assert response.json() == {"done": True}
+    assert echo.status_code == 200
+    assert echo.json() == "application value"
 
 
 def test_ordinary_bff_results_are_serialized_under_a_hard_byte_limit(

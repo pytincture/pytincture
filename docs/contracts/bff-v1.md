@@ -135,7 +135,17 @@ refill and retry once before a remaining 409 becomes a typed error.
 `media_type` is preserved.
 
 Trusted application code runs in the normal thread/async execution path by
-default. `BFF_EXECUTION_MODE=isolated-process` is an explicit harder boundary
+default. `BFF_ASYNC_EXECUTION_MODE=worker-thread` is an additive option for
+trusted, non-streaming coroutine methods and async policy hooks that might call
+blocking code without yielding. It runs each such stage on a bounded worker
+thread with its own event loop, keeping the request loop responsive. A timed-out
+worker thread retains its BFF admission slot until it exits because Python
+threads are not safely killable. The default remains `event-loop`, and explicit
+async-generator streaming remains on its cooperative event-loop path. Code that
+deliberately reuses an async client or other object bound to the ASGI event loop
+must keep the default or create that resource inside the worker-thread call.
+
+`BFF_EXECUTION_MODE=isolated-process` is an explicit harder boundary
 for non-streaming methods: each call runs in a killable child with per-worker
 and per-user admission, wall-time, CPU, memory where the operating system
 supports it, and serialized-output limits. Streaming operations return `501`

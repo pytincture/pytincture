@@ -2,8 +2,8 @@
   "schema_version": 1,
   "recorded_on": "2026-09-01",
   "reviewed_commit": "4a1672f654b71c118094e346a4767e41ff6ec26a",
-  "status": "tracking_open_medium",
-  "summary": "No confirmed critical/high vulnerability or request-controlled server RCE was found. Two conditional medium availability defects are tracked; deployment-trust observations are either accepted architecture, already mitigated by integrity controls, or receiving additive opt-in hardening.",
+  "status": "tracking_open_hardening",
+  "summary": "No confirmed critical/high vulnerability or request-controlled server RCE was found. The two conditional medium availability defects are remediated; remaining deployment-trust observations are either accepted architecture, already mitigated by integrity controls, or receiving additive opt-in hardening.",
   "compatibility_constraints": {
     "class_level_bff_export_preserved": true,
     "private_underscore_members_exported": false,
@@ -35,9 +35,16 @@
     {
       "id": "FOLLOWUP-ASYNC-COOPERATIVE-TIMEOUT",
       "severity": "medium",
-      "status": "open_additive_hardening",
+      "status": "remediated_additive_hardening",
       "issue": "https://github.com/pytincture/pytincture/issues/281",
       "disposition": "Retain the compatibility default and existing isolated-process hard-kill option; add opt-in off-main-loop containment for trusted async stages.",
+      "implementation": "BFF_ASYNC_EXECUTION_MODE=worker-thread runs trusted non-streaming coroutine BFF functions and async policy hooks on bounded worker-thread event loops, retains admission after a timeout until abandoned work exits, and leaves the event-loop default and explicit streaming unchanged.",
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_opt_in_async_bff_stage_uses_worker_loop_and_retains_timed_out_work",
+        "tests/test_app.py::test_opt_in_async_worker_mode_keeps_health_responsive",
+        "tests/test_app.py::test_async_policy_runs_before_constructor",
+        "tests/test_configuration.py::test_trusted_bff_execution_remains_the_simple_default"
+      ],
       "potential_user_breakage": false,
       "existing_mitigation": "BFF_EXECUTION_MODE=isolated-process runs non-streaming coroutine BFF operations in a killable, resource-limited child process.",
       "compatibility_note": "Plain synchronous applications require no async knowledge. Default coroutine and explicit-streaming behavior remain available."

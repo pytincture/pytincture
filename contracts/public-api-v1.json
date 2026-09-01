@@ -89,6 +89,8 @@
     ],
     "default_execution_mode": "trusted-thread",
     "optional_execution_mode": "isolated-process",
+    "default_async_execution_mode": "event-loop",
+    "optional_async_execution_mode": "worker-thread",
     "get_contract": "parameterless-read-only-repeatable-bodyless",
     "request_headers": [
       "X-CSRF-Token",
