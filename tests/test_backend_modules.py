@@ -1416,6 +1416,9 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert followup_statuses["FOLLOWUP-ASYNC-COOPERATIVE-TIMEOUT"] == (
         "remediated_additive_hardening"
     )
+    assert followup_statuses["FOLLOWUP-MODULES-PATH-TRUST"] == (
+        "remediated_additive_hardening"
+    )
     assert followup_statuses["FOLLOWUP-PROCESS-NOT-SANDBOX"] == "accepted"
     assert followup_statuses["FOLLOWUP-BROWSER-WIDGET-TRUST"] == (
         "mitigated_and_accepted"

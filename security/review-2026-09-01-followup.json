@@ -52,9 +52,18 @@
     {
       "id": "FOLLOWUP-MODULES-PATH-TRUST",
       "severity": "deployment_boundary",
-      "status": "open_additive_hardening",
+      "status": "remediated_additive_hardening",
       "issue": "https://github.com/pytincture/pytincture/issues/282",
       "disposition": "Warn when the effective service account can write MODULES_PATH and provide optional fail-closed enforcement; filesystem immutability remains deployment-owned.",
+      "implementation": "Service startup emits one structured security.modules_path_writable warning when effective access and mount flags indicate a writable root. PYTINCTURE_REQUIRE_READONLY_MODULES_PATH=true fails configuration/startup closed, while the compatibility default remains false.",
+      "regression_tests": [
+        "tests/test_configuration.py::test_readonly_modules_path_enforcement_is_opt_in",
+        "tests/test_configuration.py::test_readonly_modules_path_enforcement_accepts_readonly_root",
+        "tests/test_configuration.py::test_readonly_modules_path_enforcement_parses_environment",
+        "tests/test_configuration.py::test_writable_modules_path_emits_one_structured_startup_warning",
+        "tests/test_app.py::test_legacy_app_modules_path_trust_handler_warns_or_fails",
+        "tests/test_launcher.py::test_launch_service_enforces_readonly_modules_path_before_process"
+      ],
       "potential_user_breakage": false,
       "compatibility_note": "Enforcement is disabled by default, so writable development and quick-app directories continue to start."
     },

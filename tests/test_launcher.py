@@ -293,6 +293,36 @@ def test_launch_service_validates_typed_configuration_before_process(monkeypatch
         os.environ.pop("AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS", None)
 
 
+def test_launch_service_enforces_readonly_modules_path_before_process(
+    monkeypatch,
+    tmp_path,
+):
+    import pytincture as launcher_mod
+    import pytincture.configuration as configuration
+
+    monkeypatch.setattr(
+        launcher_mod,
+        "Process",
+        lambda *args, **kwargs: pytest.fail("process must not be created"),
+    )
+    monkeypatch.setattr(
+        configuration,
+        "modules_path_appears_writable",
+        lambda path: True,
+    )
+    try:
+        with pytest.raises(ValueError, match="modules_path is writable"):
+            launcher_mod.launch_service(
+                modules_folder=str(tmp_path),
+                env_vars={
+                    "PYTINCTURE_REQUIRE_READONLY_MODULES_PATH": "true",
+                },
+            )
+    finally:
+        launcher_mod.set_modules_path(None)
+        os.environ.pop("PYTINCTURE_REQUIRE_READONLY_MODULES_PATH", None)
+
+
 def test_launch_service_ignores_env_var_override(monkeypatch, tmp_path):
     process_calls = []
     set_modules_path(None)

@@ -109,7 +109,12 @@ canonicalizes the root, rejects symlink components and cross-platform traversal
 syntax, uses no-follow opens where supported, and verifies BFF source digests
 between discovery and execution. These checks are defense in depth, not a
 replacement for read-only application artifacts and least-privilege filesystem
-permissions.
+permissions. At service startup, Pytincture emits the structured warning event
+`security.modules_path_writable` when the effective service account appears able
+to write the root. Set `PYTINCTURE_REQUIRE_READONLY_MODULES_PATH=true` to fail
+closed instead. The check uses mount flags and effective-access information as
+best-effort evidence; the deployment should still use a read-only root
+filesystem or module mount and a non-root service user.
 
 BFF registry discovery is fail-closed per source file. An unreadable, unsafe,
 malformed, or invalidly encoded Python file contributes no callable operations,
