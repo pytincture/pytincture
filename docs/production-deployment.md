@@ -178,6 +178,42 @@ domain, subdomain, and preload policies are known. Before final promotion,
 record durable `production_edge_reviews` evidence proving the live HTTPS
 redirect, HSTS policy, canonical origin, and trusted proxy-header replacement.
 
+Use `scripts/audit_production_edge.py` against the real public hostname. The
+audit verifies the TLS certificate with the system trust store, requires the
+HTTP health URL to redirect exactly to the canonical HTTPS health URL, enforces
+the configured minimum HSTS lifetime, and probes an endpoint that emits an
+absolute canonical URL both normally and with hostile `Forwarded` and
+`X-Forwarded-*` inputs. It also hashes and checks the deployed nginx
+configuration for an exact `server_name` and replacement of `Host`,
+`X-Forwarded-Host`, and `X-Forwarded-Proto`; caller-supplied forwarded values
+must not be passed through.
+
+The canonical probe can be public SAML metadata or an OAuth initiation route.
+It must return a body or redirect whose decoded content contains the exact
+canonical HTTPS origin. For example:
+
+```bash
+python scripts/audit_production_edge.py \
+  --https-origin https://service.example.com \
+  --http-origin http://service.example.com \
+  --canonical-probe-path /myapp/auth/saml/metadata \
+  --proxy-config /etc/nginx/conf.d/service.conf \
+  --version 1.0.0rc3 \
+  --commit-sha FULL_DEPLOYED_COMMIT_SHA \
+  --evidence-url https://github.com/OWNER/REPOSITORY/actions/runs/RUN_ID \
+  --output production-edge-evidence.json
+```
+
+The output follows
+[`contracts/production-edge-evidence-v1.schema.json`](../contracts/production-edge-evidence-v1.schema.json).
+It contains response and proxy-configuration hashes, bounded status/header
+observations, and the required boolean checks; response bodies, cookies, and
+credentials are never recorded. A custom internal CA may be supplied with
+`--ca-file`, but there is intentionally no insecure TLS bypass. Attach the JSON
+to the durable evidence URL before adding it to `release/qualification.json`.
+The audit is read-only and does not require Redis, sticky routing, or any new
+service-side state.
+
 The versioned [performance budgets](performance.md) cover health, generated
 application packages, representative BFF calls, and cold/warm browser startup
 on GitHub-hosted runners. These are regression gates, not capacity promises.

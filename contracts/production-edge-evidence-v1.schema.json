@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pytincture/pytincture/contracts/production-edge-evidence-v1.schema.json",
+  "title": "Pytincture live production-edge qualification evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "status",
+    "tested_at",
+    "version",
+    "commit_sha",
+    "evidence_url",
+    "https_origin",
+    "checks",
+    "observations",
+    "findings"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "https://github.com/pytincture/pytincture/contracts/production-edge-evidence-v1.schema.json"
+    },
+    "schema_version": { "const": 1 },
+    "status": { "enum": ["passed", "failed"] },
+    "tested_at": { "type": "string", "format": "date-time" },
+    "version": { "type": "string", "pattern": "^1\\.0\\.0(?:rc[1-9][0-9]*)?$" },
+    "commit_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "evidence_url": { "type": "string", "format": "uri" },
+    "https_origin": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "https_redirect",
+        "hsts",
+        "canonical_origin",
+        "trusted_proxy_headers",
+        "tls_certificate_valid",
+        "version"
+      ],
+      "properties": {
+        "https_redirect": { "type": "boolean" },
+        "hsts": { "type": "boolean" },
+        "canonical_origin": { "type": "boolean" },
+        "trusted_proxy_headers": { "type": "boolean" },
+        "tls_certificate_valid": { "type": "boolean" },
+        "version": { "type": "boolean" }
+      }
+    },
+    "observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical_probe_body_sha256",
+        "canonical_probe_hostile_body_sha256",
+        "canonical_probe_path",
+        "canonical_probe_status",
+        "canonical_probe_hostile_status",
+        "health_path",
+        "health_status",
+        "health_version",
+        "hsts",
+        "hsts_max_age",
+        "http_redirect_location",
+        "http_redirect_status",
+        "proxy_config_sha256",
+        "proxy_kind",
+        "proxy_replacement_checks"
+      ],
+      "properties": {
+        "canonical_probe_body_sha256": { "$ref": "#/$defs/sha256" },
+        "canonical_probe_hostile_body_sha256": { "$ref": "#/$defs/sha256" },
+        "canonical_probe_path": { "type": "string", "pattern": "^/" },
+        "canonical_probe_status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "canonical_probe_hostile_status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "health_path": { "type": "string", "pattern": "^/" },
+        "health_status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "health_version": { "type": "string" },
+        "hsts": { "type": "string" },
+        "hsts_max_age": { "type": ["integer", "null"], "minimum": 0 },
+        "http_redirect_location": { "type": "string", "format": "uri" },
+        "http_redirect_status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "proxy_config_sha256": { "$ref": "#/$defs/sha256" },
+        "proxy_kind": { "const": "nginx" },
+        "proxy_replacement_checks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "server_name",
+            "upstream_host_replaced",
+            "forwarded_host_replaced",
+            "forwarded_proto_replaced",
+            "caller_forwarded_values_rejected"
+          ],
+          "properties": {
+            "server_name": { "type": "boolean" },
+            "upstream_host_replaced": { "type": "boolean" },
+            "forwarded_host_replaced": { "type": "boolean" },
+            "forwarded_proto_replaced": { "type": "boolean" },
+            "caller_forwarded_values_rejected": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "https_redirect",
+          "hsts",
+          "canonical_origin",
+          "trusted_proxy_headers",
+          "tls_certificate_valid",
+          "version"
+        ]
+      },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}
