@@ -82,6 +82,17 @@ materially different trust domains should still use separate origins and
 processes so a browser/package compromise in one cannot inherit another's
 same-origin authority.
 
+High-trust deployments can set `widget_trust_policy` to a JSON document or a
+path to one. The policy is loaded and canonicalized at startup, then acts as an
+exact allowlist for widget distribution, version, executable/style paths, and
+SHA-256 values. An unlisted application widget fails closed. The selected
+administrator-owned manifest is serialized into the service page and overrides
+the wheel's own asset manifest. See
+[widgetset packaging](widgetset-packaging.md#deployment-owned-trust-policy) for
+the schema. Leaving this setting empty preserves normal pluggable widgetsets.
+This is a static deployment control and adds no Redis, process memory, sticky
+routing, or server-side session requirement.
+
 Run production applications with any ASGI server, for example
 `uvicorn my_service:app`. The compatibility `launch_service()` API remains
 available for existing deployments. Both typed and compatibility paths reject
@@ -176,6 +187,7 @@ The contract test checks every row in this table against the dataclass model.
 | `appcode_build_max_concurrency` | `APPCODE_BUILD_MAX_CONCURRENCY` | Concurrent archive builds per worker. |
 | `appcode_build_queue_timeout_seconds` | `APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS` | Maximum archive build admission wait. |
 | `dev_wheel_version` | `PYTINCTURE_DEV_WHEEL_VERSION` | Explicit development widget-wheel fallback version. |
+| `widget_trust_policy` | `PYTINCTURE_WIDGET_TRUST_POLICY` | Optional deployment-owned widget distribution/version/asset-hash policy JSON or path. |
 | `remote_store_timeout_seconds` | `REMOTE_STORE_TIMEOUT_SECONDS` | Optional remote-store HTTP deadline. |
 | `remote_store_failure_threshold` | `REMOTE_STORE_FAILURE_THRESHOLD` | Failures before opening the store circuit. |
 | `remote_store_cooldown_seconds` | `REMOTE_STORE_COOLDOWN_SECONDS` | Open-circuit cooldown. |

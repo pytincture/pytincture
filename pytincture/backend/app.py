@@ -113,6 +113,11 @@ from pytincture.backend.mcp import (
     register_bff_tools,
 )
 from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate
+from pytincture.backend.widget_trust import (
+    WidgetTrustPolicyError,
+    canonical_widget_trust_policy,
+    trusted_widget_manifest,
+)
 from pytincture.backend.middleware import (
     RequestBodyLimitMiddleware,
     RotatingSessionMiddleware,
@@ -219,6 +224,12 @@ except InvalidVersion as exc:
     raise RuntimeError(
         "PYTINCTURE_DEV_WHEEL_VERSION must be a valid Python package version"
     ) from exc
+try:
+    WIDGET_TRUST_POLICY = canonical_widget_trust_policy(
+        os.getenv("PYTINCTURE_WIDGET_TRUST_POLICY")
+    )
+except WidgetTrustPolicyError as exc:
+    raise RuntimeError(f"invalid PYTINCTURE_WIDGET_TRUST_POLICY: {exc}") from exc
 if CANONICAL_ORIGIN:
     _canonical_parts = urlsplit(CANONICAL_ORIGIN)
     if (
@@ -792,6 +803,23 @@ def get_widgetset(application, static_path):
     Scan the application file and its imports to find the widgetset.
     """
     return discover_widgetset(application, static_path)
+
+
+def _trusted_widget_manifest(widgetset: str) -> dict[str, Any] | None:
+    if not widgetset:
+        return None
+    return trusted_widget_manifest(WIDGET_TRUST_POLICY, widgetset)
+
+
+def _html_script_json(value: Any) -> str:
+    """Serialize a value for a JSON expression inside an HTML script element."""
+
+    return (
+        json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
 
 def create_pytincture_pkg_in_memory():
     """Generate a pytincture widgetset package in memory."""
@@ -2378,16 +2406,23 @@ def _application_widget_wheel_allowed(
     except InvalidWheelFilename:
         return False
     widget_spec = get_widgetset(application, modules_root)
+    if WIDGET_TRUST_POLICY is not None:
+        try:
+            _trusted_widget_manifest(widget_spec)
+        except WidgetTrustPolicyError:
+            return False
     widget_distribution, separator, declared_version_text = widget_spec.partition("==")
     widget_distribution = widget_distribution.strip()
     if not widget_distribution:
         return False
-    allowed_versions = {DEVELOPMENT_WIDGET_VERSION}
+    allowed_versions = set()
     if separator and declared_version_text.strip():
         try:
             allowed_versions.add(Version(declared_version_text.strip()))
         except InvalidVersion:
             return False
+    if WIDGET_TRUST_POLICY is None:
+        allowed_versions.add(DEVELOPMENT_WIDGET_VERSION)
     return (
         canonicalize_name(wheel_distribution)
         == canonicalize_name(widget_distribution)
@@ -4870,12 +4905,26 @@ async def main_app_route(response: Response, application: str, request: Request)
     except UnsafePath:
         raise HTTPException(status_code=404, detail="Application not found")
     widgetset = get_widgetset(application, appcode_folder)
+    try:
+        widget_asset_manifest = _trusted_widget_manifest(widgetset)
+    except WidgetTrustPolicyError as exc:
+        logger.error(
+            "Application widgetset rejected by deployment trust policy",
+            extra={"application": application},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Application widgetset is not trusted by deployment policy",
+        ) from exc
     safe_application = escape(application)
     request_uuid = FRONTEND_INSTANCE_UUID
 
     # Modify the index.html to include the application name and widgetset
     index_html = open(f"{STATIC_PATH}/index.html").read()
-    index_html = index_html.replace("***APPLICATION***", safe_application)
+    index_html = index_html.replace(
+        "***APPLICATION_JSON***", _html_script_json(application)
+    )
+    index_html = index_html.replace("***APPLICATION***", str(safe_application))
     
     entrypoint_source = decode_python_source(secure_entrypoint.content)
 
@@ -4890,10 +4939,14 @@ async def main_app_route(response: Response, application: str, request: Request)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if main_window_class:
         # Use the discovered MainWindow subclass name as the entrypoint
-        index_html = index_html.replace("***ENTRYPOINT***", main_window_class)
+        entrypoint = main_window_class
     else:
         # If no MainWindow subclass is found, fallback to using application name
-        index_html = index_html.replace("***ENTRYPOINT***", safe_application)
+        entrypoint = application
+    index_html = index_html.replace(
+        "***ENTRYPOINT_JSON***", _html_script_json(entrypoint)
+    )
+    index_html = index_html.replace("***ENTRYPOINT***", str(escape(entrypoint)))
     
     loading_title = application
     favicon_markup = ""
@@ -4908,18 +4961,30 @@ async def main_app_route(response: Response, application: str, request: Request)
         request_uuid=request_uuid,
         source_code=entrypoint_source,
     )
-    index_html = index_html.replace("***LOADING_TITLE***", json.dumps(loading_title))
+    index_html = index_html.replace(
+        "***LOADING_TITLE_JSON***", _html_script_json(loading_title)
+    )
+    index_html = index_html.replace(
+        "***LOADING_TITLE***", _html_script_json(loading_title)
+    )
     index_html = index_html.replace("***FAVICON_LINK***", favicon_markup)
     index_html = index_html.replace("***REQUEST_UUID***", request_uuid)
     index_html = index_html.replace(
-        "***DEV_WHEEL_VERSION***", json.dumps(DEVELOPMENT_WIDGET_VERSION_TEXT)
+        "***DEV_WHEEL_VERSION***", _html_script_json(DEVELOPMENT_WIDGET_VERSION_TEXT)
     )
     index_html = index_html.replace(
         "***ENABLE_BACKEND_LOGGING***",
-        json.dumps(_browser_logging_available()),
+        _html_script_json(_browser_logging_available()),
     )
 
-    index_html = index_html.replace("***WIDGETSET***", widgetset)
+    index_html = index_html.replace(
+        "***WIDGETSET_JSON***", _html_script_json(widgetset)
+    )
+    index_html = index_html.replace("***WIDGETSET***", str(escape(widgetset)))
+    index_html = index_html.replace(
+        "***WIDGET_ASSET_MANIFEST_JSON***",
+        _html_script_json(widget_asset_manifest),
+    )
     return HTMLResponse(
         content=index_html,
         headers={

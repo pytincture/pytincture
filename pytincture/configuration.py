@@ -19,6 +19,7 @@ from packaging.version import InvalidVersion, Version
 from pytincture.backend.application_admission import canonical_application_admission
 from pytincture.backend.safe_paths import validate_application_name
 from pytincture.backend.storage import validate_redis_url
+from pytincture.backend.widget_trust import canonical_widget_trust_policy
 
 
 _MICROSOFT_SHARED_TENANTS = {"common", "organizations", "consumers"}
@@ -381,6 +382,12 @@ class PytinctureConfig:
         "PYTINCTURE_DEV_WHEEL_VERSION",
         "Explicit development widget-wheel fallback version.",
     )
+    widget_trust_policy: Optional[str] = _setting(
+        None,
+        "PYTINCTURE_WIDGET_TRUST_POLICY",
+        "Optional deployment-owned widget distribution/version/asset-hash policy JSON or path.",
+        repr=False,
+    )
     remote_store_timeout_seconds: float = _setting(
         2.0, "REMOTE_STORE_TIMEOUT_SECONDS", "Optional remote-store HTTP deadline."
     )
@@ -636,6 +643,14 @@ class PytinctureConfig:
                 "dev_wheel_version must be a valid Python package version"
             ) from exc
         object.__setattr__(self, "dev_wheel_version", development_widget_version)
+        try:
+            object.__setattr__(
+                self,
+                "widget_trust_policy",
+                canonical_widget_trust_policy(self.widget_trust_policy),
+            )
+        except ValueError as exc:
+            raise ValueError(f"invalid widget_trust_policy: {exc}") from exc
         if not 1 <= self.bff_replay_token_batch_size <= 100:
             raise ValueError("bff_replay_token_batch_size must be between 1 and 100")
         if not 0 <= self.bff_replay_token_low_watermark < self.bff_replay_token_batch_size:

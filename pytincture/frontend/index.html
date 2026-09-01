@@ -14,14 +14,15 @@
 <body>
     <script>
       runTinctureApp({
-        application: "***APPLICATION***",
-        widgetlib: "***WIDGETSET***",
+        application: ***APPLICATION_JSON***,
+        widgetlib: ***WIDGETSET_JSON***,
+        widgetAssetManifest: ***WIDGET_ASSET_MANIFEST_JSON***,
         devWheelVersion: ***DEV_WHEEL_VERSION***,
-        entrypoint: "***ENTRYPOINT***",
+        entrypoint: ***ENTRYPOINT_JSON***,
         requestUuid: "***REQUEST_UUID***",
         enableBackendLogging: ***ENABLE_BACKEND_LOGGING***,
         enableServiceWorker: true,
-        loadingTitle: ***LOADING_TITLE***
+        loadingTitle: ***LOADING_TITLE_JSON***
       });
     </script>
     <div id="maindiv" style="width: 100%; height: 100vh;"></div>

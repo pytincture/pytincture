@@ -5,6 +5,12 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Discover installed widget metadata from static source/distribution records
+  without importing browser packages on the server. Add an optional
+  deployment-owned widget distribution/version/asset-hash trust policy that
+  overrides wheel self-attestation and fails closed, and serialize all service
+  widget/page metadata safely for HTML script context. Pluggable pinned
+  widgetsets remain the default and the policy adds no runtime state or Redis.
 - Freeze Python CI and release-build inputs through the hash-bearing `uv.lock`,
   enforce exact wheel/sdist/npm file inventories, generate a complete SPDX
   inventory for every embedded Pyodide catalog component, verify vendored core

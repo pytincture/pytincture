@@ -804,6 +804,43 @@
         "tests/test_release_security.py::test_ci_uses_frozen_python_inputs_and_release_security_gates",
         "tests/test_release_security.py::test_frozen_lock_has_no_drift"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-M-17-WIDGET-TRUST",
+      "status": "remediated_with_optional_high_trust_policy",
+      "title": "Widget discovery is non-executing and administrator trust can fail closed",
+      "intentional_contract": "Widgetsets remain pluggable exact-pinned browser wheels. A wheel-owned asset manifest is integrity metadata for that selected wheel, not an independent authorization root. High-trust deployments may add an exact administrator-owned distribution/version/asset-hash allowlist without changing ordinary developer usage.",
+      "security_boundary": "The service discovers widget metadata only through AST parsing and installed distribution metadata/owned source; it never imports browser packages. When a deployment trust policy is configured, an unlisted distribution or version is rejected, the administrator manifest overrides wheel self-attestation, the development fallback is not exposed, and every selected browser asset is still ownership- and SHA-256-verified before evaluation. All selected metadata is JSON-serialized with HTML-script escaping.",
+      "controls": {
+        "browser_package_imported_for_discovery": false,
+        "installed_distribution_metadata_static": true,
+        "pluggable_widgetsets_preserved": true,
+        "exact_pins_preserved": true,
+        "package_manifest_is_independent_authorization_root": false,
+        "administrator_allowlist_optional": true,
+        "configured_allowlist_fails_closed": true,
+        "administrator_asset_hashes_override_package_manifest": true,
+        "html_script_metadata_context_safe": true,
+        "redis_required": false,
+        "runtime_state_added": false
+      },
+      "implementation": [
+        "pytincture/backend/browser_packages.py",
+        "pytincture/backend/widget_trust.py",
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "pytincture/frontend/index.html",
+        "docs/browser-packaging.md",
+        "docs/widgetset-packaging.md"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_widgetset_discovery_reads_installed_distribution_without_importing",
+        "tests/test_backend_modules.py::test_widgetset_discovery_skips_distribution_scan_for_stdlib_imports",
+        "tests/test_backend_modules.py::test_widget_trust_policy_is_an_exact_administrator_allowlist",
+        "tests/test_configuration.py::test_deployment_widget_trust_policy_overrides_manifest_and_escapes_html",
+        "tests/test_configuration.py::test_deployment_widget_trust_policy_fails_closed_for_unlisted_version",
+        "tests/test_configuration.py::test_widget_trust_policy_rejects_ambiguous_or_unhashed_entries"
+      ]
     }
   ]
 }

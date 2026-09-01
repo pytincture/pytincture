@@ -1023,13 +1023,16 @@ def test_large_public_asset_head_is_metadata_only_and_get_streams_off_loop(
 def test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not(
     fresh_client, monkeypatch, tmp_path
 ):
-    import sys
     from packaging.version import Version
     import pytincture.backend.app as backend_app
 
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
     monkeypatch.delenv("PYTINCTURE_PUBLIC_ASSET_PATHS", raising=False)
     (tmp_path / "demoapp.py").write_text("import demo_widgets\n")
+    (tmp_path / "demo_widgets.py").write_text(
+        '__widgetset__ = "demo-widgets"\n__version__ = "0.1.0"\n',
+        encoding="utf-8",
+    )
     matching_version = "demo_widgets-0.1.0-py3-none-any.whl"
     matching_dev = "demo_widgets-99.99.99-py3-none-any.whl"
     stale_version = "demo_widgets-0.0.9-py3-none-any.whl"
@@ -1043,12 +1046,6 @@ def test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not(
     nested = tmp_path / "private"
     nested.mkdir()
     (nested / matching_version).write_bytes(b"nested-wheel")
-    widget_module = type("DemoWidgets", (), {
-        "__widgetset__": "demo-widgets",
-        "__version__": "0.1.0",
-    })
-    monkeypatch.setitem(sys.modules, "demo_widgets", widget_module)
-
     assert fresh_client.get(f"/demoapp/appcode/{matching_version}").status_code == 200
     assert fresh_client.get(f"/demoapp/appcode/{matching_dev}").status_code == 200
     assert fresh_client.head(f"/demoapp/appcode/{matching_version}").status_code == 200
@@ -2664,13 +2661,12 @@ def test_get_widgetset(tmp_path, monkeypatch):
     static_dir.mkdir()
     app_file = static_dir / "testapp.py"
     app_file.write_text("import dummywidget\n")
-    # Insert a dummy module into sys.modules.
-    import sys
-    dummy_module = type("DummyWidget", (), {"__widgetset__": "widget_value", "__version__": "1.0"})
-    sys.modules["dummywidget"] = dummy_module
+    (static_dir / "dummywidget.py").write_text(
+        '__widgetset__ = "widget_value"\n__version__ = "1.0"\n',
+        encoding="utf-8",
+    )
     result = get_widgetset("testapp", str(static_dir))
     assert result == "widget_value==1.0"
-    del sys.modules["dummywidget"]
 
 def test_create_pytincture_pkg_in_memory(monkeypatch, tmp_path):
     """
@@ -3771,17 +3767,17 @@ def test_main_app_route_logged_in(fresh_client, monkeypatch, tmp_path):
     dummy_modules = tmp_path / "modules"
     dummy_modules.mkdir()
     (dummy_modules / "demoapp.py").write_text("import dummywidget\n")
+    (dummy_modules / "dummywidget.py").write_text(
+        '__widgetset__ = "widgetset_val"\n__version__ = "3.0"\n',
+        encoding="utf-8",
+    )
     monkeypatch.setenv("MODULES_PATH", str(dummy_modules))
-    import sys
-    dummy_mod = type("DummyModule", (), {"__widgetset__": "widgetset_val", "__version__": "3.0"})
-    sys.modules["dummywidget"] = dummy_mod
     response = fresh_client.get("/demoapp")
     assert response.status_code == 200
     html = response.text
     # Check that placeholders are replaced.
     assert "***APPLICATION***" not in html
     assert "widgetset_val==3.0" in html
-    del sys.modules["dummywidget"]
 
 
 def test_main_app_frontend_files_share_one_instance_uuid(fresh_client, monkeypatch, tmp_path):

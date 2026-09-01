@@ -112,11 +112,20 @@ __version__ = "2.4.1"
 ```
 
 Pytincture reads local metadata through the AST without importing browser-only
-code on the server. A root-level wheel is public only when its distribution
-name and version match the application widgetset, or when its version equals
-the explicit `PYTINCTURE_DEV_WHEEL_VERSION` fallback (`99.99.99` by default).
-Other versions of the same distribution remain private. Backend wheel URLs
-receive the server cache UUID; micropip package-index requests do not.
+code on the server. For an installed dependency it reads the distribution's
+metadata and owned top-level source statically; package top-level code is never
+executed for discovery. A root-level wheel is public only when its distribution
+name and version match the application widgetset, or—when no deployment trust
+policy is configured—when its version equals the explicit
+`PYTINCTURE_DEV_WHEEL_VERSION` fallback (`99.99.99` by default). Other versions
+of the same distribution remain private. Backend wheel URLs receive the server
+cache UUID; micropip package-index requests do not.
+
+`PYTINCTURE_WIDGET_TRUST_POLICY` optionally selects an exact
+administrator-owned distribution/version/asset-hash manifest. In this mode an
+unlisted widget is rejected, the package's internal manifest cannot expand the
+approved asset set, and the development fallback is disabled unless the
+application itself declares that exact version.
 
 ## Framework caching
 

@@ -2,19 +2,24 @@
 
 import ast
 import fnmatch
-import importlib
+import importlib.metadata as importlib_metadata
 import io
 import json
 import os
 import re
+import sys
 import threading
 import zipfile
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
+from importlib.machinery import PathFinder
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
+from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
 
 from pytincture.dataclass import has_bff_export_class
 from pytincture.backend.safe_paths import (
@@ -355,12 +360,112 @@ def _literal_module_metadata(
     return values.get("__widgetset__"), values.get("__version__")
 
 
+def _literal_external_metadata(file_path: Path) -> tuple[str | None, str | None]:
+    """Read bounded literal metadata from installed source without importing it."""
+
+    try:
+        if not file_path.is_file() or file_path.stat().st_size > 256 * 1024:
+            return None, None
+        with file_path.open("rb") as source_file:
+            content = source_file.read(256 * 1024 + 1)
+        if len(content) > 256 * 1024:
+            return None, None
+        tree = ast.parse(decode_python_source(content), filename=str(file_path))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return None, None
+    values: dict[str, str] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Constant):
+            continue
+        if not isinstance(node.value.value, str):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id in {
+                "__widgetset__",
+                "__version__",
+            }:
+                values[target.id] = node.value.value
+    return values.get("__widgetset__"), values.get("__version__")
+
+
+def _valid_widget_spec(widgetset: object, version: object) -> str | None:
+    if not isinstance(widgetset, str) or not widgetset.strip():
+        return None
+    try:
+        canonicalize_name(widgetset.strip(), validate=True)
+    except ValueError:
+        return None
+    if version is None:
+        return widgetset.strip()
+    if not isinstance(version, str):
+        return None
+    try:
+        Version(version.strip())
+    except InvalidVersion:
+        return None
+    return f"{widgetset.strip()}=={version.strip()}"
+
+
+def _installed_widget_metadata(
+    module_name: str,
+    distribution_names: tuple[str, ...] | list[str],
+) -> str | None:
+    """Inspect distribution metadata/source without executing package code."""
+
+    discovered_specs: set[str] = set()
+    for distribution_name in distribution_names:
+        try:
+            distribution = importlib_metadata.distribution(distribution_name)
+        except importlib_metadata.PackageNotFoundError:
+            continue
+        declared_widgetset = distribution.metadata.get("Pytincture-Widgetset")
+        if declared_widgetset:
+            spec = _valid_widget_spec(declared_widgetset, distribution.version)
+            if spec:
+                discovered_specs.add(spec)
+                continue
+        owned_files = {
+            str(path).replace("\\", "/"): path
+            for path in distribution.files or ()
+        }
+        for relative in (f"{module_name}/__init__.py", f"{module_name}.py"):
+            owned_path = owned_files.get(relative)
+            if owned_path is None:
+                continue
+            widgetset, _declared_version = _literal_external_metadata(
+                Path(distribution.locate_file(owned_path))
+            )
+            spec = _valid_widget_spec(widgetset, distribution.version)
+            if spec:
+                discovered_specs.add(spec)
+                break
+    if len(discovered_specs) == 1:
+        return discovered_specs.pop()
+    if discovered_specs:
+        # Multiple distributions claiming one import package are ambiguous.
+        return None
+
+    # Some editable/legacy packages do not expose top-level distribution
+    # metadata. PathFinder locates a top-level module without executing it.
+    try:
+        spec = PathFinder.find_spec(module_name)
+    except (AttributeError, ImportError, ValueError):
+        spec = None
+    if (
+        spec is not None
+        and spec.origin
+        and spec.origin not in {"built-in", "frozen"}
+    ):
+        widgetset, version = _literal_external_metadata(Path(spec.origin))
+        return _valid_widget_spec(widgetset, version)
+    return None
+
+
 def discover_widgetset(
     application: str,
     modules_root: str,
-    importer: Callable[[str], Any] = importlib.import_module,
 ) -> str:
-    """Discover widget metadata while avoiding imports for local application modules."""
+    """Discover widget metadata without importing browser packages on the server."""
     try:
         sanitized_application = validate_application_name(application)
     except ValueError:
@@ -382,6 +487,7 @@ def discover_widgetset(
         elif isinstance(node, ast.ImportFrom) and node.module:
             imports.append(node.module.split(".", 1)[0])
 
+    installed_packages: dict[str, list[str]] | None = None
     for module_name in imports:
         local_candidates = (
             os.path.join(root, f"{module_name}.py"),
@@ -398,18 +504,24 @@ def discover_widgetset(
                 continue
             if os.path.isfile(candidate):
                 widgetset, version = _literal_module_metadata(candidate, root)
-                if widgetset:
-                    return widgetset + (f"=={version}" if version else "")
+                widget_spec = _valid_widget_spec(widgetset, version)
+                if widget_spec:
+                    return widget_spec
                 break
         if not has_local_candidate:
-            try:
-                module = importer(module_name)
-            except ModuleNotFoundError:
+            if module_name in sys.stdlib_module_names:
                 continue
-            widgetset = getattr(module, "__widgetset__", None)
-            if widgetset:
-                version = getattr(module, "__version__", None)
-                return widgetset + (f"=={version}" if version else "")
+            if installed_packages is None:
+                try:
+                    installed_packages = importlib_metadata.packages_distributions()
+                except Exception:
+                    installed_packages = {}
+            widget_spec = _installed_widget_metadata(
+                module_name,
+                installed_packages.get(module_name, ()),
+            )
+            if widget_spec:
+                return widget_spec
     return ""
 
 
