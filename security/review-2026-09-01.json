@@ -58,12 +58,21 @@
     {
       "id": "REVIEW-2026-09-01-H5",
       "severity": "high",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/268",
       "title": "Pickle IPC defeats isolated BFF process boundary",
       "disposition": "replace pickle with bounded non-executable byte messages",
       "potential_user_breakage": false,
-      "compatibility_note": "Supported JSON-compatible BFF results remain unchanged; arbitrary pickled results were never part of the public contract."
+      "compatibility_note": "Supported JSON-compatible BFF results remain unchanged; arbitrary pickled results were never part of the public contract.",
+      "implementation": [
+        "pytincture/backend/execution.py",
+        "docs/backend-architecture.md",
+        "security/accepted-architecture.md"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_isolated_process_never_unpickles_child_controlled_messages",
+        "tests/test_backend_modules.py::test_isolated_process_rejects_malformed_child_messages"
+      ]
     },
     {
       "id": "REVIEW-2026-09-01-M1",

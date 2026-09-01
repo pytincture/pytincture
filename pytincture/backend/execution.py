@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import math
 import multiprocessing
 import sys
@@ -28,6 +29,74 @@ class IsolatedExecutionTimeout(RuntimeError):
 
 class IsolatedExecutionFailed(RuntimeError):
     """Raised when isolated application code fails without leaking details."""
+
+
+_IPC_MAGIC = b"PTB1"
+_IPC_STATUS_OK = b"O"
+_IPC_STATUS_RESULT_LIMIT = b"L"
+_IPC_STATUS_FAILED = b"F"
+_IPC_HEADER_BYTES = len(_IPC_MAGIC) + 1
+
+
+def _isolated_message(status: bytes, payload: bytes = b"") -> bytes:
+    if status not in {
+        _IPC_STATUS_OK,
+        _IPC_STATUS_RESULT_LIMIT,
+        _IPC_STATUS_FAILED,
+    }:
+        raise ValueError("invalid isolated BFF message status")
+    if status != _IPC_STATUS_OK and payload:
+        raise ValueError("isolated BFF error messages cannot include a payload")
+    return _IPC_MAGIC + status + payload
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON value is not permitted: {value}")
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def _decode_isolated_message(
+    message: bytes,
+    *,
+    result_max_bytes: int,
+    result_max_depth: int,
+    result_max_items: int,
+) -> tuple[bytes, bytes]:
+    if len(message) < _IPC_HEADER_BYTES or not message.startswith(_IPC_MAGIC):
+        raise IsolatedExecutionFailed("invalid isolated BFF response")
+    status = message[len(_IPC_MAGIC) : _IPC_HEADER_BYTES]
+    payload = message[_IPC_HEADER_BYTES:]
+    if status == _IPC_STATUS_OK:
+        if not payload or len(payload) > result_max_bytes:
+            raise IsolatedExecutionFailed("invalid isolated BFF response")
+        try:
+            decoded = json.loads(
+                payload.decode("utf-8"),
+                object_pairs_hook=_unique_json_object,
+                parse_constant=_reject_json_constant,
+            )
+            canonical = encode_bff_result(
+                decoded,
+                max_bytes=result_max_bytes,
+                max_depth=result_max_depth,
+                max_items=result_max_items,
+            )
+        except (BFFResultLimitExceeded, UnicodeDecodeError, ValueError) as exc:
+            raise IsolatedExecutionFailed("invalid isolated BFF response") from exc
+        if canonical != payload:
+            raise IsolatedExecutionFailed("invalid isolated BFF response")
+        return status, payload
+    if status in {_IPC_STATUS_RESULT_LIMIT, _IPC_STATUS_FAILED} and not payload:
+        return status, payload
+    raise IsolatedExecutionFailed("invalid isolated BFF response")
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,12 +182,12 @@ def _isolated_worker(
             max_depth=result_max_depth,
             max_items=result_max_items,
         )
-        connection.send(("ok", payload))
+        connection.send_bytes(_isolated_message(_IPC_STATUS_OK, payload))
     except BFFResultLimitExceeded:
-        connection.send(("result-limit", b""))
+        connection.send_bytes(_isolated_message(_IPC_STATUS_RESULT_LIMIT))
     except BaseException:  # noqa: BLE001 - child failures cross only as a safe tag
         try:
-            connection.send(("failed", b""))
+            connection.send_bytes(_isolated_message(_IPC_STATUS_FAILED))
         except (BrokenPipeError, EOFError, OSError):
             pass
     finally:
@@ -205,11 +274,24 @@ class ProcessIsolatedBFFExecutor:
                 if remaining <= 0:
                     raise IsolatedExecutionTimeout("isolated BFF call timed out")
                 if receiving.poll(min(0.05, remaining)):
-                    status, payload = receiving.recv()
+                    try:
+                        message = receiving.recv_bytes(
+                            self.result_max_bytes + _IPC_HEADER_BYTES
+                        )
+                    except (EOFError, OSError) as exc:
+                        raise IsolatedExecutionFailed(
+                            "invalid isolated BFF response"
+                        ) from exc
+                    status, payload = _decode_isolated_message(
+                        message,
+                        result_max_bytes=self.result_max_bytes,
+                        result_max_depth=self.result_max_depth,
+                        result_max_items=self.result_max_items,
+                    )
                     process.join(timeout=0.1)
-                    if status == "ok":
+                    if status == _IPC_STATUS_OK:
                         return payload
-                    if status == "result-limit":
+                    if status == _IPC_STATUS_RESULT_LIMIT:
                         raise BFFResultLimitExceeded("BFF result limit exceeded")
                     raise IsolatedExecutionFailed("isolated BFF call failed")
                 if not process.is_alive():

@@ -256,6 +256,9 @@ retained. The opt-in process executor provides killable wall-time execution,
 per-worker/per-user admission, CPU limits on POSIX, address-space limits on
 Linux, and the same output boundary. It intentionally rejects streaming BFFs;
 trusted mode remains the default and keeps current streaming/object behavior.
+The child-to-parent channel is a bounded, versioned byte protocol carrying
+canonical JSON or fixed failure statuses. The parent never performs pickle or
+another executable deserialization operation on child-controlled bytes.
 
 ## HSTS remains an edge responsibility
 

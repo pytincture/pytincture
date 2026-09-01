@@ -36,6 +36,7 @@ from pytincture.backend.diagnostics import (
 )
 from pytincture.backend.execution import (
     IsolatedBFFInvocation,
+    IsolatedExecutionFailed,
     IsolatedExecutionRejected,
     IsolatedExecutionTimeout,
     ProcessIsolatedBFFExecutor,
@@ -198,6 +199,76 @@ class Worker:
     with pytest.raises(BFFResultLimitExceeded):
         executor.execute(
             _isolated_test_invocation(module_path, operation, "large")
+        )
+
+
+def test_isolated_process_never_unpickles_child_controlled_messages(tmp_path):
+    marker_path = tmp_path / "parent-unpickle-proof"
+    module_path = tmp_path / "isolated_pickle_attack.py"
+    module_path.write_text(
+        f'''
+import inspect
+from pathlib import Path
+from pytincture.dataclass import backend_for_frontend
+
+class ParentPayload:
+    def __reduce__(self):
+        return (Path.write_text, (Path({str(marker_path)!r}), "unsafe"))
+
+@backend_for_frontend
+class Worker:
+    def __init__(self, _user): pass
+    def attack(self):
+        frame = inspect.currentframe()
+        while frame is not None:
+            connection = frame.f_locals.get("connection")
+            if connection is not None:
+                connection.send(ParentPayload())
+                return {{"sent": True}}
+            frame = frame.f_back
+        return {{"sent": False}}
+''',
+        encoding="utf-8",
+    )
+    operation = get_bff_manifest(str(module_path))[("Worker", "attack")]
+    executor = ProcessIsolatedBFFExecutor(
+        max_concurrency=1,
+        max_per_user=1,
+        cpu_seconds=2,
+        memory_bytes=64 * 1024 * 1024 * 1024,
+        result_max_bytes=1024,
+        result_max_depth=8,
+        result_max_items=100,
+    )
+
+    with pytest.raises(IsolatedExecutionFailed, match="invalid"):
+        executor.execute(
+            _isolated_test_invocation(module_path, operation, "attack")
+        )
+
+    assert marker_path.exists() is False
+    assert executor.active_users == {}
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        b"not-pytincture",
+        b"PTB1O{\"duplicate\":1,\"duplicate\":2}",
+        b"PTB1ONaN",
+        b"PTB1O{ \"noncanonical\": true }",
+        b"PTB1Funexpected",
+    ],
+)
+def test_isolated_process_rejects_malformed_child_messages(message):
+    from pytincture.backend.execution import _decode_isolated_message
+
+    with pytest.raises(IsolatedExecutionFailed, match="invalid"):
+        _decode_isolated_message(
+            message,
+            result_max_bytes=1024,
+            result_max_depth=8,
+            result_max_items=100,
         )
 
 
@@ -1229,7 +1300,9 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     )
     assert active_review["status"] == "remediation_in_progress"
     assert len(active_review["findings"]) == 12
-    assert {item["status"] for item in active_review["findings"]} == {"open"}
+    statuses = {item["id"]: item["status"] for item in active_review["findings"]}
+    assert statuses["REVIEW-2026-09-01-H5"] == "remediated"
+    assert list(statuses.values()).count("open") == 11
     assert all(
         item["issue"].startswith("https://github.com/pytincture/")
         for item in active_review["findings"]

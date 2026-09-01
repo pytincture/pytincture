@@ -43,3 +43,11 @@ module first and retain route-level tests for observable HTTP behavior.
   explicitly constructed store.
 - Routes, operation IDs, session schema, and public imports remain governed by
   the versioned public contracts.
+
+## Optional isolated BFF execution
+
+`BFF_EXECUTION_MODE=isolated-process` adds a killable process boundary for
+deployment-selected BFF calls. Child results cross into the parent only as
+size-bounded, canonical JSON in a versioned byte protocol. The parent never
+unpickles child-controlled data. This mode adds no shared session state and
+does not require Redis or sticky routing.
