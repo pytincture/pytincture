@@ -510,6 +510,20 @@ async def health_check():
     return {"status": "ok", "version": __version__}
 
 
+@app.get("/_pytincture/edge-client", include_in_schema=False)
+async def edge_client_probe(request: Request):
+    """Expose only the bounded peer value needed to qualify proxy replacement."""
+    client_host = str(request.client.host if request.client else "")[:255]
+    return JSONResponse(
+        {"client_host": client_host},
+        headers={
+            "Cache-Control": "private, no-store, max-age=0",
+            "Pragma": "no-cache",
+            "Vary": "Forwarded, X-Forwarded-For",
+        },
+    )
+
+
 async def _run_bounded_thread_stage(
     gate: AsyncAdmissionGate,
     function: Callable,

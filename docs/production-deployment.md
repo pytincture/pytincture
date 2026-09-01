@@ -137,13 +137,16 @@ location / {
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $remote_addr;
     proxy_set_header X-Request-ID $request_id;
     proxy_buffering off;
     proxy_read_timeout 310s;
 }
 ```
 
-`proxy_buffering off` is required for incremental BFF streaming. Set the proxy
+`X-Forwarded-For` deliberately uses `$remote_addr`, not
+`$proxy_add_x_forwarded_for` or `$http_x_forwarded_for`: the public edge must
+replace any caller-supplied chain. `proxy_buffering off` is required for incremental BFF streaming. Set the proxy
 timeout slightly above `BFF_STREAM_MAX_SECONDS`. Do not forward arbitrary
 client-supplied `X-Forwarded-*` values. Pytincture accepts a caller request ID
 only when it contains 1–128 letters, digits, `.`, `_`, `:`, or `-`.
@@ -184,9 +187,14 @@ HTTP health URL to redirect exactly to the canonical HTTPS health URL, enforces
 the configured minimum HSTS lifetime, and probes an endpoint that emits an
 absolute canonical URL both normally and with hostile `Forwarded` and
 `X-Forwarded-*` inputs. It also hashes and checks the deployed nginx
-configuration for an exact `server_name` and replacement of `Host`,
-`X-Forwarded-Host`, and `X-Forwarded-Proto`; caller-supplied forwarded values
-must not be passed through.
+configuration structurally. It selects the exact HTTPS `server_name`, port,
+and location that handles the canonical probe rather than accepting matching
+text from an unrelated block. That target must replace `Host`,
+`X-Forwarded-Host`, `X-Forwarded-Proto`, and `X-Forwarded-For`; caller-supplied
+forwarded values must not be passed through. A second request sends a forged
+client address to `/_pytincture/edge-client` and requires the application to
+observe a different peer. The probe returns only that request's bounded peer
+value, is never cached, and is not an authentication or authorization input.
 
 The canonical probe can be public SAML metadata or an OAuth initiation route.
 It must return a body or redirect whose decoded content contains the exact
@@ -212,7 +220,9 @@ credentials are never recorded. A custom internal CA may be supplied with
 `--ca-file`, but there is intentionally no insecure TLS bypass. Attach the JSON
 to the durable evidence URL before adding it to `release/qualification.json`.
 The audit is read-only and does not require Redis, sticky routing, or any new
-service-side state.
+service-side state. Evidence produced by older auditor versions must be
+regenerated because the proxy observations now include the selected-vhost,
+selected-location, and forged-client checks.
 
 The versioned [performance budgets](performance.md) cover health, generated
 application packages, representative BFF calls, and cold/warm browser startup

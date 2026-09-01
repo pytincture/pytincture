@@ -193,12 +193,24 @@
     {
       "id": "REVIEW-2026-09-01-M5",
       "severity": "medium",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/273",
       "title": "Proxy example and edge auditor can certify spoofable forwarding",
       "disposition": "replace forwarded client IPs and audit/probe the exact target vhost",
       "potential_user_breakage": true,
-      "compatibility_note": "Unsafe proxy configurations that previously passed qualification will fail until corrected; application behavior and correctly configured proxies are unchanged."
+      "compatibility_note": "Unsafe proxy configurations that previously passed qualification now fail until corrected, and old production-edge evidence must be regenerated with the expanded schema. Correctly configured proxies and application APIs are unchanged; the read-only client-peer probe is stateless, bounded, and no-store.",
+      "implementation": [
+        "scripts/audit_production_edge.py",
+        "contracts/production-edge-evidence-v1.schema.json",
+        "docs/production-deployment.md",
+        "pytincture/backend/app.py"
+      ],
+      "regression_tests": [
+        "tests/test_production_edge_audit.py::test_proxy_audit_ignores_safe_directives_in_an_unrelated_vhost",
+        "tests/test_production_edge_audit.py::test_proxy_audit_ignores_safe_directives_in_an_unrelated_location",
+        "tests/test_production_edge_audit.py::test_live_edge_evidence_rejects_a_forged_forwarded_client_ip",
+        "tests/test_app.py::test_health_and_readiness_endpoints"
+      ]
     },
     {
       "id": "REVIEW-2026-09-01-M6",

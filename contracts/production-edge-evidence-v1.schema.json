@@ -57,6 +57,9 @@
         "canonical_probe_path",
         "canonical_probe_status",
         "canonical_probe_hostile_status",
+        "client_ip_probe_body_sha256",
+        "client_ip_probe_status",
+        "client_ip_forgery_rejected",
         "health_path",
         "health_status",
         "health_version",
@@ -74,6 +77,9 @@
         "canonical_probe_path": { "type": "string", "pattern": "^/" },
         "canonical_probe_status": { "type": "integer", "minimum": 100, "maximum": 599 },
         "canonical_probe_hostile_status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "client_ip_probe_body_sha256": { "$ref": "#/$defs/sha256" },
+        "client_ip_probe_status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "client_ip_forgery_rejected": { "type": "boolean" },
         "health_path": { "type": "string", "pattern": "^/" },
         "health_status": { "type": "integer", "minimum": 100, "maximum": 599 },
         "health_version": { "type": "string" },
@@ -87,17 +93,23 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
+            "target_vhost",
+            "target_location",
             "server_name",
             "upstream_host_replaced",
             "forwarded_host_replaced",
             "forwarded_proto_replaced",
+            "forwarded_for_replaced",
             "caller_forwarded_values_rejected"
           ],
           "properties": {
+            "target_vhost": { "type": "boolean" },
+            "target_location": { "type": "boolean" },
             "server_name": { "type": "boolean" },
             "upstream_host_replaced": { "type": "boolean" },
             "forwarded_host_replaced": { "type": "boolean" },
             "forwarded_proto_replaced": { "type": "boolean" },
+            "forwarded_for_replaced": { "type": "boolean" },
             "caller_forwarded_values_rejected": { "type": "boolean" }
           }
         }

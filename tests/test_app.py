@@ -2819,6 +2819,15 @@ def test_health_and_readiness_endpoints(fresh_client):
     assert health.json() == {"status": "ok", "version": __version__}
     assert health.headers["X-Request-ID"] == "health-check-1"
 
+    edge_probe = fresh_client.get(
+        "/_pytincture/edge-client",
+        headers={"X-Forwarded-For": "198.51.100.77"},
+    )
+    assert edge_probe.status_code == 200
+    assert edge_probe.json() == {"client_host": "127.0.0.1"}
+    assert edge_probe.headers["cache-control"] == "private, no-store, max-age=0"
+    assert edge_probe.headers["vary"] == "Forwarded, X-Forwarded-For"
+
     readiness = fresh_client.get("/readyz")
     assert readiness.status_code == 200
     assert readiness.json()["status"] == "ready"
