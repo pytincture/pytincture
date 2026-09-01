@@ -7,12 +7,16 @@ import argparse
 import email.parser
 import hashlib
 import json
-import stat
 import tarfile
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+from archive_safety import (
+    ArchiveSafetyError,
+    validate_tar_members,
+    validate_zip_members,
+)
 from verify_npm_release import ReleaseVerificationError, verify_release_metadata
 
 
@@ -42,25 +46,17 @@ def _metadata_identity(content: bytes, label: str, version: str) -> None:
     _require(metadata.get("Version") == version, f"{label} version does not match release")
 
 
-def _safe_member_name(name: str) -> bool:
-    member = PurePosixPath(name)
-    return bool(name) and not member.is_absolute() and ".." not in member.parts and "\\" not in name
-
-
 def _verify_wheel(path: Path, version: str) -> None:
     expected_metadata = f"pytincture-{version}.dist-info/METADATA"
     try:
         with zipfile.ZipFile(path) as archive:
-            members = archive.infolist()
-            _require(all(_safe_member_name(member.filename) for member in members), "wheel contains an unsafe path")
+            members = validate_zip_members(archive.infolist())
             metadata_members = [member for member in members if member.filename == expected_metadata]
             _require(len(metadata_members) == 1, "wheel must contain exact release METADATA")
             member = metadata_members[0]
-            mode = member.external_attr >> 16
-            _require(not stat.S_ISLNK(mode), "wheel METADATA must not be a symlink")
             _require(member.file_size <= 1024 * 1024, "wheel METADATA is unexpectedly large")
             _metadata_identity(archive.read(member), "wheel", version)
-    except (OSError, zipfile.BadZipFile) as exc:
+    except (OSError, zipfile.BadZipFile, ArchiveSafetyError) as exc:
         raise ReleaseVerificationError(f"invalid Python wheel: {exc}") from exc
 
 
@@ -69,8 +65,7 @@ def _verify_sdist(path: Path, version: str) -> None:
     expected_metadata = f"{expected_root}/PKG-INFO"
     try:
         with tarfile.open(path, mode="r:gz") as archive:
-            members = archive.getmembers()
-            _require(all(_safe_member_name(member.name) for member in members), "sdist contains an unsafe path")
+            members = validate_tar_members(archive.getmembers())
             roots = {PurePosixPath(member.name).parts[0] for member in members if member.name}
             _require(roots == {expected_root}, "sdist root does not match release version")
             metadata_members = [member for member in members if member.name == expected_metadata]
@@ -81,7 +76,7 @@ def _verify_sdist(path: Path, version: str) -> None:
             metadata_file = archive.extractfile(member)
             _require(metadata_file is not None, "sdist PKG-INFO could not be read")
             _metadata_identity(metadata_file.read(), "sdist", version)
-    except (OSError, tarfile.TarError) as exc:
+    except (OSError, tarfile.TarError, ArchiveSafetyError) as exc:
         raise ReleaseVerificationError(f"invalid Python sdist: {exc}") from exc
 
 

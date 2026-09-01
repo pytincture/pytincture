@@ -9,6 +9,8 @@ import sys
 import tarfile
 from pathlib import Path
 
+from archive_safety import validate_tar_members
+
 
 def main() -> None:
     if len(sys.argv) != 3:
@@ -18,7 +20,10 @@ def main() -> None:
     temporary_path = archive_path.with_suffix(archive_path.suffix + ".normalized")
 
     with tarfile.open(archive_path, "r:gz") as source:
-        members = sorted(source.getmembers(), key=lambda member: member.name)
+        members = sorted(
+            validate_tar_members(source.getmembers()),
+            key=lambda member: member.name,
+        )
         with temporary_path.open("wb") as raw_output:
             with gzip.GzipFile(filename="", mode="wb", fileobj=raw_output, mtime=epoch) as compressed:
                 with tarfile.open(

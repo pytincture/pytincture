@@ -215,12 +215,27 @@
     {
       "id": "REVIEW-2026-09-01-M6",
       "severity": "medium",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/274",
       "title": "Release validation ignores tar links and special members",
       "disposition": "reject every non-directory and non-regular archive member",
       "potential_user_breakage": false,
-      "compatibility_note": "Normal Pytincture artifacts are unaffected; nonstandard custom archives containing links or special members fail closed."
+      "compatibility_note": "Normal Pytincture artifacts are unaffected. Nonstandard custom archives containing links, devices, FIFOs, malformed paths, or duplicate normalized names now fail closed during normalization, inspection, and retained-artifact publication verification.",
+      "implementation": [
+        "scripts/archive_safety.py",
+        "scripts/inspect_release_artifacts.py",
+        "scripts/verify_python_release.py",
+        "scripts/verify_npm_release.py",
+        "scripts/normalize_sdist.py",
+        "docs/release-artifacts.md"
+      ],
+      "regression_tests": [
+        "tests/test_release_security.py::test_release_tar_validation_rejects_links_devices_and_fifos",
+        "tests/test_release_security.py::test_release_tar_validation_rejects_duplicates_escapes_and_malformed_names",
+        "tests/test_release_security.py::test_release_wheel_validation_rejects_symlink_duplicate_and_escape_members",
+        "tests/test_python_release_provenance.py::test_python_artifacts_reject_special_members_inside_wheel_and_sdist",
+        "tests/test_npm_release_provenance.py::test_npm_artifact_rejects_special_archive_members"
+      ]
     },
     {
       "id": "REVIEW-2026-09-01-M7",

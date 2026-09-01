@@ -45,13 +45,20 @@ def run_metadata(**overrides):
     }
 
 
-def write_npm_artifact(root: Path, version="1.0.0-rc.2", name="@pytincture/runtime") -> Path:
+def write_npm_artifact(
+    root: Path,
+    version="1.0.0-rc.2",
+    name="@pytincture/runtime",
+    extra_member: tarfile.TarInfo | None = None,
+) -> Path:
     path = root / f"pytincture-runtime-{version}.tgz"
     package_json = json.dumps({"name": name, "version": version}).encode()
     member = tarfile.TarInfo("package/package.json")
     member.size = len(package_json)
     with tarfile.open(path, mode="w:gz") as package:
         package.addfile(member, io.BytesIO(package_json))
+        if extra_member is not None:
+            package.addfile(extra_member)
     return path
 
 
@@ -126,6 +133,16 @@ def test_npm_artifact_rejects_multiple_tarballs(tmp_path):
     write_npm_artifact(tmp_path)
     write_npm_artifact(tmp_path, version="1.0.0-rc.3")
     with pytest.raises(ReleaseVerificationError, match="exactly one"):
+        verify_npm_artifact(tmp_path, "1.0.0-rc.2")
+
+
+def test_npm_artifact_rejects_special_archive_members(tmp_path):
+    link = tarfile.TarInfo("package/link")
+    link.type = tarfile.LNKTYPE
+    link.linkname = "package/package.json"
+    write_npm_artifact(tmp_path, extra_member=link)
+
+    with pytest.raises(ReleaseVerificationError, match="regular file or directory"):
         verify_npm_artifact(tmp_path, "1.0.0-rc.2")
 
 

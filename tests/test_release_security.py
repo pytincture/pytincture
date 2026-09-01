@@ -1,8 +1,11 @@
 import json
 import re
+import stat
 import subprocess
 import sys
+import tarfile
 import tomllib
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -14,6 +17,11 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import generate_vendored_pyodide_sbom as sbom_generator
 import inspect_release_artifacts as release_artifacts
 import scan_repository_secrets as secret_scanner
+from archive_safety import (
+    ArchiveSafetyError,
+    validate_tar_members,
+    validate_zip_members,
+)
 
 
 def test_release_contract_is_an_exact_inventory_and_rejects_extra_files():
@@ -39,6 +47,57 @@ def test_release_inventory_rejects_sensitive_files_even_if_declared():
         release_artifacts._check_contents(
             "test artifact", {"config.env", "private.pem"}, ["config.env", "private.pem"], "1.0.0"
         )
+
+
+@pytest.mark.parametrize(
+    "member_type",
+    [
+        tarfile.SYMTYPE,
+        tarfile.LNKTYPE,
+        tarfile.CHRTYPE,
+        tarfile.BLKTYPE,
+        tarfile.FIFOTYPE,
+    ],
+)
+def test_release_tar_validation_rejects_links_devices_and_fifos(member_type):
+    member = tarfile.TarInfo("package/untrusted")
+    member.type = member_type
+    member.linkname = "package/target"
+
+    with pytest.raises(ArchiveSafetyError, match="not a regular file or directory"):
+        validate_tar_members([member])
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        ["package/file", "package/file"],
+        ["package/file", "../escape"],
+        ["package/file", "./package/malformed"],
+        ["package/file", "package//malformed"],
+    ],
+)
+def test_release_tar_validation_rejects_duplicates_escapes_and_malformed_names(
+    names,
+):
+    members = [tarfile.TarInfo(name) for name in names]
+
+    with pytest.raises(ArchiveSafetyError):
+        validate_tar_members(members)
+
+
+def test_release_wheel_validation_rejects_symlink_duplicate_and_escape_members():
+    symlink = zipfile.ZipInfo("package/link")
+    symlink.external_attr = (stat.S_IFLNK | 0o777) << 16
+    with pytest.raises(ArchiveSafetyError, match="not a regular file or directory"):
+        validate_zip_members([symlink])
+
+    duplicate = [zipfile.ZipInfo("package/file"), zipfile.ZipInfo("package/file")]
+    with pytest.raises(ArchiveSafetyError, match="duplicate"):
+        validate_zip_members(duplicate)
+
+    with pytest.raises(ArchiveSafetyError, match="unsafe path"):
+        validate_zip_members([zipfile.ZipInfo("../escape")])
 
 
 def test_vendored_sbom_is_generated_and_covers_complete_pyodide_catalog():

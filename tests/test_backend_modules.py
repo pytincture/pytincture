@@ -1326,7 +1326,8 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert statuses["REVIEW-2026-09-01-M3"] == "remediated"
     assert statuses["REVIEW-2026-09-01-M4"] == "remediated"
     assert statuses["REVIEW-2026-09-01-M5"] == "remediated"
-    assert list(statuses.values()).count("open") == 2
+    assert statuses["REVIEW-2026-09-01-M6"] == "remediated"
+    assert list(statuses.values()).count("open") == 1
     wheel_locks = json.loads(
         (root / "security" / "widget-wheel-locks.json").read_text()
     )

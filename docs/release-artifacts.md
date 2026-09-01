@@ -56,7 +56,11 @@ The validator applies
 checks source and artifact versions, verifies base dependencies and declared
 extras, and requires the wheel, sdist, and npm tarball to match explicit exact
 file inventories. Any extra, missing, duplicate, or sensitive file fails the
-release. The output includes artifact hashes and hashes of the normalized
+release. Every member is validated before metadata is read or an sdist is
+normalized: only canonical, contained, unique regular files and necessary
+directories are accepted. Symlinks, hardlinks, devices, FIFOs, malformed
+names, and every other special member fail closed in wheels, sdists, and npm
+tarballs. The output includes artifact hashes and hashes of the normalized
 inventories.
 
 The vendored Pyodide gate regenerates and compares the SPDX 2.3 SBOM, including
