@@ -14,6 +14,7 @@
     "rollback_exercises",
     "performance_reviews",
     "repository_policy_reviews",
+    "production_edge_reviews",
     "security_reviews",
     "defect_audits",
     "final_decision"
@@ -32,6 +33,7 @@
     "rollback_exercises": { "type": "array" },
     "performance_reviews": { "type": "array" },
     "repository_policy_reviews": { "type": "array" },
+    "production_edge_reviews": { "type": "array" },
     "security_reviews": { "type": "array" },
     "defect_audits": { "type": "array" },
     "final_decision": {

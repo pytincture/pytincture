@@ -542,11 +542,12 @@ def test_state_changing_bff_call_requires_csrf(
     monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
-    fresh_client.post(
+    login_response = fresh_client.post(
         "/demoapp/auth/user",
         data={"email": "person@example.com", "password": "local"},
         follow_redirects=False,
     )
+    assert login_response.headers["cache-control"] == "private, no-store, max-age=0"
     without_token = fresh_client.post(
         "/demoapp/classcall/example.py/ExampleClass/testfunc", json={"args": [], "kwargs": {}}
     )
@@ -557,6 +558,11 @@ def test_state_changing_bff_call_requires_csrf(
         headers=_csrf_headers(fresh_client),
     )
     assert with_token.status_code == 200
+    assert with_token.headers["cache-control"] == "private, no-store, max-age=0"
+    assert set(with_token.headers["vary"].split(", ")) == {
+        "Cookie",
+        "Authorization",
+    }
 
 
 def test_bff_replay_token_is_opaque_session_bound_and_single_use(
@@ -2698,16 +2704,119 @@ def test_create_pytincture_pkg_in_memory(monkeypatch, tmp_path):
         assert any("pytincture/module.py" in name for name in names)
 
 
-def test_logs_endpoint(fresh_client, monkeypatch):
+def test_logs_endpoint(fresh_client, monkeypatch, caplog):
     """
     Test the /logs endpoint.
     """
     import pytincture.backend.app as backend_app
     monkeypatch.setattr(backend_app, "require_auth", lambda req: {"email": "dummy@example.com"})
-    response = fresh_client.post("/logs", json={"log": "test log"})
+    with caplog.at_level("INFO", logger="pytincture.backend.app"):
+        response = fresh_client.post(
+            "/logs",
+            json={
+                "level": "info",
+                "message": "test log secret=must-not-cross-the-log-boundary",
+                "timestamp": "2026-08-31T12:00:00Z",
+            },
+        )
     assert response.status_code == 200
     data = response.json()
     assert data.get("status") == "ok"
+    assert response.headers["cache-control"] == "private, no-store, max-age=0"
+    assert set(response.headers["vary"].split(", ")) == {
+        "Cookie",
+        "Authorization",
+    }
+    assert "must-not-cross-the-log-boundary" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        b'{"level":"notice","message":"x","timestamp":"2026-08-31T12:00:00Z"}',
+        b'{"level":"info","message":"x","timestamp":"2026-08-31T12:00:00"}',
+        b'{"level":"info","message":"x","timestamp":123}',
+        b'{"level":"info","message":"x","timestamp":"2026-08-31T12:00:00Z","extra":true}',
+        b'{"level":"info","level":"error","message":"x","timestamp":"2026-08-31T12:00:00Z"}',
+    ),
+)
+def test_logs_endpoint_rejects_noncanonical_payloads(
+    fresh_client, monkeypatch, body
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(
+        backend_app,
+        "require_auth",
+        lambda _request: {"email": "dummy@example.com"},
+    )
+    response = fresh_client.post(
+        "/logs",
+        content=body,
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 422
+
+
+def test_logs_endpoint_has_dedicated_size_and_rate_limits(
+    fresh_client, monkeypatch
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(
+        backend_app,
+        "require_auth",
+        lambda _request: {"email": "dummy@example.com"},
+    )
+    monkeypatch.setattr(backend_app, "BROWSER_LOG_MAX_BYTES", 64)
+    oversized = fresh_client.post(
+        "/logs",
+        content=b'{"message":"' + (b"x" * 100) + b'"}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert oversized.status_code == 413
+
+    monkeypatch.setattr(backend_app, "BROWSER_LOG_MAX_BYTES", 4096)
+    monkeypatch.setattr(
+        backend_app,
+        "BROWSER_LOG_RATE_LIMITER",
+        backend_app.SlidingWindowRateLimiter(1, 60),
+    )
+    payload = {
+        "level": "info",
+        "message": "bounded",
+        "timestamp": "2026-08-31T12:00:00Z",
+    }
+    assert fresh_client.post("/logs", json=payload).status_code == 200
+    rejected = fresh_client.post("/logs", json=payload)
+    assert rejected.status_code == 429
+    assert int(rejected.headers["retry-after"]) >= 1
+
+
+def test_noauth_browser_logging_requires_explicit_opt_in(
+    fresh_client, monkeypatch
+):
+    import pytincture.backend.app as backend_app
+
+    for name in (
+        "ENABLE_GOOGLE_AUTH",
+        "ENABLE_MICROSOFT_AUTH",
+        "ENABLE_USER_LOGIN",
+        "ENABLE_SAML_AUTH",
+    ):
+        monkeypatch.setattr(backend_app, name, False)
+    monkeypatch.setattr(backend_app, "ALLOW_NOAUTH_BROWSER_LOGS", False)
+    payload = {
+        "level": "info",
+        "message": "bounded",
+        "timestamp": "2026-08-31T12:00:00Z",
+    }
+    assert backend_app._browser_logging_available() is False
+    assert fresh_client.post("/logs", json=payload).status_code == 404
+
+    monkeypatch.setattr(backend_app, "ALLOW_NOAUTH_BROWSER_LOGS", True)
+    assert backend_app._browser_logging_available() is True
+    assert fresh_client.post("/logs", json=payload).status_code == 200
 
 
 def test_require_auth_does_not_print_debug_output(monkeypatch, capsys):
@@ -3699,6 +3808,7 @@ def test_main_app_frontend_files_share_one_instance_uuid(fresh_client, monkeypat
     assert set(uuid_values) == {backend_app.FRONTEND_INSTANCE_UUID}
     assert "***REQUEST_UUID***" not in first_response.text
     assert "***REQUEST_UUID***" not in second_response.text
+    assert "enableBackendLogging: false" in first_response.text
     assert first_response.headers["cache-control"] == "no-store, max-age=0"
     assert first_response.headers["pragma"] == "no-cache"
 

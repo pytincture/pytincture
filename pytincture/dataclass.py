@@ -9,7 +9,7 @@ from urllib.parse import quote
 import uuid
 from fastapi import FastAPI, Request
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 import inspect
 import textwrap
 from typing import Dict, Any, Mapping
@@ -1053,6 +1053,8 @@ def add_bff_docs_to_app(
     app: FastAPI,
     operations: Mapping[tuple[str, str, str], Mapping[str, Any]] | None = None,
     asset_uuid: str | None = None,
+    docs_mode: str = "public",
+    authorize: Any = None,
 ):
     """
     Adds BFF-specific OpenAPI documentation to a FastAPI application
@@ -1135,6 +1137,24 @@ def add_bff_docs_to_app(
     openapi_path = f"{docs_path}/openapi.json"
     docs_asset_uuid = asset_uuid or uuid.uuid4().hex
 
+    async def authorize_request(request: Request) -> None:
+        if docs_mode != "authenticated":
+            return
+        if not callable(authorize):
+            raise RuntimeError(
+                "authenticated API documentation requires an authorization hook"
+            )
+        result = authorize(request)
+        if inspect.isawaitable(result):
+            await result
+
+    def place_before_application_route(route) -> None:
+        for index, existing in enumerate(app.routes[:-1]):
+            if getattr(existing, "path", None) == "/{application}":
+                app.routes.pop()
+                app.routes.insert(index, route)
+                break
+
     def custom_openapi():
         if not app.openapi_schema:
             openapi_schema = get_openapi(
@@ -1181,18 +1201,8 @@ def add_bff_docs_to_app(
         
         return app.openapi_schema
 
-    @app.get(openapi_path, tags=["documentation"])
-    async def get_bff_openapi():
-        """
-        Get the OpenAPI schema for BFF endpoints
-        """
-        return custom_openapi()
-
-    @app.get(docs_path, tags=["documentation"])
     async def get_bff_docs(request: Request):
-        """
-        Get the Swagger UI HTML for BFF endpoints
-        """
+        await authorize_request(request)
         root_path = str(request.scope.get("root_path", "")).rstrip("/")
         encoded_uuid = quote(docs_asset_uuid, safe="")
         asset_prefix = f"{root_path}/frontend"
@@ -1232,18 +1242,53 @@ def add_bff_docs_to_app(
             },
         )
 
-    # The service's one-segment application route is intentionally broad. Keep
-    # this exact framework endpoint ahead of it so the default /bff-docs URL is
-    # not interpreted as an application identifier.
-    docs_route = app.routes[-1]
-    for index, route in enumerate(app.routes[:-1]):
-        if getattr(route, "path", None) == "/{application}":
-            app.routes.pop()
-            app.routes.insert(index, docs_route)
-            break
-
     # Set the custom OpenAPI function
     app.openapi = custom_openapi
+
+    if docs_mode != "disabled":
+        @app.get(openapi_path, tags=["documentation"], include_in_schema=False)
+        async def get_bff_openapi(request: Request):
+            await authorize_request(request)
+            return JSONResponse(
+                custom_openapi(),
+                headers={
+                    "Cache-Control": "private, no-store, max-age=0",
+                    "Vary": "Cookie, Authorization",
+                },
+            )
+
+        app.get(docs_path, tags=["documentation"], include_in_schema=False)(
+            get_bff_docs
+        )
+        place_before_application_route(app.routes[-1])
+
+        for alias in ("/docs", "/redoc"):
+            if alias == docs_path:
+                continue
+
+            async def docs_alias(request: Request):
+                await authorize_request(request)
+                return RedirectResponse(
+                    docs_path,
+                    status_code=307,
+                    headers={"Cache-Control": "private, no-store, max-age=0"},
+                )
+
+            app.get(alias, include_in_schema=False)(docs_alias)
+            place_before_application_route(app.routes[-1])
+
+        if openapi_path != "/openapi.json":
+            @app.get("/openapi.json", include_in_schema=False)
+            async def get_openapi_alias(request: Request):
+                await authorize_request(request)
+                return JSONResponse(
+                    custom_openapi(),
+                    headers={
+                        "Cache-Control": "private, no-store, max-age=0",
+                        "Vary": "Cookie, Authorization",
+                    },
+                )
+            place_before_application_route(app.routes[-1])
 
 def get_imports_used_in_class(file_path, class_name, source_code=None):
     if source_code is None:

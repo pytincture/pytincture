@@ -5,7 +5,7 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## Current decision: NO-GO on the observation time gate
+## Current decision: NO-GO pending observation and edge evidence
 
 As of 2026-08-30 UTC, signed GitHub prereleases and PyPI artifacts are
 published for both `1.0.0rc1` and `1.0.0rc2`. The matching retained npm
@@ -18,9 +18,11 @@ formal 30-day observation period began at `2026-08-29T02:08:06Z` and cannot
 complete before `2026-09-28T02:08:06Z`. RC2 now has complete latest-candidate
 standalone, authenticated BFF, federated SAML, upgrade/rollback, performance,
 security/defect, and repository-policy evidence. The release remains NO-GO
-only because the time gate and subsequent release-manager approval cannot yet
-be completed. The Starlette security blocker is resolved by requiring the
-patched 1.6 release line and allowing no dependency-audit exceptions.
+until the time gate completes, a production-edge review records the deployed
+HTTPS redirect, HSTS, canonical-origin, and trusted-proxy controls, and the
+release manager approves the final decision. The Starlette security blocker is
+resolved by requiring the patched 1.6 release line and allowing no
+dependency-audit exceptions.
 
 Published and retained rc1 evidence:
 
@@ -76,6 +78,8 @@ For every release candidate, record:
 - upgrade from 0.10.7 and package/deployment rollback results;
 - browser and service performance evidence satisfying the versioned budgets;
 - an administrator-run release branch-protection audit;
+- a production-edge review proving HTTPS redirects, HSTS, canonical origin,
+  and trusted proxy-header handling for the latest RC;
 - a security review reporting zero open critical/high findings; and
 - a defect audit reporting zero open P0/P1 issues.
 

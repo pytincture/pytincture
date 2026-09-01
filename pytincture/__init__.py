@@ -5,7 +5,9 @@ pyTincture uvicorn launcher
 __version__ = "1.0.0rc2"
 
 from multiprocessing import Process, freeze_support
+from copy import deepcopy
 import ipaddress
+import logging
 import os
 import signal
 import shutil
@@ -110,19 +112,45 @@ def _loopback_bind_host(host=None):
     return resolved
 
 
+class _PathOnlyAccessFilter(logging.Filter):
+    """Remove query strings before Uvicorn formats an optional access record."""
+
+    def filter(self, record):
+        arguments = record.args
+        if isinstance(arguments, tuple) and len(arguments) >= 3:
+            sanitized = list(arguments)
+            sanitized[2] = str(sanitized[2]).split("?", 1)[0][:2048]
+            record.args = tuple(sanitized)
+        return True
+
+
+def _sanitized_uvicorn_log_config():
+    config = deepcopy(uvicorn.config.LOGGING_CONFIG)
+    config.setdefault("filters", {})["pytincture_path_only"] = {
+        "()": _PathOnlyAccessFilter,
+    }
+    access_handler = config.get("handlers", {}).get("access", {})
+    access_handler["filters"] = ["pytincture_path_only"]
+    return config
+
+
 def main(port, ssl_keyfile=None, ssl_certfile=None, modules_folder=None, host=None):
     if modules_folder is not None:
         set_modules_path(os.fspath(modules_folder))
 
+    bind_host = _loopback_bind_host(host)
+    config = PytinctureConfig.from_env()
     run_kwargs = dict(
-        host=_loopback_bind_host(host),
+        host=bind_host,
         port=port,
-        log_level="debug",
-        access_log=True,
+        log_level=config.log_level.lower(),
+        access_log=config.uvicorn_access_log,
         reload=False,
         ssl_keyfile=ssl_keyfile,
         ssl_certfile=ssl_certfile,
     )
+    if config.uvicorn_access_log:
+        run_kwargs["log_config"] = _sanitized_uvicorn_log_config()
 
     if uvloop is not None:
         try:
@@ -131,7 +159,6 @@ def main(port, ssl_keyfile=None, ssl_certfile=None, modules_folder=None, host=No
         except Exception:  # pragma: no cover - uvloop unsupported platform
             run_kwargs["loop"] = "asyncio"
 
-    config = PytinctureConfig.from_env()
     uvicorn.run(create_app(config), **run_kwargs)
 
 

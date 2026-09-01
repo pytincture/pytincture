@@ -167,6 +167,7 @@
       "require_last_push_approval": true
     }
   ],
+  "production_edge_reviews": [],
   "security_reviews": [
     {
       "version": "1.0.0rc2",
@@ -193,6 +194,6 @@
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1, RC2, representative standalone/authenticated/federated applications, upgrade/rollback, performance, repository policy, security, and defect audits are recorded and passing. The release remains NO-GO only because the approved 30-day observation cannot complete before 2026-09-28T02:08:06Z."
+    "notes": "RC1, RC2, representative standalone/authenticated/federated applications, upgrade/rollback, performance, repository policy, security, and defect audits are recorded and passing. The release remains NO-GO until the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS evidence is recorded, and the release manager makes the final decision."
   }
 }

@@ -1144,6 +1144,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-M-09-BFF-EXECUTION",
         "REVIEW-2026-08-31-M-10-PUBLIC-FILE-APPCODE-CACHE",
         "REVIEW-2026-08-31-M-11-M-12-BLOCKING-SHARED-STORE",
+        "REVIEW-2026-08-31-M-13-M-14-LOGS-DOCS-HSTS",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1158,6 +1159,13 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert registry_controls["invalid_file_operations_denied"] is True
     assert registry_controls["unrelated_valid_operations_preserved"] is True
     assert registry_controls["redis_required"] is False
+    logging_controls = dispositions[
+        "REVIEW-2026-08-31-M-13-M-14-LOGS-DOCS-HSTS"
+    ]["controls"]
+    assert logging_controls["uvicorn_access_log_default"] is False
+    assert logging_controls["browser_log_noauth_default"] is False
+    assert logging_controls["production_edge_evidence_required_for_final"] is True
+    assert logging_controls["redis_required"] is False
     assert dispositions["FOLLOWUP-F-01"]["controls"][
         "long_lived_pypi_credential_used"
     ] is False
