@@ -40,6 +40,8 @@ def main() -> None:
         assert backend.mcp_http_app is None
     elif feature == "oauth":
         os.environ["ENABLE_GOOGLE_AUTH"] = "true"
+        os.environ["GOOGLE_CLIENT_ID"] = "clean-install-client"
+        os.environ["GOOGLE_CLIENT_SECRET"] = "clean-install-client-secret"
         os.environ["SAML_SECRET_KEY"] = "clean-install-oauth-secret-0123456789abcdef"
         os.environ["PYTINCTURE_ALLOWED_HOSTS"] = "auth.example.test"
         os.environ["PYTINCTURE_CANONICAL_ORIGIN"] = "https://auth.example.test"
@@ -62,6 +64,9 @@ def main() -> None:
         assert RedisDict is not None
     elif feature == "saml":
         os.environ["ENABLE_SAML_AUTH"] = "true"
+        os.environ["SAML_IDP_ENTITY_ID"] = "https://idp.example.test/entity"
+        os.environ["SAML_IDP_SSO_URL"] = "https://idp.example.test/sso"
+        os.environ["SAML_IDP_X509_CERT"] = "clean-install-certificate"
         os.environ["SAML_SECRET_KEY"] = "clean-install-saml-secret-0123456789abcdef"
         os.environ["PYTINCTURE_ALLOWED_HOSTS"] = "auth.example.test"
         os.environ["PYTINCTURE_CANONICAL_ORIGIN"] = "https://auth.example.test"

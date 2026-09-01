@@ -934,6 +934,7 @@
         "pytincture/backend/app.py",
         "pytincture/backend/browser_packages.py",
         "pytincture/dataclass.py",
+        "scripts/smoke_optional_extra.py",
         "docs/backend-architecture.md"
       ],
       "regression_tests": [
