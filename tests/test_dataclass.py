@@ -550,6 +550,8 @@ def test_generate_stub_classes_returns_stub(tmp_path, monkeypatch):
     assert "async def fetch(self, url, payload=None, method='GET', _replay_retry=True):" in stub
     assert "def foo(self, *args, **kwargs):" in stub
     assert "response = self.fetch_sync(url, payload, 'POST')" in stub
+    assert "async def foo_async(self, *args, **kwargs):" in stub
+    assert "response = await self.fetch(url, payload, 'POST')" in stub
     assert "async def foo(self, *args, **kwargs):" not in stub
     expected_url = "/demoapp/classcall/service.py/MyService/foo"
     assert expected_url in stub
@@ -559,6 +561,113 @@ def test_generate_stub_classes_returns_stub(tmp_path, monkeypatch):
     assert "JSON.stringify(json.dumps" not in stub
     assert "json.dumps(payload, allow_nan=False)" in stub
     assert "from io import StringIO" in stub
+
+
+def test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_flight(
+    tmp_path,
+    monkeypatch,
+):
+    source = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class Service:
+            def mutate(self):
+                return True
+    """)
+    file_path = tmp_path / "service.py"
+    file_path.write_text(source)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    stub = generate_stub_classes(
+        str(file_path),
+        "example.com",
+        "https",
+        application="demoapp",
+        replay_client={"capsule": "opaque", "key": bytes(range(32))},
+    )
+
+    class Headers:
+        @staticmethod
+        def get(name):
+            return None
+
+    class Response:
+        status = 200
+        headers = Headers()
+
+        @staticmethod
+        async def text():
+            return '{"ok": true}'
+
+    browser_calls = []
+
+    async def fetch(url, options=None):
+        browser_calls.append((url, options))
+        return Response()
+
+    warnings_sent = []
+    js_module = types.ModuleType("js")
+    js_module.XMLHttpRequest = types.SimpleNamespace(new=lambda: None)
+    js_module.document = types.SimpleNamespace(cookie="pytincture_csrf=test")
+    js_module.fetch = fetch
+    js_module.console = types.SimpleNamespace(warn=warnings_sent.append)
+    js_module.window = types.SimpleNamespace(
+        location=types.SimpleNamespace(href="https://example.test/demoapp")
+    )
+    pyodide_module = types.ModuleType("pyodide")
+    pyodide_ffi_module = types.ModuleType("pyodide.ffi")
+    pyodide_ffi_module.to_js = lambda value: value
+    monkeypatch.setitem(sys.modules, "js", js_module)
+    monkeypatch.setitem(sys.modules, "pyodide", pyodide_module)
+    monkeypatch.setitem(sys.modules, "pyodide.ffi", pyodide_ffi_module)
+
+    namespace = {}
+    exec(compile(stub, str(file_path), "exec"), namespace)
+    service = namespace["Service"]()
+
+    async def exercise():
+        refill_calls = 0
+
+        async def refill_once():
+            nonlocal refill_calls
+            refill_calls += 1
+            await asyncio.sleep(0.01)
+            service._pytincture_replay_pool.extend(["one", "two"])
+
+        service._request_pytincture_state = refill_once
+        tokens = await asyncio.gather(
+            service._take_pytincture_state(),
+            service._take_pytincture_state(),
+        )
+        assert refill_calls == 1
+        assert set(tokens) == {"one", "two"}
+
+        service._pytincture_replay_pool[:] = ["mutation-token"]
+
+        async def failed_prefetch():
+            raise RuntimeError("prefetch unavailable")
+
+        service._refill_pytincture_state = failed_prefetch
+        result = await service.mutate_async()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert result == {"ok": True}
+        assert len(browser_calls) == 1
+        assert warnings_sent == [
+            "Pytincture replay-token prefetch failed; the next BFF call will retry."
+        ]
+
+        service._pytincture_replay_enabled = False
+        service._pytincture_browser_timeout = 0.001
+
+        async def never_returns(url, options=None):
+            await asyncio.Event().wait()
+
+        js_module.fetch = never_returns
+        with pytest.raises(TimeoutError):
+            await service.mutate_async()
+
+    asyncio.run(exercise())
 
 
 def test_generated_bff_proxies_raise_safe_typed_errors_for_non_2xx(

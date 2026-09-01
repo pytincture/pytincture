@@ -16,7 +16,8 @@
         "Python 3.13 tests",
         "Python 3.14 tests",
         "Validate Python package",
-        "Validate JavaScript runtime"
+        "Validate JavaScript runtime",
+        "Repository secret scan"
       ]
     },
     "release": {
@@ -26,6 +27,7 @@
         "Validate release artifacts",
         "Release qualification gates",
         "Dependency vulnerability audit",
+        "Repository secret scan",
         "Validate JavaScript runtime",
         "Pyodide E2E (chromium)",
         "Pyodide E2E (firefox)",

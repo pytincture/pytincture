@@ -43,6 +43,13 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "PYTINCTURE_ALLOWED_HOSTS": "app.example.test,api.example.test",
             "PYTINCTURE_CANONICAL_ORIGIN": "https://app.example.test/",
             "PYTINCTURE_DEV_WHEEL_VERSION": "42.0.dev1",
+            "PYTINCTURE_WIDGET_WHEEL_MAX_BYTES": "33554432",
+            "PYTINCTURE_WIDGET_WHEEL_DIGEST_CACHE_ENTRIES": "9",
+            "PYTINCTURE_WIDGET_WHEEL_MAX_CONCURRENCY": "3",
+            "PYTINCTURE_WIDGET_WHEEL_MAX_QUEUE": "5",
+            "PYTINCTURE_WIDGET_WHEEL_QUEUE_TIMEOUT_SECONDS": "0.25",
+            "PYTINCTURE_WIDGET_WHEEL_RATE_LIMIT_ATTEMPTS": "40",
+            "PYTINCTURE_WIDGET_WHEEL_RATE_LIMIT_WINDOW_SECONDS": "20",
             "SAML_SECRET_KEY": "0123456789abcdef0123456789abcdef",
             "SAML_RESPONSE_MAX_BYTES": "262144",
             "SAML_RELAY_STATE_TTL_SECONDS": "480",
@@ -98,6 +105,13 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.allowed_hosts == ("app.example.test", "api.example.test")
     assert config.canonical_origin == "https://app.example.test"
     assert config.dev_wheel_version == "42.0.dev1"
+    assert config.public_widget_wheel_max_bytes == 33554432
+    assert config.public_widget_wheel_digest_cache_entries == 9
+    assert config.public_widget_wheel_max_concurrency == 3
+    assert config.public_widget_wheel_max_queue == 5
+    assert config.public_widget_wheel_queue_timeout_seconds == 0.25
+    assert config.public_widget_wheel_rate_limit_attempts == 40
+    assert config.public_widget_wheel_rate_limit_window_seconds == 20
     assert config.trusted_proxy_headers is False
     assert config.saml_response_max_bytes == 262144
     assert config.saml_transaction_ttl_seconds == 480

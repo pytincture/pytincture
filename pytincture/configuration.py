@@ -403,6 +403,41 @@ class PytinctureConfig:
         "PYTINCTURE_DEV_WHEEL_VERSION",
         "Explicit development widget-wheel fallback version.",
     )
+    public_widget_wheel_max_bytes: int = _setting(
+        64 * 1024 * 1024,
+        "PYTINCTURE_WIDGET_WHEEL_MAX_BYTES",
+        "Maximum bytes in one backend-served widget wheel.",
+    )
+    public_widget_wheel_digest_cache_entries: int = _setting(
+        32,
+        "PYTINCTURE_WIDGET_WHEEL_DIGEST_CACHE_ENTRIES",
+        "Per-worker verified widget-wheel digest cache entries.",
+    )
+    public_widget_wheel_max_concurrency: int = _setting(
+        4,
+        "PYTINCTURE_WIDGET_WHEEL_MAX_CONCURRENCY",
+        "Concurrent backend widget-wheel responses per worker.",
+    )
+    public_widget_wheel_max_queue: int = _setting(
+        8,
+        "PYTINCTURE_WIDGET_WHEEL_MAX_QUEUE",
+        "Maximum queued backend widget-wheel responses per worker.",
+    )
+    public_widget_wheel_queue_timeout_seconds: float = _setting(
+        1.0,
+        "PYTINCTURE_WIDGET_WHEEL_QUEUE_TIMEOUT_SECONDS",
+        "Maximum widget-wheel response admission wait.",
+    )
+    public_widget_wheel_rate_limit_attempts: int = _setting(
+        120,
+        "PYTINCTURE_WIDGET_WHEEL_RATE_LIMIT_ATTEMPTS",
+        "Widget-wheel requests allowed per peer/application window and worker.",
+    )
+    public_widget_wheel_rate_limit_window_seconds: int = _setting(
+        60,
+        "PYTINCTURE_WIDGET_WHEEL_RATE_LIMIT_WINDOW_SECONDS",
+        "Widget-wheel request rate-limit window.",
+    )
     widget_trust_policy: Optional[str] = _setting(
         None,
         "PYTINCTURE_WIDGET_TRUST_POLICY",
@@ -626,6 +661,12 @@ class PytinctureConfig:
             self.appcode_cache_max_bytes,
             self.appcode_build_max_concurrency,
             self.appcode_build_queue_timeout_seconds,
+            self.public_widget_wheel_max_bytes,
+            self.public_widget_wheel_digest_cache_entries,
+            self.public_widget_wheel_max_concurrency,
+            self.public_widget_wheel_queue_timeout_seconds,
+            self.public_widget_wheel_rate_limit_attempts,
+            self.public_widget_wheel_rate_limit_window_seconds,
             self.saml_validation_max_concurrency,
             self.saml_validation_queue_timeout_seconds,
             self.saml_validation_timeout_seconds,
@@ -647,6 +688,7 @@ class PytinctureConfig:
             self.bff_stream_max_seconds,
             self.bff_stream_idle_timeout_seconds,
             self.appcode_build_queue_timeout_seconds,
+            self.public_widget_wheel_queue_timeout_seconds,
             self.remote_store_timeout_seconds,
             self.remote_store_cooldown_seconds,
             self.remote_store_queue_timeout_seconds,
@@ -658,6 +700,8 @@ class PytinctureConfig:
             raise ValueError("resource limits must be greater than zero")
         if self.bff_max_queue < 0:
             raise ValueError("bff_max_queue cannot be negative")
+        if self.public_widget_wheel_max_queue < 0:
+            raise ValueError("public_widget_wheel_max_queue cannot be negative")
         if self.saml_validation_max_queue < 0:
             raise ValueError("saml_validation_max_queue cannot be negative")
         if self.remote_store_max_queue < 0:
@@ -965,6 +1009,12 @@ class PytinctureConfig:
             "appcode_max_total_bytes", "appcode_cache_entries",
             "appcode_cache_max_bytes",
             "appcode_build_max_concurrency",
+            "public_widget_wheel_max_bytes",
+            "public_widget_wheel_digest_cache_entries",
+            "public_widget_wheel_max_concurrency",
+            "public_widget_wheel_max_queue",
+            "public_widget_wheel_rate_limit_attempts",
+            "public_widget_wheel_rate_limit_window_seconds",
             "remote_store_failure_threshold", "remote_store_max_concurrency",
             "remote_store_max_queue",
         }
@@ -977,6 +1027,7 @@ class PytinctureConfig:
             "remote_store_cooldown_seconds", "remote_store_queue_timeout_seconds",
             "readiness_cache_ttl_seconds", "saml_validation_queue_timeout_seconds",
             "saml_validation_timeout_seconds", "appcode_build_queue_timeout_seconds",
+            "public_widget_wheel_queue_timeout_seconds",
         }
         tuple_fields = {
             "cors_allowed_origins", "allowed_hosts", "previous_session_secrets",

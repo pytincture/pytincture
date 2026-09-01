@@ -86,7 +86,7 @@ package contents without publishing, run:
 
 ```bash
 cd pytincture/frontend
-npm ci
+npm ci --ignore-scripts
 npm run build
 npm pack --dry-run
 ```

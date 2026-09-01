@@ -8,6 +8,8 @@ import os
 import re
 import stat
 import tokenize
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePosixPath
@@ -103,6 +105,45 @@ class SecureFileHandle:
         if self.descriptor >= 0:
             os.close(self.descriptor)
             self.descriptor = -1
+
+
+class SecureFileDigestCache:
+    """Bounded identity-keyed digest cache for verified regular files."""
+
+    def __init__(self, max_entries: int):
+        if max_entries <= 0:
+            raise ValueError("max_entries must be greater than zero")
+        self.max_entries = max_entries
+        self._entries: OrderedDict[tuple[object, ...], str] = OrderedDict()
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _key(metadata: SecureFileMetadata) -> tuple[object, ...]:
+        return (metadata.path, *metadata.identity)
+
+    def get(self, metadata: SecureFileMetadata) -> str | None:
+        key = self._key(metadata)
+        with self._lock:
+            digest = self._entries.get(key)
+            if digest is not None:
+                self._entries.move_to_end(key)
+            return digest
+
+    def get_or_hash(self, handle: SecureFileHandle) -> str:
+        key = self._key(handle.metadata)
+        # Serialize cache misses so a burst for one wheel cannot duplicate the
+        # full-file hash. Identity changes naturally create a fresh entry.
+        with self._lock:
+            digest = self._entries.get(key)
+            if digest is not None:
+                self._entries.move_to_end(key)
+                return digest
+            digest = hash_open_file(handle)
+            self._entries[key] = digest
+            self._entries.move_to_end(key)
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
+            return digest
 
 
 def validate_application_name(value: str) -> str:

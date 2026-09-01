@@ -10,6 +10,7 @@ import tarfile
 from pathlib import Path
 from typing import Any, Mapping
 
+from archive_safety import ArchiveSafetyError, validate_tar_members
 from versioning import npm_version_for_python
 
 
@@ -90,7 +91,8 @@ def verify_npm_artifact(artifact_dir: Path, npm_version: str) -> Path:
 
     try:
         with tarfile.open(resolved, mode="r:gz") as package:
-            members = [member for member in package.getmembers() if member.name == "package/package.json"]
+            all_members = validate_tar_members(package.getmembers())
+            members = [member for member in all_members if member.name == "package/package.json"]
             _require(len(members) == 1, "npm artifact must contain one package/package.json")
             member = members[0]
             _require(member.isfile(), "package/package.json must be a regular file")
@@ -98,7 +100,12 @@ def verify_npm_artifact(artifact_dir: Path, npm_version: str) -> Path:
             package_file = package.extractfile(member)
             _require(package_file is not None, "package/package.json could not be read")
             metadata = json.loads(package_file.read().decode("utf-8"))
-    except (tarfile.TarError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (
+        tarfile.TarError,
+        ArchiveSafetyError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ) as exc:
         raise ReleaseVerificationError(f"invalid npm artifact: {exc}") from exc
 
     _require(isinstance(metadata, dict), "npm package metadata must be an object")

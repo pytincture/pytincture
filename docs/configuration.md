@@ -191,6 +191,13 @@ The contract test checks every row in this table against the dataclass model.
 | `appcode_build_max_concurrency` | `APPCODE_BUILD_MAX_CONCURRENCY` | Concurrent archive builds per worker. |
 | `appcode_build_queue_timeout_seconds` | `APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS` | Maximum archive build admission wait. |
 | `dev_wheel_version` | `PYTINCTURE_DEV_WHEEL_VERSION` | Explicit development widget-wheel fallback version. |
+| `public_widget_wheel_max_bytes` | `PYTINCTURE_WIDGET_WHEEL_MAX_BYTES` | Maximum bytes in one backend-served widget wheel. |
+| `public_widget_wheel_digest_cache_entries` | `PYTINCTURE_WIDGET_WHEEL_DIGEST_CACHE_ENTRIES` | Per-worker verified widget-wheel digest cache entries. |
+| `public_widget_wheel_max_concurrency` | `PYTINCTURE_WIDGET_WHEEL_MAX_CONCURRENCY` | Concurrent backend widget-wheel responses per worker. |
+| `public_widget_wheel_max_queue` | `PYTINCTURE_WIDGET_WHEEL_MAX_QUEUE` | Maximum queued backend widget-wheel responses per worker. |
+| `public_widget_wheel_queue_timeout_seconds` | `PYTINCTURE_WIDGET_WHEEL_QUEUE_TIMEOUT_SECONDS` | Maximum widget-wheel response admission wait. |
+| `public_widget_wheel_rate_limit_attempts` | `PYTINCTURE_WIDGET_WHEEL_RATE_LIMIT_ATTEMPTS` | Widget-wheel requests allowed per peer/application window and worker. |
+| `public_widget_wheel_rate_limit_window_seconds` | `PYTINCTURE_WIDGET_WHEEL_RATE_LIMIT_WINDOW_SECONDS` | Widget-wheel request rate-limit window. |
 | `widget_trust_policy` | `PYTINCTURE_WIDGET_TRUST_POLICY` | Optional deployment-owned widget distribution/version/asset-hash policy JSON or path. |
 | `remote_store_timeout_seconds` | `REMOTE_STORE_TIMEOUT_SECONDS` | Optional remote-store HTTP deadline. |
 | `remote_store_failure_threshold` | `REMOTE_STORE_FAILURE_THRESHOLD` | Failures before opening the store circuit. |
@@ -259,7 +266,7 @@ come from the deployment secret manager rather than committed files.
 | `SAML_ROLE_ATTRIBUTE_KEYS` | Candidate assertion attributes containing roles. |
 | `SAML_SP_ASSERTION_CONSUMER_SERVICE_URL` | Service-provider ACS URL/template. |
 | `SAML_SP_ENTITY_ID` | Service-provider entity ID/template. |
-| `SAML_SP_PRIVATE_KEY` | PEM service-provider signing/decryption key. |
+| `SAML_SP_PRIVATE_KEY` | PEM service-provider key; encrypted assertions are currently rejected before toolkit processing. |
 | `SAML_SP_X509_CERT` | PEM service-provider certificate. |
 | `SECRET_KEY` | Legacy fallback for `SAML_SECRET_KEY`; migrate to the typed setting. |
 

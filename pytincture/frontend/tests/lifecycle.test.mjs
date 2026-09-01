@@ -5,6 +5,7 @@ await import("../pytincture.js");
 
 const {
     BUILTIN_WIDGET_ASSET_MANIFESTS,
+    BUILTIN_WIDGET_WHEEL_LOCKS,
     DEFAULT_RUNTIME_OPERATIONS,
     LIFECYCLE_STAGES,
     PytinctureLifecycleError,
@@ -124,7 +125,7 @@ test("reports package-install failures", async () => {
 });
 
 test("browser package requirements must be exact or hash-pinned wheels", () => {
-    assert.doesNotThrow(() => validatePackageRequirement("dhxpyt==0.9.16"));
+    assert.doesNotThrow(() => validatePackageRequirement("dhxpyt==0.9.18"));
     assert.doesNotThrow(() => validatePackageRequirement(
         "https://widgets.example/widget-1.0-py3-none-any.whl#sha256=" + "a".repeat(64),
         { allowPackagePin: false },
@@ -134,6 +135,25 @@ test("browser package requirements must be exact or hash-pinned wheels", () => {
         () => validatePackageRequirement("https://widgets.example/widget.whl"),
         /#sha256/,
     );
+});
+
+test("the built-in dhxpyt release verifies the complete PyPI wheel", async () => {
+    const calls = [];
+    const pyodide = fakePyodide();
+    pyodide.runPythonAsync = async source => calls.push(source);
+
+    const installedSource = await DEFAULT_RUNTIME_OPERATIONS.installWidgetset(pyodide, {
+        widgetlib: "dhxpyt==0.9.18",
+        widgetSource: null,
+        requestUuid: "backend-instance",
+    });
+
+    assert.equal(installedSource, BUILTIN_WIDGET_WHEEL_LOCKS["dhxpyt==0.9.18"]);
+    assert.match(installedSource, /^https:\/\/files\.pythonhosted\.org\//);
+    assert.match(installedSource, /#sha256=[a-f0-9]{64}$/);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].includes("backend-instance"), false);
+    assert.match(calls[0], /deps=False/);
 });
 
 test("explicit widget sources require caller-provided wheel integrity", () => {
@@ -165,17 +185,17 @@ test("widget asset loader is manifest-only and verifies ownership and hashes", a
         generatedPython = source;
         return JSON.stringify({
             widgetPackage: "dhxpyt",
-            widgetVersion: "0.9.16",
+            widgetVersion: "0.9.18",
             javascriptAssets: 9,
             cssAssets: 4,
-            assetManifest: "Pytincture compatibility lock dhxpyt@0.9.16",
+            assetManifest: "Pytincture compatibility lock dhxpyt@0.9.18",
             dhxAvailable: true,
         });
     };
     const report = await DEFAULT_RUNTIME_OPERATIONS.loadWidgetsetAssets(
         pyodide,
-        normalizeConfig({ application: "sample", widgetlib: "dhxpyt==0.9.16" }),
-        "dhxpyt==0.9.16",
+        normalizeConfig({ application: "sample", widgetlib: "dhxpyt==0.9.18" }),
+        "dhxpyt==0.9.18",
     );
 
     assert.equal(report.javascriptAssets, 9);
@@ -183,7 +203,7 @@ test("widget asset loader is manifest-only and verifies ownership and hashes", a
     assert.match(generatedPython, /asset_path not in owned_files/);
     assert.match(generatedPython, /Widget asset integrity check failed/);
     assert.match(generatedPython, /hashlib\.sha256/);
-    assert.equal(BUILTIN_WIDGET_ASSET_MANIFESTS["dhxpyt@0.9.16"].assets.length, 13);
+    assert.equal(BUILTIN_WIDGET_ASSET_MANIFESTS["dhxpyt@0.9.18"].assets.length, 13);
 });
 
 test("backend fallback locks the wheel hash and disables transitive installs", async () => {
@@ -212,6 +232,44 @@ test("backend fallback locks the wheel hash and disables transitive installs", a
         assert.match(source, /#sha256=a{64}$/);
         assert.match(calls.at(-1), /sha256=a{64}/);
         assert.match(calls.at(-1), /deps=False/);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("backend wheel probe uses metadata first and hashes only an uncached wheel", async () => {
+    const originalFetch = globalThis.fetch;
+    const methods = [];
+    const pyodide = fakePyodide();
+    pyodide.runPythonAsync = async source => {
+        if (source.includes('"custom-widgets==1.0.0"')) {
+            throw new Error("package index unavailable");
+        }
+    };
+    globalThis.fetch = async (_url, options = {}) => {
+        const method = options.method || "GET";
+        methods.push(method);
+        return {
+            ok: true,
+            headers: {
+                get: name => name === "x-pytincture-sha256" && method === "GET"
+                    ? "b".repeat(64)
+                    : null,
+            },
+            body: { cancel: async () => undefined },
+        };
+    };
+    try {
+        const source = await DEFAULT_RUNTIME_OPERATIONS.installWidgetset(pyodide, {
+            application: "sample",
+            widgetlib: "custom-widgets==1.0.0",
+            widgetSource: null,
+            devWidgetHost: "https://widgets.example",
+            devWheelVersion: "99.99.99",
+            requestUuid: "instance-id",
+        });
+        assert.deepEqual(methods, ["HEAD", "GET"]);
+        assert.match(source, /#sha256=b{64}$/);
     } finally {
         globalThis.fetch = originalFetch;
     }
@@ -381,6 +439,16 @@ test("external browser assets fail closed without explicit SRI", () => {
         });
         assert.throws(
             () => DEFAULT_RUNTIME_OPERATIONS.preflightConfig(externalPyodide),
+            /allowUnverifiedExternalPyodide=true/,
+        );
+
+        const optedInWithoutIntegrity = normalizeConfig({
+            mode: "inline",
+            pyodideBaseUrl: "https://cdn.example.test/pyodide/0.29.3/full/",
+            allowUnverifiedExternalPyodide: true,
+        });
+        assert.throws(
+            () => DEFAULT_RUNTIME_OPERATIONS.preflightConfig(optedInWithoutIntegrity),
             /External Pyodide requires pyodideScriptIntegrity/,
         );
 
@@ -428,6 +496,7 @@ test("external script and stylesheet loaders apply SRI with anonymous CORS", asy
         const config = normalizeConfig({
             mode: "inline",
             pyodideBaseUrl: "https://cdn.example.test/pyodide/0.29.3/full/",
+            allowUnverifiedExternalPyodide: true,
             pyodideScriptIntegrity: {
                 "pyodide.js": integrity,
                 "pyodide.asm.js": integrity,

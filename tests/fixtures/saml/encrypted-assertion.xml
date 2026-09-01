@@ -1,0 +1,12 @@
+<samlp:Response
+    xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+    xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+    xmlns:xenc="http://www.w3.org/2001/04/xmlenc#">
+  <saml:EncryptedAssertion>
+    <xenc:EncryptedData Type="http://www.w3.org/2001/04/xmlenc#Element">
+      <xenc:CipherData>
+        <xenc:CipherValue>AA==</xenc:CipherValue>
+      </xenc:CipherData>
+    </xenc:EncryptedData>
+  </saml:EncryptedAssertion>
+</samlp:Response>

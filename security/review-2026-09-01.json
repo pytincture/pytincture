@@ -1,0 +1,278 @@
+{
+  "schema_version": 1,
+  "reviewed_commit": "a6608412b8a8f3a71ee98b8900bf31a7a91eeb2b",
+  "recorded_on": "2026-09-01",
+  "status": "remediated",
+  "summary": "All five High and seven Medium findings are accepted for remediation. None requires changing Pytincture's class-level BFF decorator contract or making Redis, process-memory sessions, or sticky routing mandatory.",
+  "external_controls_document": "security/external-controls.json",
+  "validation": {
+    "python_full_suite": "613 passed",
+    "frontend_unit_suite": "32 passed",
+    "packaged_app_browser_matrix": "9 passed, 6 intentionally skipped by browser capability",
+    "repository_quickstarts": "6 passed across Chromium, Firefox, and WebKit",
+    "standalone_python_wheel": "passed in Chromium from a non-editable clean wheel environment",
+    "federated_saml": "passed in Chromium against pinned Keycloak 26.7.2",
+    "independent_release_rebuilds": "two clean frozen builds produced byte-identical wheel, sdist, and npm artifacts",
+    "dhxpyt_security_suite": "4 Python contract tests and 2 Chromium browser tests passed before 0.9.18 publication"
+  },
+  "architecture_constraints": {
+    "class_level_bff_export_preserved": true,
+    "pluggable_widgetsets_preserved": true,
+    "stateless_browser_sessions_preserved": true,
+    "redis_required": false,
+    "process_memory_sessions_required": false,
+    "sticky_routing_required": false,
+    "untrusted_assistant_and_record_data_is_browser_code": false,
+    "isolated_process_ipc_may_deserialize_executable_objects": false
+  },
+  "findings": [
+    {
+      "id": "REVIEW-2026-09-01-H1",
+      "severity": "high",
+      "status": "remediated",
+      "issue": "https://github.com/pytincture/pytincture/issues/264",
+      "title": "Automatic assistant-message DOM XSS",
+      "disposition": "remediate in dhxpyt and pin the complete patched wheel in Pytincture",
+      "potential_user_breakage": true,
+      "compatibility_note": "Artifact titles and identifiers now render as text; applications relying on raw HTML there must use an explicit sanitized rich-content path. Normal chat and BFF use is unchanged.",
+      "implementation": [
+        "dhxpyt 0.9.18",
+        "security/widget-wheel-locks.json",
+        "pytincture/frontend/pytincture.js"
+      ],
+      "regression_tests": [
+        "dhxpyt/tests/security-boundaries.spec.mjs::assistant messages remain inert",
+        "pytincture/frontend/tests/lifecycle.test.mjs::the built-in dhxpyt release verifies the complete PyPI wheel"
+      ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-H2",
+      "severity": "high",
+      "status": "remediated",
+      "issue": "https://github.com/pytincture/pytincture/issues/265",
+      "title": "Artifact preview escapes iframe isolation",
+      "disposition": "isolate untrusted previews and disable automatic model-supplied Python execution",
+      "potential_user_breakage": true,
+      "compatibility_note": "Same-origin interactive scripts, parent-DOM access, network-capable previews, and automatic Python execution no longer work. Plain text, code, and passive media previews remain supported.",
+      "implementation": [
+        "dhxpyt 0.9.18",
+        "security/widget-wheel-locks.json",
+        "pytincture/frontend/pytincture.js"
+      ],
+      "regression_tests": [
+        "dhxpyt/tests/security-boundaries.spec.mjs::artifact previews remain isolated",
+        "pytincture/frontend/tests/lifecycle.test.mjs::widget asset loader is manifest-only and verifies ownership and hashes"
+      ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-H3",
+      "severity": "high",
+      "status": "remediated",
+      "issue": "https://github.com/pytincture/pytincture/issues/266",
+      "title": "Ordinary widget data reaches HTML sinks",
+      "disposition": "treat ordinary values as text and separate explicit sanitized rich-content APIs",
+      "potential_user_breakage": true,
+      "compatibility_note": "Markup inserted as ordinary Grid, Listbox, Combobox, CardFlow, or CardPanel data is escaped. Sanitized rich-content options and trusted developer-supplied DOM templates remain explicit APIs.",
+      "implementation": [
+        "dhxpyt 0.9.18",
+        "security/widget-wheel-locks.json",
+        "pytincture/frontend/pytincture.js"
+      ],
+      "regression_tests": [
+        "dhxpyt/tests/test_security_defaults.py",
+        "dhxpyt/tests/security-boundaries.spec.mjs::ordinary widget data remains inert"
+      ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-H4",
+      "severity": "high",
+      "status": "remediated",
+      "issue": "https://github.com/pytincture/pytincture/issues/267",
+      "title": "Encrypted SAML assertion bypasses transform preflight",
+      "disposition": "reject encrypted assertions until transform validation is guaranteed before xmlsec signature processing",
+      "potential_user_breakage": true,
+      "compatibility_note": "Deployments using encrypted assertions must temporarily configure signed plaintext assertions. Other authentication methods, sessions, and BFFs are unchanged.",
+      "implementation": [
+        "pytincture/backend/saml.py",
+        "docs/authentication.md",
+        "security/saml-transform-mitigation.json"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_saml_response_transform_guard_accepts_only_bounded_safe_algorithms",
+        "tests/test_app.py::test_saml_acs_rejects_encrypted_assertions_before_toolkit"
+      ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-H5",
+      "severity": "high",
+      "status": "remediated",
+      "issue": "https://github.com/pytincture/pytincture/issues/268",
+      "title": "Pickle IPC defeats isolated BFF process boundary",
+      "disposition": "replace pickle with bounded non-executable byte messages",
+      "potential_user_breakage": false,
+      "compatibility_note": "Supported JSON-compatible BFF results remain unchanged; arbitrary pickled results were never part of the public contract.",
+      "implementation": [
+        "pytincture/backend/execution.py",
+        "docs/backend-architecture.md",
+        "security/accepted-architecture.md"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_isolated_process_never_unpickles_child_controlled_messages",
+        "tests/test_backend_modules.py::test_isolated_process_rejects_malformed_child_messages"
+      ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-M1",
+      "severity": "medium",
+      "status": "remediated",
+      "issue": "https://github.com/pytincture/pytincture/issues/269",
+      "title": "Timed-out synchronous streams leave orphan threads",
+      "disposition": "keep work admitted until completion or run it in a bounded killable executor",
+      "potential_user_breakage": true,
+      "compatibility_note": "Indefinitely blocking synchronous iterators retain one configured admission slot until they exit; finite iterators and cooperative async streams remain supported without API changes.",
+      "implementation": [
+        "pytincture/backend/streaming.py",
+        "docs/contracts/bff-v1.md",
+        "docs/backend-architecture.md"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_timed_out_sync_stream_retains_admission_until_worker_exits",
+        "tests/test_backend_modules.py::test_disconnected_sync_stream_retains_admission_until_worker_exits"
+      ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-M2",
+      "severity": "medium",
+      "status": "remediated",
+      "issue": "https://github.com/pytincture/pytincture/issues/270",
+      "title": "Public wheel requests repeatedly hash entire files",
+      "disposition": "cache verified digests, bound wheel size and admission, and support conditional requests",
+      "potential_user_breakage": true,
+      "compatibility_note": "Backend wheel fallback order and URLs remain unchanged. Wheels above the new 64 MiB default require an explicit deployment limit increase, and excessive callers can receive 429 or 503 with Retry-After.",
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/backend/safe_paths.py",
+        "pytincture/configuration.py",
+        "pytincture/frontend/pytincture.js"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not",
+        "tests/test_app.py::test_widget_wheel_serving_enforces_size_rate_and_admission_limits",
+        "pytincture/frontend/tests/lifecycle.test.mjs::backend wheel probe uses metadata first and hashes only an uncached wheel"
+      ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-M3",
+      "severity": "medium",
+      "status": "remediated",
+      "issue": "https://github.com/pytincture/pytincture/issues/271",
+      "title": "Weak artifact messaging and unbounded plaintext chat persistence",
+      "disposition": "capability-bind messages and bound/minimize persistence",
+      "potential_user_breakage": true,
+      "compatibility_note": "Oversized histories and logs are truncated or evicted, direct postMessage integrations must use the bound preview channel, and artifact-console text is excluded from model requests unless explicitly enabled. Existing applications that supplied storageKey retain local persistence; applications without an explicit persistence choice no longer store chat content.",
+      "implementation": [
+        "dhxpyt 0.9.18",
+        "security/widget-wheel-locks.json",
+        "pytincture/frontend/pytincture.js"
+      ],
+      "regression_tests": [
+        "dhxpyt/tests/test_security_contract.py",
+        "dhxpyt/tests/security_browser.spec.mjs::chat bounds persistence and model context",
+        "pytincture/frontend/tests/lifecycle.test.mjs::the built-in dhxpyt release verifies the complete PyPI wheel"
+      ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-M4",
+      "severity": "medium",
+      "status": "remediated",
+      "issue": "https://github.com/pytincture/pytincture/issues/272",
+      "title": "Synchronous BFF transport and replay refill races",
+      "disposition": "add deadline-bounded async transport and single-flight refills without masking completed mutations",
+      "potential_user_breakage": true,
+      "compatibility_note": "Existing synchronous generated methods remain throughout 1.x and emit a normally hidden deprecation warning. Each receives an additive method_async companion; new code should await it for bounded non-blocking transport. The class-level decorator, backend method, stateless sessions, and no-Redis deployment model are unchanged.",
+      "implementation": [
+        "pytincture/dataclass.py",
+        "docs/bff-guide.md",
+        "docs/contracts/bff-v1.md",
+        "docs/migrations/0.10-to-1.0.md"
+      ],
+      "regression_tests": [
+        "tests/test_dataclass.py::test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_flight",
+        "tests/test_dataclass.py::test_generate_stub_classes_returns_stub"
+      ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-M5",
+      "severity": "medium",
+      "status": "remediated",
+      "issue": "https://github.com/pytincture/pytincture/issues/273",
+      "title": "Proxy example and edge auditor can certify spoofable forwarding",
+      "disposition": "replace forwarded client IPs and audit/probe the exact target vhost",
+      "potential_user_breakage": true,
+      "compatibility_note": "Unsafe proxy configurations that previously passed qualification now fail until corrected, and old production-edge evidence must be regenerated with the expanded schema. Correctly configured proxies and application APIs are unchanged; the read-only client-peer probe is stateless, bounded, and no-store.",
+      "implementation": [
+        "scripts/audit_production_edge.py",
+        "contracts/production-edge-evidence-v1.schema.json",
+        "docs/production-deployment.md",
+        "pytincture/backend/app.py"
+      ],
+      "regression_tests": [
+        "tests/test_production_edge_audit.py::test_proxy_audit_ignores_safe_directives_in_an_unrelated_vhost",
+        "tests/test_production_edge_audit.py::test_proxy_audit_ignores_safe_directives_in_an_unrelated_location",
+        "tests/test_production_edge_audit.py::test_live_edge_evidence_rejects_a_forged_forwarded_client_ip",
+        "tests/test_app.py::test_health_and_readiness_endpoints"
+      ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-M6",
+      "severity": "medium",
+      "status": "remediated",
+      "issue": "https://github.com/pytincture/pytincture/issues/274",
+      "title": "Release validation ignores tar links and special members",
+      "disposition": "reject every non-directory and non-regular archive member",
+      "potential_user_breakage": false,
+      "compatibility_note": "Normal Pytincture artifacts are unaffected. Nonstandard custom archives containing links, devices, FIFOs, malformed paths, or duplicate normalized names now fail closed during normalization, inspection, and retained-artifact publication verification.",
+      "implementation": [
+        "scripts/archive_safety.py",
+        "scripts/inspect_release_artifacts.py",
+        "scripts/verify_python_release.py",
+        "scripts/verify_npm_release.py",
+        "scripts/normalize_sdist.py",
+        "docs/release-artifacts.md"
+      ],
+      "regression_tests": [
+        "tests/test_release_security.py::test_release_tar_validation_rejects_links_devices_and_fifos",
+        "tests/test_release_security.py::test_release_tar_validation_rejects_duplicates_escapes_and_malformed_names",
+        "tests/test_release_security.py::test_release_wheel_validation_rejects_symlink_duplicate_and_escape_members",
+        "tests/test_python_release_provenance.py::test_python_artifacts_reject_special_members_inside_wheel_and_sdist",
+        "tests/test_npm_release_provenance.py::test_npm_artifact_rejects_special_archive_members"
+      ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-M7",
+      "severity": "medium",
+      "status": "remediated",
+      "issue": "https://github.com/pytincture/pytincture/issues/275",
+      "title": "Dependency and repository integrity gaps",
+      "disposition": "require secret scan, whole-wheel verification, explicit external-runtime trust, lifecycle minimization, and independent clean rebuilds",
+      "potential_user_breakage": true,
+      "compatibility_note": "Runtime and BFF APIs are unchanged. Cross-origin Pyodide now requires the explicitly unsafe development/demo opt-in plus bootstrap SRI; production keeps the bundled self-hosted verified default. CI dependency installs disable lifecycle scripts, so a future dependency that truly needs one requires a reviewed explicit build step.",
+      "implementation": [
+        "contracts/repository-policy-v1.json",
+        "security/widget-wheel-locks.json",
+        "security/external-controls.json",
+        "pytincture/frontend/pytincture.js",
+        ".github/workflows/ci.yml",
+        "docs/standalone-mode.md",
+        "docs/release-artifacts.md"
+      ],
+      "regression_tests": [
+        "tests/test_repository_policy.py::test_release_repository_policy_covers_every_publish_dependency",
+        "tests/test_release_security.py::test_ci_uses_frozen_python_inputs_and_release_security_gates",
+        "tests/test_release_security.py::test_release_reproducibility_uses_an_independent_clean_build",
+        "tests/test_release_security.py::test_external_security_controls_are_explicit_and_not_runtime_state",
+        "pytincture/frontend/tests/lifecycle.test.mjs::external browser assets fail closed without explicit SRI"
+      ]
+    }
+  ]
+}

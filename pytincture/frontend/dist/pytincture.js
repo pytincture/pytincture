@@ -3,19 +3,22 @@ var PytinctureRuntime = (() => {
   // pytincture.js
   var FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
   var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc3";
+  var BUILTIN_WIDGET_WHEEL_LOCKS = Object.freeze({
+    "dhxpyt==0.9.18": "https://files.pythonhosted.org/packages/0c/e7/b48e045156c7b4bf20778597991d7dfe591fd46ada5267b747e2d5977244/dhxpyt-0.9.18-py3-none-any.whl#sha256=acd8db34547c6b61c83a01958e9545ee724564859e5bcb53713ae3c872234fbe"
+  });
   var BUILTIN_WIDGET_ASSET_MANIFESTS = Object.freeze({
-    "dhxpyt@0.9.16": {
+    "dhxpyt@0.9.18": {
       schema: 1,
       package: "dhxpyt",
-      version: "0.9.16",
+      version: "0.9.18",
       assets: [
         { path: "dhxpyt/dhxsrc/suite.css", type: "css", sha256: "bbfb8928fce1a99acf5a6f610c99625eea8b31e0f62b4cb5b31b6ccb684a1719" },
         { path: "dhxpyt/dhxsrc/fonts/inter.css", type: "css", sha256: "868d674eb57814ea39415af15132b4077ccdc081b1c8e15cf31e652e12bf3cc9" },
         { path: "dhxpyt/dhxsrc/dhx_custom.css", type: "css", sha256: "43091047578499088323dc062805c71327c273c2840512b7700f9ed10c9c6a61" },
-        { path: "dhxpyt/dhxsrc/suite.js", type: "javascript", sha256: "f727f02e2a7bf163c920782bfc80927cff344a8cb78f0ae2d01b4a74252ee6b8" },
-        { path: "dhxpyt/dhxsrc/cardflow.js", type: "javascript", sha256: "4e445672ae0d5f296a3cd52b2a2e64ae7cc8b23aa08949c90e06f577bbc65cbc" },
-        { path: "dhxpyt/dhxsrc/cardpanel.js", type: "javascript", sha256: "511461c150a9e1c55e06b054bdaba15610ba3438726c6c23be0536a218dc606f" },
-        { path: "dhxpyt/dhxsrc/chat.js", type: "javascript", sha256: "99cd11cf5eb189b63880041ef1fe5e0f73153a9da0df839595e136bdf6fbfd67" },
+        { path: "dhxpyt/dhxsrc/suite.js", type: "javascript", sha256: "e4d99a233660aae3afeb62d2aba546269bf5fe59ed4489481848ac0de53f9d2c" },
+        { path: "dhxpyt/dhxsrc/cardflow.js", type: "javascript", sha256: "a589ff5e7adb642b70c06b018f06789bff8da4c41520915830dd4c7aefc8658b" },
+        { path: "dhxpyt/dhxsrc/cardpanel.js", type: "javascript", sha256: "25e1befe91f86b1de5f738b934f6887c094b1c35d1a634a58c3cdb98c0e41715" },
+        { path: "dhxpyt/dhxsrc/chat.js", type: "javascript", sha256: "fa7420e2955db78d62317fa566209fefbf90eba042894bff6841754f32223c10" },
         { path: "dhxpyt/dhxsrc/kanban.css", type: "css", sha256: "155a5ea4b5589b1fa0c2b51ea7c9007e8939b1484d037f7ea04eaea9a03d1abb" },
         { path: "dhxpyt/dhxsrc/kanban.js", type: "javascript", sha256: "186950aa79b1a09525b78c808a6a62e4cfc052e1de6afe834eab64cbb94b9acb" },
         { path: "dhxpyt/dhxsrc/kanban_board.js", type: "javascript", sha256: "053a4d55b2c43171ce41b4888b0a89f123afbfe49ef5adbf540491b156626c55" },
@@ -28,7 +31,7 @@ var PytinctureRuntime = (() => {
   var DEFAULT_CONFIG = {
     application: null,
     entrypoint: null,
-    widgetlib: "dhxpyt==0.9.16",
+    widgetlib: "dhxpyt==0.9.18",
     widgetSource: null,
     widgetAssetManifest: null,
     requestUuid: null,
@@ -36,6 +39,7 @@ var PytinctureRuntime = (() => {
     // 'package', 'inline', or 'auto'
     pyodideBaseUrl: "./frontend/pyodide/0.29.3/full/",
     pyodideScriptIntegrity: null,
+    allowUnverifiedExternalPyodide: false,
     loadMaterialIcons: true,
     materialIconsUrl: "./frontend/vendor/materialdesignicons/materialdesignicons.css",
     materialIconsIntegrity: null,
@@ -418,6 +422,11 @@ var PytinctureRuntime = (() => {
       throw new Error("pyodideBaseUrl is required.");
     }
     if (isExternalAssetUrl(config.pyodideBaseUrl)) {
+      if (config.allowUnverifiedExternalPyodide !== true) {
+        throw new Error(
+          "External Pyodide requires allowUnverifiedExternalPyodide=true; self-host the verified runtime for production."
+        );
+      }
       for (const filename of ["pyodide.js", "pyodide.asm.js"]) {
         if (!isValidSubresourceIntegrity((_a = config.pyodideScriptIntegrity) == null ? void 0 : _a[filename])) {
           throw new Error(
@@ -861,10 +870,10 @@ await micropip.install(${libLiteral}, deps=False)
     }
   }
   async function probeBackendWheel(url) {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f, _g;
     let response;
     try {
-      response = await fetch(url);
+      response = await fetch(url, { method: "HEAD" });
     } catch (err) {
       console.warn(`Failed to check URL: ${url}`, err);
       return null;
@@ -876,9 +885,25 @@ await micropip.install(${libLiteral}, deps=False)
       }
       return null;
     }
-    const sha256 = ((_c = (_b = response.headers) == null ? void 0 : _b.get) == null ? void 0 : _c.call(_b, "x-pytincture-sha256")) || "";
+    let sha256 = ((_c = (_b = response.headers) == null ? void 0 : _b.get) == null ? void 0 : _c.call(_b, "x-pytincture-sha256")) || "";
+    if (!/^[a-f0-9]{64}$/i.test(sha256)) {
+      try {
+        response = await fetch(url);
+      } catch (err) {
+        console.warn(`Failed to check URL: ${url}`, err);
+        return null;
+      }
+      if (!response.ok) {
+        try {
+          await ((_d = response.body) == null ? void 0 : _d.cancel());
+        } catch (_error) {
+        }
+        return null;
+      }
+      sha256 = ((_f = (_e = response.headers) == null ? void 0 : _e.get) == null ? void 0 : _f.call(_e, "x-pytincture-sha256")) || "";
+    }
     try {
-      await ((_d = response.body) == null ? void 0 : _d.cancel());
+      await ((_g = response.body) == null ? void 0 : _g.cancel());
     } catch (_error) {
     }
     if (!/^[a-f0-9]{64}$/i.test(sha256)) {
@@ -1025,8 +1050,9 @@ await micropip.install(${sourceLiteral}, deps=False)
         label: "Widgetset",
         allowPackagePin: !config.widgetSource
       });
-      await installWidgetsetSource(pyodide, primarySource);
-      installedSource = primarySource;
+      const verifiedPrimarySource = config.widgetSource ? primarySource : BUILTIN_WIDGET_WHEEL_LOCKS[primarySource] || primarySource;
+      await installWidgetsetSource(pyodide, verifiedPrimarySource);
+      installedSource = verifiedPrimarySource;
     } catch (error) {
       lastInstallError = error;
       if (config.widgetSource) {
@@ -1466,6 +1492,7 @@ json.dumps({
   }
   globalThis.__pytinctureTesting = Object.freeze({
     BUILTIN_WIDGET_ASSET_MANIFESTS,
+    BUILTIN_WIDGET_WHEEL_LOCKS,
     DEFAULT_RUNTIME_OPERATIONS,
     LIFECYCLE_STAGES,
     PytinctureLifecycleError,

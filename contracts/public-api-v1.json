@@ -36,6 +36,7 @@
       "runTinctureApp"
     ],
     "run_tincture_app_config": [
+      "allowUnverifiedExternalPyodide",
       "application",
       "devWheelVersion",
       "devWidgetHost",

@@ -49,6 +49,15 @@ def test_release_repository_policy_covers_every_publish_dependency():
             assert context in workflow
 
 
+def test_every_repository_policy_profile_requires_secret_scan():
+    policy = contract()
+
+    assert all(
+        "Repository secret scan" in profile["required_checks"]
+        for profile in policy["profiles"].values()
+    )
+
+
 def test_repository_policy_accepts_the_complete_release_profile():
     assert validate_policy(protected_policy(), contract(), "release") == []
 

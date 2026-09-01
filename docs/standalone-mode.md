@@ -33,7 +33,7 @@ the runtime:
   window.pytinctureAutoStartConfig = {
     mode: "inline",
     entrypoint: "MyApp",
-    widgetlib: "dhxpyt==0.9.16",
+    widgetlib: "dhxpyt==0.9.18",
     onLifecycleEvent: event => console.debug(event.stage, event.type)
   };
 </script>
@@ -65,7 +65,10 @@ this keeps the browser dependency set reviewable and reproducible.
 Widgetsets may remain fully pluggable. A widget wheel that executes JavaScript
 or loads CSS includes a hashed `pytincture-assets.json`; see
 [widgetset packaging](widgetset-packaging.md). Pytincture never scans unrelated
-or transitive packages for executable assets.
+or transitive packages for executable assets. The bundled `dhxpyt==0.9.18`
+compatibility release additionally has its complete PyPI wheel locked by
+Pytincture. Other widgetsets may use an exact package pin or an
+administrator-owned hash-pinned `widgetSource`.
 
 ## Explicit CDN convenience mode
 
@@ -78,8 +81,9 @@ from the release integrity manifest into trusted HTML/configuration:
   window.pytinctureAutoStartConfig = {
     mode: "inline",
     entrypoint: "MyApp",
-    widgetlib: "dhxpyt==0.9.16",
+    widgetlib: "dhxpyt==0.9.18",
     pyodideBaseUrl: "https://cdn.example/pyodide/0.29.3/full/",
+    allowUnverifiedExternalPyodide: true,
     pyodideScriptIntegrity: {
       "pyodide.js": "sha384-<trusted-manifest-value>",
       "pyodide.asm.js": "sha384-<trusted-manifest-value>"
@@ -94,12 +98,15 @@ from the release integrity manifest into trusted HTML/configuration:
   crossorigin="anonymous"></script>
 ```
 
-External Pyodide and icon URLs fail preflight unless their SRI values are
-supplied. The runtime applies anonymous CORS to those script/stylesheet loads.
-WASM, the standard library, and Pyodide metadata are loaded internally by
-Pyodide, so verify those bytes from the signed/reviewed manifest before
-deployment or self-host them. A manifest fetched from the same potentially
-compromised CDN is not an independent trust root.
+External Pyodide fails preflight unless the deliberately named
+`allowUnverifiedExternalPyodide: true` opt-in and bootstrap-script SRI values
+are both supplied. This is a controlled demo/development escape hatch, not a
+production recommendation. The runtime applies anonymous CORS to those
+scripts. WASM, the standard library, and Pyodide metadata are loaded internally
+by Pyodide and cannot all receive browser SRI through this integration, so
+production deployments must use Pytincture's self-hosted verified runtime (the
+default). A manifest fetched from the same potentially compromised CDN is not
+an independent trust root.
 
 ## Explicit startup
 
@@ -109,7 +116,7 @@ Set `window.pytinctureAutoStartDisabled = true` before the runtime and call:
 await window.runTinctureApp({
   mode: "inline",
   entrypoint: "MyApp",
-  widgetlib: "dhxpyt==0.9.16"
+  widgetlib: "dhxpyt==0.9.18"
 });
 ```
 

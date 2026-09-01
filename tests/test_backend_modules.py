@@ -36,6 +36,7 @@ from pytincture.backend.diagnostics import (
 )
 from pytincture.backend.execution import (
     IsolatedBFFInvocation,
+    IsolatedExecutionFailed,
     IsolatedExecutionRejected,
     IsolatedExecutionTimeout,
     ProcessIsolatedBFFExecutor,
@@ -80,6 +81,7 @@ from pytincture.backend.streaming import (
     as_streaming_response,
     limited_async_stream,
     limited_sync_stream,
+    limited_thread_stream,
 )
 from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate, CircuitOpen
 from pytincture.backend.widget_trust import (
@@ -198,6 +200,76 @@ class Worker:
     with pytest.raises(BFFResultLimitExceeded):
         executor.execute(
             _isolated_test_invocation(module_path, operation, "large")
+        )
+
+
+def test_isolated_process_never_unpickles_child_controlled_messages(tmp_path):
+    marker_path = tmp_path / "parent-unpickle-proof"
+    module_path = tmp_path / "isolated_pickle_attack.py"
+    module_path.write_text(
+        f'''
+import inspect
+from pathlib import Path
+from pytincture.dataclass import backend_for_frontend
+
+class ParentPayload:
+    def __reduce__(self):
+        return (Path.write_text, (Path({str(marker_path)!r}), "unsafe"))
+
+@backend_for_frontend
+class Worker:
+    def __init__(self, _user): pass
+    def attack(self):
+        frame = inspect.currentframe()
+        while frame is not None:
+            connection = frame.f_locals.get("connection")
+            if connection is not None:
+                connection.send(ParentPayload())
+                return {{"sent": True}}
+            frame = frame.f_back
+        return {{"sent": False}}
+''',
+        encoding="utf-8",
+    )
+    operation = get_bff_manifest(str(module_path))[("Worker", "attack")]
+    executor = ProcessIsolatedBFFExecutor(
+        max_concurrency=1,
+        max_per_user=1,
+        cpu_seconds=2,
+        memory_bytes=64 * 1024 * 1024 * 1024,
+        result_max_bytes=1024,
+        result_max_depth=8,
+        result_max_items=100,
+    )
+
+    with pytest.raises(IsolatedExecutionFailed, match="invalid"):
+        executor.execute(
+            _isolated_test_invocation(module_path, operation, "attack")
+        )
+
+    assert marker_path.exists() is False
+    assert executor.active_users == {}
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        b"not-pytincture",
+        b"PTB1O{\"duplicate\":1,\"duplicate\":2}",
+        b"PTB1ONaN",
+        b"PTB1O{ \"noncanonical\": true }",
+        b"PTB1Funexpected",
+    ],
+)
+def test_isolated_process_rejects_malformed_child_messages(message):
+    from pytincture.backend.execution import _decode_isolated_message
+
+    with pytest.raises(IsolatedExecutionFailed, match="invalid"):
+        _decode_isolated_message(
+            message,
+            result_max_bytes=1024,
+            result_max_depth=8,
+            result_max_items=100,
         )
 
 
@@ -1043,6 +1115,15 @@ def test_saml_response_transform_guard_accepts_only_bounded_safe_algorithms():
             len(disallowed),
         )
 
+    encrypted = (
+        Path(__file__).parent / "fixtures" / "saml" / "encrypted-assertion.xml"
+    ).read_bytes()
+    with pytest.raises(ValueError, match="encrypted SAML assertions"):
+        validate_saml_response_xml(
+            base64.b64encode(encrypted).decode("ascii"),
+            len(encrypted),
+        )
+
 
 @pytest.mark.parametrize(
     ("element", "algorithm", "message"),
@@ -1190,6 +1271,11 @@ def test_saml_mitigation_evidence_matches_the_enforced_runtime():
     assert evidence["upstream_status"] == "open"
     assert evidence["dependency"] == f"python3-saml=={version('python3-saml')}"
     assert evidence["mitigations"]["strict_transform_allowlist"] is True
+    assert evidence["mitigations"]["encrypted_assertions_supported"] is False
+    assert (
+        evidence["mitigations"]["encrypted_assertions_rejected_before_toolkit"]
+        is True
+    )
     assert evidence["mitigations"]["guard_runs_before_toolkit_signature_processing"] is True
     assert evidence["safe_fixture"] == (
         "tests/fixtures/saml/disallowed-xslt-transform.xml"
@@ -1221,6 +1307,53 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     )
     assert evidence["status"] == "passed"
     assert evidence["review_response"] == "accepted"
+    assert evidence["active_review_tracking_document"] == (
+        "security/review-2026-09-01.json"
+    )
+    active_review = json.loads(
+        (root / evidence["active_review_tracking_document"]).read_text()
+    )
+    assert active_review["status"] == "remediated"
+    assert len(active_review["findings"]) == 12
+    statuses = {item["id"]: item["status"] for item in active_review["findings"]}
+    assert statuses["REVIEW-2026-09-01-H1"] == "remediated"
+    assert statuses["REVIEW-2026-09-01-H2"] == "remediated"
+    assert statuses["REVIEW-2026-09-01-H3"] == "remediated"
+    assert statuses["REVIEW-2026-09-01-H4"] == "remediated"
+    assert statuses["REVIEW-2026-09-01-H5"] == "remediated"
+    assert statuses["REVIEW-2026-09-01-M1"] == "remediated"
+    assert statuses["REVIEW-2026-09-01-M2"] == "remediated"
+    assert statuses["REVIEW-2026-09-01-M3"] == "remediated"
+    assert statuses["REVIEW-2026-09-01-M4"] == "remediated"
+    assert statuses["REVIEW-2026-09-01-M5"] == "remediated"
+    assert statuses["REVIEW-2026-09-01-M6"] == "remediated"
+    assert statuses["REVIEW-2026-09-01-M7"] == "remediated"
+    assert list(statuses.values()).count("open") == 0
+    wheel_locks = json.loads(
+        (root / "security" / "widget-wheel-locks.json").read_text()
+    )
+    assert wheel_locks["schema_version"] == 1
+    assert wheel_locks["locks"][0]["requirement"] == "dhxpyt==0.9.18"
+    assert len(wheel_locks["locks"][0]["sha256"]) == 64
+    assert all(
+        item["issue"].startswith("https://github.com/pytincture/")
+        for item in active_review["findings"]
+    )
+    assert (
+        active_review["architecture_constraints"][
+            "class_level_bff_export_preserved"
+        ]
+        is True
+    )
+    assert active_review["architecture_constraints"]["redis_required"] is False
+    external_controls = json.loads(
+        (root / active_review["external_controls_document"]).read_text()
+    )
+    assert external_controls["framework_controls"]["redis_required"] is False
+    assert all(
+        control["framework_cannot_self_attest"] is True
+        for control in external_controls["remaining_external_controls"]
+    )
     dispositions = {item["id"]: item for item in evidence["dispositions"]}
     assert set(dispositions) == {
         "F-01",
@@ -1722,6 +1855,85 @@ def test_async_stream_enforces_item_and_idle_limits():
     assert reasons[-1][0] == "item-limit"
     assert asyncio.run(collect(idle_item(), max_items=2, idle_timeout_seconds=0.001)) == []
     assert reasons[-1] == ("idle-timeout", 0)
+
+
+def test_timed_out_sync_stream_retains_admission_until_worker_exits():
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    finished = asyncio.Event()
+    reasons = []
+
+    def blocking_source():
+        worker_started.set()
+        release_worker.wait(timeout=2)
+        yield "late"
+
+    async def exercise():
+        chunks = [
+            chunk
+            async for chunk in limited_thread_stream(
+                blocking_source(),
+                raw=False,
+                max_seconds=0.01,
+                max_bytes=100,
+                max_items=10,
+                idle_timeout_seconds=1,
+                on_finish=lambda reason, size: (
+                    reasons.append((reason, size)),
+                    finished.set(),
+                ),
+            )
+        ]
+        assert chunks == []
+        assert worker_started.is_set()
+        # This callback releases the request's BFF slot in production. It must
+        # not run while the timed-out thread is still executing.
+        assert reasons == []
+        release_worker.set()
+        await asyncio.wait_for(finished.wait(), timeout=1)
+
+    asyncio.run(exercise())
+    assert reasons == [("timeout", 0)]
+
+
+def test_disconnected_sync_stream_retains_admission_until_worker_exits():
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    finished = asyncio.Event()
+    reasons = []
+
+    def blocking_source():
+        worker_started.set()
+        release_worker.wait(timeout=2)
+        yield "late"
+
+    async def exercise():
+        async def consume():
+            async for _chunk in limited_thread_stream(
+                blocking_source(),
+                raw=False,
+                max_seconds=10,
+                max_bytes=100,
+                max_items=10,
+                idle_timeout_seconds=10,
+                on_finish=lambda reason, size: (
+                    reasons.append((reason, size)),
+                    finished.set(),
+                ),
+            ):
+                pass
+
+        consumer = asyncio.create_task(consume())
+        await asyncio.to_thread(worker_started.wait, 1)
+        consumer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await consumer
+        assert reasons == []
+        release_worker.set()
+        await asyncio.wait_for(finished.wait(), timeout=1)
+
+    asyncio.run(exercise())
+    assert reasons == [("disconnect", 0)]
 
 
 def test_existing_streaming_response_is_wrapped_by_limits():

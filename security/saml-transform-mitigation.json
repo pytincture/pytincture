@@ -9,6 +9,8 @@
   "fixed_release_available": false,
   "mitigations": {
     "strict_transform_allowlist": true,
+    "encrypted_assertions_supported": false,
+    "encrypted_assertions_rejected_before_toolkit": true,
     "dtd_and_entity_declarations_rejected": true,
     "decoded_response_size_limited": true,
     "xml_network_and_entity_resolution_disabled": true,
@@ -16,11 +18,13 @@
     "guard_runs_before_toolkit_signature_processing": true,
     "process_isolation_required": false
   },
-  "process_isolation_rationale": "Unapproved transforms are rejected before xmlsec processing; input allocation and XML parsing are bounded.",
+  "process_isolation_rationale": "Unapproved visible transforms and every encrypted assertion are rejected before xmlsec processing; input allocation and XML parsing are bounded.",
   "safe_fixture": "tests/fixtures/saml/disallowed-xslt-transform.xml",
+  "encrypted_assertion_fixture": "tests/fixtures/saml/encrypted-assertion.xml",
   "regression_tests": [
     "tests/test_backend_modules.py::test_saml_response_transform_guard_accepts_only_bounded_safe_algorithms",
     "tests/test_backend_modules.py::test_saml_response_transform_guard_rejects_unsafe_or_oversized_xml",
-    "tests/test_app.py::test_saml_acs_rejects_disallowed_transforms_before_toolkit_and_rate_limits"
+    "tests/test_app.py::test_saml_acs_rejects_disallowed_transforms_before_toolkit_and_rate_limits",
+    "tests/test_app.py::test_saml_acs_rejects_encrypted_assertions_before_toolkit"
   ]
 }

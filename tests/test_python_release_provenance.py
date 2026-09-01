@@ -29,6 +29,8 @@ def _write_python_artifacts(
     metadata_name: str = "pytincture",
     metadata_version: str = VERSION,
     filename_version: str = VERSION,
+    wheel_extra: zipfile.ZipInfo | None = None,
+    sdist_extra: tarfile.TarInfo | None = None,
 ) -> tuple[Path, Path]:
     wheel = root / f"pytincture-{filename_version}-py3-none-any.whl"
     with zipfile.ZipFile(wheel, mode="w") as archive:
@@ -36,6 +38,8 @@ def _write_python_artifacts(
             f"pytincture-{filename_version}.dist-info/METADATA",
             _metadata(metadata_name, metadata_version),
         )
+        if wheel_extra is not None:
+            archive.writestr(wheel_extra, b"target")
 
     sdist = root / f"pytincture-{filename_version}.tar.gz"
     content = _metadata(metadata_name, metadata_version)
@@ -43,6 +47,8 @@ def _write_python_artifacts(
     member.size = len(content)
     with tarfile.open(sdist, mode="w:gz") as archive:
         archive.addfile(member, io.BytesIO(content))
+        if sdist_extra is not None:
+            archive.addfile(sdist_extra)
 
     manifest = {
         "python_version": VERSION,
@@ -102,4 +108,23 @@ def test_python_artifacts_reject_symlinked_distribution(tmp_path):
     wheel.symlink_to(target.name)
 
     with pytest.raises(ReleaseVerificationError, match="regular file"):
+        verify_python_artifacts(tmp_path, VERSION)
+
+
+def test_python_artifacts_reject_special_members_inside_wheel_and_sdist(tmp_path):
+    wheel_link = zipfile.ZipInfo("pytincture-1.0.0rc2.dist-info/link")
+    wheel_link.external_attr = (0o120777 << 16)
+    _write_python_artifacts(tmp_path, wheel_extra=wheel_link)
+
+    with pytest.raises(ReleaseVerificationError, match="regular file or directory"):
+        verify_python_artifacts(tmp_path, VERSION)
+
+    for path in tmp_path.iterdir():
+        path.unlink()
+    sdist_link = tarfile.TarInfo("pytincture-1.0.0rc2/link")
+    sdist_link.type = tarfile.SYMTYPE
+    sdist_link.linkname = "pytincture-1.0.0rc2/PKG-INFO"
+    _write_python_artifacts(tmp_path, sdist_extra=sdist_link)
+
+    with pytest.raises(ReleaseVerificationError, match="regular file or directory"):
         verify_python_artifacts(tmp_path, VERSION)

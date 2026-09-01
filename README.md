@@ -132,8 +132,8 @@ pip install ".[dev]"
    example: "/{application}"
 - SAML_SP_ENTITY_ID: Optional template for the SP entity ID (supports {application}, {base_url}, {host}); defaults to `/{application}/auth/saml/metadata`.
 - SAML_SP_ASSERTION_CONSUMER_SERVICE_URL: Optional template for the ACS endpoint (supports placeholders like {application}).
-- SAML_SP_X509_CERT: Service Provider certificate in PEM format if signing/encryption is required.
-- SAML_SP_PRIVATE_KEY: Service Provider private key in PEM format matching the SP certificate.
+- SAML_SP_X509_CERT: Service Provider certificate in PEM format. Encrypted assertions are currently rejected before toolkit processing; configure the IdP for signed plaintext assertions.
+- SAML_SP_PRIVATE_KEY: Service Provider private key in PEM format matching the SP certificate. It does not opt the service into encrypted assertions.
 - SAML_IDP_ENTITY_ID: Identity Provider entity ID.
 - SAML_IDP_SSO_URL: Identity Provider SSO URL.
 - SAML_IDP_SLO_URL: Optional Identity Provider SLO URL.
@@ -303,7 +303,7 @@ copied from the trusted release integrity manifest, for example:
 ### Using pytincture.js standalone
 With the runtime script on the page, Pytincture auto-detects any `<script type="text/python">` blocks and runs them once Pyodide is ready. Optional helpers:
 
-- Add `window.pytinctureAutoStartConfig = { widgetlib: "dhxpyt==0.9.16", libsSelector: "#micropip-libs" }` before loading the script to override defaults.
+- Add `window.pytinctureAutoStartConfig = { widgetlib: "dhxpyt==0.9.18", libsSelector: "#micropip-libs" }` before loading the script to override defaults.
 - Set `window.pytinctureAutoStartDisabled = true` if you prefer to call `runTinctureApp({...})` manually.
 - Extra Python wheels can be listed in `<script type="text/json" id="micropip-libs">["faker==37.0.0"]</script>`.
 

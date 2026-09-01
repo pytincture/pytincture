@@ -21,6 +21,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;
     }
 }
 """
@@ -63,6 +64,13 @@ def _passing_fetcher(url, *, headers, timeout, tls_context):
             {"location": "https://app.example.test/healthz"},
             b"",
         )
+    if url == "https://app.example.test/_pytincture/edge-client":
+        assert headers["X-Forwarded-For"] == edge.HOSTILE_FORWARDED_FOR
+        return edge.ProbeResponse(
+            200,
+            {"content-type": "application/json"},
+            b'{"client_host":"203.0.113.19"}',
+        )
     assert url == "https://app.example.test/demo/auth/saml/metadata"
     assert not headers or headers["X-Forwarded-Host"] == edge.HOSTILE_FORWARD_HOST
     return edge.ProbeResponse(
@@ -82,12 +90,16 @@ def test_live_edge_evidence_passes_and_redacts_response_bodies(tmp_path):
     assert all(evidence["checks"].values())
     assert evidence["observations"]["hsts_max_age"] == 63072000
     assert evidence["observations"]["proxy_replacement_checks"] == {
+        "target_vhost": True,
+        "target_location": True,
         "server_name": True,
         "upstream_host_replaced": True,
         "forwarded_host_replaced": True,
         "forwarded_proto_replaced": True,
+        "forwarded_for_replaced": True,
         "caller_forwarded_values_rejected": True,
     }
+    assert evidence["observations"]["client_ip_forgery_rejected"] is True
     assert "private-metadata-marker" not in json.dumps(evidence)
     assert evidence["findings"] == []
 
@@ -130,6 +142,73 @@ def test_live_edge_evidence_fails_closed_on_header_passthrough_and_poisoning(tmp
         "canonical_origin",
         "trusted_proxy_headers",
     }
+
+
+def test_proxy_audit_ignores_safe_directives_in_an_unrelated_vhost(tmp_path):
+    unsafe_target = NGINX_CONFIG.replace(
+        "proxy_set_header X-Forwarded-For $remote_addr;",
+        "proxy_set_header X-Forwarded-For $http_x_forwarded_for;",
+    )
+    unrelated_safe = NGINX_CONFIG.replace(
+        "server_name app.example.test;",
+        "server_name unrelated.example.test;",
+    )
+    args = _args(tmp_path)
+    args.proxy_config.write_text(unsafe_target + unrelated_safe)
+
+    evidence = edge.build_evidence(args, fetcher=_passing_fetcher)
+
+    assert evidence["status"] == "failed"
+    checks = evidence["observations"]["proxy_replacement_checks"]
+    assert checks["target_vhost"] is True
+    assert checks["target_location"] is True
+    assert checks["forwarded_for_replaced"] is False
+    assert checks["caller_forwarded_values_rejected"] is False
+
+
+def test_proxy_audit_ignores_safe_directives_in_an_unrelated_location(tmp_path):
+    unsafe_target = NGINX_CONFIG.replace(
+        "proxy_set_header X-Forwarded-For $remote_addr;",
+        "proxy_set_header X-Forwarded-For $http_x_forwarded_for;",
+    )
+    safe_sibling = NGINX_CONFIG[
+        NGINX_CONFIG.index("    location /") : NGINX_CONFIG.rindex("}")
+    ].replace("location /", "location /unrelated", 1)
+    args = _args(tmp_path)
+    args.proxy_config.write_text(
+        unsafe_target.replace("\n}", f"\n{safe_sibling}}}", 1)
+    )
+
+    checks = edge._nginx_proxy_checks(
+        args.proxy_config.read_text(),
+        "app.example.test",
+        "/demo/auth/saml/metadata",
+        443,
+    )
+
+    assert checks["target_location"] is True
+    assert checks["forwarded_for_replaced"] is False
+    assert checks["caller_forwarded_values_rejected"] is False
+
+
+def test_live_edge_evidence_rejects_a_forged_forwarded_client_ip(tmp_path):
+    def forged_fetcher(url, *, headers, timeout, tls_context):
+        response = _passing_fetcher(
+            url, headers=headers, timeout=timeout, tls_context=tls_context
+        )
+        if url.endswith("/_pytincture/edge-client"):
+            return edge.ProbeResponse(
+                200,
+                {"content-type": "application/json"},
+                json.dumps({"client_host": edge.HOSTILE_FORWARDED_FOR}).encode(),
+            )
+        return response
+
+    evidence = edge.build_evidence(_args(tmp_path), fetcher=forged_fetcher)
+
+    assert evidence["status"] == "failed"
+    assert evidence["checks"]["trusted_proxy_headers"] is False
+    assert evidence["observations"]["client_ip_forgery_rejected"] is False
 
 
 @pytest.mark.parametrize(

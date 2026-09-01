@@ -28,14 +28,14 @@ request, or server failures.
 | Pytincture runtime | Synchronized from `pytincture.__version__` |
 | Pyodide | 0.29.3 browser distribution |
 | Python in Pyodide | 3.13 |
-| dhxpyt | 0.9.16 |
+| dhxpyt | 0.9.18 |
 | Keycloak | 26.7.2, digest pinned in CI |
 | Playwright | 1.62.1 |
 | Browser engines | Playwright 1.62.1 Chromium, Firefox, and WebKit builds |
 
 The backend test environment installs the current checkout. It downloads the
 exact dhxpyt wheel without installing its server-side dependencies. It exposes
-that wheel under an intentionally unpublished `0.9.16+backend` candidate, then
+that wheel under an intentionally unpublished `0.9.18+backend` candidate, then
 forces the browser's initial package-index lookup to fail so the deployed
 backend wheel path is exercised.
 
@@ -44,11 +44,11 @@ backend wheel path is exercised.
 From the repository root:
 
 ```bash
-python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.16
-cp tests/e2e_apps/dhxpyt-0.9.16-py3-none-any.whl \
-  tests/e2e_apps/dhxpyt-0.9.16+backend-py3-none-any.whl
+python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.18
+cp tests/e2e_apps/dhxpyt-0.9.18-py3-none-any.whl \
+  tests/e2e_apps/dhxpyt-0.9.18+backend-py3-none-any.whl
 cd pytincture/frontend
-npm ci
+npm ci --ignore-scripts
 npx playwright install chromium firefox webkit
 npm run test:e2e
 npm run test:examples

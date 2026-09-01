@@ -105,6 +105,13 @@ def validate_saml_response_xml(encoded_response: str, max_decoded_bytes: int) ->
 
     root = _parse_bounded_xml(xml_payload)
 
+    encrypted_assertion_tag = f"{{{SAML_ASSERTION_NAMESPACE}}}EncryptedAssertion"
+    if any(element.tag == encrypted_assertion_tag for element in root.iter()):
+        # python3-saml 1.16 decrypts before signature processing, which would
+        # hide transform algorithms from this preflight. Fail closed until a
+        # toolkit can expose the decrypted tree before xmlsec sees it.
+        raise ValueError("encrypted SAML assertions are not supported")
+
     guarded_elements = {
         f"{{{XMLDSIG_NAMESPACE}}}Transform",
         f"{{{XMLDSIG_NAMESPACE}}}CanonicalizationMethod",

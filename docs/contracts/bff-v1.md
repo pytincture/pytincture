@@ -109,6 +109,13 @@ created. `BFF_RESULT_MAX_BYTES`, `BFF_RESULT_MAX_DEPTH`, and
 `BFF_RESULT_MAX_ITEMS` cap serialized output and structure; an oversized result
 returns `413`. Stream items are likewise bounded before their serialized bytes
 are retained, in addition to the aggregate stream duration/byte/item limits.
+Cooperative async generators are the preferred streaming contract. Legacy
+synchronous iterators run one `next()` at a time in the bounded thread pool.
+Because a Python thread cannot be killed safely, a timed-out or disconnected
+request keeps its BFF admission slot until the outstanding `next()` exits and
+the iterator closes. Repeated abandoned streams therefore cannot exceed the
+configured BFF concurrency, though a permanently blocked iterator can retain
+one slot permanently.
 
 Generated sync, async, and streaming proxies decode only 2xx responses. Any
 other response except 401 raises `PytinctureBFFError`, whose stable fields are
@@ -134,11 +141,16 @@ BFF modules and does not change their browser API.
 
 Generated browser classes preserve the exported class, method, and attribute
 names. They construct the route from the module-relative identifier and call
-the declared HTTP method. Sync methods use synchronous browser requests; async
-and streaming methods use asynchronous fetch/iteration behavior. Each generated
-BFF module exposes `PytinctureBFFError` for callers that want to catch the typed
-failure. Authentication redirects and optional replay-token refill are runtime
-concerns but may not change user method signatures.
+the declared HTTP method. Sync methods retain synchronous browser requests for
+the 1.x compatibility period and receive an additive `<method>_async`
+companion. Async and streaming methods use deadline-bounded asynchronous
+fetch/iteration behavior. Each generated BFF module exposes
+`PytinctureBFFError` for callers that want to catch the typed failure.
+Authentication redirects and optional replay-token refill are runtime concerns
+but may not change existing user method signatures. Replay refill is
+single-flight. A best-effort refill that fails after a completed mutation may
+be reported separately but must not replace the completed mutation result or
+cause it to be sent again.
 
 ## Evolution
 

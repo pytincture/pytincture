@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { readFileSync, writeFileSync } from "node:fs";
 
 
-const WIDGET_WHEEL = "dhxpyt-0.9.16+backend-py3-none-any.whl";
+const WIDGET_WHEEL = "dhxpyt-0.9.18+backend-py3-none-any.whl";
 const PERFORMANCE_BUDGETS = JSON.parse(readFileSync(
     new URL("../../../contracts/performance-budgets-v1.json", import.meta.url),
 ));
@@ -196,11 +196,11 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         expect(compatibility.pyodideVersion).toBeTruthy();
         expect(compatibility.pythonVersion).toMatch(/^3\.13\./);
         expect(compatibility.widgetPackage).toBe("dhxpyt");
-        expect(compatibility.widgetVersion).toBe("0.9.16");
+        expect(compatibility.widgetVersion).toBe("0.9.18");
         expect(compatibility.dhxAvailable).toBe(true);
         expect(compatibility.javascriptAssets).toBe(9);
         expect(compatibility.cssAssets).toBe(4);
-        expect(compatibility.assetManifest).toContain("dhxpyt@0.9.16");
+        expect(compatibility.assetManifest).toContain("dhxpyt@0.9.18");
         expect(lifecycle.at(-1).type).toBe("ready");
         expect(await page.locator("style").evaluateAll(styles => (
             styles.some(style => style.textContent.includes("data:font/woff2;base64,"))
@@ -220,9 +220,13 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         expect(new URL(widgetRequest.url).searchParams.get("uuid")).toBeTruthy();
         const wheelHead = await request.head(`/e2e_app/appcode/${WIDGET_WHEEL}`);
         expect(wheelHead.ok()).toBe(true);
-        expect(wheelHead.headers()["x-pytincture-sha256"]).toBeUndefined();
+        expect(wheelHead.headers()["x-pytincture-sha256"]).toMatch(/^[a-f0-9]{64}$/);
         const wheelGet = await request.get(`/e2e_app/appcode/${WIDGET_WHEEL}`);
         expect(wheelGet.headers()["x-pytincture-sha256"]).toMatch(/^[a-f0-9]{64}$/);
+        const wheelConditional = await request.get(`/e2e_app/appcode/${WIDGET_WHEEL}`, {
+            headers: { "If-None-Match": wheelHead.headers().etag },
+        });
+        expect(wheelConditional.status()).toBe(304);
 
         const localFrontendRequests = diagnostics.requests.filter(entry => {
             const url = new URL(entry.url);
@@ -392,7 +396,7 @@ test("widget manifests reject corrupt and non-owned executable assets", async ({
         manifest = {
             schema: 1,
             package: "dhxpyt",
-            version: "0.9.16",
+            version: "0.9.18",
             assets: [asset],
         };
         await page.goto("/e2e_app/appcode/inline-e2e.html");

@@ -21,7 +21,7 @@ def validate(name: str, result: dict) -> None:
     for field in ("modules_path", "server_secret_absent", "public_imports"):
         if result.get(field) is not True:
             raise SystemExit(f"{name}: compatibility field failed: {field}")
-    if result.get("widgetset") != "dhxpyt==0.9.16":
+    if result.get("widgetset") != "dhxpyt==0.9.18":
         raise SystemExit(f"{name}: widget metadata changed: {result.get('widgetset')}")
 
 

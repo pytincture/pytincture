@@ -7,9 +7,64 @@ from collections.abc import AsyncIterable, Callable, Iterable
 from typing import Any
 
 from fastapi.responses import StreamingResponse
-from starlette.concurrency import iterate_in_threadpool
+from starlette.concurrency import run_in_threadpool
 
 from pytincture.backend.results import BFFResultLimitExceeded, encode_bff_result
+
+
+_DEFERRED_SYNC_STREAM_CLEANUPS: set[asyncio.Task] = set()
+
+
+def _next_sync_item(iterator):
+    try:
+        return True, next(iterator)
+    except StopIteration:
+        return False, None
+
+
+async def _finish_sync_stream(
+    iterator,
+    pending_next: asyncio.Task | None,
+    reason: str,
+    output_bytes: int,
+    on_finish: Callable[[str, int], None] | None,
+) -> None:
+    if pending_next is not None:
+        try:
+            await pending_next
+        except BaseException:
+            # The response has already ended. Retrieve the worker outcome so it
+            # cannot become an unhandled task exception, then close the source.
+            pass
+    try:
+        close = getattr(iterator, "close", None)
+        if callable(close):
+            await run_in_threadpool(close)
+    finally:
+        if on_finish is not None:
+            on_finish(reason, output_bytes)
+
+
+def _defer_sync_stream_finish(
+    iterator,
+    pending_next: asyncio.Task | None,
+    reason: str,
+    output_bytes: int,
+    on_finish: Callable[[str, int], None] | None,
+) -> None:
+    cleanup = asyncio.create_task(
+        _finish_sync_stream(
+            iterator,
+            pending_next,
+            reason,
+            output_bytes,
+            on_finish,
+        )
+    )
+    # Keep a strong reference until the abandoned worker and iterator close
+    # have both completed. The BFF admission callback runs only at that point.
+    _DEFERRED_SYNC_STREAM_CLEANUPS.add(cleanup)
+    cleanup.add_done_callback(_DEFERRED_SYNC_STREAM_CLEANUPS.discard)
 
 
 def serialize_stream_item(
@@ -168,6 +223,106 @@ async def limited_async_stream(
                 on_finish(reason, output_bytes)
 
 
+async def limited_thread_stream(
+    iterable: Iterable,
+    *,
+    raw: bool,
+    max_seconds: float,
+    max_bytes: int,
+    max_items: int = 10_000,
+    idle_timeout_seconds: float = 30.0,
+    on_finish: Callable[[str, int], None] | None = None,
+):
+    """Iterate a legacy synchronous stream without losing worker accounting.
+
+    Python threads cannot be killed safely. If ``next()`` outlives a response
+    timeout or disconnect, cleanup and ``on_finish`` are deferred until that
+    exact worker exits. The application-level BFF slot therefore remains held
+    and bounds the number of abandoned synchronous workers.
+    """
+
+    started = time.monotonic()
+    output_bytes = 0
+    output_items = 0
+    reason = "complete"
+    iterator = iter(iterable)
+    pending_next: asyncio.Task | None = None
+    deferred_finish = False
+    try:
+        while True:
+            remaining = max_seconds - (time.monotonic() - started)
+            if remaining <= 0:
+                reason = "timeout"
+                return
+            wait_seconds = min(remaining, idle_timeout_seconds)
+            pending_next = asyncio.create_task(
+                run_in_threadpool(_next_sync_item, iterator)
+            )
+            try:
+                has_item, item = await asyncio.wait_for(
+                    asyncio.shield(pending_next),
+                    timeout=wait_seconds,
+                )
+                pending_next = None
+            except asyncio.TimeoutError:
+                reason = (
+                    "idle-timeout"
+                    if idle_timeout_seconds < remaining
+                    else "timeout"
+                )
+                _defer_sync_stream_finish(
+                    iterator,
+                    pending_next,
+                    reason,
+                    output_bytes,
+                    on_finish,
+                )
+                deferred_finish = True
+                return
+            if not has_item:
+                return
+            remaining_bytes = max_bytes - output_bytes
+            try:
+                serialized = serialize_stream_item(
+                    item,
+                    raw,
+                    max_bytes=remaining_bytes,
+                    max_items=max_items,
+                )
+            except BFFResultLimitExceeded:
+                reason = "byte-limit"
+                return
+            output_items += 1
+            if output_items > max_items:
+                reason = "item-limit"
+                return
+            output_bytes += _serialized_size(serialized)
+            if output_bytes > max_bytes:
+                reason = "byte-limit"
+                return
+            yield serialized
+    except (asyncio.CancelledError, GeneratorExit):
+        reason = "disconnect"
+        _defer_sync_stream_finish(
+            iterator,
+            pending_next,
+            reason,
+            output_bytes,
+            on_finish,
+        )
+        deferred_finish = True
+        raise
+    finally:
+        if not deferred_finish:
+            await _finish_sync_stream(
+                iterator,
+                pending_next,
+                reason,
+                output_bytes,
+                on_finish,
+            )
+
+
 def as_streaming_response(
     result: Any,
     *,
@@ -205,8 +360,8 @@ def as_streaming_response(
             result = [result]
         elif not inspect.isgenerator(result) and not isinstance(result, Iterable):
             result = [result]
-        content = limited_async_stream(
-            iterate_in_threadpool(iter(result)),
+        content = limited_thread_stream(
+            iter(result),
             raw=raw,
             max_seconds=max_seconds,
             max_bytes=max_bytes,

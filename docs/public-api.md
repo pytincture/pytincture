@@ -128,7 +128,7 @@ Two pre-load globals are public:
 | --- | --- | --- |
 | `application` | `null` | Service application route/name. |
 | `entrypoint` | application | Python class or callable to start. |
-| `widgetlib` | `"dhxpyt==0.9.16"` | Exact PyPI package/version for the widgetset. |
+| `widgetlib` | `"dhxpyt==0.9.18"` | Exact PyPI package/version for the widgetset. |
 | `widgetSource` | `null` | Explicit `#sha256=`-locked wheel URL; disables backend fallback. |
 | `widgetAssetManifest` | `null` | Optional hashed asset manifest for a controlled legacy widget wheel. |
 | `requestUuid` | generated | Cache namespace; service mode supplies one per server process. |
@@ -136,6 +136,7 @@ Two pre-load globals are public:
 | `onLifecycleEvent` | `null` | Callback for stage, compatibility, fallback, error, and ready events. |
 | `pyodideBaseUrl` | bundled path | Trailing-slash base for Pyodide assets. |
 | `pyodideScriptIntegrity` | `null` | Required `pyodide.js`/`pyodide.asm.js` SRI map when `pyodideBaseUrl` is cross-origin. |
+| `allowUnverifiedExternalPyodide` | `false` | Explicit demo/development opt-in for cross-origin Pyodide; production uses the self-hosted verified default. |
 | `loadMaterialIcons` | `true` | Load the Material Design icon stylesheet. |
 | `materialIconsUrl` | bundled path | Self-hosted Material Design icon stylesheet source. |
 | `materialIconsIntegrity` | `null` | Required SRI value when `materialIconsUrl` is cross-origin. |

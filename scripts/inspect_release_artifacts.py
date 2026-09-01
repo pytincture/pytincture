@@ -13,6 +13,11 @@ import tomllib
 import zipfile
 from pathlib import Path
 
+from archive_safety import (
+    ArchiveSafetyError,
+    validate_tar_members,
+    validate_zip_members,
+)
 from versioning import npm_version_for_python
 
 
@@ -44,11 +49,12 @@ def _source_versions() -> tuple[str, str]:
 
 def _normalized_tar_names(path: Path) -> tuple[set[str], tarfile.TarFile]:
     archive = tarfile.open(path, "r:gz")
-    members = [member for member in archive.getmembers() if member.name]
-    raw_name_list = [member.name.rstrip("/") for member in members]
-    if len(raw_name_list) != len(set(raw_name_list)):
+    try:
+        members = validate_tar_members(archive.getmembers())
+    except ArchiveSafetyError as exc:
         archive.close()
-        _fail(f"{path.name} contains duplicate archive members")
+        _fail(f"{path.name}: {exc}")
+    raw_name_list = [member.name.rstrip("/") for member in members]
     raw_names = set(raw_name_list)
     roots = {name.split("/", 1)[0] for name in raw_names}
     if len(roots) != 1:
@@ -119,9 +125,12 @@ def _requirement_name(value: str) -> str:
 
 def inspect_wheel(path: Path, contract: dict, version: str) -> str:
     with zipfile.ZipFile(path) as archive:
-        raw_names = archive.namelist()
-        if len(raw_names) != len(set(raw_names)):
-            _fail("wheel contains duplicate archive members")
+        try:
+            raw_names = [
+                member.filename for member in validate_zip_members(archive.infolist())
+            ]
+        except ArchiveSafetyError as exc:
+            _fail(f"wheel: {exc}")
         names = set(raw_names)
         inventory_hash = _check_contents(
             "wheel", names, contract["wheel_inventory"], version
