@@ -43,6 +43,19 @@
       },
       "status": "passed",
       "notes": "The signed GitHub prerelease is published; the exact wheel, source distribution, and npm tarball are retained and attested. The protected PyPI and npm OIDC publishers verified those artifacts and are waiting for non-self environment approval; registry publication is a distribution task and does not invalidate candidate qualification."
+    },
+    {
+      "version": "1.0.0rc4",
+      "published_at": "2026-09-01T20:23:24Z",
+      "commit_sha": "ec1d7b8aa33b0a551f3e48311daebe91c8ca17c5",
+      "ci_url": "https://github.com/pytincture/pytincture/actions/runs/33555029444",
+      "artifacts": {
+        "wheel": "cab434e127bdd0fe9c40826e1cace82d136f5e0f8b31e3439f507f4900e6427b",
+        "sdist": "141a78e0f127f7781a2624fff7ec9cb3e806cf5b87027241eab48be79e8c5c34",
+        "npm": "e2acda3a62eb56009130b47191fdcf8a96dab852fc4cb07ce6f95e0242b9f8d6"
+      },
+      "status": "passed",
+      "notes": "The signed GitHub prerelease is published; the exact wheel, source distribution, and npm tarball are retained, reproducible, and attested. The protected PyPI and npm OIDC publishers verified those artifacts and are waiting for non-self environment approval. Rc4 qualifies all 2026-09-01 review remediations without changing the approved stateless, Redis-free observation scope."
     }
   ],
   "representative_applications": {
@@ -69,6 +82,19 @@
         "commit_sha": "6b49958c7e9cc11547db15d3d0c47feb4baad1a8",
         "browser": "chromium",
         "widgetset": "dhxpyt==0.9.16+backend",
+        "console_errors": 0,
+        "visible_url_clean": true,
+        "findings": []
+      },
+      {
+        "application": "wheel-only standalone fixture",
+        "version": "1.0.0rc4",
+        "tested_at": "2026-09-01T20:25:43Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33555029444",
+        "commit_sha": "ec1d7b8aa33b0a551f3e48311daebe91c8ca17c5",
+        "browser": "chromium",
+        "widgetset": "dhxpyt==0.9.18+backend",
         "console_errors": 0,
         "visible_url_clean": true,
         "findings": []
@@ -114,6 +140,21 @@
           "webkit": 13.0
         },
         "findings": []
+      },
+      {
+        "application": "authenticated BFF fixture",
+        "version": "1.0.0rc4",
+        "tested_at": "2026-09-01T20:26:51Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33555029444",
+        "commit_sha": "ec1d7b8aa33b0a551f3e48311daebe91c8ca17c5",
+        "browsers": ["chromium", "firefox", "webkit"],
+        "authenticated_bff_p95_ms": {
+          "chromium": 9.7,
+          "firefox": 13.0,
+          "webkit": 16.0
+        },
+        "findings": []
       }
     ],
     "federated_auth": [
@@ -147,6 +188,22 @@
         "saml_replay_mitigation": "passed",
         "redis_required": false,
         "findings": []
+      },
+      {
+        "application": "Keycloak SAML fixture",
+        "version": "1.0.0rc4",
+        "tested_at": "2026-09-01T20:26:28Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33555029444",
+        "commit_sha": "ec1d7b8aa33b0a551f3e48311daebe91c8ca17c5",
+        "provider": "Keycloak 26.7.2",
+        "browser": "chromium",
+        "requested_authn_context": false,
+        "console_errors": 0,
+        "saml_transform_mitigation": "passed",
+        "saml_replay_mitigation": "passed",
+        "redis_required": false,
+        "findings": []
       }
     ]
   },
@@ -167,6 +224,15 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33463168037",
       "commit_sha": "6b49958c7e9cc11547db15d3d0c47feb4baad1a8",
+      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "server-secret exclusion"]
+    },
+    {
+      "from_version": "0.10.7",
+      "version": "1.0.0rc4",
+      "tested_at": "2026-09-01T20:25:18Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33555029444",
+      "commit_sha": "ec1d7b8aa33b0a551f3e48311daebe91c8ca17c5",
       "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "server-secret exclusion"]
     }
   ],
@@ -189,6 +255,16 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33463168037",
       "commit_sha": "6b49958c7e9cc11547db15d3d0c47feb4baad1a8",
+      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "baseline equivalence"]
+    },
+    {
+      "from_version": "1.0.0rc4",
+      "version": "1.0.0rc4",
+      "to_version": "0.10.7",
+      "tested_at": "2026-09-01T20:25:18Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33555029444",
+      "commit_sha": "ec1d7b8aa33b0a551f3e48311daebe91c8ca17c5",
       "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "baseline equivalence"]
     }
   ],
@@ -249,6 +325,27 @@
         "firefox": 14.0,
         "webkit": 13.0
       }
+    },
+    {
+      "application": "release service and browser fixtures",
+      "version": "1.0.0rc4",
+      "tested_at": "2026-09-01T20:26:51Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33555029444",
+      "commit_sha": "ec1d7b8aa33b0a551f3e48311daebe91c8ca17c5",
+      "service": {
+        "health_p95_ms": 28.435,
+        "bff_p95_ms": 77.167,
+        "appcode_p95_ms": 76.399,
+        "failures": 0,
+        "saturation_rejections": 18,
+        "recovered": true
+      },
+      "browser_authenticated_bff_p95_ms": {
+        "chromium": 9.7,
+        "firefox": 13.0,
+        "webkit": 16.0
+      }
     }
   ],
   "repository_policy_reviews": [
@@ -269,6 +366,17 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5488070319",
       "required_checks": 19,
+      "enforce_admins": true,
+      "require_code_owner_reviews": true,
+      "required_approving_review_count": 1,
+      "require_last_push_approval": true
+    },
+    {
+      "version": "1.0.0rc4",
+      "tested_at": "2026-09-01T20:28:32Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5499998408",
+      "required_checks": 20,
       "enforce_admins": true,
       "require_code_owner_reviews": true,
       "required_approving_review_count": 1,
@@ -294,6 +402,15 @@
       "open_critical": 0,
       "open_high": 0,
       "scope": "Daybreak findings and dispositions through #240, dependency and secret audits, SAML mitigation evidence, exact artifact attestations, and complete release acceptance matrix"
+    },
+    {
+      "version": "1.0.0rc4",
+      "tested_at": "2026-09-01T20:28:32Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5499998408",
+      "open_critical": 0,
+      "open_high": 0,
+      "scope": "Daybreak 2026-09-01 findings #264-#275 and scan-facing dispositions, dependency and history secret audits, SAML mitigation evidence, exact reproducible artifact attestations, and the complete release acceptance matrix"
     }
   ],
   "defect_audits": [
@@ -314,12 +431,21 @@
       "open_p0": 0,
       "open_p1": 0,
       "open_release_blockers": 0
+    },
+    {
+      "version": "1.0.0rc4",
+      "tested_at": "2026-09-01T20:28:32Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5499998408",
+      "open_p0": 0,
+      "open_p1": 0,
+      "open_release_blockers": 0
     }
   ],
   "final_decision": {
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1, RC2, and RC3 evidence is recorded and passing. The 2026-09-01 review remediations merged after rc3 require a published and fully qualified 1.0.0rc4 before final promotion. These hardening changes preserve the approved observation scope and do not reset its clock. The release remains NO-GO until rc4 passes the complete latest-candidate matrix, the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS/canonical-origin/trusted-proxy evidence is recorded, protected registry distribution tasks complete, and the release manager makes the final decision."
+    "notes": "RC1 through RC4 evidence is recorded and passing. Rc4 qualifies the complete 2026-09-01 hardening tranche while preserving the approved stateless, Redis-free observation scope, so it does not reset the clock. The release remains NO-GO until the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS/canonical-origin/trusted-proxy evidence is recorded, protected registry distribution tasks complete, and the release manager makes the final decision."
   }
 }
