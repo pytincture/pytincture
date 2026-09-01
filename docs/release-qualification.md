@@ -5,22 +5,26 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## Current decision: NO-GO pending observation and edge evidence
+## Current decision: NO-GO pending rc3, observation, and edge evidence
 
-As of 2026-08-30 UTC, signed GitHub prereleases and PyPI artifacts are
-published for both `1.0.0rc1` and `1.0.0rc2`. The matching retained npm
-tarballs are validated and integrity-checked; npm registry publication remains
-a deferred distribution task and does not block the approved observation
-track.
+Signed GitHub prereleases and PyPI artifacts are published for `1.0.0rc1` and
+`1.0.0rc2`. Subsequent external review produced additional hardening that is
+present on `main` but not in the published rc2 artifacts, so the repository is
+preparing `1.0.0rc3` as the next qualification target. Rc3 is not recorded as
+passed until its signed tag, release artifacts, hashes, and complete
+latest-candidate acceptance evidence exist. The matching retained npm tarballs
+are validated and integrity-checked; npm registry publication remains a
+deferred distribution task and does not block the approved observation track.
 
 The release manager approved the successful `pytincture_example` run, so the
 formal 30-day observation period began at `2026-08-29T02:08:06Z` and cannot
-complete before `2026-09-28T02:08:06Z`. RC2 now has complete latest-candidate
+complete before `2026-09-28T02:08:06Z`. RC2 has complete historical
 standalone, authenticated BFF, federated SAML, upgrade/rollback, performance,
-security/defect, and repository-policy evidence. The release remains NO-GO
-until the time gate completes, a production-edge review records the deployed
-HTTPS redirect, HSTS, canonical-origin, and trusted-proxy controls, and the
-release manager approves the final decision. The Starlette security blocker is
+security/defect, and repository-policy evidence. Rc3 must repeat that matrix
+after publication. The release remains NO-GO until rc3 qualification passes,
+the time gate completes, a production-edge review records the deployed HTTPS
+redirect, HSTS, canonical-origin, and trusted-proxy controls, and the release
+manager approves the final decision. The Starlette security blocker remains
 resolved by requiring the patched 1.6 release line and allowing no
 dependency-audit exceptions.
 
@@ -133,8 +137,9 @@ its tracking issue is accidentally closed.
    blocker audit, and full CI. Then publish the GitHub prerelease. Copy artifact
    hashes and CI evidence into the qualification record in a follow-up PR.
 4. Run representative applications and begin the observation log.
-5. Resolve discovered blockers, publish/record `1.0.0rc2`, and repeat every
-   latest-RC exercise.
+5. Resolve discovered blockers, publish/record the next release candidate, and
+   repeat every latest-RC exercise. Post-rc2 security hardening is targeted for
+   `1.0.0rc3`.
 6. After at least 30 days from the approved observation start, complete
    security/defect audits, execute rollback, and record an explicit `go` or
    `no-go` decision with approvers.

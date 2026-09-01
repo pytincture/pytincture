@@ -1,5 +1,5 @@
 const FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
-const PYTINCTURE_RUNTIME_VERSION = "1.0.0rc2";
+const PYTINCTURE_RUNTIME_VERSION = "1.0.0rc3";
 
 // Compatibility lock for the dhxpyt release used by the 1.0 acceptance
 // fixtures. New widgetsets (and future dhxpyt releases) should ship the same

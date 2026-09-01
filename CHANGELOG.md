@@ -5,6 +5,8 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+## 1.0.0rc3 — 2026-09-01
+
 - Discover installed widget metadata from static source/distribution records
   without importing browser packages on the server. Add an optional
   deployment-owned widget distribution/version/asset-hash trust policy that

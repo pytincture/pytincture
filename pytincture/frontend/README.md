@@ -150,7 +150,7 @@ with the matching SRI copied from the trusted release integrity manifest:
 
 ```html
 <script
-  src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.2/dist/pytincture.min.js"
+  src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.3/dist/pytincture.min.js"
   integrity="sha384-<trusted-manifest-value>"
   crossorigin="anonymous"></script>
 ```

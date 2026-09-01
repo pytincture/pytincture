@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pytincture"
 
-version = "1.0.0rc2"
+version = "1.0.0rc3"
 
 description = "UI Builder"
 readme = "README.md"
