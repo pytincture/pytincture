@@ -2466,6 +2466,32 @@ def test_policy_bearing_export_fails_startup_without_hook(monkeypatch, tmp_path)
         backend_app._validate_bff_policy_configuration()
 
 
+def test_legacy_app_modules_path_trust_handler_warns_or_fails(
+    monkeypatch,
+    caplog,
+    tmp_path,
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "get_modules_path", lambda: str(tmp_path))
+    monkeypatch.setattr(
+        backend_app,
+        "modules_path_appears_writable",
+        lambda path: True,
+    )
+    monkeypatch.setattr(backend_app, "REQUIRE_READONLY_MODULES_PATH", False)
+
+    with caplog.at_level("WARNING", logger="pytincture.security"):
+        backend_app.validate_modules_path_trust_configuration()
+    event = json.loads(caplog.records[-1].message)
+    assert event["event"] == "security.modules_path_writable"
+    assert event["enforcement"] is False
+
+    monkeypatch.setattr(backend_app, "REQUIRE_READONLY_MODULES_PATH", True)
+    with pytest.raises(RuntimeError, match="MODULES_PATH is writable"):
+        backend_app.validate_modules_path_trust_configuration()
+
+
 @pytest.mark.parametrize("async_execution_mode", ["event-loop", "worker-thread"])
 def test_class_call_streaming(
     monkeypatch,

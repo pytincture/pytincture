@@ -66,7 +66,10 @@ from starlette.routing import Match, Route
 
 # Pytincture
 from pytincture import __version__, get_modules_path
-from pytincture.configuration import PytinctureConfig
+from pytincture.configuration import (
+    PytinctureConfig,
+    modules_path_appears_writable,
+)
 from pytincture.backend.auth import (
     SENSITIVE_USER_CLAIM_KEYS,
     allowed_email,
@@ -1222,6 +1225,30 @@ def validate_bff_policy_configuration() -> None:
     _validate_bff_policy_configuration()
 
 
+def validate_modules_path_trust_configuration() -> None:
+    """Warn or fail when deployment-trusted application source is writable."""
+
+    modules_path = get_modules_path()
+    if not modules_path_appears_writable(modules_path):
+        return
+    if REQUIRE_READONLY_MODULES_PATH:
+        raise RuntimeError(
+            "MODULES_PATH is writable by the effective service account while "
+            "PYTINCTURE_REQUIRE_READONLY_MODULES_PATH=true"
+        )
+    structured_log(
+        logger,
+        logging.WARNING,
+        "security.modules_path_writable",
+        modules_path=str(modules_path),
+        enforcement=False,
+        production_control=(
+            "mount application source read-only and run as a non-root service user"
+        ),
+    )
+
+
+app.router.add_event_handler("startup", validate_modules_path_trust_configuration)
 app.router.add_event_handler("startup", validate_bff_policy_configuration)
 app.router.add_event_handler("startup", validate_bff_replay_store_configuration)
 
@@ -3637,6 +3664,9 @@ BFF_EXECUTION_MODE = os.getenv("BFF_EXECUTION_MODE", "trusted-thread").strip().l
 BFF_ASYNC_EXECUTION_MODE = os.getenv(
     "BFF_ASYNC_EXECUTION_MODE", "event-loop"
 ).strip().lower()
+REQUIRE_READONLY_MODULES_PATH = os.getenv(
+    "PYTINCTURE_REQUIRE_READONLY_MODULES_PATH", "false"
+).lower() == "true"
 BFF_ISOLATED_MAX_CONCURRENCY = int(os.getenv("BFF_ISOLATED_MAX_CONCURRENCY", "4"))
 BFF_ISOLATED_MAX_PER_USER = int(os.getenv("BFF_ISOLATED_MAX_PER_USER", "2"))
 BFF_ISOLATED_CPU_SECONDS = float(os.getenv("BFF_ISOLATED_CPU_SECONDS", "30"))

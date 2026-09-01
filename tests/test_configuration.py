@@ -861,6 +861,107 @@ def test_missing_modules_path_fails_before_application_creation(tmp_path):
         create_app(PytinctureConfig(modules_path=str(tmp_path / "missing")))
 
 
+def test_readonly_modules_path_enforcement_is_opt_in(monkeypatch, tmp_path):
+    import pytincture.configuration as configuration
+
+    monkeypatch.setattr(
+        configuration,
+        "modules_path_appears_writable",
+        lambda path: True,
+    )
+
+    compatible = PytinctureConfig(modules_path=str(tmp_path))
+    assert compatible.require_readonly_modules_path is False
+
+    with pytest.raises(ValueError, match="modules_path is writable"):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            require_readonly_modules_path=True,
+        )
+
+
+def test_readonly_modules_path_enforcement_accepts_readonly_root(
+    monkeypatch,
+    tmp_path,
+):
+    import pytincture.configuration as configuration
+
+    monkeypatch.setattr(
+        configuration,
+        "modules_path_appears_writable",
+        lambda path: False,
+    )
+
+    config = PytinctureConfig(
+        modules_path=str(tmp_path),
+        require_readonly_modules_path=True,
+    )
+
+    assert config.require_readonly_modules_path is True
+    assert config.to_environ()["PYTINCTURE_REQUIRE_READONLY_MODULES_PATH"] == (
+        "true"
+    )
+    with TestClient(create_app(config)) as client:
+        assert client.get("/healthz").status_code == 200
+
+
+def test_readonly_modules_path_enforcement_parses_environment(
+    monkeypatch,
+    tmp_path,
+):
+    import pytincture.configuration as configuration
+
+    monkeypatch.setattr(
+        configuration,
+        "modules_path_appears_writable",
+        lambda path: False,
+    )
+
+    config = PytinctureConfig.from_env(
+        {
+            "MODULES_PATH": str(tmp_path),
+            "PYTINCTURE_REQUIRE_READONLY_MODULES_PATH": "true",
+        }
+    )
+
+    assert config.require_readonly_modules_path is True
+
+
+def test_writable_modules_path_emits_one_structured_startup_warning(
+    monkeypatch,
+    caplog,
+    tmp_path,
+):
+    import pytincture.configuration as configuration
+
+    monkeypatch.setattr(
+        configuration,
+        "modules_path_appears_writable",
+        lambda path: True,
+    )
+    configured_app = create_app(PytinctureConfig(modules_path=str(tmp_path)))
+
+    with caplog.at_level("WARNING", logger="pytincture.security"):
+        with TestClient(configured_app) as client:
+            assert client.get("/healthz").status_code == 200
+
+    warnings = [
+        json.loads(record.message)
+        for record in caplog.records
+        if '"event":"security.modules_path_writable"' in record.message
+    ]
+    assert warnings == [
+        {
+            "enforcement": False,
+            "event": "security.modules_path_writable",
+            "modules_path": str(tmp_path.resolve()),
+            "production_control": (
+                "mount application source read-only and run as a non-root service user"
+            ),
+        }
+    ]
+
+
 def test_configuration_context_is_local_and_does_not_change_legacy_global(tmp_path):
     from pytincture import MODULES_PATH
 

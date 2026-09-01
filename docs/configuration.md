@@ -93,6 +93,12 @@ the schema. Leaving this setting empty preserves normal pluggable widgetsets.
 This is a static deployment control and adds no Redis, process memory, sticky
 routing, or server-side session requirement.
 
+Writable module roots remain supported for local development and are the
+default. Service startup emits `security.modules_path_writable` when the
+effective account appears able to modify `MODULES_PATH`. Production deployments
+can set `require_readonly_modules_path=True` to turn that best-effort signal
+into a startup failure after mounting application source read-only.
+
 Run production applications with any ASGI server, for example
 `uvicorn my_service:app`. The compatibility `launch_service()` API remains
 available for existing deployments. Both typed and compatibility paths reject
@@ -110,6 +116,7 @@ The contract test checks every row in this table against the dataclass model.
 | Field | Environment variable | Meaning |
 | --- | --- | --- |
 | `modules_path` | `MODULES_PATH` | Application module root. |
+| `require_readonly_modules_path` | `PYTINCTURE_REQUIRE_READONLY_MODULES_PATH` | Fail startup when the effective service account can write the module root. |
 | `default_application` | `PYTINCTURE_DEFAULT_APPLICATION` | Optional application for the root redirect. |
 | `favicon_folder` | `PYTINCTURE_FAVICON_FOLDER` | Optional favicon file/directory. |
 | `cors_allowed_origins` | `CORS_ALLOWED_ORIGINS` | Allowed browser origins. |

@@ -82,9 +82,12 @@ follows:
   unchanged.
 - `MODULES_PATH` is deployment-trusted application source. A read-only
   container/root mount and non-root service account remain deployment
-  controls. A prominent warning plus optional fail-closed enforcement is
-  tracked in [#282](https://github.com/pytincture/pytincture/issues/282); a
-  writable development tree remains supported by default.
+  controls. Writable roots now emit the structured startup event
+  `security.modules_path_writable`; operators can set
+  `PYTINCTURE_REQUIRE_READONLY_MODULES_PATH=true` to fail closed. This additive
+  remediation is tracked in
+  [#282](https://github.com/pytincture/pytincture/issues/282); a writable
+  development tree remains supported by default.
 - The optional process executor is a bounded, killable resource boundary, not
   a hostile-code sandbox. Pytincture BFF modules are operator-deployed trusted
   application code. Truly untrusted code requires a separate container/UID,

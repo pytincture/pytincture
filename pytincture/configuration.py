@@ -84,6 +84,23 @@ def _bool(value: object) -> bool:
     raise ValueError(f"expected a boolean value, received {value!r}")
 
 
+def modules_path_appears_writable(path: str | Path) -> bool:
+    """Best-effort check using the effective service account and mount flags."""
+
+    candidate = Path(path)
+    try:
+        stat = os.statvfs(candidate)
+        readonly_flag = getattr(os, "ST_RDONLY", 1)
+        if stat.f_flag & readonly_flag:
+            return False
+    except (AttributeError, OSError):
+        pass
+    try:
+        return os.access(candidate, os.W_OK, effective_ids=True)
+    except (NotImplementedError, TypeError):
+        return os.access(candidate, os.W_OK)
+
+
 def _csv(value: object) -> tuple[str, ...]:
     if value in (None, ""):
         return ()
@@ -114,6 +131,11 @@ class PytinctureConfig:
     """
 
     modules_path: str = _setting(".", "MODULES_PATH", "Application module root.")
+    require_readonly_modules_path: bool = _setting(
+        False,
+        "PYTINCTURE_REQUIRE_READONLY_MODULES_PATH",
+        "Fail startup when the effective service account can write the module root.",
+    )
     default_application: Optional[str] = _setting(
         None, "PYTINCTURE_DEFAULT_APPLICATION", "Optional application for the root redirect."
     )
@@ -584,6 +606,15 @@ class PytinctureConfig:
         object.__setattr__(self, "modules_path", modules_path)
         if not Path(modules_path).is_dir():
             raise ValueError(f"modules_path is not a directory: {modules_path}")
+        if (
+            self.require_readonly_modules_path
+            and modules_path_appears_writable(modules_path)
+        ):
+            raise ValueError(
+                "modules_path is writable by the effective service account; "
+                "disable require_readonly_modules_path for development or mount "
+                "the production application root read-only"
+            )
 
         object.__setattr__(
             self,
@@ -988,6 +1019,7 @@ class PytinctureConfig:
         source = dict(os.environ if environ is None else environ)
         values = {}
         boolean_fields = {
+            "require_readonly_modules_path",
             "enable_user_login", "enable_dev_email_login", "enable_google_auth",
             "enable_microsoft_auth", "enable_saml_auth", "enable_bff_replay_tokens",
             "bff_replay_require_shared_store",
