@@ -57,6 +57,52 @@ anonymity is requested. No guaranteed response SLA is currently offered.
   tag. Registry publication uses protected GitHub environments and OIDC trusted
   publishing; long-lived registry credentials are not an accepted fallback.
 
+## 2026-09-01 follow-up review disposition
+
+The follow-up review found no confirmed critical/high vulnerability and no
+request-controlled path to server-side code execution. Its two conditional
+medium availability findings and related trust observations are disposed as
+follows:
+
+- Ordinary BFF generators must be bounded before general JSON conversion can
+  expand them. This confirmed defect is tracked in
+  [#280](https://github.com/pytincture/pytincture/issues/280). Explicit BFF
+  streaming and `yield` remain supported.
+- Trusted-mode coroutine BFFs and async policy hooks use cooperative event-loop
+  timeouts. The existing `BFF_EXECUTION_MODE=isolated-process` option already
+  gives non-streaming calls a killable process boundary. Additive opt-in
+  containment for trusted async stages is tracked in
+  [#281](https://github.com/pytincture/pytincture/issues/281); synchronous
+  applications, the compatibility default, and explicit streaming do not
+  change.
+- `MODULES_PATH` is deployment-trusted application source. A read-only
+  container/root mount and non-root service account remain deployment
+  controls. A prominent warning plus optional fail-closed enforcement is
+  tracked in [#282](https://github.com/pytincture/pytincture/issues/282); a
+  writable development tree remains supported by default.
+- The optional process executor is a bounded, killable resource boundary, not
+  a hostile-code sandbox. Pytincture BFF modules are operator-deployed trusted
+  application code. Truly untrusted code requires a separate container/UID,
+  secret boundary, syscall policy, and network policy outside Pytincture.
+- Browser Python and selected widget JavaScript are trusted application code.
+  Cross-origin Pyodide scripts and icon styles already fail closed without
+  valid SRI, and executable widget assets must match their declared SHA-256
+  hashes. The server still enforces authentication, signed application
+  audience, Origin/Fetch Metadata, CSRF, canonical arguments, export identity,
+  and policy on every applicable BFF call.
+- Service scripts remain same-origin under CSP; PyPI is a package connection,
+  never a script source. Narrowing the default connection policy to self plus
+  the exact PyPI metadata/wheel origins is tracked in
+  [#283](https://github.com/pytincture/pytincture/issues/283).
+- `@backend_for_frontend` remains the explicit class-level network export
+  decision. Public members are operations by design; names beginning with `_`
+  are already excluded from the manifest and cannot be remotely dispatched.
+
+The machine-readable record for this scan is
+[`security/review-2026-09-01-followup.json`](security/review-2026-09-01-followup.json).
+It includes compatibility effects so future scans do not reinterpret accepted
+architecture as an unaddressed defect.
+
 The machine-readable dispositions and their regression-test mappings are in
 [`security/review-dispositions.json`](security/review-dispositions.json).
 The exact version, source integrity, license, and file hashes for the vendored

@@ -1310,6 +1310,37 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert evidence["active_review_tracking_document"] == (
         "security/review-2026-09-01.json"
     )
+    assert evidence["latest_followup_review"] == (
+        "security/review-2026-09-01-followup.json"
+    )
+    followup = json.loads(
+        (root / evidence["latest_followup_review"]).read_text()
+    )
+    assert followup["status"] == "tracking_open_medium"
+    assert followup["compatibility_constraints"] == {
+        "class_level_bff_export_preserved": True,
+        "private_underscore_members_exported": False,
+        "synchronous_bff_preserved": True,
+        "asynchronous_bff_preserved": True,
+        "explicit_streaming_yield_preserved": True,
+        "pluggable_widgetsets_preserved": True,
+        "redis_required": False,
+        "sticky_routing_required": False,
+    }
+    followup_statuses = {
+        item["id"]: item["status"] for item in followup["findings"]
+    }
+    assert followup_statuses["FOLLOWUP-RESULT-ITERABLE-EXPANSION"] == "open"
+    assert followup_statuses["FOLLOWUP-ASYNC-COOPERATIVE-TIMEOUT"] == (
+        "open_additive_hardening"
+    )
+    assert followup_statuses["FOLLOWUP-PROCESS-NOT-SANDBOX"] == "accepted"
+    assert followup_statuses["FOLLOWUP-BROWSER-WIDGET-TRUST"] == (
+        "mitigated_and_accepted"
+    )
+    assert followup_statuses["FOLLOWUP-CLASS-LEVEL-BFF"] == (
+        "accepted_existing_control"
+    )
     active_review = json.loads(
         (root / evidence["active_review_tracking_document"]).read_text()
     )

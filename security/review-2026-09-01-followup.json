@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "recorded_on": "2026-09-01",
+  "reviewed_commit": "4a1672f654b71c118094e346a4767e41ff6ec26a",
+  "status": "tracking_open_medium",
+  "summary": "No confirmed critical/high vulnerability or request-controlled server RCE was found. Two conditional medium availability defects are tracked; deployment-trust observations are either accepted architecture, already mitigated by integrity controls, or receiving additive opt-in hardening.",
+  "compatibility_constraints": {
+    "class_level_bff_export_preserved": true,
+    "private_underscore_members_exported": false,
+    "synchronous_bff_preserved": true,
+    "asynchronous_bff_preserved": true,
+    "explicit_streaming_yield_preserved": true,
+    "pluggable_widgetsets_preserved": true,
+    "redis_required": false,
+    "sticky_routing_required": false
+  },
+  "findings": [
+    {
+      "id": "FOLLOWUP-RESULT-ITERABLE-EXPANSION",
+      "severity": "medium",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/280",
+      "disposition": "Bound generators and iterators incrementally before general JSON conversion; keep explicit streaming unchanged.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Finite ordinary generators remain JSON arrays within configured limits. Explicit streaming and yielded streaming responses are unchanged."
+    },
+    {
+      "id": "FOLLOWUP-ASYNC-COOPERATIVE-TIMEOUT",
+      "severity": "medium",
+      "status": "open_additive_hardening",
+      "issue": "https://github.com/pytincture/pytincture/issues/281",
+      "disposition": "Retain the compatibility default and existing isolated-process hard-kill option; add opt-in off-main-loop containment for trusted async stages.",
+      "potential_user_breakage": false,
+      "existing_mitigation": "BFF_EXECUTION_MODE=isolated-process runs non-streaming coroutine BFF operations in a killable, resource-limited child process.",
+      "compatibility_note": "Plain synchronous applications require no async knowledge. Default coroutine and explicit-streaming behavior remain available."
+    },
+    {
+      "id": "FOLLOWUP-MODULES-PATH-TRUST",
+      "severity": "deployment_boundary",
+      "status": "open_additive_hardening",
+      "issue": "https://github.com/pytincture/pytincture/issues/282",
+      "disposition": "Warn when the effective service account can write MODULES_PATH and provide optional fail-closed enforcement; filesystem immutability remains deployment-owned.",
+      "potential_user_breakage": false,
+      "compatibility_note": "Enforcement is disabled by default, so writable development and quick-app directories continue to start."
+    },
+    {
+      "id": "FOLLOWUP-PROCESS-NOT-SANDBOX",
+      "severity": "accepted_architecture",
+      "status": "accepted",
+      "issue": "https://github.com/pytincture/pytincture/issues/279",
+      "disposition": "Document the executor as killable resource containment for deployment-trusted BFF code, not a hostile-code sandbox.",
+      "potential_user_breakage": false,
+      "compatibility_note": "No mandatory sandbox, container, Redis service, or process mode is introduced."
+    },
+    {
+      "id": "FOLLOWUP-BROWSER-WIDGET-TRUST",
+      "severity": "accepted_architecture",
+      "status": "mitigated_and_accepted",
+      "issue": "https://github.com/pytincture/pytincture/issues/279",
+      "disposition": "Treat selected browser/widget code as trusted application code; require SRI for external runtime resources and SHA-256 verification for widget assets.",
+      "potential_user_breakage": false,
+      "existing_mitigation": "External Pyodide scripts and Material Icons fail closed without valid SRI; widget JavaScript and CSS must be manifest-owned and match SHA-256 locks.",
+      "compatibility_note": "Pluggable widgetsets and browser Python remain supported."
+    },
+    {
+      "id": "FOLLOWUP-SERVICE-CSP-CONNECTIONS",
+      "severity": "hardening",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/283",
+      "disposition": "Keep scripts same-origin and narrow default package connections to self plus exact PyPI origins, with explicit additional application origins.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Same-origin BFFs and micropip continue by default; direct browser connections to other APIs require exact configuration."
+    },
+    {
+      "id": "FOLLOWUP-CLASS-LEVEL-BFF",
+      "severity": "accepted_architecture",
+      "status": "accepted_existing_control",
+      "issue": "https://github.com/pytincture/pytincture/issues/279",
+      "disposition": "Preserve class-level public-member export and the existing underscore-private exclusion.",
+      "potential_user_breakage": false,
+      "existing_mitigation": "Static and runtime manifests exclude every member whose name begins with an underscore and require exact Pytincture decorator provenance.",
+      "compatibility_note": "No method-level decorator or redundant allowlist is required."
+    }
+  ]
+}
