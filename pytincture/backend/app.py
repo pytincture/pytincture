@@ -254,6 +254,33 @@ _BASE_APP_LIFESPAN = app.router.lifespan_context
 logger = logging.getLogger("pytincture.security")
 _configured_log_level = os.getenv("PYTINCTURE_LOG_LEVEL", "INFO").strip().upper()
 logger.setLevel(getattr(logging, _configured_log_level, logging.INFO))
+_DEFAULT_BROWSER_CONNECT_ORIGINS = (
+    "https://pypi.org",
+    "https://files.pythonhosted.org",
+)
+BROWSER_CONNECT_ORIGINS = tuple(_PYTINCTURE_CONFIG.browser_connect_origins)
+
+
+def _service_content_security_policy() -> str:
+    connect_sources = " ".join(
+        (
+            "'self'",
+            *_DEFAULT_BROWSER_CONNECT_ORIGINS,
+            *BROWSER_CONNECT_ORIGINS,
+        )
+    )
+    return (
+        "default-src 'self'; object-src 'none'; base-uri 'self'; "
+        "frame-ancestors 'none'; form-action 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self' data:; "
+        f"img-src 'self' data: https:; connect-src {connect_sources}; "
+        "worker-src 'self' blob:"
+    )
+
+
+SERVICE_CONTENT_SECURITY_POLICY = _service_content_security_policy()
 TRUST_PROXY_HEADERS = os.getenv("PYTINCTURE_TRUST_PROXY_HEADERS", "false").lower() == "true"
 CANONICAL_ORIGIN = os.getenv("PYTINCTURE_CANONICAL_ORIGIN", "").strip().rstrip("/")
 ALLOWED_HOSTS = tuple(
@@ -762,13 +789,7 @@ async def correlation_id_middleware(request: Request, call_next):
     )
     response.headers.setdefault(
         "Content-Security-Policy",
-        "default-src 'self'; object-src 'none'; base-uri 'self'; "
-        "frame-ancestors 'none'; form-action 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; "
-        "style-src 'self' 'unsafe-inline'; "
-        "font-src 'self' data:; "
-        "img-src 'self' data: https:; connect-src 'self' https:; "
-        "worker-src 'self' blob:",
+        SERVICE_CONTENT_SECURITY_POLICY,
     )
     if _private_response_required(request):
         cache_control = response.headers.get("cache-control", "")

@@ -2,8 +2,8 @@
   "schema_version": 1,
   "recorded_on": "2026-09-01",
   "reviewed_commit": "4a1672f654b71c118094e346a4767e41ff6ec26a",
-  "status": "tracking_open_hardening",
-  "summary": "No confirmed critical/high vulnerability or request-controlled server RCE was found. The two conditional medium availability defects are remediated; remaining deployment-trust observations are either accepted architecture, already mitigated by integrity controls, or receiving additive opt-in hardening.",
+  "status": "remediated",
+  "summary": "No confirmed critical/high vulnerability or request-controlled server RCE was found. The two conditional medium availability defects and additive hardening items are remediated; the remaining deployment-trust observations are documented accepted architecture with existing controls.",
   "compatibility_constraints": {
     "class_level_bff_export_preserved": true,
     "private_underscore_members_exported": false,
@@ -89,9 +89,18 @@
     {
       "id": "FOLLOWUP-SERVICE-CSP-CONNECTIONS",
       "severity": "hardening",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/283",
       "disposition": "Keep scripts same-origin and narrow default package connections to self plus exact PyPI origins, with explicit additional application origins.",
+      "implementation": "Service CSP connect-src defaults to self, https://pypi.org, and https://files.pythonhosted.org. PYTINCTURE_BROWSER_CONNECT_ORIGINS adds only canonical exact HTTPS/WSS origins after rejecting credentials, wildcards, paths, queries, fragments, duplicates, and injection syntax. script-src remains same-origin plus Pyodide-required directives.",
+      "regression_tests": [
+        "tests/test_configuration.py::test_browser_connect_origins_are_typed_canonical_and_environment_backed",
+        "tests/test_configuration.py::test_browser_connect_origins_reject_ambiguous_or_unsafe_values",
+        "tests/test_configuration.py::test_browser_connect_origins_reject_canonical_duplicates",
+        "tests/test_configuration.py::test_service_csp_uses_exact_default_and_opt_in_connect_origins",
+        "tests/test_configuration.py::test_configuration_reference_document_matches_typed_model",
+        "tests/test_docs.py::test_configuration_reference_covers_every_backend_environment_setting"
+      ],
       "potential_user_breakage": true,
       "compatibility_note": "Same-origin BFFs and micropip continue by default; direct browser connections to other APIs require exact configuration."
     },

@@ -1398,7 +1398,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     followup = json.loads(
         (root / evidence["latest_followup_review"]).read_text()
     )
-    assert followup["status"] == "tracking_open_hardening"
+    assert followup["status"] == "remediated"
     assert followup["compatibility_constraints"] == {
         "class_level_bff_export_preserved": True,
         "private_underscore_members_exported": False,
@@ -1423,6 +1423,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert followup_statuses["FOLLOWUP-BROWSER-WIDGET-TRUST"] == (
         "mitigated_and_accepted"
     )
+    assert followup_statuses["FOLLOWUP-SERVICE-CSP-CONNECTIONS"] == "remediated"
     assert followup_statuses["FOLLOWUP-CLASS-LEVEL-BFF"] == (
         "accepted_existing_control"
     )
