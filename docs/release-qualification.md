@@ -5,16 +5,15 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## Current decision: NO-GO pending rc4, observation, and edge evidence
+## Current decision: NO-GO pending observation and edge evidence
 
-Signed GitHub prereleases exist for `1.0.0rc1`, `1.0.0rc2`, and `1.0.0rc3`.
-Rc3 is the latest qualified candidate. Its exact retained wheel, source
-distribution, and npm tarball are attested, integrity-recorded, and covered by
-the complete release acceptance matrix. The 2026-09-01 external review then
-identified 12 additional findings. Their remediations are merged on `main`,
-recorded in `security/review-2026-09-01.json`, and require a published and fully
-qualified `1.0.0rc4` before final promotion. The protected PyPI and npm OIDC
-publishers independently verified the rc3 bytes and are waiting for non-self
+Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc4`. Rc4 is the
+latest qualified candidate. Its exact retained wheel, source distribution, and
+npm tarball are reproducible, attested, integrity-recorded, and covered by the
+complete release acceptance matrix. It includes the 12 remediations from the
+2026-09-01 external review, with scan-facing controls and compatibility effects
+recorded in `security/review-2026-09-01.json`. The protected PyPI and npm OIDC
+publishers independently verified the rc4 bytes and are waiting for non-self
 environment approval; registry publication is a distribution task and does
 not invalidate candidate evidence or reset the approved observation track.
 
@@ -22,15 +21,15 @@ The release manager approved the successful `pytincture_example` run, so the
 formal 30-day observation period began at `2026-08-29T02:08:06Z` and cannot
 complete before `2026-09-28T02:08:06Z`. RC2 has complete historical
 standalone, authenticated BFF, federated SAML, upgrade/rollback, performance,
-security/defect, and repository-policy evidence. Rc3 repeated and passed that
-complete matrix after publication. Rc4 must repeat the latest-candidate matrix
-after publication. The release remains NO-GO until rc4 qualification passes,
+security/defect, and repository-policy evidence. Rc3 and rc4 each repeated and
+passed that complete matrix after publication. The release remains NO-GO until
 the time gate completes, a production-edge review records the deployed HTTPS
-redirect, HSTS, canonical-origin, and trusted-proxy controls, and the release
-manager approves the final decision. The rc4 hardening preserves the approved
-observation scope, so it does not reset the clock. The Starlette security
-blocker remains resolved by requiring the patched 1.6 release line and allowing
-no dependency-audit exceptions.
+redirect, HSTS, canonical-origin, and trusted-proxy controls, protected
+registry approvals complete, and the release manager approves the final
+decision. The rc4 hardening preserves the approved observation scope, so it
+does not reset the clock. The Starlette security blocker remains resolved by
+requiring the patched 1.6 release line and allowing no dependency-audit
+exceptions.
 
 Published and retained rc1 evidence:
 
@@ -102,16 +101,33 @@ environment approval. Their pre-publication stages verified the trusted
 release run, exact retained hashes, package identity, attestation, and version
 immutability. No environment protection was bypassed.
 
-Rc4 preparation status:
+Published and retained rc4 evidence:
 
-- all 12 findings are remediated and closed by
-  <https://github.com/pytincture/pytincture/pull/276>;
-- scan-facing dispositions and compatibility notes are committed under
-  `security/`;
-- the complete pull-request and post-merge Python/browser/SAML/artifact matrix
-  passed; and
-- rc4 is not recorded as a passed candidate until its signed tag, release,
-  retained artifact hashes, and release-event qualification evidence exist.
+- signed tag and GitHub prerelease:
+  <https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc4>;
+- green tag qualification run:
+  <https://github.com/pytincture/pytincture/actions/runs/33554591665>;
+- green release/attestation run and all latest-candidate representative-app
+  evidence:
+  <https://github.com/pytincture/pytincture/actions/runs/33555029444>;
+- wheel SHA-256:
+  `cab434e127bdd0fe9c40826e1cace82d136f5e0f8b31e3439f507f4900e6427b`;
+- source-distribution SHA-256:
+  `141a78e0f127f7781a2624fff7ec9cb3e806cf5b87027241eab48be79e8c5c34`;
+- retained npm tarball SHA-256:
+  `e2acda3a62eb56009130b47191fdcf8a96dab852fc4cb07ce6f95e0242b9f8d6`;
+- security, defect, and live repository-policy audit:
+  <https://github.com/pytincture/pytincture/issues/143#issuecomment-5499998408>;
+- protected PyPI publisher:
+  <https://github.com/pytincture/pytincture/actions/runs/33555394353>; and
+- protected npm publisher:
+  <https://github.com/pytincture/pytincture/actions/runs/33555394373>.
+
+All 12 findings are remediated and closed by
+<https://github.com/pytincture/pytincture/pull/276>. The rc4 compatibility
+record explicitly preserves class-level BFF export, synchronous generated BFF
+methods, pluggable widgetsets, signed browser-carried sessions, Redis-free load
+balancing, and operation without sticky sessions.
 
 ## Evidence required after each RC
 
