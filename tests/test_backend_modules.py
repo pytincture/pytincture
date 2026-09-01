@@ -1248,6 +1248,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-M-19-M-21-M-23-SECRET-SCAN",
         "REVIEW-2026-08-31-M-17-WIDGET-TRUST",
         "REVIEW-2026-08-31-M-15-M-16-M-18-PREAUTH-CSRF",
+        "REVIEW-2026-08-31-M-24-CONTAINER-GUIDANCE",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1387,6 +1388,15 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert session_controls["redis_required"] is False
     assert session_controls["process_memory_required"] is False
     assert session_controls["sticky_routing_required"] is False
+    container_controls = dispositions[
+        "REVIEW-2026-08-31-M-24-CONTAINER-GUIDANCE"
+    ]["controls"]
+    assert container_controls["official_container_currently_published"] is False
+    assert container_controls["unsupported_dockerhub_image_recommended"] is False
+    assert container_controls["mutable_container_tag_recommended"] is False
+    assert container_controls["future_digest_reference_required"] is True
+    assert container_controls["future_sbom_required"] is True
+    assert container_controls["future_signature_or_attestation_required"] is True
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:
