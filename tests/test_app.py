@@ -3678,6 +3678,44 @@ def test_saml_acs_rejects_disallowed_transforms_before_toolkit_and_rate_limits(
     assert toolkit_called is False
 
 
+def test_saml_acs_rejects_encrypted_assertions_before_toolkit(
+    fresh_client,
+    monkeypatch,
+):
+    import pytincture.backend.app as backend_app
+    from pytincture.backend.saml import SlidingWindowRateLimiter
+
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(
+        backend_app,
+        "SAML_ACS_RATE_LIMITER",
+        SlidingWindowRateLimiter(2, 60),
+    )
+    toolkit_called = False
+
+    def fail_if_toolkit_is_called(*args, **kwargs):
+        nonlocal toolkit_called
+        toolkit_called = True
+        raise AssertionError("encrypted XML reached the SAML toolkit")
+
+    monkeypatch.setattr(backend_app, "_init_saml_auth", fail_if_toolkit_is_called)
+    encrypted_response = (
+        Path(__file__).parent / "fixtures" / "saml" / "encrypted-assertion.xml"
+    ).read_bytes()
+
+    rejected = fresh_client.post(
+        "/demoapp/auth/saml/acs",
+        data={
+            "SAMLResponse": base64.b64encode(encrypted_response).decode("ascii"),
+            "RelayState": "preflight-rejects-before-state",
+        },
+    )
+
+    assert rejected.status_code == 400
+    assert rejected.json() == {"detail": "Invalid SAML response"}
+    assert toolkit_called is False
+
+
 def test_login_endpoint(fresh_client, monkeypatch, tmp_path):
     """
     Test the /{application}/login endpoint returns expected HTML content.

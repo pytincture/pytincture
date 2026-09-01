@@ -132,8 +132,8 @@ pip install ".[dev]"
    example: "/{application}"
 - SAML_SP_ENTITY_ID: Optional template for the SP entity ID (supports {application}, {base_url}, {host}); defaults to `/{application}/auth/saml/metadata`.
 - SAML_SP_ASSERTION_CONSUMER_SERVICE_URL: Optional template for the ACS endpoint (supports placeholders like {application}).
-- SAML_SP_X509_CERT: Service Provider certificate in PEM format if signing/encryption is required.
-- SAML_SP_PRIVATE_KEY: Service Provider private key in PEM format matching the SP certificate.
+- SAML_SP_X509_CERT: Service Provider certificate in PEM format. Encrypted assertions are currently rejected before toolkit processing; configure the IdP for signed plaintext assertions.
+- SAML_SP_PRIVATE_KEY: Service Provider private key in PEM format matching the SP certificate. It does not opt the service into encrypted assertions.
 - SAML_IDP_ENTITY_ID: Identity Provider entity ID.
 - SAML_IDP_SSO_URL: Identity Provider SSO URL.
 - SAML_IDP_SLO_URL: Optional Identity Provider SLO URL.

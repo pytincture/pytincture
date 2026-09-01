@@ -109,6 +109,13 @@ that trusted correlation. SAML signature and digest algorithms must use
 SHA-256 or stronger. SHA-1 and unknown algorithms are rejected before toolkit
 signature processing.
 
+Encrypted assertions are currently rejected before the SAML toolkit runs. The
+supported toolkit decrypts assertions before exposing their signature
+transforms, so accepting them would bypass Pytincture's pre-signature transform
+allowlist. Configure the IdP to send signed plaintext assertions. This
+restriction can be removed only when the decrypted document can be checked
+before xmlsec signature processing.
+
 `SAML_REQUESTED_AUTHN_CONTEXT` is a boolean setting: use `true` to request a
 context or `false` (the default) to omit `RequestedAuthnContext` entirely. It
 does not accept a numeric authentication-context identifier.

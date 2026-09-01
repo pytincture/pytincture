@@ -259,7 +259,7 @@ come from the deployment secret manager rather than committed files.
 | `SAML_ROLE_ATTRIBUTE_KEYS` | Candidate assertion attributes containing roles. |
 | `SAML_SP_ASSERTION_CONSUMER_SERVICE_URL` | Service-provider ACS URL/template. |
 | `SAML_SP_ENTITY_ID` | Service-provider entity ID/template. |
-| `SAML_SP_PRIVATE_KEY` | PEM service-provider signing/decryption key. |
+| `SAML_SP_PRIVATE_KEY` | PEM service-provider key; encrypted assertions are currently rejected before toolkit processing. |
 | `SAML_SP_X509_CERT` | PEM service-provider certificate. |
 | `SECRET_KEY` | Legacy fallback for `SAML_SECRET_KEY`; migrate to the typed setting. |
 

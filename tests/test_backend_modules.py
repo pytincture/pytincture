@@ -1114,6 +1114,15 @@ def test_saml_response_transform_guard_accepts_only_bounded_safe_algorithms():
             len(disallowed),
         )
 
+    encrypted = (
+        Path(__file__).parent / "fixtures" / "saml" / "encrypted-assertion.xml"
+    ).read_bytes()
+    with pytest.raises(ValueError, match="encrypted SAML assertions"):
+        validate_saml_response_xml(
+            base64.b64encode(encrypted).decode("ascii"),
+            len(encrypted),
+        )
+
 
 @pytest.mark.parametrize(
     ("element", "algorithm", "message"),
@@ -1261,6 +1270,11 @@ def test_saml_mitigation_evidence_matches_the_enforced_runtime():
     assert evidence["upstream_status"] == "open"
     assert evidence["dependency"] == f"python3-saml=={version('python3-saml')}"
     assert evidence["mitigations"]["strict_transform_allowlist"] is True
+    assert evidence["mitigations"]["encrypted_assertions_supported"] is False
+    assert (
+        evidence["mitigations"]["encrypted_assertions_rejected_before_toolkit"]
+        is True
+    )
     assert evidence["mitigations"]["guard_runs_before_toolkit_signature_processing"] is True
     assert evidence["safe_fixture"] == (
         "tests/fixtures/saml/disallowed-xslt-transform.xml"
@@ -1301,8 +1315,9 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert active_review["status"] == "remediation_in_progress"
     assert len(active_review["findings"]) == 12
     statuses = {item["id"]: item["status"] for item in active_review["findings"]}
+    assert statuses["REVIEW-2026-09-01-H4"] == "remediated"
     assert statuses["REVIEW-2026-09-01-H5"] == "remediated"
-    assert list(statuses.values()).count("open") == 11
+    assert list(statuses.values()).count("open") == 10
     assert all(
         item["issue"].startswith("https://github.com/pytincture/")
         for item in active_review["findings"]

@@ -48,12 +48,21 @@
     {
       "id": "REVIEW-2026-09-01-H4",
       "severity": "high",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/267",
       "title": "Encrypted SAML assertion bypasses transform preflight",
       "disposition": "reject encrypted assertions until transform validation is guaranteed before xmlsec signature processing",
       "potential_user_breakage": true,
-      "compatibility_note": "Deployments using encrypted assertions must temporarily configure signed plaintext assertions. Other authentication methods, sessions, and BFFs are unchanged."
+      "compatibility_note": "Deployments using encrypted assertions must temporarily configure signed plaintext assertions. Other authentication methods, sessions, and BFFs are unchanged.",
+      "implementation": [
+        "pytincture/backend/saml.py",
+        "docs/authentication.md",
+        "security/saml-transform-mitigation.json"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_saml_response_transform_guard_accepts_only_bounded_safe_algorithms",
+        "tests/test_app.py::test_saml_acs_rejects_encrypted_assertions_before_toolkit"
+      ]
     },
     {
       "id": "REVIEW-2026-09-01-H5",
