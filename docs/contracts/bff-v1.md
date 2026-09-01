@@ -141,11 +141,16 @@ BFF modules and does not change their browser API.
 
 Generated browser classes preserve the exported class, method, and attribute
 names. They construct the route from the module-relative identifier and call
-the declared HTTP method. Sync methods use synchronous browser requests; async
-and streaming methods use asynchronous fetch/iteration behavior. Each generated
-BFF module exposes `PytinctureBFFError` for callers that want to catch the typed
-failure. Authentication redirects and optional replay-token refill are runtime
-concerns but may not change user method signatures.
+the declared HTTP method. Sync methods retain synchronous browser requests for
+the 1.x compatibility period and receive an additive `<method>_async`
+companion. Async and streaming methods use deadline-bounded asynchronous
+fetch/iteration behavior. Each generated BFF module exposes
+`PytinctureBFFError` for callers that want to catch the typed failure.
+Authentication redirects and optional replay-token refill are runtime concerns
+but may not change existing user method signatures. Replay refill is
+single-flight. A best-effort refill that fails after a completed mutation may
+be reported separately but must not replace the completed mutation result or
+cause it to be sent again.
 
 ## Evolution
 

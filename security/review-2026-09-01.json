@@ -173,12 +173,22 @@
     {
       "id": "REVIEW-2026-09-01-M4",
       "severity": "medium",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/272",
       "title": "Synchronous BFF transport and replay refill races",
       "disposition": "add deadline-bounded async transport and single-flight refills without masking completed mutations",
       "potential_user_breakage": true,
-      "compatibility_note": "An async migration may require awaiting generated calls. The synchronous API will receive a documented compatibility/deprecation path rather than disappearing silently."
+      "compatibility_note": "Existing synchronous generated methods remain throughout 1.x and emit a normally hidden deprecation warning. Each receives an additive method_async companion; new code should await it for bounded non-blocking transport. The class-level decorator, backend method, stateless sessions, and no-Redis deployment model are unchanged.",
+      "implementation": [
+        "pytincture/dataclass.py",
+        "docs/bff-guide.md",
+        "docs/contracts/bff-v1.md",
+        "docs/migrations/0.10-to-1.0.md"
+      ],
+      "regression_tests": [
+        "tests/test_dataclass.py::test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_flight",
+        "tests/test_dataclass.py::test_generate_stub_classes_returns_stub"
+      ]
     },
     {
       "id": "REVIEW-2026-09-01-M5",

@@ -91,6 +91,22 @@ Generated clients raise a `PytinctureBFFError` before decoding any non-2xx
 response. The error exposes only `status_code`, `operation`, and
 `correlation_id`; the backend response body is intentionally not included.
 
+For every synchronous exported method whose class does not already use that
+name, the browser proxy also exposes an awaitable `<method>_async(...)`
+companion. Existing synchronous calls remain
+available through 1.x, but emit a `DeprecationWarning` and retain the browser
+platform's unavoidable synchronous-XHR limitations. New browser code should
+use the async companion; backend classes and the class-level decorator do not
+need to change. Async fetches, response reads, and stream reads have a bounded
+35-second browser wait in addition to the server-side limits.
+
+Optional stateless replay tokens remain browser-held and work across workers
+without Redis or sticky routing. Concurrent token demand shares one refill.
+Low-watermark prefetch is best-effort: if it fails after a BFF mutation has
+already succeeded, the successful result is returned and a generic browser
+diagnostic is emitted; the next call retries the refill before sending another
+mutation.
+
 Sessions and generated BFF routes are scoped to the application used during
 login. Exact module-relative paths are checked against the files packaged for
 that application, so a same-named module elsewhere cannot inherit a grant.

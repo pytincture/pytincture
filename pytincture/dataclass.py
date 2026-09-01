@@ -1424,6 +1424,9 @@ class PytinctureBFFError(RuntimeError):
             stub_class_code += f"    _pytincture_replay_key = {replay_key!r}\n"
             stub_class_code += f"    _pytincture_replay_low = {replay_low_watermark!r}\n"
             stub_class_code += "    _pytincture_replay_pool = []\n"
+            stub_class_code += "    _pytincture_replay_refill_task = None\n"
+            stub_class_code += "    _pytincture_sync_warning_emitted = False\n"
+            stub_class_code += "    _pytincture_browser_timeout = 35.0\n"
             stub_class_code += "    def _bff_operation(self, url):\n"
             stub_class_code += "        method_name = str(url).rstrip('/').rsplit('/', 1)[-1]\n"
             stub_class_code += "        return f'{self.__class__.__name__}.{method_name}'\n"
@@ -1464,16 +1467,48 @@ class PytinctureBFFError(RuntimeError):
             stub_class_code += "        if req.status != 200:\n"
             stub_class_code += "            raise RuntimeError('Unable to refresh browser state')\n"
             stub_class_code += "        self._pytincture_replay_pool.extend(self._decode_pytincture_state(str(req.responseText)))\n"
-            stub_class_code += "    async def _refill_pytincture_state(self):\n"
+            stub_class_code += "    async def _await_bff(self, awaitable):\n"
+            stub_class_code += "        return await asyncio.wait_for(awaitable, timeout=self._pytincture_browser_timeout)\n"
+            stub_class_code += "    async def _request_pytincture_state(self):\n"
             stub_class_code += "        if not self._pytincture_replay_enabled:\n"
             stub_class_code += "            return\n"
             stub_class_code += "        from js import fetch\n"
             stub_class_code += "        from pyodide.ffi import to_js\n"
             stub_class_code += "        options = {'method': 'POST', 'headers': {'X-CSRF-Token': self._csrf_token(), 'X-Pytincture-Client': self._pytincture_replay_capsule}}\n"
-            stub_class_code += f"        response = await fetch({replay_state_url!r}, to_js(options))\n"
+            stub_class_code += f"        response = await self._await_bff(fetch({replay_state_url!r}, to_js(options)))\n"
             stub_class_code += "        if response.status != 200:\n"
             stub_class_code += "            raise RuntimeError('Unable to refresh browser state')\n"
-            stub_class_code += "        self._pytincture_replay_pool.extend(self._decode_pytincture_state(await response.text()))\n"
+            stub_class_code += "        encoded = await self._await_bff(response.text())\n"
+            stub_class_code += "        self._pytincture_replay_pool.extend(self._decode_pytincture_state(encoded))\n"
+            stub_class_code += "    async def _refill_pytincture_state(self):\n"
+            stub_class_code += "        if not self._pytincture_replay_enabled:\n"
+            stub_class_code += "            return\n"
+            stub_class_code += "        owner = self.__class__\n"
+            stub_class_code += "        task = owner._pytincture_replay_refill_task\n"
+            stub_class_code += "        if task is None:\n"
+            stub_class_code += "            task = asyncio.create_task(self._request_pytincture_state())\n"
+            stub_class_code += "            owner._pytincture_replay_refill_task = task\n"
+            stub_class_code += "        try:\n"
+            stub_class_code += "            await task\n"
+            stub_class_code += "        finally:\n"
+            stub_class_code += "            if owner._pytincture_replay_refill_task is task:\n"
+            stub_class_code += "                owner._pytincture_replay_refill_task = None\n"
+            stub_class_code += "    def _schedule_pytincture_state_refill(self):\n"
+            stub_class_code += "        if not self._pytincture_replay_enabled or len(self._pytincture_replay_pool) > self._pytincture_replay_low:\n"
+            stub_class_code += "            return\n"
+            stub_class_code += "        task = asyncio.create_task(self._refill_pytincture_state())\n"
+            stub_class_code += "        def report_refill(completed):\n"
+            stub_class_code += "            try:\n"
+            stub_class_code += "                completed.result()\n"
+            stub_class_code += "            except asyncio.CancelledError:\n"
+            stub_class_code += "                return\n"
+            stub_class_code += "            except Exception:\n"
+            stub_class_code += "                try:\n"
+            stub_class_code += "                    from js import console\n"
+            stub_class_code += "                    console.warn('Pytincture replay-token prefetch failed; the next BFF call will retry.')\n"
+            stub_class_code += "                except Exception:\n"
+            stub_class_code += "                    pass\n"
+            stub_class_code += "        task.add_done_callback(report_refill)\n"
             stub_class_code += "    def _take_pytincture_state_sync(self):\n"
             stub_class_code += "        if not self._pytincture_replay_enabled:\n"
             stub_class_code += "            return ''\n"
@@ -1486,7 +1521,14 @@ class PytinctureBFFError(RuntimeError):
             stub_class_code += "        if not self._pytincture_replay_pool:\n"
             stub_class_code += "            await self._refill_pytincture_state()\n"
             stub_class_code += "        return self._pytincture_replay_pool.pop()\n"
+            stub_class_code += "    def _warn_legacy_sync(self):\n"
+            stub_class_code += "        owner = self.__class__\n"
+            stub_class_code += "        if owner._pytincture_sync_warning_emitted:\n"
+            stub_class_code += "            return\n"
+            stub_class_code += "        owner._pytincture_sync_warning_emitted = True\n"
+            stub_class_code += "        warnings.warn('Synchronous browser BFF calls are deprecated; await the generated *_async method instead.', DeprecationWarning, stacklevel=3)\n"
             stub_class_code += "    def fetch_sync(self, url, payload=None, method='GET', _replay_retry=True):\n"
+            stub_class_code += "        self._warn_legacy_sync()\n"
             stub_class_code += "        replay_token = self._take_pytincture_state_sync()\n"
             stub_class_code += "        req = XMLHttpRequest.new()\n"
             stub_class_code += "        req.open(method, url, False)\n"
@@ -1509,8 +1551,6 @@ class PytinctureBFFError(RuntimeError):
             stub_class_code += f"            window.location.href = redirect_url\n"
             stub_class_code += f"            return 'null'\n"
             stub_class_code += "        self._raise_for_bff_status(req.status, url, req.getResponseHeader('X-Request-ID'))\n"
-            stub_class_code += "        if self._pytincture_replay_enabled and len(self._pytincture_replay_pool) <= self._pytincture_replay_low:\n"
-            stub_class_code += "            self._refill_pytincture_state_sync()\n"
             stub_class_code += f"        return StringIO(req.response).getvalue()\n"
             stub_class_code += f"\n"
             stub_class_code += f"    async def fetch(self, url, payload=None, method='GET', _replay_retry=True):\n"
@@ -1524,7 +1564,7 @@ class PytinctureBFFError(RuntimeError):
             stub_class_code += "            options['headers']['X-Pytincture-BFF-Token'] = replay_token\n"
             stub_class_code += f"        if payload is not None and method != 'GET':\n"
             stub_class_code += f"            options['body'] = json.dumps(payload, allow_nan=False)\n"
-            stub_class_code += f"        response = await fetch(url, to_js(options))\n"
+            stub_class_code += f"        response = await self._await_bff(fetch(url, to_js(options)))\n"
             stub_class_code += "        if _replay_retry and response.status == 409 and response.headers.get('X-Pytincture-Replay') == 'rejected':\n"
             stub_class_code += "            self._pytincture_replay_pool.clear()\n"
             stub_class_code += "            return await self.fetch(url, payload, method, False)\n"
@@ -1534,9 +1574,8 @@ class PytinctureBFFError(RuntimeError):
             stub_class_code += f"            window.location.href = redirect_url\n"
             stub_class_code += f"            return 'null'\n"
             stub_class_code += "        self._raise_for_bff_status(response.status, url, response.headers.get('X-Request-ID'))\n"
-            stub_class_code += "        if self._pytincture_replay_enabled and len(self._pytincture_replay_pool) <= self._pytincture_replay_low:\n"
-            stub_class_code += "            await self._refill_pytincture_state()\n"
-            stub_class_code += f"        return await response.text()\n"
+            stub_class_code += "        self._schedule_pytincture_state_refill()\n"
+            stub_class_code += f"        return await self._await_bff(response.text())\n"
 
             streaming_methods = {}
             for node in class_node.body:
@@ -1564,7 +1603,7 @@ class PytinctureBFFError(RuntimeError):
                 stub_class_code += f"        body_payload = payload if payload is not None else {{'args': [], 'kwargs': {{}}}}\n"
                 stub_class_code += f"        if method != 'GET':\n"
                 stub_class_code += f"            options['body'] = json.dumps(body_payload, allow_nan=False)\n"
-                stub_class_code += f"        response = await fetch(url, to_js(options))\n"
+                stub_class_code += f"        response = await self._await_bff(fetch(url, to_js(options)))\n"
                 stub_class_code += "        if _replay_retry and response.status == 409 and response.headers.get('X-Pytincture-Replay') == 'rejected':\n"
                 stub_class_code += "            self._pytincture_replay_pool.clear()\n"
                 stub_class_code += "            async for retry_chunk in self.fetch_stream(url, payload, method, False):\n"
@@ -1577,12 +1616,11 @@ class PytinctureBFFError(RuntimeError):
                 stub_class_code += f"            window.location.href = redirect_url\n"
                 stub_class_code += f"            return\n"
                 stub_class_code += "        self._raise_for_bff_status(response.status, url, response.headers.get('X-Request-ID'))\n"
-                stub_class_code += "        if self._pytincture_replay_enabled and len(self._pytincture_replay_pool) <= self._pytincture_replay_low:\n"
-                stub_class_code += "            await self._refill_pytincture_state()\n"
+                stub_class_code += "        self._schedule_pytincture_state_refill()\n"
                 stub_class_code += f"        reader = response.body.getReader()\n"
                 stub_class_code += f"        decoder = TextDecoder.new()\n"
                 stub_class_code += f"        while True:\n"
-                stub_class_code += f"            chunk = await reader.read()\n"
+                stub_class_code += f"            chunk = await self._await_bff(reader.read())\n"
                 stub_class_code += f"            if chunk.done:\n"
                 stub_class_code += f"                break\n"
                 stub_class_code += f"            text = decoder.decode(chunk.value, to_js({{'stream': True}}))\n"
@@ -1592,6 +1630,11 @@ class PytinctureBFFError(RuntimeError):
                 stub_class_code += f"        if final_text:\n"
                 stub_class_code += f"            yield final_text\n"
 
+            declared_member_names = {
+                node.name
+                for node in class_node.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
             for node in class_node.body:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith('_'):
                     is_streaming = node.name in streaming_methods
@@ -1640,6 +1683,13 @@ class PytinctureBFFError(RuntimeError):
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
                         stub_class_code += f"        response = self.fetch_sync(url, payload, {request_method!r})\n"
                         stub_class_code +=  "        return json.loads(response)\n"
+                        async_companion = f"{node.name}_async"
+                        if async_companion not in declared_member_names:
+                            stub_class_code += f"    async def {async_companion}(self, *args, **kwargs):\n"
+                            stub_class_code += f"        url = {call_url!r}\n"
+                            stub_class_code += "        payload = {'args': args, 'kwargs': kwargs}\n"
+                            stub_class_code += f"        response = await self.fetch(url, payload, {request_method!r})\n"
+                            stub_class_code += "        return json.loads(response)\n"
                 elif isinstance(node, ast.Assign):
                     for target in node.targets:
                         if isinstance(target, ast.Name):
@@ -1654,6 +1704,8 @@ class PytinctureBFFError(RuntimeError):
     all_imports.add("import base64")
     all_imports.add("import hashlib")
     all_imports.add("import hmac")
+    all_imports.add("import asyncio")
+    all_imports.add("import warnings")
     all_imports.add("from js import XMLHttpRequest, document")
     all_imports.add("from io import StringIO")
     for imp in all_imports:
