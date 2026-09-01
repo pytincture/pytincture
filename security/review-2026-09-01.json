@@ -113,12 +113,21 @@
     {
       "id": "REVIEW-2026-09-01-M1",
       "severity": "medium",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/269",
       "title": "Timed-out synchronous streams leave orphan threads",
       "disposition": "keep work admitted until completion or run it in a bounded killable executor",
       "potential_user_breakage": true,
-      "compatibility_note": "Indefinitely blocking synchronous iterators may be rejected or terminated; finite iterators and cooperative async streams remain supported."
+      "compatibility_note": "Indefinitely blocking synchronous iterators retain one configured admission slot until they exit; finite iterators and cooperative async streams remain supported without API changes.",
+      "implementation": [
+        "pytincture/backend/streaming.py",
+        "docs/contracts/bff-v1.md",
+        "docs/backend-architecture.md"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_timed_out_sync_stream_retains_admission_until_worker_exits",
+        "tests/test_backend_modules.py::test_disconnected_sync_stream_retains_admission_until_worker_exits"
+      ]
     },
     {
       "id": "REVIEW-2026-09-01-M2",

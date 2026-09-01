@@ -109,6 +109,13 @@ created. `BFF_RESULT_MAX_BYTES`, `BFF_RESULT_MAX_DEPTH`, and
 `BFF_RESULT_MAX_ITEMS` cap serialized output and structure; an oversized result
 returns `413`. Stream items are likewise bounded before their serialized bytes
 are retained, in addition to the aggregate stream duration/byte/item limits.
+Cooperative async generators are the preferred streaming contract. Legacy
+synchronous iterators run one `next()` at a time in the bounded thread pool.
+Because a Python thread cannot be killed safely, a timed-out or disconnected
+request keeps its BFF admission slot until the outstanding `next()` exits and
+the iterator closes. Repeated abandoned streams therefore cannot exceed the
+configured BFF concurrency, though a permanently blocked iterator can retain
+one slot permanently.
 
 Generated sync, async, and streaming proxies decode only 2xx responses. Any
 other response except 401 raises `PytinctureBFFError`, whose stable fields are

@@ -81,6 +81,7 @@ from pytincture.backend.streaming import (
     as_streaming_response,
     limited_async_stream,
     limited_sync_stream,
+    limited_thread_stream,
 )
 from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate, CircuitOpen
 from pytincture.backend.widget_trust import (
@@ -1320,7 +1321,8 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert statuses["REVIEW-2026-09-01-H3"] == "remediated"
     assert statuses["REVIEW-2026-09-01-H4"] == "remediated"
     assert statuses["REVIEW-2026-09-01-H5"] == "remediated"
-    assert list(statuses.values()).count("open") == 7
+    assert statuses["REVIEW-2026-09-01-M1"] == "remediated"
+    assert list(statuses.values()).count("open") == 6
     wheel_locks = json.loads(
         (root / "security" / "widget-wheel-locks.json").read_text()
     )
@@ -1839,6 +1841,85 @@ def test_async_stream_enforces_item_and_idle_limits():
     assert reasons[-1][0] == "item-limit"
     assert asyncio.run(collect(idle_item(), max_items=2, idle_timeout_seconds=0.001)) == []
     assert reasons[-1] == ("idle-timeout", 0)
+
+
+def test_timed_out_sync_stream_retains_admission_until_worker_exits():
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    finished = asyncio.Event()
+    reasons = []
+
+    def blocking_source():
+        worker_started.set()
+        release_worker.wait(timeout=2)
+        yield "late"
+
+    async def exercise():
+        chunks = [
+            chunk
+            async for chunk in limited_thread_stream(
+                blocking_source(),
+                raw=False,
+                max_seconds=0.01,
+                max_bytes=100,
+                max_items=10,
+                idle_timeout_seconds=1,
+                on_finish=lambda reason, size: (
+                    reasons.append((reason, size)),
+                    finished.set(),
+                ),
+            )
+        ]
+        assert chunks == []
+        assert worker_started.is_set()
+        # This callback releases the request's BFF slot in production. It must
+        # not run while the timed-out thread is still executing.
+        assert reasons == []
+        release_worker.set()
+        await asyncio.wait_for(finished.wait(), timeout=1)
+
+    asyncio.run(exercise())
+    assert reasons == [("timeout", 0)]
+
+
+def test_disconnected_sync_stream_retains_admission_until_worker_exits():
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    finished = asyncio.Event()
+    reasons = []
+
+    def blocking_source():
+        worker_started.set()
+        release_worker.wait(timeout=2)
+        yield "late"
+
+    async def exercise():
+        async def consume():
+            async for _chunk in limited_thread_stream(
+                blocking_source(),
+                raw=False,
+                max_seconds=10,
+                max_bytes=100,
+                max_items=10,
+                idle_timeout_seconds=10,
+                on_finish=lambda reason, size: (
+                    reasons.append((reason, size)),
+                    finished.set(),
+                ),
+            ):
+                pass
+
+        consumer = asyncio.create_task(consume())
+        await asyncio.to_thread(worker_started.wait, 1)
+        consumer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await consumer
+        assert reasons == []
+        release_worker.set()
+        await asyncio.wait_for(finished.wait(), timeout=1)
+
+    asyncio.run(exercise())
+    assert reasons == [("disconnect", 0)]
 
 
 def test_existing_streaming_response_is_wrapped_by_limits():

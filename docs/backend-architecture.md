@@ -51,3 +51,13 @@ deployment-selected BFF calls. Child results cross into the parent only as
 size-bounded, canonical JSON in a versioned byte protocol. The parent never
 unpickles child-controlled data. This mode adds no shared session state and
 does not require Redis or sticky routing.
+
+## Streaming worker accounting
+
+Async BFF streams are cooperatively cancelled at disconnect, idle timeout, or
+the aggregate deadline. A legacy synchronous iterator executes each `next()`
+in the bounded worker pool. If that call cannot stop, its request admission
+slot is deliberately retained until the worker exits and the iterator closes;
+the HTTP response can end without allowing another abandoned thread to take
+its place. This accounting is local to each worker, requires no shared store,
+and remains compatible with load balancing.
