@@ -168,6 +168,7 @@ from pytincture.backend.saml import (
     provider_value as saml_provider_value,
 )
 from pytincture.backend.safe_paths import (
+    SecureFileDigestCache,
     SecureFileHandle,
     UnsafePath,
     decode_python_source,
@@ -2461,16 +2462,71 @@ def _resolve_public_asset(
         raise HTTPException(status_code=404, detail="Asset not found") from None
 
 
-async def _stream_public_asset(handle: SecureFileHandle):
+def _request_etag_matches(request: Request, etag: str) -> bool:
+    candidates = request.headers.get("if-none-match", "")
+    return any(
+        candidate.strip() in {"*", etag, f"W/{etag}"}
+        for candidate in candidates.split(",")
+    )
+
+
+_DEFERRED_PUBLIC_ASSET_CLEANUPS: set[asyncio.Task] = set()
+
+
+async def _finish_public_asset_worker(
+    handle: SecureFileHandle,
+    pending: asyncio.Task | None,
+    on_finish: Callable[[], None] | None,
+) -> None:
+    if pending is not None:
+        try:
+            await pending
+        except BaseException:
+            pass
+    try:
+        await run_in_threadpool(handle.close)
+    finally:
+        if on_finish is not None:
+            on_finish()
+
+
+def _defer_public_asset_finish(
+    handle: SecureFileHandle,
+    pending: asyncio.Task | None,
+    on_finish: Callable[[], None] | None,
+) -> None:
+    cleanup = asyncio.create_task(
+        _finish_public_asset_worker(handle, pending, on_finish)
+    )
+    _DEFERRED_PUBLIC_ASSET_CLEANUPS.add(cleanup)
+    cleanup.add_done_callback(_DEFERRED_PUBLIC_ASSET_CLEANUPS.discard)
+
+
+async def _stream_public_asset(
+    handle: SecureFileHandle,
+    on_finish: Callable[[], None] | None = None,
+):
     """Read a verified descriptor incrementally without blocking the event loop."""
+    pending_read: asyncio.Task | None = None
+    deferred_finish = False
     try:
         while True:
-            chunk = await run_in_threadpool(os.read, handle.descriptor, 64 * 1024)
+            pending_read = asyncio.create_task(
+                run_in_threadpool(os.read, handle.descriptor, 64 * 1024)
+            )
+            try:
+                chunk = await asyncio.shield(pending_read)
+                pending_read = None
+            except asyncio.CancelledError:
+                _defer_public_asset_finish(handle, pending_read, on_finish)
+                deferred_finish = True
+                raise
             if not chunk:
                 break
             yield chunk
     finally:
-        await run_in_threadpool(handle.close)
+        if not deferred_finish:
+            await _finish_public_asset_worker(handle, pending_read, on_finish)
 
 
 async def _public_file_response(
@@ -2480,42 +2536,76 @@ async def _public_file_response(
     metadata,
     *,
     include_digest: bool = False,
+    max_bytes: int | None = None,
+    digest_cache: SecureFileDigestCache | None = None,
+    on_finish: Callable[[], None] | None = None,
 ):
     media_type = mimetypes.guess_type(metadata.path)[0] or "application/octet-stream"
-    if request.method == "HEAD":
-        return Response(
-            content=b"",
-            media_type=media_type,
-            headers=_public_asset_response_headers(metadata, relative_path),
-        )
-
-    handle = None
-    try:
-        handle = await run_in_threadpool(
-            open_contained_file,
-            root,
-            relative_path,
-            expected=metadata,
-        )
-        digest = (
-            await run_in_threadpool(hash_open_file, handle)
-            if include_digest
-            else None
-        )
-        headers = _public_asset_response_headers(
-            handle.metadata,
-            relative_path,
-            digest=digest,
-        )
-    except (OSError, UnsafePath):
-        if handle is not None:
-            await run_in_threadpool(handle.close)
-        raise HTTPException(status_code=404, detail="Asset not found") from None
-    return StreamingResponse(
-        _stream_public_asset(handle),
-        media_type=media_type,
-        headers=headers,
+    cached_digest = digest_cache.get(metadata) if include_digest and digest_cache else None
+    metadata_headers = _public_asset_response_headers(
+        metadata,
+        relative_path,
+        digest=cached_digest,
     )
+    release_on_return = True
+    try:
+        if _request_etag_matches(request, metadata_headers["ETag"]):
+            return Response(
+                status_code=304,
+                headers=metadata_headers,
+            )
+        if request.method == "HEAD":
+            return Response(
+                content=b"",
+                media_type=media_type,
+                headers=metadata_headers,
+            )
+
+        handle = None
+        try:
+            handle = await run_in_threadpool(
+                open_contained_file,
+                root,
+                relative_path,
+                expected=metadata,
+                max_bytes=max_bytes,
+            )
+            if include_digest:
+                digest_function = (
+                    digest_cache.get_or_hash
+                    if digest_cache is not None
+                    else hash_open_file
+                )
+                digest_task = asyncio.create_task(
+                    run_in_threadpool(digest_function, handle)
+                )
+                try:
+                    digest = await asyncio.shield(digest_task)
+                except asyncio.CancelledError:
+                    _defer_public_asset_finish(handle, digest_task, on_finish)
+                    handle = None
+                    release_on_return = False
+                    raise
+            else:
+                digest = None
+            headers = _public_asset_response_headers(
+                handle.metadata,
+                relative_path,
+                digest=digest,
+            )
+        except (OSError, UnsafePath):
+            if handle is not None:
+                await run_in_threadpool(handle.close)
+            raise HTTPException(status_code=404, detail="Asset not found") from None
+        release_on_return = False
+        return StreamingResponse(
+            _stream_public_asset(handle, on_finish=on_finish),
+            media_type=media_type,
+            headers=headers,
+        )
+    finally:
+        if release_on_return and on_finish is not None:
+            on_finish()
 
 
 def _application_widget_wheel_allowed(
@@ -2580,12 +2670,43 @@ async def public_app_asset(request: Request, application: str, asset_path: str):
         )
     except (OSError, UnsafePath):
         raise HTTPException(status_code=404, detail="Asset not found")
+    is_widget_wheel = normalized.lower().endswith(".whl")
+    if not is_widget_wheel:
+        return await _public_file_response(
+            request,
+            modules_root,
+            normalized,
+            metadata,
+        )
+    if metadata.size > PUBLIC_WIDGET_WHEEL_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Widget wheel exceeds configured size limit")
+    peer = request.client.host if request.client is not None else "unknown"
+    allowed, retry_after = PUBLIC_WIDGET_WHEEL_RATE_LIMITER.allow(
+        f"{peer}:{application}"
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Widget wheel rate limit exceeded",
+            headers={"Retry-After": str(retry_after)},
+        )
+    try:
+        await PUBLIC_WIDGET_WHEEL_GATE.acquire()
+    except AdmissionRejected as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Widget wheel capacity is temporarily exhausted",
+            headers={"Retry-After": "1"},
+        ) from exc
     return await _public_file_response(
         request,
         modules_root,
         normalized,
         metadata,
-        include_digest=normalized.lower().endswith(".whl"),
+        include_digest=True,
+        max_bytes=PUBLIC_WIDGET_WHEEL_MAX_BYTES,
+        digest_cache=PUBLIC_WIDGET_WHEEL_DIGEST_CACHE,
+        on_finish=PUBLIC_WIDGET_WHEEL_GATE.release,
     )
 
 
@@ -3410,6 +3531,27 @@ APPCODE_BUILD_MAX_CONCURRENCY = int(os.getenv("APPCODE_BUILD_MAX_CONCURRENCY", "
 APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS = float(
     os.getenv("APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS", "1")
 )
+PUBLIC_WIDGET_WHEEL_MAX_BYTES = int(
+    os.getenv("PYTINCTURE_WIDGET_WHEEL_MAX_BYTES", str(64 * 1024 * 1024))
+)
+PUBLIC_WIDGET_WHEEL_DIGEST_CACHE_ENTRIES = int(
+    os.getenv("PYTINCTURE_WIDGET_WHEEL_DIGEST_CACHE_ENTRIES", "32")
+)
+PUBLIC_WIDGET_WHEEL_MAX_CONCURRENCY = int(
+    os.getenv("PYTINCTURE_WIDGET_WHEEL_MAX_CONCURRENCY", "4")
+)
+PUBLIC_WIDGET_WHEEL_MAX_QUEUE = int(
+    os.getenv("PYTINCTURE_WIDGET_WHEEL_MAX_QUEUE", "8")
+)
+PUBLIC_WIDGET_WHEEL_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("PYTINCTURE_WIDGET_WHEEL_QUEUE_TIMEOUT_SECONDS", "1")
+)
+PUBLIC_WIDGET_WHEEL_RATE_LIMIT_ATTEMPTS = int(
+    os.getenv("PYTINCTURE_WIDGET_WHEEL_RATE_LIMIT_ATTEMPTS", "120")
+)
+PUBLIC_WIDGET_WHEEL_RATE_LIMIT_WINDOW_SECONDS = int(
+    os.getenv("PYTINCTURE_WIDGET_WHEEL_RATE_LIMIT_WINDOW_SECONDS", "60")
+)
 if min(
     BFF_CALL_TIMEOUT_SECONDS,
     BFF_MAX_CONCURRENCY,
@@ -3435,10 +3577,18 @@ if min(
     APPCODE_CACHE_MAX_BYTES,
     APPCODE_BUILD_MAX_CONCURRENCY,
     APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS,
+    PUBLIC_WIDGET_WHEEL_MAX_BYTES,
+    PUBLIC_WIDGET_WHEEL_DIGEST_CACHE_ENTRIES,
+    PUBLIC_WIDGET_WHEEL_MAX_CONCURRENCY,
+    PUBLIC_WIDGET_WHEEL_QUEUE_TIMEOUT_SECONDS,
+    PUBLIC_WIDGET_WHEEL_RATE_LIMIT_ATTEMPTS,
+    PUBLIC_WIDGET_WHEEL_RATE_LIMIT_WINDOW_SECONDS,
 ) <= 0:
     raise RuntimeError("BFF timeout and stream limits must be greater than zero")
 if BFF_MAX_QUEUE < 0:
     raise RuntimeError("BFF_MAX_QUEUE cannot be negative")
+if PUBLIC_WIDGET_WHEEL_MAX_QUEUE < 0:
+    raise RuntimeError("PYTINCTURE_WIDGET_WHEEL_MAX_QUEUE cannot be negative")
 if BFF_EXECUTION_MODE not in {"trusted-thread", "isolated-process"}:
     raise RuntimeError("BFF_EXECUTION_MODE must be trusted-thread or isolated-process")
 if BFF_ISOLATED_MAX_PER_USER > BFF_ISOLATED_MAX_CONCURRENCY:
@@ -3453,6 +3603,18 @@ APPCODE_ARCHIVE_CACHE = AppcodeArchiveCache(
     APPCODE_CACHE_MAX_BYTES,
 )
 APPCODE_BUILD_GATE = threading.BoundedSemaphore(APPCODE_BUILD_MAX_CONCURRENCY)
+PUBLIC_WIDGET_WHEEL_GATE = AsyncAdmissionGate(
+    PUBLIC_WIDGET_WHEEL_MAX_CONCURRENCY,
+    PUBLIC_WIDGET_WHEEL_MAX_QUEUE,
+    PUBLIC_WIDGET_WHEEL_QUEUE_TIMEOUT_SECONDS,
+)
+PUBLIC_WIDGET_WHEEL_DIGEST_CACHE = SecureFileDigestCache(
+    PUBLIC_WIDGET_WHEEL_DIGEST_CACHE_ENTRIES
+)
+PUBLIC_WIDGET_WHEEL_RATE_LIMITER = SlidingWindowRateLimiter(
+    PUBLIC_WIDGET_WHEEL_RATE_LIMIT_ATTEMPTS,
+    PUBLIC_WIDGET_WHEEL_RATE_LIMIT_WINDOW_SECONDS,
+)
 BFF_ISOLATED_EXECUTOR = ProcessIsolatedBFFExecutor(
     max_concurrency=BFF_ISOLATED_MAX_CONCURRENCY,
     max_per_user=BFF_ISOLATED_MAX_PER_USER,

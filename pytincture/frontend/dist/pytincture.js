@@ -864,10 +864,10 @@ await micropip.install(${libLiteral}, deps=False)
     }
   }
   async function probeBackendWheel(url) {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f, _g;
     let response;
     try {
-      response = await fetch(url);
+      response = await fetch(url, { method: "HEAD" });
     } catch (err) {
       console.warn(`Failed to check URL: ${url}`, err);
       return null;
@@ -879,9 +879,25 @@ await micropip.install(${libLiteral}, deps=False)
       }
       return null;
     }
-    const sha256 = ((_c = (_b = response.headers) == null ? void 0 : _b.get) == null ? void 0 : _c.call(_b, "x-pytincture-sha256")) || "";
+    let sha256 = ((_c = (_b = response.headers) == null ? void 0 : _b.get) == null ? void 0 : _c.call(_b, "x-pytincture-sha256")) || "";
+    if (!/^[a-f0-9]{64}$/i.test(sha256)) {
+      try {
+        response = await fetch(url);
+      } catch (err) {
+        console.warn(`Failed to check URL: ${url}`, err);
+        return null;
+      }
+      if (!response.ok) {
+        try {
+          await ((_d = response.body) == null ? void 0 : _d.cancel());
+        } catch (_error) {
+        }
+        return null;
+      }
+      sha256 = ((_f = (_e = response.headers) == null ? void 0 : _e.get) == null ? void 0 : _f.call(_e, "x-pytincture-sha256")) || "";
+    }
     try {
-      await ((_d = response.body) == null ? void 0 : _d.cancel());
+      await ((_g = response.body) == null ? void 0 : _g.cancel());
     } catch (_error) {
     }
     if (!/^[a-f0-9]{64}$/i.test(sha256)) {

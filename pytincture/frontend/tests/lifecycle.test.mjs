@@ -237,6 +237,44 @@ test("backend fallback locks the wheel hash and disables transitive installs", a
     }
 });
 
+test("backend wheel probe uses metadata first and hashes only an uncached wheel", async () => {
+    const originalFetch = globalThis.fetch;
+    const methods = [];
+    const pyodide = fakePyodide();
+    pyodide.runPythonAsync = async source => {
+        if (source.includes('"custom-widgets==1.0.0"')) {
+            throw new Error("package index unavailable");
+        }
+    };
+    globalThis.fetch = async (_url, options = {}) => {
+        const method = options.method || "GET";
+        methods.push(method);
+        return {
+            ok: true,
+            headers: {
+                get: name => name === "x-pytincture-sha256" && method === "GET"
+                    ? "b".repeat(64)
+                    : null,
+            },
+            body: { cancel: async () => undefined },
+        };
+    };
+    try {
+        const source = await DEFAULT_RUNTIME_OPERATIONS.installWidgetset(pyodide, {
+            application: "sample",
+            widgetlib: "custom-widgets==1.0.0",
+            widgetSource: null,
+            devWidgetHost: "https://widgets.example",
+            devWheelVersion: "99.99.99",
+            requestUuid: "instance-id",
+        });
+        assert.deepEqual(methods, ["HEAD", "GET"]);
+        assert.match(source, /#sha256=b{64}$/);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test("backend fallback refuses a wheel without server integrity metadata", async () => {
     const originalFetch = globalThis.fetch;
     const pyodide = fakePyodide();

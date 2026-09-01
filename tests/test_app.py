@@ -1,5 +1,6 @@
 import os
 import base64
+import hashlib
 import io
 import json
 import re
@@ -1145,6 +1146,8 @@ def test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not(
 ):
     from packaging.version import Version
     import pytincture.backend.app as backend_app
+    import pytincture.backend.safe_paths as safe_paths
+    from pytincture.backend.safe_paths import SecureFileDigestCache
 
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
     monkeypatch.delenv("PYTINCTURE_PUBLIC_ASSET_PATHS", raising=False)
@@ -1166,13 +1169,33 @@ def test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not(
     nested = tmp_path / "private"
     nested.mkdir()
     (nested / matching_version).write_bytes(b"nested-wheel")
+    monkeypatch.setattr(
+        backend_app,
+        "PUBLIC_WIDGET_WHEEL_DIGEST_CACHE",
+        SecureFileDigestCache(4),
+    )
+    original_hash = safe_paths.hash_open_file
+    hash_calls = []
+
+    def tracked_hash(handle):
+        hash_calls.append(handle.metadata.identity)
+        return original_hash(handle)
+
+    monkeypatch.setattr(safe_paths, "hash_open_file", tracked_hash)
+    uncached_head = fresh_client.head(f"/demoapp/appcode/{matching_version}")
+    assert uncached_head.status_code == 200
+    assert "x-pytincture-sha256" not in uncached_head.headers
+    assert hash_calls == []
     assert fresh_client.get(f"/demoapp/appcode/{matching_version}").status_code == 200
+    assert fresh_client.get(f"/demoapp/appcode/{matching_version}").status_code == 200
+    assert len(hash_calls) == 1
     assert fresh_client.get(f"/demoapp/appcode/{matching_dev}").status_code == 200
     assert fresh_client.head(f"/demoapp/appcode/{matching_version}").status_code == 200
     assert fresh_client.head(f"/demoapp/appcode/{matching_dev}").status_code == 200
-    assert "x-pytincture-sha256" not in fresh_client.head(
-        f"/demoapp/appcode/{matching_version}"
-    ).headers
+    cached_head = fresh_client.head(f"/demoapp/appcode/{matching_version}")
+    assert cached_head.headers["x-pytincture-sha256"] == hashlib.sha256(
+        b"versioned-wheel"
+    ).hexdigest()
     assert (
         fresh_client.get(f"/demoapp/appcode/{matching_version}").headers[
             "x-pytincture-sha256"
@@ -1185,9 +1208,68 @@ def test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not(
     assert fresh_client.head(f"/demoapp/appcode/{unrelated}").status_code == 404
     assert fresh_client.get(f"/demoapp/appcode/private/{matching_version}").status_code == 404
 
+    etag = cached_head.headers["etag"]
+    conditional = fresh_client.get(
+        f"/demoapp/appcode/{matching_version}",
+        headers={"If-None-Match": etag},
+    )
+    assert conditional.status_code == 304
+    assert conditional.content == b""
+    assert len(hash_calls) == 2  # declared and development wheels, once each
+
     monkeypatch.setattr(backend_app, "DEVELOPMENT_WIDGET_VERSION", Version("42.0.dev1"))
     assert fresh_client.get(f"/demoapp/appcode/{configured_dev}").status_code == 200
     assert fresh_client.get(f"/demoapp/appcode/{matching_dev}").status_code == 404
+
+
+def test_widget_wheel_serving_enforces_size_rate_and_admission_limits(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+    from pytincture.backend.limits import AdmissionRejected
+
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    (tmp_path / "demoapp.py").write_text("import demo_widgets\n")
+    (tmp_path / "demo_widgets.py").write_text(
+        '__widgetset__ = "demo-widgets"\n__version__ = "0.1.0"\n',
+        encoding="utf-8",
+    )
+    wheel = "demo_widgets-0.1.0-py3-none-any.whl"
+    (tmp_path / wheel).write_bytes(b"wheel-body")
+
+    monkeypatch.setattr(backend_app, "PUBLIC_WIDGET_WHEEL_MAX_BYTES", 4)
+    assert fresh_client.get(f"/demoapp/appcode/{wheel}").status_code == 413
+    monkeypatch.setattr(backend_app, "PUBLIC_WIDGET_WHEEL_MAX_BYTES", 1024)
+
+    class RejectingRateLimiter:
+        def allow(self, _key):
+            return False, 7
+
+    monkeypatch.setattr(
+        backend_app, "PUBLIC_WIDGET_WHEEL_RATE_LIMITER", RejectingRateLimiter()
+    )
+    rate_limited = fresh_client.get(f"/demoapp/appcode/{wheel}")
+    assert rate_limited.status_code == 429
+    assert rate_limited.headers["retry-after"] == "7"
+
+    class AllowingRateLimiter:
+        def allow(self, _key):
+            return True, 0
+
+    class RejectingGate:
+        async def acquire(self):
+            raise AdmissionRejected("full")
+
+        def release(self):
+            raise AssertionError("unacquired gate cannot be released")
+
+    monkeypatch.setattr(
+        backend_app, "PUBLIC_WIDGET_WHEEL_RATE_LIMITER", AllowingRateLimiter()
+    )
+    monkeypatch.setattr(backend_app, "PUBLIC_WIDGET_WHEEL_GATE", RejectingGate())
+    saturated = fresh_client.get(f"/demoapp/appcode/{wheel}")
+    assert saturated.status_code == 503
+    assert saturated.headers["retry-after"] == "1"
 
 
 def test_browser_package_excludes_unreachable_server_modules(

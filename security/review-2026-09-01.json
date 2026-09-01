@@ -132,12 +132,23 @@
     {
       "id": "REVIEW-2026-09-01-M2",
       "severity": "medium",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/270",
       "title": "Public wheel requests repeatedly hash entire files",
       "disposition": "cache verified digests, bound wheel size and admission, and support conditional requests",
       "potential_user_breakage": true,
-      "compatibility_note": "Only wheels above the documented safe size limit require a deployment override; normal backend wheel fallback remains unchanged."
+      "compatibility_note": "Backend wheel fallback order and URLs remain unchanged. Wheels above the new 64 MiB default require an explicit deployment limit increase, and excessive callers can receive 429 or 503 with Retry-After.",
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/backend/safe_paths.py",
+        "pytincture/configuration.py",
+        "pytincture/frontend/pytincture.js"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not",
+        "tests/test_app.py::test_widget_wheel_serving_enforces_size_rate_and_admission_limits",
+        "pytincture/frontend/tests/lifecycle.test.mjs::backend wheel probe uses metadata first and hashes only an uncached wheel"
+      ]
     },
     {
       "id": "REVIEW-2026-09-01-M3",

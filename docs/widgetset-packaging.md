@@ -96,6 +96,13 @@ The policy is static and requires no shared runtime state.
   URL to micropip. Without a deployment trust policy, the backend serves only
   the application's declared version and `PYTINCTURE_DEV_WHEEL_VERSION`; the
   normal real-version-first, `99.99.99`-last default fallback is unchanged.
+- Backend wheel metadata is checked with `HEAD` first. A cache miss performs
+  one bounded `GET` to compute the digest; subsequent requests reuse that
+  digest only while the verified device/inode/size/mtime/ctime identity is
+  unchanged. ETag conditional requests, per-worker response admission, a
+  peer/application rate limit, and a 64 MiB default maximum bound public wheel
+  work. The `PYTINCTURE_WIDGET_WHEEL_*` settings can tune these deployment
+  limits without adding shared state.
 - Automatic dependency installation is disabled. Applications list every
   additional browser dependency as its own exact or hash-locked entry in
   `#micropip-libs`.
