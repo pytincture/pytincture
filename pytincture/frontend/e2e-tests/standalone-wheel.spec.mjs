@@ -132,7 +132,7 @@ test("standalone app runs from the Python wheel runtime", async ({ page, request
         const consoleErrors = diagnostics.consoleEntries.filter(entry => entry.type === "error");
         expect(consoleErrors).toEqual([]);
         const completedWheelProbeAborts = diagnostics.failures.filter(entry => (
-            entry.method === "GET"
+            ["HEAD", "GET"].includes(entry.method)
             && entry.failure?.errorText === "net::ERR_ABORTED"
             && new URL(entry.url).pathname.endsWith(REAL_WIDGET_WHEEL)
             && diagnostics.responses.some(response => (
