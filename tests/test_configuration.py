@@ -276,6 +276,109 @@ def test_cors_origins_use_the_backend_csv_format(tmp_path):
     )
 
 
+def test_browser_connect_origins_are_typed_canonical_and_environment_backed(
+    tmp_path,
+):
+    config = PytinctureConfig.from_env(
+        {
+            "MODULES_PATH": str(tmp_path),
+            "PYTINCTURE_BROWSER_CONNECT_ORIGINS": json.dumps(
+                [
+                    "HTTPS://API.EXAMPLE.TEST",
+                    "wss://events.example.test:8443",
+                ]
+            ),
+        }
+    )
+
+    assert config.browser_connect_origins == (
+        "https://api.example.test",
+        "wss://events.example.test:8443",
+    )
+    assert json.loads(
+        config.to_environ()["PYTINCTURE_BROWSER_CONNECT_ORIGINS"]
+    ) == [
+        "https://api.example.test",
+        "wss://events.example.test:8443",
+    ]
+
+
+@pytest.mark.parametrize(
+    "origin",
+    (
+        "http://api.example.test",
+        "ws://events.example.test",
+        "https://user:password@api.example.test",
+        "https://*.example.test",
+        "https://api.example.test/",
+        "https://api.example.test/path",
+        "https://api.example.test?query=yes",
+        "https://api.example.test#fragment",
+        "https://api.example.test;script-src-*",
+        "https://api.example.test https://evil.example",
+    ),
+)
+def test_browser_connect_origins_reject_ambiguous_or_unsafe_values(
+    tmp_path,
+    origin,
+):
+    with pytest.raises(ValueError, match="browser connect origin"):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            browser_connect_origins=(origin,),
+        )
+
+
+def test_browser_connect_origins_reject_canonical_duplicates(tmp_path):
+    with pytest.raises(ValueError, match="must not contain duplicates"):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            browser_connect_origins=(
+                "https://api.example.test",
+                "HTTPS://API.EXAMPLE.TEST",
+            ),
+        )
+
+
+def test_service_csp_uses_exact_default_and_opt_in_connect_origins(tmp_path):
+    default_app = create_app(PytinctureConfig(modules_path=str(tmp_path)))
+    configured_app = create_app(PytinctureConfig(
+        modules_path=str(tmp_path),
+        browser_connect_origins=(
+            "https://api.example.test",
+            "wss://events.example.test:8443",
+        ),
+    ))
+
+    with TestClient(default_app) as default_client:
+        default_csp = default_client.get("/healthz").headers[
+            "content-security-policy"
+        ]
+    with TestClient(configured_app) as configured_client:
+        configured_csp = configured_client.get("/healthz").headers[
+            "content-security-policy"
+        ]
+
+    def directive(policy, name):
+        return next(
+            item.strip()
+            for item in policy.split(";")
+            if item.strip().startswith(f"{name} ")
+        )
+
+    assert directive(default_csp, "connect-src") == (
+        "connect-src 'self' https://pypi.org https://files.pythonhosted.org"
+    )
+    assert directive(configured_csp, "connect-src") == (
+        "connect-src 'self' https://pypi.org https://files.pythonhosted.org "
+        "https://api.example.test wss://events.example.test:8443"
+    )
+    script_sources = directive(configured_csp, "script-src")
+    assert script_sources == "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:"
+    assert "pypi.org" not in script_sources
+    assert "api.example.test" not in script_sources
+
+
 def test_legacy_app_rejects_credentialed_wildcard_cors(tmp_path):
     environment = os.environ.copy()
     environment.update(

@@ -55,6 +55,12 @@ browser-carried sessions and optional Redis, are recorded in
   carry only the exact bounded `{level,message,timestamp}` schema. Set
   `ENABLE_BROWSER_LOGS=false` to disable them. No-auth services do not expose
   `/logs` unless `ALLOW_NOAUTH_BROWSER_LOGS=true` is explicitly selected.
+- Service CSP permits browser connections only to self and the exact PyPI
+  package origins by default. Configure intentional browser API/WebSocket
+  access with `PYTINCTURE_BROWSER_CONNECT_ORIGINS` as a JSON list of exact
+  HTTPS/WSS origins. PyPI is never added to `script-src`; external
+  Pyodide/icon resources still require SRI, and executable widget assets still
+  require their SHA-256 manifest locks.
 
 Signed session and SAML handshake cookies can be read by any worker sharing the
 signing secret. Redis is only an optional enhancement for immediate

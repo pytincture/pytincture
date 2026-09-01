@@ -65,6 +65,63 @@ def _valid_microsoft_tenant_id(value: str) -> bool:
     )
 
 
+def _canonical_browser_connect_origin(value: str) -> str:
+    candidate = str(value)
+    if not candidate or candidate != candidate.strip():
+        raise ValueError("browser connect origins must not contain surrounding whitespace")
+    try:
+        parsed = urlparse(candidate)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"invalid browser connect origin: {candidate!r}") from exc
+    if (
+        parsed.scheme.lower() not in {"https", "wss"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+        or "*" in candidate
+    ):
+        raise ValueError(
+            "browser connect origins must be exact HTTPS or WSS origins "
+            "without credentials, wildcards, paths, queries, or fragments"
+        )
+
+    hostname = parsed.hostname
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        if not re.fullmatch(
+            r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+            r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*",
+            hostname,
+        ):
+            raise ValueError(f"invalid browser connect origin host: {hostname!r}")
+        canonical_host = hostname.casefold()
+    else:
+        canonical_host = f"[{address.compressed}]" if address.version == 6 else str(address)
+
+    canonical = f"{parsed.scheme.lower()}://{canonical_host}"
+    if port is not None:
+        canonical += f":{port}"
+    if candidate.casefold() != canonical.casefold():
+        raise ValueError(
+            "browser connect origins must use canonical origin-only syntax"
+        )
+    return canonical
+
+
+def canonical_browser_connect_origins(values: object) -> tuple[str, ...]:
+    origins = tuple(values or ())
+    canonical = tuple(_canonical_browser_connect_origin(value) for value in origins)
+    if len(set(canonical)) != len(canonical):
+        raise ValueError("browser connect origins must not contain duplicates")
+    return canonical
+
+
 def _setting(default, env: str, description: str, *, repr: bool = True):
     return field(
         default=default,
@@ -144,6 +201,11 @@ class PytinctureConfig:
     )
     cors_allowed_origins: tuple[str, ...] = _setting(
         (), "CORS_ALLOWED_ORIGINS", "Allowed browser origins."
+    )
+    browser_connect_origins: tuple[str, ...] = _setting(
+        (),
+        "PYTINCTURE_BROWSER_CONNECT_ORIGINS",
+        "Exact additional HTTPS/WSS origins permitted by browser connect-src.",
     )
     allowed_hosts: tuple[str, ...] = _setting(
         (), "PYTINCTURE_ALLOWED_HOSTS", "Allowed HTTP Host header names."
@@ -595,6 +657,7 @@ class PytinctureConfig:
         )
         for name in (
             "cors_allowed_origins",
+            "browser_connect_origins",
             "allowed_hosts",
             "previous_session_secrets",
             "mcp_allowed_hosts",
@@ -620,6 +683,11 @@ class PytinctureConfig:
             self,
             "application_admission",
             canonical_application_admission(self.application_admission),
+        )
+        object.__setattr__(
+            self,
+            "browser_connect_origins",
+            canonical_browser_connect_origins(self.browser_connect_origins),
         )
 
         if self.default_application is not None:
@@ -1076,6 +1144,7 @@ class PytinctureConfig:
         }
         tuple_fields = {
             "cors_allowed_origins", "allowed_hosts", "previous_session_secrets",
+            "browser_connect_origins",
             "mcp_allowed_hosts", "mcp_allowed_origins",
         }
         for definition in fields(cls):
@@ -1094,7 +1163,12 @@ class PytinctureConfig:
             elif definition.name in tuple_fields:
                 values[definition.name] = (
                     _json_or_csv(raw)
-                    if definition.name in {"previous_session_secrets", "mcp_allowed_hosts", "mcp_allowed_origins"}
+                    if definition.name in {
+                        "previous_session_secrets",
+                        "browser_connect_origins",
+                        "mcp_allowed_hosts",
+                        "mcp_allowed_origins",
+                    }
                     else _csv(raw)
                 )
             else:

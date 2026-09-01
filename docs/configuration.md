@@ -82,6 +82,14 @@ materially different trust domains should still use separate origins and
 processes so a browser/package compromise in one cannot inherit another's
 same-origin authority.
 
+Service-page `connect-src` permits only `'self'`, `https://pypi.org`, and
+`https://files.pythonhosted.org` by default. Browser applications that call
+another API directly can add exact origins with `browser_connect_origins`, for
+example `("https://api.example.com", "wss://events.example.com")`. Entries are
+origin-only HTTPS/WSS values: credentials, wildcards, paths, queries, fragments,
+and ambiguous strings are rejected. This does not add those hosts to
+`script-src`.
+
 High-trust deployments can set `widget_trust_policy` to a JSON document or a
 path to one. The policy is loaded and canonicalized at startup, then acts as an
 exact allowlist for widget distribution, version, executable/style paths, and
@@ -120,6 +128,7 @@ The contract test checks every row in this table against the dataclass model.
 | `default_application` | `PYTINCTURE_DEFAULT_APPLICATION` | Optional application for the root redirect. |
 | `favicon_folder` | `PYTINCTURE_FAVICON_FOLDER` | Optional favicon file/directory. |
 | `cors_allowed_origins` | `CORS_ALLOWED_ORIGINS` | Allowed browser origins. |
+| `browser_connect_origins` | `PYTINCTURE_BROWSER_CONNECT_ORIGINS` | Exact additional HTTPS/WSS origins permitted by browser connect-src. |
 | `allowed_hosts` | `PYTINCTURE_ALLOWED_HOSTS` | Allowed HTTP Host header names. |
 | `canonical_origin` | `PYTINCTURE_CANONICAL_ORIGIN` | Canonical external HTTP(S) origin for authentication callbacks. |
 | `enable_user_login` | `ENABLE_USER_LOGIN` | Enable local user login. |

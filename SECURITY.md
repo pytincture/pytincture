@@ -98,10 +98,12 @@ follows:
   hashes. The server still enforces authentication, signed application
   audience, Origin/Fetch Metadata, CSRF, canonical arguments, export identity,
   and policy on every applicable BFF call.
-- Service scripts remain same-origin under CSP; PyPI is a package connection,
-  never a script source. Narrowing the default connection policy to self plus
-  the exact PyPI metadata/wheel origins is tracked in
-  [#283](https://github.com/pytincture/pytincture/issues/283).
+- Service scripts remain same-origin under CSP. `connect-src` now defaults to
+  self plus the exact PyPI metadata and wheel origins; typed additional
+  HTTPS/WSS origins are validated as credential-free, wildcard-free origin
+  strings. PyPI is not a script source. External Pyodide/icons retain SRI
+  requirements and widget assets retain SHA-256 verification. This remediation
+  is tracked in [#283](https://github.com/pytincture/pytincture/issues/283).
 - `@backend_for_frontend` remains the explicit class-level network export
   decision. Public members are operations by design; names beginning with `_`
   are already excluded from the manifest and cannot be remotely dispatched.
