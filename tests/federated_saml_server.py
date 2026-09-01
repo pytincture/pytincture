@@ -14,7 +14,7 @@ from pytincture import PytinctureConfig, create_app
 ROOT = Path(__file__).resolve().parent / "e2e_apps"
 IDP_BASE_URL = "http://127.0.0.1:8085/realms/pytincture-acceptance"
 IDP_METADATA_URL = f"{IDP_BASE_URL}/protocol/saml/descriptor"
-WIDGET_VERSION = "0.9.16+backend"
+WIDGET_VERSION = "0.9.17+backend"
 WIDGET_WHEEL = ROOT / f"dhxpyt-{WIDGET_VERSION}-py3-none-any.whl"
 
 

@@ -1315,9 +1315,18 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert active_review["status"] == "remediation_in_progress"
     assert len(active_review["findings"]) == 12
     statuses = {item["id"]: item["status"] for item in active_review["findings"]}
+    assert statuses["REVIEW-2026-09-01-H1"] == "remediated"
+    assert statuses["REVIEW-2026-09-01-H2"] == "remediated"
+    assert statuses["REVIEW-2026-09-01-H3"] == "remediated"
     assert statuses["REVIEW-2026-09-01-H4"] == "remediated"
     assert statuses["REVIEW-2026-09-01-H5"] == "remediated"
-    assert list(statuses.values()).count("open") == 10
+    assert list(statuses.values()).count("open") == 7
+    wheel_locks = json.loads(
+        (root / "security" / "widget-wheel-locks.json").read_text()
+    )
+    assert wheel_locks["schema_version"] == 1
+    assert wheel_locks["locks"][0]["requirement"] == "dhxpyt==0.9.17"
+    assert len(wheel_locks["locks"][0]["sha256"]) == 64
     assert all(
         item["issue"].startswith("https://github.com/pytincture/")
         for item in active_review["findings"]

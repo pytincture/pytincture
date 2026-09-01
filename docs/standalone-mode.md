@@ -33,7 +33,7 @@ the runtime:
   window.pytinctureAutoStartConfig = {
     mode: "inline",
     entrypoint: "MyApp",
-    widgetlib: "dhxpyt==0.9.16",
+    widgetlib: "dhxpyt==0.9.17",
     onLifecycleEvent: event => console.debug(event.stage, event.type)
   };
 </script>
@@ -65,7 +65,10 @@ this keeps the browser dependency set reviewable and reproducible.
 Widgetsets may remain fully pluggable. A widget wheel that executes JavaScript
 or loads CSS includes a hashed `pytincture-assets.json`; see
 [widgetset packaging](widgetset-packaging.md). Pytincture never scans unrelated
-or transitive packages for executable assets.
+or transitive packages for executable assets. The bundled `dhxpyt==0.9.17`
+compatibility release additionally has its complete PyPI wheel locked by
+Pytincture. Other widgetsets may use an exact package pin or an
+administrator-owned hash-pinned `widgetSource`.
 
 ## Explicit CDN convenience mode
 
@@ -78,7 +81,7 @@ from the release integrity manifest into trusted HTML/configuration:
   window.pytinctureAutoStartConfig = {
     mode: "inline",
     entrypoint: "MyApp",
-    widgetlib: "dhxpyt==0.9.16",
+    widgetlib: "dhxpyt==0.9.17",
     pyodideBaseUrl: "https://cdn.example/pyodide/0.29.3/full/",
     pyodideScriptIntegrity: {
       "pyodide.js": "sha384-<trusted-manifest-value>",
@@ -109,7 +112,7 @@ Set `window.pytinctureAutoStartDisabled = true` before the runtime and call:
 await window.runTinctureApp({
   mode: "inline",
   entrypoint: "MyApp",
-  widgetlib: "dhxpyt==0.9.16"
+  widgetlib: "dhxpyt==0.9.17"
 });
 ```
 

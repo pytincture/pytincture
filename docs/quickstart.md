@@ -19,7 +19,7 @@ python -m uvicorn service:app --port 8070
 
 Open <http://127.0.0.1:8070/>. The root redirects to `/hello` without adding a
 cache UUID to the visible URL. Pytincture downloads the application package,
-starts bundled Pyodide, installs `dhxpyt==0.9.16`, and calls `hello.load_ui()`.
+starts bundled Pyodide, installs `dhxpyt==0.9.17`, and calls `hello.load_ui()`.
 
 The example has three files: [`service.py`](../examples/quickstart/service/service.py)
 creates the ASGI app, [`hello.py`](../examples/quickstart/service/hello.py) runs

@@ -66,7 +66,7 @@ test("service quickstart runs the packaged example", async ({ page, request }) =
     const compatibility = lifecycle.find(event => event.type === "compatibility")?.compatibility;
     expect(compatibility.runtimeVersion).toBe(health.version);
     expect(compatibility.widgetPackage).toBe("dhxpyt");
-    expect(compatibility.widgetVersion).toBe("0.9.16");
+    expect(compatibility.widgetVersion).toBe("0.9.17");
     expect(diagnostics.requests.some(url => new URL(url).pathname === "/hello/appcode/appcode.pyt")).toBe(true);
     expect(diagnostics.requests.some(url => (
         new URL(url).pathname === "/hello/frontend/vendor/materialdesignicons/materialdesignicons.css"
@@ -86,7 +86,7 @@ test("standalone quickstart runs with its bundled runtime", async ({ page }) => 
     const lifecycle = await expectCleanRun(page, diagnostics);
     const compatibility = lifecycle.find(event => event.type === "compatibility")?.compatibility;
     expect(compatibility.widgetPackage).toBe("dhxpyt");
-    expect(compatibility.widgetVersion).toBe("0.9.16");
+    expect(compatibility.widgetVersion).toBe("0.9.17");
     const runtimeRequest = diagnostics.requests.find(url => (
         new URL(url).pathname === BUNDLED_RUNTIME_PATH
     ));

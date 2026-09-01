@@ -18,32 +18,59 @@
     {
       "id": "REVIEW-2026-09-01-H1",
       "severity": "high",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/264",
       "title": "Automatic assistant-message DOM XSS",
       "disposition": "remediate in dhxpyt and pin the complete patched wheel in Pytincture",
       "potential_user_breakage": true,
-      "compatibility_note": "Artifact titles and identifiers will render as text; applications relying on raw HTML there must use an explicit trusted rich-content path. Normal chat and BFF use is unchanged."
+      "compatibility_note": "Artifact titles and identifiers now render as text; applications relying on raw HTML there must use an explicit sanitized rich-content path. Normal chat and BFF use is unchanged.",
+      "implementation": [
+        "dhxpyt 0.9.17",
+        "security/widget-wheel-locks.json",
+        "pytincture/frontend/pytincture.js"
+      ],
+      "regression_tests": [
+        "dhxpyt/tests/security-boundaries.spec.mjs::assistant messages remain inert",
+        "pytincture/frontend/tests/lifecycle.test.mjs::the built-in dhxpyt release verifies the complete PyPI wheel"
+      ]
     },
     {
       "id": "REVIEW-2026-09-01-H2",
       "severity": "high",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/265",
       "title": "Artifact preview escapes iframe isolation",
       "disposition": "isolate untrusted previews and disable automatic model-supplied Python execution",
       "potential_user_breakage": true,
-      "compatibility_note": "Same-origin interactive scripts, parent-DOM access, and automatic Python execution will no longer work. Plain text, code, and passive media previews remain supported."
+      "compatibility_note": "Same-origin interactive scripts, parent-DOM access, network-capable previews, and automatic Python execution no longer work. Plain text, code, and passive media previews remain supported.",
+      "implementation": [
+        "dhxpyt 0.9.17",
+        "security/widget-wheel-locks.json",
+        "pytincture/frontend/pytincture.js"
+      ],
+      "regression_tests": [
+        "dhxpyt/tests/security-boundaries.spec.mjs::artifact previews remain isolated",
+        "pytincture/frontend/tests/lifecycle.test.mjs::widget asset loader is manifest-only and verifies ownership and hashes"
+      ]
     },
     {
       "id": "REVIEW-2026-09-01-H3",
       "severity": "high",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/266",
       "title": "Ordinary widget data reaches HTML sinks",
       "disposition": "treat ordinary values as text and separate explicit sanitized rich-content APIs",
       "potential_user_breakage": true,
-      "compatibility_note": "Markup inserted as ordinary Grid, Listbox, CardFlow, or CardPanel data will be escaped. Trusted templates remain an explicit API."
+      "compatibility_note": "Markup inserted as ordinary Grid, Listbox, Combobox, CardFlow, or CardPanel data is escaped. Sanitized rich-content options and trusted developer-supplied DOM templates remain explicit APIs.",
+      "implementation": [
+        "dhxpyt 0.9.17",
+        "security/widget-wheel-locks.json",
+        "pytincture/frontend/pytincture.js"
+      ],
+      "regression_tests": [
+        "dhxpyt/tests/test_security_defaults.py",
+        "dhxpyt/tests/security-boundaries.spec.mjs::ordinary widget data remains inert"
+      ]
     },
     {
       "id": "REVIEW-2026-09-01-H4",

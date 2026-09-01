@@ -16,11 +16,11 @@ PROFILES = {
     "health": {"path": "/healthz"},
     "appcode": {"path": "/e2e_app/appcode/appcode.pyt"},
     "public_asset_head": {
-        "path": "/e2e_app/appcode/dhxpyt-0.9.16+backend-py3-none-any.whl",
+        "path": "/e2e_app/appcode/dhxpyt-0.9.17+backend-py3-none-any.whl",
         "method": "HEAD",
     },
     "public_asset": {
-        "path": "/e2e_app/appcode/dhxpyt-0.9.16+backend-py3-none-any.whl",
+        "path": "/e2e_app/appcode/dhxpyt-0.9.17+backend-py3-none-any.whl",
     },
     "bff": {
         "path": "/performance_data/classcall/performance_data.py/PerformanceData/ping",

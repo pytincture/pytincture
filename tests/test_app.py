@@ -2648,7 +2648,7 @@ def test_frontend_runtime_cache_busts_only_backend_micropip_installs(fresh_clien
     assert "withoutCacheBusting" not in response.text
     assert "activeRequestUuid" not in response.text
     assert "requestUuid ? withRequestUuid(source, requestUuid) : source" in response.text
-    assert "await installWidgetsetSource(pyodide, primarySource);" in response.text
+    assert "await installWidgetsetSource(pyodide, verifiedPrimarySource);" in response.text
     assert "await installWidgetsetSource(pyodide, lockedSource, config.requestUuid);" in response.text
     assert "#sha256=${backendWheel.sha256}" in response.text
 
@@ -2661,7 +2661,7 @@ def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_cli
     assert response.text.index("candidateVersions.push(pinnedMatch[1])") < response.text.index(
         "candidateVersions.push(config.devWheelVersion)"
     )
-    assert response.text.index("await installWidgetsetSource(pyodide, primarySource)") < response.text.index(
+    assert response.text.index("await installWidgetsetSource(pyodide, verifiedPrimarySource)") < response.text.index(
         "const backendSources = await resolveBackendWidgetSources(config)"
     )
     assert "is not available from PyPI; checking backend wheels" in response.text

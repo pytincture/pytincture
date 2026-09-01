@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "policy": "Pytincture compatibility widget releases are installed from an immutable PyPI file URL and verified against a deployment-owned SHA-256 digest before import. Backend wheel URLs retain their separately returned SHA-256 and instance UUID. Custom pluggable widgetsets remain supported through exact index pins or administrator-supplied hash-pinned wheel URLs.",
+  "locks": [
+    {
+      "requirement": "dhxpyt==0.9.17",
+      "source": "https://files.pythonhosted.org/packages/b0/0f/ffd11784d6c4695702ad6c99a9a347af41caa992f4124de7d5472bf3b6be/dhxpyt-0.9.17-py3-none-any.whl",
+      "sha256": "d354717a276989df44c802d060171122ebed5432cb4cc5e64812a4b89bb41914",
+      "upstream_repository": "https://github.com/pytincture/dhx_pytincture_widgetset",
+      "upstream_pull_request": "https://github.com/pytincture/dhx_pytincture_widgetset/pull/33",
+      "upstream_merge_commit": "26f1f267b559274cbc3e8751f66fe24980dc40b7",
+      "security_properties": {
+        "ordinary_data_is_text": true,
+        "rich_content_requires_explicit_sanitized_api": true,
+        "assistant_output_is_untrusted": true,
+        "artifact_iframe_has_opaque_origin": true,
+        "model_supplied_python_auto_execution": false
+      }
+    }
+  ]
+}

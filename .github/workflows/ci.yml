@@ -448,8 +448,8 @@ jobs:
             --python "$(command -v python)" \
             --artifact "$wheel_path" \
             --extra dev
-          python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.16
-          cp tests/e2e_apps/dhxpyt-0.9.16-py3-none-any.whl tests/e2e_apps/dhxpyt-0.9.16+backend-py3-none-any.whl
+          python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.17
+          cp tests/e2e_apps/dhxpyt-0.9.17-py3-none-any.whl tests/e2e_apps/dhxpyt-0.9.17+backend-py3-none-any.whl
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -542,10 +542,10 @@ jobs:
           "$standalone_python" -m pip download \
             --no-deps \
             --dest /tmp/pytincture-standalone-widget \
-            dhxpyt==0.9.16
+            dhxpyt==0.9.17
           cp \
-            /tmp/pytincture-standalone-widget/dhxpyt-0.9.16-py3-none-any.whl \
-            /tmp/pytincture-standalone-widget/dhxpyt-0.9.16+backend-py3-none-any.whl
+            /tmp/pytincture-standalone-widget/dhxpyt-0.9.17-py3-none-any.whl \
+            /tmp/pytincture-standalone-widget/dhxpyt-0.9.17+backend-py3-none-any.whl
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -567,7 +567,7 @@ jobs:
         env:
           PYTINCTURE_ACCEPTANCE_RESULT: standalone-acceptance-result.json
           PYTINCTURE_STANDALONE_PYTHON: /tmp/pytincture-standalone-wheel/bin/python
-          PYTINCTURE_STANDALONE_WIDGET_WHEEL: /tmp/pytincture-standalone-widget/dhxpyt-0.9.16+backend-py3-none-any.whl
+          PYTINCTURE_STANDALONE_WIDGET_WHEEL: /tmp/pytincture-standalone-widget/dhxpyt-0.9.17+backend-py3-none-any.whl
         run: npx playwright test --config playwright.standalone.config.mjs
 
       - name: Build standalone qualification evidence
@@ -705,10 +705,10 @@ jobs:
           "$saml_python" -m pip download \
             --no-deps \
             --dest tests/e2e_apps \
-            dhxpyt==0.9.16
+            dhxpyt==0.9.17
           cp \
-            tests/e2e_apps/dhxpyt-0.9.16-py3-none-any.whl \
-            tests/e2e_apps/dhxpyt-0.9.16+backend-py3-none-any.whl
+            tests/e2e_apps/dhxpyt-0.9.17-py3-none-any.whl \
+            tests/e2e_apps/dhxpyt-0.9.17+backend-py3-none-any.whl
 
       - name: Start pinned Keycloak identity provider
         run: |
@@ -821,10 +821,10 @@ jobs:
           python scripts/install_locked_artifact.py \
             --python "$(command -v python)" \
             --artifact dist/pytincture-*.whl
-          python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.16
+          python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.17
           cp \
-            tests/e2e_apps/dhxpyt-0.9.16-py3-none-any.whl \
-            tests/e2e_apps/dhxpyt-0.9.16+backend-py3-none-any.whl
+            tests/e2e_apps/dhxpyt-0.9.17-py3-none-any.whl \
+            tests/e2e_apps/dhxpyt-0.9.17+backend-py3-none-any.whl
 
       - name: Run health load budget
         env:

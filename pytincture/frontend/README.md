@@ -65,7 +65,7 @@ Before the script tag loads, you may set the following globals:
 ```html
 <script>
   window.pytinctureAutoStartConfig = {
-    widgetlib: "dhxpyt==0.9.16",
+    widgetlib: "dhxpyt==0.9.17",
     libsSelector: "#micropip-libs",
     pyodideBaseUrl: "./frontend/pyodide/0.29.3/full/",
     enableServiceWorker: true,
@@ -82,7 +82,7 @@ Manual start (if auto-start is disabled):
 ```js
 runTinctureApp({
   mode: "inline",
-  widgetlib: "dhxpyt==0.9.16",
+  widgetlib: "dhxpyt==0.9.17",
   enableBackendLogging: false
 });
 ```

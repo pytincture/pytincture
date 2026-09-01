@@ -82,8 +82,14 @@ The policy is static and requires no shared runtime state.
 
 ## Installation locks
 
-- PyPI widgetsets use an exact `name==version` requirement. Micropip verifies
-  the package-index wheel hash.
+- Pytincture's built-in compatibility widget release uses an immutable PyPI
+  file URL plus a deployment-owned complete-wheel SHA-256 lock recorded in
+  `security/widget-wheel-locks.json`. It is still a PyPI install and never
+  receives the backend instance UUID.
+- Other pluggable PyPI widgetsets use an exact `name==version` requirement;
+  micropip verifies the hash supplied by the package index. High-trust
+  deployments can instead set an administrator-owned `widgetSource` URL with
+  its own `#sha256=<64 hex>` lock.
 - Explicit wheel sources include `#sha256=<64 hex>`.
 - A Pytincture backend computes the wheel SHA-256 and exposes it in
   `X-Pytincture-SHA256`; the runtime adds that lock before giving the backend

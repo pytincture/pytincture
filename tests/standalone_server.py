@@ -93,7 +93,7 @@ class StandaloneHandler(BaseHTTPRequestHandler):
             return
         wheel_route = (
             "/standalone_fixture/appcode/"
-            "dhxpyt-0.9.16+backend-py3-none-any.whl"
+            "dhxpyt-0.9.17+backend-py3-none-any.whl"
         )
         if path == wheel_route:
             self._serve_file(WIDGET_WHEEL, send_body, "application/zip")
