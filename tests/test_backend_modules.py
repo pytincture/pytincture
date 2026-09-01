@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
+from starlette.requests import Request
 
 from pytincture.backend.auth import (
     allowed_email,
@@ -54,7 +55,11 @@ from pytincture.backend.replay import (
     SharedReplayStoreAdapter,
     validate_atomic_replay_store,
 )
-from pytincture.backend.results import BFFResultLimitExceeded, encode_bff_result
+from pytincture.backend.results import (
+    BFFResultLimitExceeded,
+    encode_bff_result,
+    prepare_bff_result,
+)
 from pytincture.backend.saml import (
     ALLOWED_XML_DIGEST_METHODS,
     ALLOWED_XML_SIGNATURE_METHODS,
@@ -99,6 +104,83 @@ def test_bff_result_encoder_stops_at_byte_depth_and_item_limits():
         encode_bff_result([[[1]]], max_bytes=100, max_depth=2)
     with pytest.raises(BFFResultLimitExceeded, match="item"):
         encode_bff_result([1, 2, 3], max_bytes=100, max_items=2)
+
+
+def test_bff_result_encoder_materializes_finite_generator_as_json_array():
+    converted, payload = prepare_bff_result(
+        (number for number in range(3)),
+        max_bytes=100,
+        max_items=3,
+    )
+
+    assert converted == [0, 1, 2]
+    assert payload == b"[0,1,2]"
+
+
+def test_bff_result_encoder_stops_and_closes_generator_at_item_limit():
+    pulled = []
+    closed = threading.Event()
+
+    def unbounded():
+        try:
+            number = 0
+            while True:
+                pulled.append(number)
+                yield number
+                number += 1
+        finally:
+            closed.set()
+
+    with pytest.raises(BFFResultLimitExceeded, match="item"):
+        encode_bff_result(unbounded(), max_bytes=1_000, max_items=2)
+
+    assert pulled == [0, 1, 2]
+    assert closed.is_set()
+
+
+def test_bff_result_encoder_bounds_nested_iterators_before_json_conversion():
+    nested = {"items": iter(range(3))}
+
+    with pytest.raises(BFFResultLimitExceeded, match="item"):
+        encode_bff_result(nested, max_bytes=1_000, max_items=3)
+
+
+def test_bff_result_encoder_rejects_ordinary_async_iterables():
+    async def values():
+        yield 1
+
+    result = values()
+    try:
+        with pytest.raises(BFFResultLimitExceeded, match="explicit streaming"):
+            encode_bff_result(result, max_bytes=1_000)
+    finally:
+        asyncio.run(result.aclose())
+
+
+def test_bff_result_serialization_runs_off_the_request_event_loop(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    serialization_threads = []
+    original_prepare = backend_app.prepare_bff_result
+
+    def observed_prepare(*args, **kwargs):
+        serialization_threads.append(threading.get_ident())
+        return original_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(backend_app, "prepare_bff_result", observed_prepare)
+
+    async def exercise():
+        request = Request({"type": "http", "headers": []})
+        request.state.bff_deadline = time.monotonic() + 1
+        event_loop_thread = threading.get_ident()
+        response = await backend_app._bounded_bff_result(request, {"ok": True})
+        return event_loop_thread, response
+
+    event_loop_thread, response = asyncio.run(exercise())
+
+    assert response.body == b'{"ok":true}'
+    assert serialization_threads
+    assert serialization_threads[0] != event_loop_thread
 
 
 def _isolated_test_invocation(path, operation, member, *, wall_time=2.0):
@@ -1330,7 +1412,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     followup_statuses = {
         item["id"]: item["status"] for item in followup["findings"]
     }
-    assert followup_statuses["FOLLOWUP-RESULT-ITERABLE-EXPANSION"] == "open"
+    assert followup_statuses["FOLLOWUP-RESULT-ITERABLE-EXPANSION"] == "remediated"
     assert followup_statuses["FOLLOWUP-ASYNC-COOPERATIVE-TIMEOUT"] == (
         "open_additive_hardening"
     )

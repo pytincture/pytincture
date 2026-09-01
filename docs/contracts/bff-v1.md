@@ -107,7 +107,12 @@ correlation id. Responses carry `X-Request-ID`.
 Ordinary results are encoded through a bounded iterator before a response is
 created. `BFF_RESULT_MAX_BYTES`, `BFF_RESULT_MAX_DEPTH`, and
 `BFF_RESULT_MAX_ITEMS` cap serialized output and structure; an oversized result
-returns `413`. Stream items are likewise bounded before their serialized bytes
+returns `413`. Finite synchronous generators and iterators remain ordinary JSON
+arrays. They are consumed incrementally, stopped and closed after the first
+item beyond the configured aggregate limit, and serialized in the bounded BFF
+worker pool instead of the request event loop. An async iterable returned from
+an ordinary operation is rejected; declare it with `@bff_stream()` to stream it
+incrementally. Stream items are likewise bounded before their serialized bytes
 are retained, in addition to the aggregate stream duration/byte/item limits.
 Cooperative async generators are the preferred streaming contract. Legacy
 synchronous iterators run one `next()` at a time in the bounded thread pool.

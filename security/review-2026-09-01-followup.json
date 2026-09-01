@@ -18,9 +18,17 @@
     {
       "id": "FOLLOWUP-RESULT-ITERABLE-EXPANSION",
       "severity": "medium",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/280",
       "disposition": "Bound generators and iterators incrementally before general JSON conversion; keep explicit streaming unchanged.",
+      "implementation": "pytincture/backend/results.py incrementally materializes bounded synchronous iterators before FastAPI conversion, closes them on a limit failure, rejects ordinary async iterables, and pytincture/backend/app.py performs ordinary serialization in the bounded BFF worker pool.",
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_bff_result_encoder_materializes_finite_generator_as_json_array",
+        "tests/test_backend_modules.py::test_bff_result_encoder_stops_and_closes_generator_at_item_limit",
+        "tests/test_backend_modules.py::test_bff_result_encoder_bounds_nested_iterators_before_json_conversion",
+        "tests/test_backend_modules.py::test_bff_result_encoder_rejects_ordinary_async_iterables",
+        "tests/test_backend_modules.py::test_bff_result_serialization_runs_off_the_request_event_loop"
+      ],
       "potential_user_breakage": true,
       "compatibility_note": "Finite ordinary generators remain JSON arrays within configured limits. Explicit streaming and yielded streaming responses are unchanged."
     },

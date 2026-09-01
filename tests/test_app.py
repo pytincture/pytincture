@@ -2559,6 +2559,60 @@ def test_ordinary_bff_results_are_serialized_under_a_hard_byte_limit(
     assert recovered.json() == {"ready": True}
 
 
+def test_ordinary_bff_iterables_are_bounded_before_json_conversion(
+    monkeypatch, fresh_client, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "iterables.py").write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class Iterables:
+            def finite(self):
+                return (number for number in range(3))
+
+            def unbounded(self):
+                def values():
+                    number = 0
+                    while True:
+                        yield number
+                        number += 1
+                return values()
+
+            def async_iterable(self):
+                async def values():
+                    yield 1
+                return values()
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "BFF_RESULT_MAX_ITEMS", 3)
+    monkeypatch.setattr(backend_app, "require_auth", lambda request: "noauth")
+    backend_app.reload_bff_registry(str(tmp_path))
+
+    finite = fresh_client.post(
+        "/iterables/classcall/iterables.py/Iterables/finite",
+        json={"args": [], "kwargs": {}},
+    )
+    unbounded = fresh_client.post(
+        "/iterables/classcall/iterables.py/Iterables/unbounded",
+        json={"args": [], "kwargs": {}},
+    )
+    async_iterable = fresh_client.post(
+        "/iterables/classcall/iterables.py/Iterables/async_iterable",
+        json={"args": [], "kwargs": {}},
+    )
+
+    assert finite.status_code == 200
+    assert finite.json() == [0, 1, 2]
+    assert unbounded.status_code == 413
+    assert unbounded.json() == {"detail": "BFF result item limit exceeded"}
+    assert async_iterable.status_code == 413
+    assert async_iterable.json() == {
+        "detail": "Async BFF result iterables require an explicit streaming export"
+    }
+
+
 def test_class_call_uses_optional_process_isolation_when_configured(
     monkeypatch, fresh_client, tmp_path
 ):
