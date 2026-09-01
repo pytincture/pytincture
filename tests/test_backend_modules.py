@@ -1327,7 +1327,8 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert statuses["REVIEW-2026-09-01-M4"] == "remediated"
     assert statuses["REVIEW-2026-09-01-M5"] == "remediated"
     assert statuses["REVIEW-2026-09-01-M6"] == "remediated"
-    assert list(statuses.values()).count("open") == 1
+    assert statuses["REVIEW-2026-09-01-M7"] == "remediated"
+    assert list(statuses.values()).count("open") == 0
     wheel_locks = json.loads(
         (root / "security" / "widget-wheel-locks.json").read_text()
     )
@@ -1345,6 +1346,14 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         is True
     )
     assert active_review["architecture_constraints"]["redis_required"] is False
+    external_controls = json.loads(
+        (root / active_review["external_controls_document"]).read_text()
+    )
+    assert external_controls["framework_controls"]["redis_required"] is False
+    assert all(
+        control["framework_cannot_self_attest"] is True
+        for control in external_controls["remaining_external_controls"]
+    )
     dispositions = {item["id"]: item for item in evidence["dispositions"]}
     assert set(dispositions) == {
         "F-01",

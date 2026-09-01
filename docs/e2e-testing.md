@@ -48,7 +48,7 @@ python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.18
 cp tests/e2e_apps/dhxpyt-0.9.18-py3-none-any.whl \
   tests/e2e_apps/dhxpyt-0.9.18+backend-py3-none-any.whl
 cd pytincture/frontend
-npm ci
+npm ci --ignore-scripts
 npx playwright install chromium firefox webkit
 npm run test:e2e
 npm run test:examples

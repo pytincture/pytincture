@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "recorded_on": "2026-09-01",
+  "purpose": "Separate framework-enforced controls from controls that only a repository or deployment administrator can apply and attest.",
+  "framework_controls": {
+    "repository_policy_contract_requires_secret_scan": true,
+    "complete_builtin_widget_wheel_digest_verified": true,
+    "self_hosted_verified_pyodide_is_default": true,
+    "external_pyodide_requires_explicit_unsafe_opt_in": true,
+    "npm_install_lifecycle_scripts_disabled_in_ci": true,
+    "independent_clean_frozen_release_rebuilds_compared": true,
+    "redis_required": false,
+    "sticky_routing_required": false
+  },
+  "remaining_external_controls": [
+    {
+      "control": "Apply and audit the release branch-protection profile, including Repository secret scan, on GitHub.",
+      "owner": "repository administrator",
+      "required_before_release": true,
+      "framework_cannot_self_attest": true
+    },
+    {
+      "control": "Protect immutable release tags and the PyPI/npm deployment environments with non-self approval and trusted-publisher settings.",
+      "owner": "repository and registry administrators",
+      "required_before_release": true,
+      "framework_cannot_self_attest": true
+    },
+    {
+      "control": "Keep the production edge, canonical host, TLS, HSTS, rate limits, and forwarded-header replacement aligned with the recorded production-edge evidence.",
+      "owner": "deployment operator",
+      "required_before_release": true,
+      "framework_cannot_self_attest": true
+    },
+    {
+      "control": "If the explicitly unsafe external-Pyodide escape hatch is used for a controlled demo, independently approve and pin every CDN/runtime byte; production should self-host instead.",
+      "owner": "deployment operator",
+      "required_before_release": false,
+      "framework_cannot_self_attest": true
+    },
+    {
+      "control": "High-trust deployments may configure an administrator-owned widget distribution/version/asset allowlist in addition to Pytincture's complete-wheel and asset hashes.",
+      "owner": "deployment operator",
+      "required_before_release": false,
+      "framework_cannot_self_attest": true
+    }
+  ]
+}

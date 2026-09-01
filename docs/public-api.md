@@ -136,6 +136,7 @@ Two pre-load globals are public:
 | `onLifecycleEvent` | `null` | Callback for stage, compatibility, fallback, error, and ready events. |
 | `pyodideBaseUrl` | bundled path | Trailing-slash base for Pyodide assets. |
 | `pyodideScriptIntegrity` | `null` | Required `pyodide.js`/`pyodide.asm.js` SRI map when `pyodideBaseUrl` is cross-origin. |
+| `allowUnverifiedExternalPyodide` | `false` | Explicit demo/development opt-in for cross-origin Pyodide; production uses the self-hosted verified default. |
 | `loadMaterialIcons` | `true` | Load the Material Design icon stylesheet. |
 | `materialIconsUrl` | bundled path | Self-hosted Material Design icon stylesheet source. |
 | `materialIconsIntegrity` | `null` | Required SRI value when `materialIconsUrl` is cross-origin. |

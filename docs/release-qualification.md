@@ -145,7 +145,8 @@ The bootstrap profile protects the current stack with its available checks.
 After the final CI workflow reaches `main`, an administrator applies and audits
 the release profile, which requires every Python, JavaScript, browser,
 artifact, optional-extra, security, production, and upgrade/rollback check,
-plus a fresh CODEOWNER approval from someone other than the last pusher.
+including the repository/history secret scan, plus a fresh CODEOWNER approval
+from someone other than the last pusher.
 The built-in Actions token cannot read administration policy, so the resulting
 audit URL is recorded under `repository_policy_reviews` rather than relying on
 an under-privileged CI API call.

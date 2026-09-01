@@ -4,6 +4,7 @@
   "recorded_on": "2026-09-01",
   "status": "remediation_in_progress",
   "summary": "All five High and seven Medium findings are accepted for remediation. None requires changing Pytincture's class-level BFF decorator contract or making Redis, process-memory sessions, or sticky routing mandatory.",
+  "external_controls_document": "security/external-controls.json",
   "architecture_constraints": {
     "class_level_bff_export_preserved": true,
     "pluggable_widgetsets_preserved": true,
@@ -240,12 +241,28 @@
     {
       "id": "REVIEW-2026-09-01-M7",
       "severity": "medium",
-      "status": "open",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/275",
       "title": "Dependency and repository integrity gaps",
       "disposition": "require secret scan, whole-wheel verification, explicit external-runtime trust, lifecycle minimization, and independent clean rebuilds",
       "potential_user_breakage": true,
-      "compatibility_note": "Custom widget wheels or external Pyodide deployments may need administrator hashes or explicit development trust opt-in; runtime BFF APIs remain unchanged."
+      "compatibility_note": "Runtime and BFF APIs are unchanged. Cross-origin Pyodide now requires the explicitly unsafe development/demo opt-in plus bootstrap SRI; production keeps the bundled self-hosted verified default. CI dependency installs disable lifecycle scripts, so a future dependency that truly needs one requires a reviewed explicit build step.",
+      "implementation": [
+        "contracts/repository-policy-v1.json",
+        "security/widget-wheel-locks.json",
+        "security/external-controls.json",
+        "pytincture/frontend/pytincture.js",
+        ".github/workflows/ci.yml",
+        "docs/standalone-mode.md",
+        "docs/release-artifacts.md"
+      ],
+      "regression_tests": [
+        "tests/test_repository_policy.py::test_release_repository_policy_covers_every_publish_dependency",
+        "tests/test_release_security.py::test_ci_uses_frozen_python_inputs_and_release_security_gates",
+        "tests/test_release_security.py::test_release_reproducibility_uses_an_independent_clean_build",
+        "tests/test_release_security.py::test_external_security_controls_are_explicit_and_not_runtime_state",
+        "pytincture/frontend/tests/lifecycle.test.mjs::external browser assets fail closed without explicit SRI"
+      ]
     }
   ]
 }

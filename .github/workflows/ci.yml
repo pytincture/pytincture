@@ -90,7 +90,7 @@ jobs:
       - name: Build npm runtime package
         working-directory: pytincture/frontend
         run: |
-          npm ci
+          npm ci --ignore-scripts
           npm run build
           mkdir -p ../../dist
           npm pack --pack-destination ../../dist
@@ -116,17 +116,30 @@ jobs:
             --npm "$npm_path" | tee dist/SHA256SUMS.json
 
       - name: Verify reproducible artifact bytes
+        shell: bash
         run: |
-          mkdir -p .reproducible
-          uv run --frozen python -m build --no-isolation --outdir .reproducible
-          python scripts/normalize_sdist.py .reproducible/*.tar.gz "$SOURCE_DATE_EPOCH"
+          mkdir -p .reproducible-source
+          git archive --format=tar HEAD | tar -xf - -C .reproducible-source
           (
-            cd pytincture/frontend
-            npm pack --pack-destination "$GITHUB_WORKSPACE/.reproducible"
+            cd .reproducible-source
+            uv sync --frozen --extra dev
+            (
+              cd pytincture/frontend
+              npm ci --ignore-scripts
+              npm run build
+              mkdir -p ../../dist
+              npm pack --pack-destination ../../dist
+            )
+            uv run --frozen python -m build --no-isolation --outdir dist
+            uv run --frozen python scripts/normalize_sdist.py dist/*.tar.gz "$SOURCE_DATE_EPOCH"
+            uv run --frozen python scripts/inspect_release_artifacts.py \
+              --wheel dist/*.whl \
+              --sdist dist/*.tar.gz \
+              --npm dist/*.tgz > dist/INSPECTION.json
           )
-          cmp dist/*.whl .reproducible/*.whl
-          cmp dist/*.tar.gz .reproducible/*.tar.gz
-          cmp dist/*.tgz .reproducible/*.tgz
+          cmp dist/*.whl .reproducible-source/dist/*.whl
+          cmp dist/*.tar.gz .reproducible-source/dist/*.tar.gz
+          cmp dist/*.tgz .reproducible-source/dist/*.tgz
 
       - name: Smoke-test wheel and source distribution installations
         shell: bash
@@ -326,7 +339,7 @@ jobs:
       - name: Audit npm dependencies
         working-directory: pytincture/frontend
         run: |
-          npm ci
+          npm ci --ignore-scripts
           npm audit --audit-level=low
 
   secret-scan:
@@ -378,7 +391,7 @@ jobs:
 
       - name: Install JavaScript dependencies
         working-directory: pytincture/frontend
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Run JavaScript unit tests
         working-directory: pytincture/frontend
@@ -448,8 +461,8 @@ jobs:
             --python "$(command -v python)" \
             --artifact "$wheel_path" \
             --extra dev
-          python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.17
-          cp tests/e2e_apps/dhxpyt-0.9.17-py3-none-any.whl tests/e2e_apps/dhxpyt-0.9.17+backend-py3-none-any.whl
+          python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.18
+          cp tests/e2e_apps/dhxpyt-0.9.18-py3-none-any.whl tests/e2e_apps/dhxpyt-0.9.18+backend-py3-none-any.whl
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -460,7 +473,7 @@ jobs:
 
       - name: Install browser test dependencies
         working-directory: pytincture/frontend
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Install ${{ matrix.browser }}
         working-directory: pytincture/frontend
@@ -542,10 +555,10 @@ jobs:
           "$standalone_python" -m pip download \
             --no-deps \
             --dest /tmp/pytincture-standalone-widget \
-            dhxpyt==0.9.17
+            dhxpyt==0.9.18
           cp \
-            /tmp/pytincture-standalone-widget/dhxpyt-0.9.17-py3-none-any.whl \
-            /tmp/pytincture-standalone-widget/dhxpyt-0.9.17+backend-py3-none-any.whl
+            /tmp/pytincture-standalone-widget/dhxpyt-0.9.18-py3-none-any.whl \
+            /tmp/pytincture-standalone-widget/dhxpyt-0.9.18+backend-py3-none-any.whl
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -556,7 +569,7 @@ jobs:
 
       - name: Install browser test dependencies
         working-directory: pytincture/frontend
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Install Chromium
         working-directory: pytincture/frontend
@@ -567,7 +580,7 @@ jobs:
         env:
           PYTINCTURE_ACCEPTANCE_RESULT: standalone-acceptance-result.json
           PYTINCTURE_STANDALONE_PYTHON: /tmp/pytincture-standalone-wheel/bin/python
-          PYTINCTURE_STANDALONE_WIDGET_WHEEL: /tmp/pytincture-standalone-widget/dhxpyt-0.9.17+backend-py3-none-any.whl
+          PYTINCTURE_STANDALONE_WIDGET_WHEEL: /tmp/pytincture-standalone-widget/dhxpyt-0.9.18+backend-py3-none-any.whl
         run: npx playwright test --config playwright.standalone.config.mjs
 
       - name: Build standalone qualification evidence
@@ -643,7 +656,7 @@ jobs:
 
       - name: Install browser test dependencies
         working-directory: pytincture/frontend
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Install ${{ matrix.browser }}
         working-directory: pytincture/frontend
@@ -705,10 +718,10 @@ jobs:
           "$saml_python" -m pip download \
             --no-deps \
             --dest tests/e2e_apps \
-            dhxpyt==0.9.17
+            dhxpyt==0.9.18
           cp \
-            tests/e2e_apps/dhxpyt-0.9.17-py3-none-any.whl \
-            tests/e2e_apps/dhxpyt-0.9.17+backend-py3-none-any.whl
+            tests/e2e_apps/dhxpyt-0.9.18-py3-none-any.whl \
+            tests/e2e_apps/dhxpyt-0.9.18+backend-py3-none-any.whl
 
       - name: Start pinned Keycloak identity provider
         run: |
@@ -740,7 +753,7 @@ jobs:
 
       - name: Install browser test dependencies
         working-directory: pytincture/frontend
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Install Chromium
         working-directory: pytincture/frontend
@@ -821,10 +834,10 @@ jobs:
           python scripts/install_locked_artifact.py \
             --python "$(command -v python)" \
             --artifact dist/pytincture-*.whl
-          python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.17
+          python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.18
           cp \
-            tests/e2e_apps/dhxpyt-0.9.17-py3-none-any.whl \
-            tests/e2e_apps/dhxpyt-0.9.17+backend-py3-none-any.whl
+            tests/e2e_apps/dhxpyt-0.9.18-py3-none-any.whl \
+            tests/e2e_apps/dhxpyt-0.9.18+backend-py3-none-any.whl
 
       - name: Run health load budget
         env:

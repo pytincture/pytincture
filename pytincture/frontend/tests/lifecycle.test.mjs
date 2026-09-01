@@ -439,6 +439,16 @@ test("external browser assets fail closed without explicit SRI", () => {
         });
         assert.throws(
             () => DEFAULT_RUNTIME_OPERATIONS.preflightConfig(externalPyodide),
+            /allowUnverifiedExternalPyodide=true/,
+        );
+
+        const optedInWithoutIntegrity = normalizeConfig({
+            mode: "inline",
+            pyodideBaseUrl: "https://cdn.example.test/pyodide/0.29.3/full/",
+            allowUnverifiedExternalPyodide: true,
+        });
+        assert.throws(
+            () => DEFAULT_RUNTIME_OPERATIONS.preflightConfig(optedInWithoutIntegrity),
             /External Pyodide requires pyodideScriptIntegrity/,
         );
 
@@ -486,6 +496,7 @@ test("external script and stylesheet loaders apply SRI with anonymous CORS", asy
         const config = normalizeConfig({
             mode: "inline",
             pyodideBaseUrl: "https://cdn.example.test/pyodide/0.29.3/full/",
+            allowUnverifiedExternalPyodide: true,
             pyodideScriptIntegrity: {
                 "pyodide.js": integrity,
                 "pyodide.asm.js": integrity,

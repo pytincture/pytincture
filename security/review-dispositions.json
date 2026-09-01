@@ -5,6 +5,7 @@
   "reviewed_report": "SECURITY_REVIEW_2026-08-30.txt",
   "followup_reviewed_report": "Daybreak follow-up findings received 2026-08-31",
   "active_review_tracking_document": "security/review-2026-09-01.json",
+  "external_controls_document": "security/external-controls.json",
   "active_review_status": "remediation_in_progress",
   "accepted_architecture_document": "security/accepted-architecture.md",
   "review_response_date": "2026-08-30",

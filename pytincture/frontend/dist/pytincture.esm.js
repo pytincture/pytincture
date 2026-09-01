@@ -37,6 +37,7 @@ var DEFAULT_CONFIG = {
   // 'package', 'inline', or 'auto'
   pyodideBaseUrl: "./frontend/pyodide/0.29.3/full/",
   pyodideScriptIntegrity: null,
+  allowUnverifiedExternalPyodide: false,
   loadMaterialIcons: true,
   materialIconsUrl: "./frontend/vendor/materialdesignicons/materialdesignicons.css",
   materialIconsIntegrity: null,
@@ -419,6 +420,11 @@ function preflightConfig(config) {
     throw new Error("pyodideBaseUrl is required.");
   }
   if (isExternalAssetUrl(config.pyodideBaseUrl)) {
+    if (config.allowUnverifiedExternalPyodide !== true) {
+      throw new Error(
+        "External Pyodide requires allowUnverifiedExternalPyodide=true; self-host the verified runtime for production."
+      );
+    }
     for (const filename of ["pyodide.js", "pyodide.asm.js"]) {
       if (!isValidSubresourceIntegrity((_a = config.pyodideScriptIntegrity) == null ? void 0 : _a[filename])) {
         throw new Error(

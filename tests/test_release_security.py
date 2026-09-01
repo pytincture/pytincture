@@ -178,6 +178,45 @@ def test_ci_uses_frozen_python_inputs_and_release_security_gates():
     assert "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb" in workflow
     assert "/tmp/gitleaks git --redact --no-banner --exit-code 1 ." in workflow
     assert "scan_repository_secrets.py" in workflow
+    assert "npm ci --ignore-scripts" in workflow
+    assert "\n          npm ci\n" not in workflow
+
+
+def test_release_reproducibility_uses_an_independent_clean_build():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "git archive --format=tar HEAD" in workflow
+    assert "cd .reproducible-source" in workflow
+    assert workflow.count("uv sync --frozen --extra dev") >= 2
+    assert workflow.count("npm ci --ignore-scripts") >= 2
+    assert "inspect_release_artifacts.py" in workflow
+    assert "cmp dist/*.whl .reproducible-source/dist/*.whl" in workflow
+    assert "cmp dist/*.tar.gz .reproducible-source/dist/*.tar.gz" in workflow
+    assert "cmp dist/*.tgz .reproducible-source/dist/*.tgz" in workflow
+
+
+def test_external_security_controls_are_explicit_and_not_runtime_state():
+    controls = json.loads(
+        (ROOT / "security" / "external-controls.json").read_text(encoding="utf-8")
+    )
+
+    assert controls["framework_controls"] == {
+        "repository_policy_contract_requires_secret_scan": True,
+        "complete_builtin_widget_wheel_digest_verified": True,
+        "self_hosted_verified_pyodide_is_default": True,
+        "external_pyodide_requires_explicit_unsafe_opt_in": True,
+        "npm_install_lifecycle_scripts_disabled_in_ci": True,
+        "independent_clean_frozen_release_rebuilds_compared": True,
+        "redis_required": False,
+        "sticky_routing_required": False,
+    }
+    assert controls["remaining_external_controls"]
+    assert all(
+        item["framework_cannot_self_attest"] is True
+        for item in controls["remaining_external_controls"]
+    )
 
 
 def test_docs_do_not_recommend_an_unsupported_mutable_container_image():

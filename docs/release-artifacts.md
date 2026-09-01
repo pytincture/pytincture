@@ -30,6 +30,11 @@ pytincture[saml]` when that feature is enabled. Dependency ranges accept
 compatible non-breaking updates for users. Development, CI, clean artifact
 installs, dependency audits, and release builds use the exact hashes in
 `uv.lock`; `uv lock --check` fails when project metadata and the lock drift.
+CI uses `npm ci --ignore-scripts`; dependency install hooks never execute with
+release authority. The reviewed `npm run build` step is invoked explicitly
+after installation. A future dependency that cannot work without an install
+hook requires a narrow, reviewed workflow exception rather than enabling all
+lifecycle scripts.
 
 ## Local artifact verification
 
@@ -37,7 +42,7 @@ Build the runtime first, then all three release files:
 
 ```bash
 cd pytincture/frontend
-npm ci
+npm ci --ignore-scripts
 npm run build
 mkdir -p ../../dist
 npm pack --pack-destination ../../dist
@@ -77,8 +82,11 @@ runtime reports the canonical framework version.
 
 CI derives `SOURCE_DATE_EPOCH` from the release commit. Wheels already honor
 that standard timestamp; the normalization step sorts sdist entries and fixes
-archive ownership and timestamps. Rebuilding the same commit therefore yields
-byte-identical Python artifacts.
+archive ownership and timestamps. The reproducibility gate exports the same
+commit into a separate clean source tree, performs a second frozen Python and
+`--ignore-scripts` npm install, rebuilds and reinspects all three artifacts,
+then compares their exact bytes. It does not merely repack outputs or reuse the
+first build's virtual environment or `node_modules`.
 
 ## CI and publication
 

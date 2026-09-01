@@ -83,6 +83,7 @@ from the release integrity manifest into trusted HTML/configuration:
     entrypoint: "MyApp",
     widgetlib: "dhxpyt==0.9.18",
     pyodideBaseUrl: "https://cdn.example/pyodide/0.29.3/full/",
+    allowUnverifiedExternalPyodide: true,
     pyodideScriptIntegrity: {
       "pyodide.js": "sha384-<trusted-manifest-value>",
       "pyodide.asm.js": "sha384-<trusted-manifest-value>"
@@ -97,12 +98,15 @@ from the release integrity manifest into trusted HTML/configuration:
   crossorigin="anonymous"></script>
 ```
 
-External Pyodide and icon URLs fail preflight unless their SRI values are
-supplied. The runtime applies anonymous CORS to those script/stylesheet loads.
-WASM, the standard library, and Pyodide metadata are loaded internally by
-Pyodide, so verify those bytes from the signed/reviewed manifest before
-deployment or self-host them. A manifest fetched from the same potentially
-compromised CDN is not an independent trust root.
+External Pyodide fails preflight unless the deliberately named
+`allowUnverifiedExternalPyodide: true` opt-in and bootstrap-script SRI values
+are both supplied. This is a controlled demo/development escape hatch, not a
+production recommendation. The runtime applies anonymous CORS to those
+scripts. WASM, the standard library, and Pyodide metadata are loaded internally
+by Pyodide and cannot all receive browser SRI through this integration, so
+production deployments must use Pytincture's self-hosted verified runtime (the
+default). A manifest fetched from the same potentially compromised CDN is not
+an independent trust root.
 
 ## Explicit startup
 
