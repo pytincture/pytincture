@@ -82,6 +82,11 @@ from pytincture.backend.streaming import (
     limited_sync_stream,
 )
 from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate, CircuitOpen
+from pytincture.backend.widget_trust import (
+    WidgetTrustPolicyError,
+    canonical_widget_trust_policy,
+    trusted_widget_manifest,
+)
 
 
 def test_bff_result_encoder_stops_at_byte_depth_and_item_limits():
@@ -728,6 +733,79 @@ def test_widgetset_discovery_reads_local_metadata_without_importing(tmp_path: Pa
     assert discover_widgetset("demo", str(tmp_path)) == "custom-widget==2.3.4"
 
 
+def test_widgetset_discovery_reads_installed_distribution_without_importing(
+    tmp_path: Path, monkeypatch
+):
+    application_root = tmp_path / "applications"
+    application_root.mkdir()
+    (application_root / "demo.py").write_text(
+        "import external_widget\n", encoding="utf-8"
+    )
+
+    package_root = tmp_path / "site-packages"
+    package = package_root / "external_widget"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text(
+        '__widgetset__ = "external-widget"\n'
+        '__version__ = "999.0"\n'
+        'raise RuntimeError("server must not import browser package")\n',
+        encoding="utf-8",
+    )
+    dist_info = package_root / "external_widget-4.5.6.dist-info"
+    dist_info.mkdir()
+    (dist_info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: external-widget\nVersion: 4.5.6\n",
+        encoding="utf-8",
+    )
+    (dist_info / "top_level.txt").write_text("external_widget\n", encoding="utf-8")
+    (dist_info / "RECORD").write_text(
+        "external_widget/__init__.py,,\n", encoding="utf-8"
+    )
+    monkeypatch.syspath_prepend(str(package_root))
+
+    assert "external_widget" not in sys.modules
+    assert discover_widgetset("demo", str(application_root)) == "external-widget==4.5.6"
+    assert "external_widget" not in sys.modules
+
+
+def test_widget_trust_policy_is_an_exact_administrator_allowlist():
+    policy = canonical_widget_trust_policy(
+        json.dumps(
+            {
+                "schema": 1,
+                "widgetsets": [
+                    {
+                        "distribution": "Demo_Widget",
+                        "version": "1.2.3",
+                        "assets": [
+                            {
+                                "path": "demo_widget/widget.js",
+                                "type": "javascript",
+                                "sha256": "a" * 64,
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+
+    assert trusted_widget_manifest(policy, "demo-widget==1.2.3") == {
+        "schema": 1,
+        "package": "demo-widget",
+        "version": "1.2.3",
+        "assets": [
+            {
+                "path": "demo_widget/widget.js",
+                "type": "javascript",
+                "sha256": "a" * 64,
+            }
+        ],
+    }
+    with pytest.raises(WidgetTrustPolicyError, match="not allowed"):
+        trusted_widget_manifest(policy, "demo-widget==1.2.4")
+
+
 @pytest.mark.parametrize(
     ("source", "expected"),
     (
@@ -1146,6 +1224,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-M-11-M-12-BLOCKING-SHARED-STORE",
         "REVIEW-2026-08-31-M-13-M-14-LOGS-DOCS-HSTS",
         "REVIEW-2026-08-31-M-19-M-21-M-23-SECRET-SCAN",
+        "REVIEW-2026-08-31-M-17-WIDGET-TRUST",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1264,6 +1343,16 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert release_controls["repository_secret_scan"] is True
     assert release_controls["redis_required"] is False
     assert release_controls["runtime_state_added"] is False
+    widget_controls = dispositions[
+        "REVIEW-2026-08-31-M-17-WIDGET-TRUST"
+    ]["controls"]
+    assert widget_controls["browser_package_imported_for_discovery"] is False
+    assert widget_controls["pluggable_widgetsets_preserved"] is True
+    assert widget_controls["package_manifest_is_independent_authorization_root"] is False
+    assert widget_controls["configured_allowlist_fails_closed"] is True
+    assert widget_controls["html_script_metadata_context_safe"] is True
+    assert widget_controls["redis_required"] is False
+    assert widget_controls["runtime_state_added"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:

@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import subprocess
@@ -354,6 +355,124 @@ def test_development_widget_version_is_validated_and_rendered(tmp_path):
     assert declared.status_code == 200
     assert development.status_code == 200
     assert rejected_default.status_code == 404
+
+
+def test_deployment_widget_trust_policy_overrides_manifest_and_escapes_html(tmp_path):
+    (tmp_path / "demo.py").write_text("import demo_widget\n", encoding="utf-8")
+    (tmp_path / "demo_widget.py").write_text(
+        '__widgetset__ = "demo-widget"\n__version__ = "1.2.3"\n',
+        encoding="utf-8",
+    )
+    declared_wheel = "demo_widget-1.2.3-py3-none-any.whl"
+    development_wheel = "demo_widget-99.99.99-py3-none-any.whl"
+    (tmp_path / declared_wheel).write_bytes(b"declared")
+    (tmp_path / development_wheel).write_bytes(b"development")
+    policy_path = tmp_path / "widget-policy.json"
+    policy_path.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "widgetsets": [
+                    {
+                        "distribution": "demo-widget",
+                        "version": "1.2.3",
+                        "assets": [
+                            {
+                                "path": "demo_widget/</script><script>alert.js",
+                                "type": "javascript",
+                                "sha256": "a" * 64,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = PytinctureConfig(
+        modules_path=str(tmp_path),
+        default_application="demo",
+        widget_trust_policy=str(policy_path),
+    )
+
+    assert config.widget_trust_policy.startswith('{"schema":1,"widgetsets":[')
+    assert config.to_environ()["PYTINCTURE_WIDGET_TRUST_POLICY"] == config.widget_trust_policy
+    with TestClient(create_app(config)) as client:
+        response = client.get("/demo")
+        declared = client.get(f"/demo/appcode/{declared_wheel}")
+        development = client.get(f"/demo/appcode/{development_wheel}")
+
+    assert response.status_code == 200
+    assert "widgetAssetManifest:" in response.text
+    assert "</script><script>alert.js" not in response.text
+    assert "\\u003c/script\\u003e\\u003cscript\\u003ealert.js" in response.text
+    assert declared.status_code == 200
+    assert development.status_code == 404
+
+
+def test_deployment_widget_trust_policy_fails_closed_for_unlisted_version(tmp_path):
+    (tmp_path / "demo.py").write_text("import demo_widget\n", encoding="utf-8")
+    (tmp_path / "demo_widget.py").write_text(
+        '__widgetset__ = "demo-widget"\n__version__ = "1.2.3"\n',
+        encoding="utf-8",
+    )
+    policy = json.dumps(
+        {
+            "schema": 1,
+            "widgetsets": [
+                {
+                    "distribution": "demo-widget",
+                    "version": "1.2.4",
+                    "assets": [
+                        {
+                            "path": "demo_widget/widget.js",
+                            "type": "javascript",
+                            "sha256": "b" * 64,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    application = create_app(
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            default_application="demo",
+            widget_trust_policy=policy,
+        )
+    )
+
+    with TestClient(application) as client:
+        response = client.get("/demo")
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Internal server error"
+    assert response.json()["correlation_id"]
+
+
+def test_widget_trust_policy_rejects_ambiguous_or_unhashed_entries(tmp_path):
+    invalid_policy = json.dumps(
+        {
+            "schema": 1,
+            "widgetsets": [
+                {
+                    "distribution": "demo-widget",
+                    "version": "1.2.3",
+                    "assets": [
+                        {
+                            "path": "demo_widget/widget.js",
+                            "type": "javascript",
+                            "sha256": "not-a-digest",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    with pytest.raises(ValueError, match="invalid widget_trust_policy"):
+        PytinctureConfig(
+            modules_path=str(tmp_path), widget_trust_policy=invalid_policy
+        )
 
 
 def test_legacy_secret_key_is_an_environment_fallback(tmp_path):
