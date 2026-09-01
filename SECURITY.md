@@ -72,12 +72,14 @@ follows:
   [#280](https://github.com/pytincture/pytincture/issues/280); explicit BFF
   streaming and `yield` remain supported.
 - Trusted-mode coroutine BFFs and async policy hooks use cooperative event-loop
-  timeouts. The existing `BFF_EXECUTION_MODE=isolated-process` option already
-  gives non-streaming calls a killable process boundary. Additive opt-in
-  containment for trusted async stages is tracked in
+  timeouts by default. `BFF_ASYNC_EXECUTION_MODE=worker-thread` now provides
+  additive opt-in containment on a bounded worker event loop and retains BFF
+  admission until timed-out thread work exits. The existing
+  `BFF_EXECUTION_MODE=isolated-process` option remains the killable boundary for
+  non-streaming calls. This remediation is tracked in
   [#281](https://github.com/pytincture/pytincture/issues/281); synchronous
-  applications, the compatibility default, and explicit streaming do not
-  change.
+  applications, the compatibility default, and explicit streaming are
+  unchanged.
 - `MODULES_PATH` is deployment-trusted application source. A read-only
   container/root mount and non-root service account remain deployment
   controls. A prominent warning plus optional fail-closed enforcement is

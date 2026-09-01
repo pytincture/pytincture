@@ -2065,18 +2065,71 @@ def _remaining_bff_seconds(request: Request) -> float:
     return max(0.0, request.state.bff_deadline - time.monotonic())
 
 
-async def _run_bff_thread_stage(request: Request, function: Callable, *args, **kwargs):
+async def _wait_for_bff_worker_task(
+    request: Request,
+    task: asyncio.Task,
+    *,
+    timeout_detail: str,
+):
     remaining = _remaining_bff_seconds(request)
     if remaining <= 0:
-        raise HTTPException(status_code=504, detail="BFF call timed out")
-    task = asyncio.create_task(run_in_threadpool(function, *args, **kwargs))
+        request.state.bff_deferred_task = task
+        raise HTTPException(status_code=504, detail=timeout_detail)
     try:
         return await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
     except asyncio.TimeoutError as exc:
         # A Python thread cannot be killed safely. Keep its admission slot until
         # it actually exits so repeated timeouts cannot create unbounded work.
         request.state.bff_deferred_task = task
-        raise HTTPException(status_code=504, detail="BFF call timed out") from exc
+        raise HTTPException(status_code=504, detail=timeout_detail) from exc
+
+
+async def _run_bff_thread_stage(request: Request, function: Callable, *args, **kwargs):
+    task = asyncio.create_task(run_in_threadpool(function, *args, **kwargs))
+    return await _wait_for_bff_worker_task(
+        request,
+        task,
+        timeout_detail="BFF call timed out",
+    )
+
+
+def _run_async_callable(function: Callable, args: tuple, kwargs: dict):
+    return asyncio.run(function(*args, **kwargs))
+
+
+async def _run_bff_async_stage(
+    request: Request,
+    function: Callable,
+    args: tuple,
+    kwargs: dict,
+    timeout_detail: str,
+):
+    if BFF_ASYNC_EXECUTION_MODE == "worker-thread":
+        task = asyncio.create_task(
+            run_in_threadpool(_run_async_callable, function, args, kwargs)
+        )
+        return await _wait_for_bff_worker_task(
+            request,
+            task,
+            timeout_detail=timeout_detail,
+        )
+    try:
+        return await asyncio.wait_for(
+            function(*args, **kwargs),
+            timeout=_remaining_bff_seconds(request),
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=504, detail=timeout_detail) from exc
+
+
+def _invoke_and_resolve_policy_hook(
+    policy_hook: Callable,
+    policy_arguments: dict[str, Any],
+):
+    result = policy_hook(**policy_arguments)
+    if inspect.isawaitable(result):
+        return asyncio.run(result)
+    return result
 
 
 def _bff_replay_subject(request: Request, user: Any) -> Optional[str]:
@@ -2907,13 +2960,26 @@ async def class_call(
             "request": request,
         }
         if inspect.iscoroutinefunction(policy_hook):
-            try:
-                policy_result = await asyncio.wait_for(
-                    policy_hook(**policy_arguments),
-                    timeout=_remaining_bff_seconds(request),
+            policy_result = await _run_bff_async_stage(
+                request,
+                policy_hook,
+                (),
+                policy_arguments,
+                "BFF policy timed out",
+            )
+        elif BFF_ASYNC_EXECUTION_MODE == "worker-thread":
+            task = asyncio.create_task(
+                run_in_threadpool(
+                    _invoke_and_resolve_policy_hook,
+                    policy_hook,
+                    policy_arguments,
                 )
-            except asyncio.TimeoutError as exc:
-                raise HTTPException(status_code=504, detail="BFF policy timed out") from exc
+            )
+            policy_result = await _wait_for_bff_worker_task(
+                request,
+                task,
+                timeout_detail="BFF policy timed out",
+            )
         else:
             policy_result = await _run_bff_thread_stage(
                 request, lambda: policy_hook(**policy_arguments)
@@ -3035,41 +3101,68 @@ async def class_call(
 
         # Execute the target callable
         if is_async_gen_function:
-            result = func(*args, **kwargs)
             if is_streaming:
-                return _as_streaming_response(result)
-            collected_items = []
-            collected_bytes = 0
+                return _as_streaming_response(func(*args, **kwargs))
+
             async def collect_items():
-                nonlocal collected_bytes
-                async for item in result:
-                    if len(collected_items) >= BFF_RESULT_MAX_ITEMS:
-                        raise HTTPException(status_code=413, detail="BFF result item limit exceeded")
-                    try:
-                        encoded_item = await _run_bff_thread_stage(
-                            request,
-                            encode_bff_result,
-                            item,
-                            max_bytes=max(1, BFF_RESULT_MAX_BYTES - collected_bytes),
-                            max_depth=BFF_RESULT_MAX_DEPTH,
-                            max_items=BFF_RESULT_MAX_ITEMS,
-                        )
-                    except BFFResultLimitExceeded as exc:
-                        raise HTTPException(status_code=413, detail=str(exc)) from exc
-                    collected_bytes += len(encoded_item)
-                    if collected_bytes > BFF_RESULT_MAX_BYTES:
-                        raise HTTPException(status_code=413, detail="BFF result byte limit exceeded")
-                    collected_items.append(item)
-            try:
-                await asyncio.wait_for(
-                    collect_items(), timeout=_remaining_bff_seconds(request)
-                )
-            except asyncio.TimeoutError as exc:
-                raise HTTPException(status_code=504, detail="BFF call timed out") from exc
-            finally:
-                close = getattr(result, "aclose", None)
-                if callable(close):
-                    await close()
+                result = func(*args, **kwargs)
+                collected_items = []
+                collected_bytes = 0
+                try:
+                    async for item in result:
+                        if len(collected_items) >= BFF_RESULT_MAX_ITEMS:
+                            raise HTTPException(
+                                status_code=413,
+                                detail="BFF result item limit exceeded",
+                            )
+                        try:
+                            if BFF_ASYNC_EXECUTION_MODE == "worker-thread":
+                                encoded_item = encode_bff_result(
+                                    item,
+                                    max_bytes=max(
+                                        1,
+                                        BFF_RESULT_MAX_BYTES - collected_bytes,
+                                    ),
+                                    max_depth=BFF_RESULT_MAX_DEPTH,
+                                    max_items=BFF_RESULT_MAX_ITEMS,
+                                )
+                            else:
+                                encoded_item = await _run_bff_thread_stage(
+                                    request,
+                                    encode_bff_result,
+                                    item,
+                                    max_bytes=max(
+                                        1,
+                                        BFF_RESULT_MAX_BYTES - collected_bytes,
+                                    ),
+                                    max_depth=BFF_RESULT_MAX_DEPTH,
+                                    max_items=BFF_RESULT_MAX_ITEMS,
+                                )
+                        except BFFResultLimitExceeded as exc:
+                            raise HTTPException(
+                                status_code=413,
+                                detail=str(exc),
+                            ) from exc
+                        collected_bytes += len(encoded_item)
+                        if collected_bytes > BFF_RESULT_MAX_BYTES:
+                            raise HTTPException(
+                                status_code=413,
+                                detail="BFF result byte limit exceeded",
+                            )
+                        collected_items.append(item)
+                finally:
+                    close = getattr(result, "aclose", None)
+                    if callable(close):
+                        await close()
+                return collected_items
+
+            collected_items = await _run_bff_async_stage(
+                request,
+                collect_items,
+                (),
+                {},
+                "BFF call timed out",
+            )
             return await _bounded_bff_result(
                 request,
                 collected_items,
@@ -3077,12 +3170,13 @@ async def class_call(
             )
 
         if is_coroutine_function:
-            try:
-                result = await asyncio.wait_for(
-                    func(*args, **kwargs), timeout=_remaining_bff_seconds(request)
-                )
-            except asyncio.TimeoutError as exc:
-                raise HTTPException(status_code=504, detail="BFF call timed out") from exc
+            result = await _run_bff_async_stage(
+                request,
+                func,
+                tuple(args),
+                dict(kwargs),
+                "BFF call timed out",
+            )
         else:
             result = await _run_bff_thread_stage(request, func, *args, **kwargs)
 
@@ -3540,6 +3634,9 @@ BFF_RESULT_MAX_BYTES = int(os.getenv("BFF_RESULT_MAX_BYTES", str(10 * 1024 * 102
 BFF_RESULT_MAX_DEPTH = int(os.getenv("BFF_RESULT_MAX_DEPTH", "32"))
 BFF_RESULT_MAX_ITEMS = int(os.getenv("BFF_RESULT_MAX_ITEMS", "10000"))
 BFF_EXECUTION_MODE = os.getenv("BFF_EXECUTION_MODE", "trusted-thread").strip().lower()
+BFF_ASYNC_EXECUTION_MODE = os.getenv(
+    "BFF_ASYNC_EXECUTION_MODE", "event-loop"
+).strip().lower()
 BFF_ISOLATED_MAX_CONCURRENCY = int(os.getenv("BFF_ISOLATED_MAX_CONCURRENCY", "4"))
 BFF_ISOLATED_MAX_PER_USER = int(os.getenv("BFF_ISOLATED_MAX_PER_USER", "2"))
 BFF_ISOLATED_CPU_SECONDS = float(os.getenv("BFF_ISOLATED_CPU_SECONDS", "30"))

@@ -89,7 +89,14 @@ such as `127.0.0.1` or `::1`.
 
 BFF modules are deployment-trusted code. The default `trusted-thread` mode
 preserves low-overhead async, object, and streaming behavior; timed-out worker
-threads retain their admission slot until they actually exit. For a harder
+threads retain their admission slot until they actually exit. If trusted async
+methods or async policy hooks might perform blocking work without yielding, set
+`BFF_ASYNC_EXECUTION_MODE=worker-thread` to move those non-streaming stages onto
+bounded per-call worker event loops. This keeps the ASGI request loop responsive
+but cannot kill a stuck Python thread. The default `event-loop` mode and all
+explicit async streaming remain unchanged. Keep the default for application
+objects deliberately bound to the ASGI loop, or construct those objects inside
+the worker-thread call. For a harder
 boundary around non-streaming BFFs, select `BFF_EXECUTION_MODE=isolated-process`
 and size its process/per-user, CPU, memory, wall-time, and result limits. Child
 processes are terminated at wall time. CPU enforcement requires POSIX and the

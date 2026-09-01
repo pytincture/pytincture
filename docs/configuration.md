@@ -175,6 +175,7 @@ The contract test checks every row in this table against the dataclass model.
 | `bff_result_max_depth` | `BFF_RESULT_MAX_DEPTH` | Maximum ordinary BFF result nesting depth. |
 | `bff_result_max_items` | `BFF_RESULT_MAX_ITEMS` | Maximum aggregate ordinary BFF result items. |
 | `bff_execution_mode` | `BFF_EXECUTION_MODE` | BFF execution mode: trusted-thread or isolated-process. |
+| `bff_async_execution_mode` | `BFF_ASYNC_EXECUTION_MODE` | Trusted async BFF stage mode: event-loop or worker-thread. |
 | `bff_isolated_max_concurrency` | `BFF_ISOLATED_MAX_CONCURRENCY` | Concurrent optional isolated BFF child processes per worker. |
 | `bff_isolated_max_per_user` | `BFF_ISOLATED_MAX_PER_USER` | Concurrent optional isolated BFF child processes per user. |
 | `bff_isolated_cpu_seconds` | `BFF_ISOLATED_CPU_SECONDS` | CPU-time limit for one optional isolated BFF child. |

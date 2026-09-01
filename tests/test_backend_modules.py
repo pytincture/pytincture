@@ -1398,7 +1398,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     followup = json.loads(
         (root / evidence["latest_followup_review"]).read_text()
     )
-    assert followup["status"] == "tracking_open_medium"
+    assert followup["status"] == "tracking_open_hardening"
     assert followup["compatibility_constraints"] == {
         "class_level_bff_export_preserved": True,
         "private_underscore_members_exported": False,
@@ -1414,7 +1414,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     }
     assert followup_statuses["FOLLOWUP-RESULT-ITERABLE-EXPANSION"] == "remediated"
     assert followup_statuses["FOLLOWUP-ASYNC-COOPERATIVE-TIMEOUT"] == (
-        "open_additive_hardening"
+        "remediated_additive_hardening"
     )
     assert followup_statuses["FOLLOWUP-PROCESS-NOT-SANDBOX"] == "accepted"
     assert followup_statuses["FOLLOWUP-BROWSER-WIDGET-TRUST"] == (
@@ -1824,6 +1824,71 @@ def test_bounded_thread_stage_keeps_event_loop_responsive_and_holds_timed_out_sl
 
     exercise_responsiveness()
     exercise_timeout_capacity()
+
+
+def test_opt_in_async_bff_stage_uses_worker_loop_and_retains_timed_out_work(
+    monkeypatch,
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "BFF_ASYNC_EXECUTION_MODE", "worker-thread")
+
+    async def exercise_responsiveness():
+        request = Request({"type": "http", "headers": []})
+        request.state.bff_deadline = time.monotonic() + 1
+        event_loop_thread = threading.get_ident()
+        worker_started = threading.Event()
+
+        async def non_yielding_coroutine():
+            worker_started.set()
+            deadline = time.monotonic() + 0.15
+            while time.monotonic() < deadline:
+                pass
+            return threading.get_ident()
+
+        work = asyncio.create_task(
+            backend_app._run_bff_async_stage(
+                request,
+                non_yielding_coroutine,
+                (),
+                {},
+                "BFF call timed out",
+            )
+        )
+        assert await asyncio.to_thread(worker_started.wait, 1)
+        started = time.monotonic()
+        await asyncio.sleep(0.01)
+        assert time.monotonic() - started < 0.1
+        assert await work != event_loop_thread
+
+    async def exercise_timeout_retention():
+        request = Request({"type": "http", "headers": []})
+        request.state.bff_deadline = time.monotonic() + 0.02
+        release = threading.Event()
+
+        async def blocked_policy():
+            while not release.is_set():
+                pass
+            return True
+
+        with pytest.raises(HTTPException) as timed_out:
+            await backend_app._run_bff_async_stage(
+                request,
+                blocked_policy,
+                (),
+                {},
+                "BFF policy timed out",
+            )
+        assert timed_out.value.status_code == 504
+        assert timed_out.value.detail == "BFF policy timed out"
+        deferred = request.state.bff_deferred_task
+        assert deferred is not None
+        assert not deferred.done()
+        release.set()
+        assert await asyncio.wait_for(deferred, timeout=1) is True
+
+    asyncio.run(exercise_responsiveness())
+    asyncio.run(exercise_timeout_retention())
 
 
 def test_sync_stream_closes_source_at_byte_limit():

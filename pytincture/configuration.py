@@ -343,6 +343,11 @@ class PytinctureConfig:
         "BFF_EXECUTION_MODE",
         "BFF execution mode: trusted-thread or isolated-process.",
     )
+    bff_async_execution_mode: str = _setting(
+        "event-loop",
+        "BFF_ASYNC_EXECUTION_MODE",
+        "Trusted async BFF stage mode: event-loop or worker-thread.",
+    )
     bff_isolated_max_concurrency: int = _setting(
         4,
         "BFF_ISOLATED_MAX_CONCURRENCY",
@@ -718,6 +723,14 @@ class PytinctureConfig:
                 "bff_execution_mode must be trusted-thread or isolated-process"
             )
         object.__setattr__(self, "bff_execution_mode", execution_mode)
+        async_execution_mode = self.bff_async_execution_mode.strip().lower()
+        if async_execution_mode not in {"event-loop", "worker-thread"}:
+            raise ValueError(
+                "bff_async_execution_mode must be event-loop or worker-thread"
+            )
+        object.__setattr__(
+            self, "bff_async_execution_mode", async_execution_mode
+        )
         if self.bff_isolated_max_per_user > self.bff_isolated_max_concurrency:
             raise ValueError(
                 "bff_isolated_max_per_user cannot exceed isolated concurrency"

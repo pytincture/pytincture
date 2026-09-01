@@ -69,6 +69,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "BFF_RESULT_MAX_DEPTH": "12",
             "BFF_RESULT_MAX_ITEMS": "200",
             "BFF_EXECUTION_MODE": "isolated-process",
+            "BFF_ASYNC_EXECUTION_MODE": "worker-thread",
             "BFF_ISOLATED_MAX_CONCURRENCY": "3",
             "BFF_ISOLATED_MAX_PER_USER": "1",
             "BFF_ISOLATED_CPU_SECONDS": "2.5",
@@ -131,6 +132,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.bff_result_max_depth == 12
     assert config.bff_result_max_items == 200
     assert config.bff_execution_mode == "isolated-process"
+    assert config.bff_async_execution_mode == "worker-thread"
     assert config.bff_isolated_max_concurrency == 3
     assert config.bff_isolated_max_per_user == 1
     assert config.bff_isolated_cpu_seconds == 2.5
@@ -148,6 +150,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.uvicorn_access_log is True
     assert config.environment == {"APP_SPECIFIC_VALUE": "kept"}
     assert config.to_environ()["ENABLE_USER_LOGIN"] == "true"
+    assert config.to_environ()["BFF_ASYNC_EXECUTION_MODE"] == "worker-thread"
     assert config.to_environ()["PYTINCTURE_DEV_WHEEL_VERSION"] == "42.0.dev1"
 
 
@@ -241,12 +244,14 @@ def test_trusted_bff_execution_remains_the_simple_default(tmp_path):
     config = PytinctureConfig(modules_path=str(tmp_path))
 
     assert config.bff_execution_mode == "trusted-thread"
+    assert config.bff_async_execution_mode == "event-loop"
 
 
 @pytest.mark.parametrize(
     "overrides",
     (
         {"bff_execution_mode": "container"},
+        {"bff_async_execution_mode": "subinterpreter"},
         {"bff_result_max_bytes": 0},
         {"bff_result_max_depth": 0},
         {"bff_result_max_items": 0},
