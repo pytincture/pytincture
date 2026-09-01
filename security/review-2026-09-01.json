@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "reviewed_commit": "a6608412b8a8f3a71ee98b8900bf31a7a91eeb2b",
+  "recorded_on": "2026-09-01",
+  "status": "remediation_in_progress",
+  "summary": "All five High and seven Medium findings are accepted for remediation. None requires changing Pytincture's class-level BFF decorator contract or making Redis, process-memory sessions, or sticky routing mandatory.",
+  "architecture_constraints": {
+    "class_level_bff_export_preserved": true,
+    "pluggable_widgetsets_preserved": true,
+    "stateless_browser_sessions_preserved": true,
+    "redis_required": false,
+    "process_memory_sessions_required": false,
+    "sticky_routing_required": false,
+    "untrusted_assistant_and_record_data_is_browser_code": false,
+    "isolated_process_ipc_may_deserialize_executable_objects": false
+  },
+  "findings": [
+    {
+      "id": "REVIEW-2026-09-01-H1",
+      "severity": "high",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/264",
+      "title": "Automatic assistant-message DOM XSS",
+      "disposition": "remediate in dhxpyt and pin the complete patched wheel in Pytincture",
+      "potential_user_breakage": true,
+      "compatibility_note": "Artifact titles and identifiers will render as text; applications relying on raw HTML there must use an explicit trusted rich-content path. Normal chat and BFF use is unchanged."
+    },
+    {
+      "id": "REVIEW-2026-09-01-H2",
+      "severity": "high",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/265",
+      "title": "Artifact preview escapes iframe isolation",
+      "disposition": "isolate untrusted previews and disable automatic model-supplied Python execution",
+      "potential_user_breakage": true,
+      "compatibility_note": "Same-origin interactive scripts, parent-DOM access, and automatic Python execution will no longer work. Plain text, code, and passive media previews remain supported."
+    },
+    {
+      "id": "REVIEW-2026-09-01-H3",
+      "severity": "high",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/266",
+      "title": "Ordinary widget data reaches HTML sinks",
+      "disposition": "treat ordinary values as text and separate explicit sanitized rich-content APIs",
+      "potential_user_breakage": true,
+      "compatibility_note": "Markup inserted as ordinary Grid, Listbox, CardFlow, or CardPanel data will be escaped. Trusted templates remain an explicit API."
+    },
+    {
+      "id": "REVIEW-2026-09-01-H4",
+      "severity": "high",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/267",
+      "title": "Encrypted SAML assertion bypasses transform preflight",
+      "disposition": "reject encrypted assertions until transform validation is guaranteed before xmlsec signature processing",
+      "potential_user_breakage": true,
+      "compatibility_note": "Deployments using encrypted assertions must temporarily configure signed plaintext assertions. Other authentication methods, sessions, and BFFs are unchanged."
+    },
+    {
+      "id": "REVIEW-2026-09-01-H5",
+      "severity": "high",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/268",
+      "title": "Pickle IPC defeats isolated BFF process boundary",
+      "disposition": "replace pickle with bounded non-executable byte messages",
+      "potential_user_breakage": false,
+      "compatibility_note": "Supported JSON-compatible BFF results remain unchanged; arbitrary pickled results were never part of the public contract."
+    },
+    {
+      "id": "REVIEW-2026-09-01-M1",
+      "severity": "medium",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/269",
+      "title": "Timed-out synchronous streams leave orphan threads",
+      "disposition": "keep work admitted until completion or run it in a bounded killable executor",
+      "potential_user_breakage": true,
+      "compatibility_note": "Indefinitely blocking synchronous iterators may be rejected or terminated; finite iterators and cooperative async streams remain supported."
+    },
+    {
+      "id": "REVIEW-2026-09-01-M2",
+      "severity": "medium",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/270",
+      "title": "Public wheel requests repeatedly hash entire files",
+      "disposition": "cache verified digests, bound wheel size and admission, and support conditional requests",
+      "potential_user_breakage": true,
+      "compatibility_note": "Only wheels above the documented safe size limit require a deployment override; normal backend wheel fallback remains unchanged."
+    },
+    {
+      "id": "REVIEW-2026-09-01-M3",
+      "severity": "medium",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/271",
+      "title": "Weak artifact messaging and unbounded plaintext chat persistence",
+      "disposition": "capability-bind messages and bound/minimize persistence",
+      "potential_user_breakage": true,
+      "compatibility_note": "Oversized histories and logs will be truncated or evicted, and direct postMessage integrations must use the bound preview channel."
+    },
+    {
+      "id": "REVIEW-2026-09-01-M4",
+      "severity": "medium",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/272",
+      "title": "Synchronous BFF transport and replay refill races",
+      "disposition": "add deadline-bounded async transport and single-flight refills without masking completed mutations",
+      "potential_user_breakage": true,
+      "compatibility_note": "An async migration may require awaiting generated calls. The synchronous API will receive a documented compatibility/deprecation path rather than disappearing silently."
+    },
+    {
+      "id": "REVIEW-2026-09-01-M5",
+      "severity": "medium",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/273",
+      "title": "Proxy example and edge auditor can certify spoofable forwarding",
+      "disposition": "replace forwarded client IPs and audit/probe the exact target vhost",
+      "potential_user_breakage": true,
+      "compatibility_note": "Unsafe proxy configurations that previously passed qualification will fail until corrected; application behavior and correctly configured proxies are unchanged."
+    },
+    {
+      "id": "REVIEW-2026-09-01-M6",
+      "severity": "medium",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/274",
+      "title": "Release validation ignores tar links and special members",
+      "disposition": "reject every non-directory and non-regular archive member",
+      "potential_user_breakage": false,
+      "compatibility_note": "Normal Pytincture artifacts are unaffected; nonstandard custom archives containing links or special members fail closed."
+    },
+    {
+      "id": "REVIEW-2026-09-01-M7",
+      "severity": "medium",
+      "status": "open",
+      "issue": "https://github.com/pytincture/pytincture/issues/275",
+      "title": "Dependency and repository integrity gaps",
+      "disposition": "require secret scan, whole-wheel verification, explicit external-runtime trust, lifecycle minimization, and independent clean rebuilds",
+      "potential_user_breakage": true,
+      "compatibility_note": "Custom widget wheels or external Pyodide deployments may need administrator hashes or explicit development trust opt-in; runtime BFF APIs remain unchanged."
+    }
+  ]
+}
