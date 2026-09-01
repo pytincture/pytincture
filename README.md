@@ -125,6 +125,8 @@ pip install ".[dev]"
 - AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS: Absolute authenticated-session lifetime that cannot be extended by activity. Defaults to `86400` (24 hours) and must be at least the idle lifetime.
 - AUTH_SESSION_HTTPS_ONLY: Require HTTPS for authentication and CSRF cookies. Defaults to `true`; loopback development login defaults it to `false` unless explicitly overridden.
 - AUTH_SESSION_SAME_SITE: Cookie SameSite policy: `lax`, `strict`, or `none`. Defaults to `lax`.
+- AUTH_SESSION_MAX_CLAIM_COUNT / AUTH_SESSION_MAX_IDENTITY_BYTES / AUTH_SESSION_MAX_COOKIE_BYTES: Fail-closed limits for retained identity keys, canonical identity JSON, and the final signed browser-session cookie. Defaults are `32`, `2048`, and `3800` bytes.
+- AUTH_LOGIN_CSRF_TTL_SECONDS: Lifetime of the one-time, application-bound password-login transaction. Defaults to `600` seconds. JSON clients obtain a token from `GET /{application}/auth/mcp` before posting credentials and that token to the same URL.
 - SAML_RELAY_STATE_TTL_SECONDS: Maximum browser-bound, one-time SAML login transaction age in seconds. Defaults to `600` (10 minutes).
 - SAML_DEFAULT_REDIRECT: Optional redirect path or URL template after SAML login (defaults to `/{application}` when unset).
    example: "/{application}"

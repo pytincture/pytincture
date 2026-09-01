@@ -2,6 +2,7 @@ import os
 import base64
 import io
 import json
+import re
 import textwrap
 import zipfile
 import tempfile
@@ -56,6 +57,64 @@ def _csrf_headers(client):
     token = client.cookies.get("pytincture_csrf")
     assert token
     return {"X-CSRF-Token": token}
+
+
+def _login_csrf_token(client, application="demoapp"):
+    page = client.get(f"/{application}/login")
+    assert page.status_code == 200
+    match = re.search(
+        r'name="login_csrf_token" value="([^"]+)"', page.text
+    )
+    assert match
+    return match.group(1)
+
+
+def _password_login(
+    client,
+    *,
+    application="demoapp",
+    email="person@example.com",
+    password="password",
+    **request_kwargs,
+):
+    data = dict(request_kwargs.pop("data", {}))
+    data.update(
+        {
+            "email": email,
+            "password": password,
+            "login_csrf_token": _login_csrf_token(client, application),
+        }
+    )
+    return client.post(
+        f"/{application}/auth/user",
+        data=data,
+        **request_kwargs,
+    )
+
+
+def _mcp_password_login(
+    client,
+    *,
+    application="demoapp",
+    email="person@example.com",
+    password="password",
+    **request_kwargs,
+):
+    initiation = client.get(f"/{application}/auth/mcp")
+    assert initiation.status_code == 200
+    payload = dict(request_kwargs.pop("json", {}))
+    payload.update(
+        {
+            "email": email,
+            "password": password,
+            "login_csrf_token": initiation.json()["login_csrf_token"],
+        }
+    )
+    return client.post(
+        f"/{application}/auth/mcp",
+        json=payload,
+        **request_kwargs,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -158,16 +217,18 @@ def test_password_hash_verifier_rejects_wrong_password(fresh_client, monkeypatch
         json.dumps({"person@example.com": PasswordHasher().hash("correct-password")}),
     )
 
-    wrong = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "wrong-password"},
+    wrong = _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="wrong-password",
         follow_redirects=False,
     )
     assert wrong.status_code == 401
 
-    correct = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "correct-password"},
+    correct = _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="correct-password",
         follow_redirects=False,
     )
     assert correct.status_code == 303
@@ -203,9 +264,10 @@ def test_password_login_hydrates_safe_default_app_user_claims(
         }]),
     )
 
-    response = fresh_client.post(
-        "/demoapp/auth/mcp",
-        json={"email": "admin@arul.ai", "password": "admin"},
+    response = _mcp_password_login(
+        fresh_client,
+        email="admin@arul.ai",
+        password="admin",
     )
 
     assert response.status_code == 200
@@ -245,9 +307,10 @@ def test_development_email_login_rejects_remote_peer_spoofing_loopback_host(monk
         headers={"X-Forwarded-Host": "localhost"},
         client=("198.51.100.24", 50000),
     ) as client:
-        response = client.post(
-            "/demoapp/auth/user",
-            data={"email": "person@example.com", "password": "ignored"},
+        response = _password_login(
+            client,
+            email="person@example.com",
+            password="ignored",
             follow_redirects=False,
         )
     assert response.status_code == 401
@@ -258,11 +321,53 @@ def test_password_login_rejects_oversized_fields(fresh_client, monkeypatch):
 
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
     monkeypatch.setattr(backend_app, "AUTH_LOGIN_EMAIL_MAX_CHARS", 8)
-    response = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "long-address@example.com", "password": "x"},
+    response = _password_login(
+        fresh_client,
+        email="long-address@example.com",
+        password="x",
     )
     assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("allowed_emails", "email"),
+    [
+        ("unknown@example.com", "unknown@example.com"),
+        ("different@example.com", "blocked@example.com"),
+    ],
+)
+def test_unknown_and_disallowed_logins_share_admission_and_dummy_hash_work(
+    fresh_client, monkeypatch, allowed_emails, email
+):
+    import pytincture.backend.app as backend_app
+
+    events = []
+
+    class RecordingLimiter:
+        def allow(self, _key):
+            events.append("rate")
+            return True, 0
+
+    def recording_dummy_hash(*_args, **_kwargs):
+        events.append("hash")
+        return False
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", False)
+    monkeypatch.setattr(backend_app, "AUTH_LOGIN_RATE_LIMITER", RecordingLimiter())
+    monkeypatch.setattr(backend_app, "verify_password", recording_dummy_hash)
+    monkeypatch.setenv("ALLOWED_EMAILS", allowed_emails)
+
+    response = _password_login(
+        fresh_client,
+        email=email,
+        password="incorrect",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 401
+    assert events == ["rate", "rate", "hash"]
 
 
 def test_password_login_rate_limit_recovers_after_window(fresh_client, monkeypatch):
@@ -279,24 +384,27 @@ def test_password_login_rate_limit_recovers_after_window(fresh_client, monkeypat
         SlidingWindowRateLimiter(1, 10, clock=lambda: now[0]),
     )
 
-    first = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "development"},
+    first = _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="development",
         follow_redirects=False,
     )
     assert first.status_code == 303
-    second = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "development"},
+    second = _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="development",
         follow_redirects=False,
     )
     assert second.status_code == 429
     assert second.headers["retry-after"] == "10"
 
     now[0] = 11
-    recovered = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "development"},
+    recovered = _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="development",
         follow_redirects=False,
     )
     assert recovered.status_code == 303
@@ -319,16 +427,18 @@ def test_password_hash_saturation_rejects_then_recovers(fresh_client, monkeypatc
         SlidingWindowRateLimiter(10, 60),
     )
 
-    saturated = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "development"},
+    saturated = _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="development",
         follow_redirects=False,
     )
     assert saturated.status_code == 503
     gate.release()
-    recovered = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "development"},
+    recovered = _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="development",
         follow_redirects=False,
     )
     assert recovered.status_code == 303
@@ -352,9 +462,10 @@ def test_development_email_login_accepts_literal_loopback_peer_and_host(
         base_url=base_url,
         client=(peer, 50000),
     ) as client:
-        response = client.post(
-            "/demoapp/auth/user",
-            data={"email": "person@example.com", "password": "ignored"},
+        response = _password_login(
+            client,
+            email="person@example.com",
+            password="ignored",
             follow_redirects=False,
         )
     assert response.status_code == 303
@@ -393,10 +504,11 @@ def test_development_email_login_rejects_public_host_through_loopback_proxy(monk
         base_url="https://public.example.com",
         client=("127.0.0.1", 50000),
     ) as client:
-        response = client.post(
-            "/demoapp/auth/user",
+        response = _password_login(
+            client,
             headers={"Origin": "https://public.example.com"},
-            data={"email": "person@example.com", "password": "ignored"},
+            email="person@example.com",
+            password="ignored",
             follow_redirects=False,
         )
 
@@ -542,9 +654,10 @@ def test_state_changing_bff_call_requires_csrf(
     monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
-    login_response = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "local"},
+    login_response = _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="local",
         follow_redirects=False,
     )
     assert login_response.headers["cache-control"] == "private, no-store, max-age=0"
@@ -583,9 +696,11 @@ def test_bff_replay_token_is_opaque_session_bound_and_single_use(
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
     backend_app.reload_bff_registry(str(dummy_module))
 
-    login = fresh_client.post(
-        "/example/auth/user",
-        data={"email": "person@example.com", "password": "local"},
+    login = _password_login(
+        fresh_client,
+        application="example",
+        email="person@example.com",
+        password="local",
         follow_redirects=False,
     )
     assert login.status_code == 303
@@ -662,9 +777,11 @@ def _prepare_bff_replay_refill(fresh_client, monkeypatch, dummy_module):
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
     backend_app.reload_bff_registry(str(dummy_module))
-    login = fresh_client.post(
-        "/example/auth/user",
-        data={"email": "person@example.com", "password": "local"},
+    login = _password_login(
+        fresh_client,
+        application="example",
+        email="person@example.com",
+        password="local",
         follow_redirects=False,
     )
     assert login.status_code == 303
@@ -779,9 +896,10 @@ def test_revoked_session_is_rejected(fresh_client, monkeypatch, dummy_module):
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
     monkeypatch.setattr(backend_app, "USE_REDIS_INSTANCE", "true")
-    fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "local"},
+    _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="local",
         follow_redirects=False,
     )
     session_data = _decode_session_cookie(fresh_client, backend_app.SAML_SECRET_KEY)
@@ -830,9 +948,11 @@ def test_main_page_revocation_lookup_runs_off_the_event_loop(
     monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
-    login = fresh_client.post(
-        "/example/auth/user",
-        data={"email": "person@example.com", "password": "local"},
+    login = _password_login(
+        fresh_client,
+        application="example",
+        email="person@example.com",
+        password="local",
         follow_redirects=False,
     )
     assert login.status_code == 303
@@ -1126,6 +1246,48 @@ def test_validation_error_does_not_echo_request_body(fresh_client):
     assert "must-not-echo" not in response.text
 
 
+def test_mcp_password_login_requires_one_time_application_transaction(
+    fresh_client, monkeypatch
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+
+    missing = fresh_client.post(
+        "/demoapp/auth/mcp",
+        json={"email": "person@example.com", "password": "local"},
+    )
+    assert missing.status_code == 403
+
+    initiation = fresh_client.get("/demoapp/auth/mcp")
+    token = initiation.json()["login_csrf_token"]
+    wrong_application = fresh_client.post(
+        "/other/auth/mcp",
+        json={
+            "email": "person@example.com",
+            "password": "local",
+            "login_csrf_token": token,
+        },
+    )
+    assert wrong_application.status_code == 403
+
+    initiation = fresh_client.get("/demoapp/auth/mcp")
+    token = initiation.json()["login_csrf_token"]
+    payload = {
+        "email": "person@example.com",
+        "password": "local",
+        "login_csrf_token": token,
+    }
+    authenticated = fresh_client.post("/demoapp/auth/mcp", json=payload)
+    replayed = fresh_client.post("/demoapp/auth/mcp", json=payload)
+
+    assert authenticated.status_code == 200
+    assert replayed.status_code == 403
+
+
 def test_request_body_limit_rejects_oversized_payload(fresh_client):
     response = fresh_client.post("/logs", content=b"x" * (2 * 1024 * 1024 + 1))
     assert response.status_code == 413
@@ -1188,9 +1350,10 @@ def test_main_route_ignores_backend_session_snapshot(
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
     (tmp_path / "demoapp.py").write_text("value = 1\n", encoding="utf-8")
 
-    response = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "stale@example.com", "password": "old-password"},
+    response = _password_login(
+        fresh_client,
+        email="stale@example.com",
+        password="old-password",
         follow_redirects=False,
     )
     assert response.status_code == 303
@@ -2552,9 +2715,10 @@ def test_authenticated_frontend_assets_are_public_and_do_not_rotate_session(
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
     monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
     monkeypatch.setenv("ALLOWED_EMAILS", "asset-user@example.com")
-    login = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "asset-user@example.com", "password": "unused"},
+    login = _password_login(
+        fresh_client,
+        email="asset-user@example.com",
+        password="unused",
         follow_redirects=False,
     )
     assert login.status_code == 303
@@ -2845,9 +3009,10 @@ def test_user_login_stores_only_compact_stateless_claims(fresh_client, monkeypat
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {"sentinel": {"value": True}})
 
-    response = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "do-not-store"},
+    response = _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="do-not-store",
         follow_redirects=False,
     )
 
@@ -2861,6 +3026,72 @@ def test_user_login_stores_only_compact_stateless_claims(fresh_client, monkeypat
     assert user["is_authenticated"] is True
     assert "password" not in user
     assert backend_app.USER_SESSION_DICT == {"sentinel": {"value": True}}
+
+
+def test_authenticated_identity_enforces_claim_count_and_total_size(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setenv(
+        "AUTH_SESSION_CLAIM_KEYS",
+        ",".join(f"custom_{index}" for index in range(20)),
+    )
+    monkeypatch.setattr(backend_app, "AUTH_SESSION_MAX_CLAIM_COUNT", 12)
+    with pytest.raises(HTTPException, match="session limits"):
+        backend_app._build_auth_session_user(
+            {
+                "email": "person@example.com",
+                **{f"custom_{index}": index for index in range(20)},
+            }
+        )
+
+    monkeypatch.setattr(backend_app, "AUTH_SESSION_MAX_CLAIM_COUNT", 32)
+    monkeypatch.setattr(backend_app, "AUTH_SESSION_MAX_IDENTITY_BYTES", 256)
+    with pytest.raises(HTTPException, match="session limits"):
+        backend_app._build_auth_session_user(
+            {"email": "person@example.com", "name": "x" * 512}
+        )
+
+
+def test_authenticated_session_enforces_signed_cookie_envelope(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    request = type("Request", (), {"session": {"return_to": "/demoapp"}})()
+    original_session = dict(request.session)
+    monkeypatch.setattr(backend_app, "AUTH_SESSION_MAX_COOKIE_BYTES", 128)
+
+    with pytest.raises(HTTPException, match="session limits"):
+        backend_app._set_authenticated_user(
+            request,
+            {"email": "person@example.com"},
+            application="demoapp",
+            auth_type="user",
+        )
+
+    assert request.session == original_session
+
+
+def test_oversized_authenticator_claims_fail_login_without_session(
+    fresh_client, monkeypatch
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", False)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    backend_app.set_user_authenticator(
+        lambda **_kwargs: {"name": "x" * 4096}
+    )
+
+    response = _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="verified",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 401
+    assert fresh_client.cookies.get("session") is None
 
 
 def test_stateless_session_survives_logout_in_another_browser_and_replica(
@@ -2877,9 +3108,10 @@ def test_stateless_session_survives_logout_in_another_browser_and_replica(
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
 
-    first_login = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "first"},
+    first_login = _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="first",
         follow_redirects=False,
     )
     assert first_login.status_code == 303
@@ -2889,9 +3121,10 @@ def test_stateless_session_survives_logout_in_another_browser_and_replica(
     ) as second_browser, TestClient(
         app, base_url="https://127.0.0.1", client=("127.0.0.1", 50002)
     ) as another_replica:
-        second_login = second_browser.post(
-            "/demoapp/auth/user",
-            data={"email": "person@example.com", "password": "second"},
+        second_login = _password_login(
+            second_browser,
+            email="person@example.com",
+            password="second",
             follow_redirects=False,
         )
         assert second_login.status_code == 303
@@ -2936,9 +3169,10 @@ def test_tampered_and_expired_stateless_sessions_are_rejected(
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
 
-    fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "secret"},
+    _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="secret",
         follow_redirects=False,
     )
     valid_cookie = fresh_client.cookies.get("session")
@@ -3597,9 +3831,10 @@ def test_auth_user_callback(fresh_client, monkeypatch):
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
     monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
     monkeypatch.setenv("ALLOWED_EMAILS", "test@example.com")
-    response = fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "test@example.com", "password": "secret"},
+    response = _password_login(
+        fresh_client,
+        email="test@example.com",
+        password="secret",
         follow_redirects=False   # Prevent auto-following the redirect
     )
     # Now the response should be the raw RedirectResponse with status 303.
@@ -3620,9 +3855,10 @@ def test_authenticated_session_has_absolute_lifetime(
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setenv("MODULES_PATH", str(dummy_module))
-    assert fresh_client.post(
-        "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "password"},
+    assert _password_login(
+        fresh_client,
+        email="person@example.com",
+        password="password",
         follow_redirects=False,
     ).status_code == 303
     session_data = _decode_session_cookie(fresh_client, backend_app.SAML_SECRET_KEY)
@@ -3663,17 +3899,22 @@ def test_browser_login_and_logout_have_csrf_and_origin_protection(
         follow_redirects=False,
     )
     assert missing_token.status_code == 403
+    login_page = fresh_client.get("/demoapp/login")
+    token = re.search(
+        r'name="login_csrf_token" value="([^"]+)"', login_page.text
+    ).group(1)
     cross_origin = fresh_client.post(
         "/demoapp/auth/user",
-        data={"email": "person@example.com", "password": "password"},
+        data={
+            "email": "person@example.com",
+            "password": "password",
+            "login_csrf_token": token,
+        },
         headers={"Origin": "https://attacker.example", "Sec-Fetch-Site": "cross-site"},
         follow_redirects=False,
     )
     assert cross_origin.status_code == 403
 
-    token = __import__("re").search(
-        r'name="login_csrf_token" value="([^"]+)"', login_page.text
-    ).group(1)
     assert fresh_client.post(
         "/demoapp/auth/user",
         data={
@@ -3683,6 +3924,15 @@ def test_browser_login_and_logout_have_csrf_and_origin_protection(
         },
         follow_redirects=False,
     ).status_code == 303
+    assert fresh_client.post(
+        "/demoapp/auth/user",
+        data={
+            "email": "person@example.com",
+            "password": "password",
+            "login_csrf_token": token,
+        },
+        follow_redirects=False,
+    ).status_code == 403
     assert fresh_client.get("/demoapp/auth/logout").status_code == 405
     assert fresh_client.post("/demoapp/auth/logout").status_code == 403
     assert fresh_client.post(

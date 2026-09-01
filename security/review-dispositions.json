@@ -841,6 +841,50 @@
         "tests/test_configuration.py::test_deployment_widget_trust_policy_fails_closed_for_unlisted_version",
         "tests/test_configuration.py::test_widget_trust_policy_rejects_ambiguous_or_unhashed_entries"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-M-15-M-16-M-18-PREAUTH-CSRF",
+      "status": "remediated",
+      "title": "Secure production cookies, uniform local-login work, one-time preauthentication, and bounded stateless sessions",
+      "intentional_contract": "Authenticated sessions remain signed browser-carried data that any replica sharing the signing key can validate. Redis, process-memory session tables, and sticky routing are not required.",
+      "security_boundary": "Every non-development authentication profile requires an HTTPS canonical origin and Secure cookies. Password admission occurs before allowlist outcome, and unknown or disallowed identities perform bounded dummy password-hash work. Browser-form and JSON password login each require a short-lived, application-bound, one-time CSRF transaction. Retained identity claims use a positive allowlist plus per-value, count, canonical-identity-byte, and final signed-cookie limits; oversized provider identities fail without issuing an authenticated session.",
+      "controls": {
+        "production_secure_cookie_forced": true,
+        "allowlist_checked_after_rate_admission": true,
+        "unknown_account_dummy_hash_work": true,
+        "disallowed_account_dummy_hash_work": true,
+        "password_login_one_time_csrf": true,
+        "mcp_json_login_one_time_csrf": true,
+        "csrf_transaction_application_bound": true,
+        "positive_claim_allowlist": true,
+        "per_claim_value_limit": true,
+        "total_claim_count_limit": true,
+        "total_identity_byte_limit": true,
+        "signed_cookie_byte_limit": true,
+        "oversized_identity_session_issued": false,
+        "signed_browser_session_preserved": true,
+        "redis_required": false,
+        "process_memory_required": false,
+        "sticky_routing_required": false
+      },
+      "implementation": [
+        "pytincture/configuration.py",
+        "pytincture/backend/auth.py",
+        "pytincture/backend/app.py",
+        "pytincture/backend/middleware.py",
+        "docs/authentication.md",
+        "docs/configuration.md"
+      ],
+      "regression_tests": [
+        "tests/test_configuration.py::test_production_authentication_requires_exact_https_origin_controls",
+        "tests/test_app.py::test_unknown_and_disallowed_logins_share_admission_and_dummy_hash_work",
+        "tests/test_app.py::test_browser_login_and_logout_have_csrf_and_origin_protection",
+        "tests/test_app.py::test_mcp_password_login_requires_one_time_application_transaction",
+        "tests/test_app.py::test_authenticated_identity_enforces_claim_count_and_total_size",
+        "tests/test_app.py::test_authenticated_session_enforces_signed_cookie_envelope",
+        "tests/test_app.py::test_oversized_authenticator_claims_fail_login_without_session",
+        "tests/test_production.py::test_signed_session_cookie_is_portable_between_workers"
+      ]
     }
   ]
 }

@@ -670,6 +670,15 @@ def test_production_authentication_requires_exact_https_origin_controls(tmp_path
     )
     assert config.allowed_hosts == ("app.example.test",)
     assert config.canonical_origin == "https://app.example.test"
+    assert config.session_https_only is True
+
+    with pytest.raises(ValueError, match="session_https_only=true"):
+        PytinctureConfig(
+            **base,
+            allowed_hosts=("app.example.test",),
+            canonical_origin="https://app.example.test",
+            session_https_only=False,
+        )
 
 
 def test_dynamic_auth_origin_is_explicit_loopback_development_only(tmp_path):

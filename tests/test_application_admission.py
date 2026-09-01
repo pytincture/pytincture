@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,6 +10,22 @@ from pytincture.backend.application_admission import (
     identity_is_admitted,
     parse_application_admission,
 )
+
+
+def _password_login(client, application):
+    page = client.get(f"/{application}/login")
+    token = re.search(
+        r'name="login_csrf_token" value="([^"]+)"', page.text
+    ).group(1)
+    return client.post(
+        f"/{application}/auth/user",
+        data={
+            "email": "analyst@example.com",
+            "password": "verified",
+            "login_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
 
 
 def test_application_admission_is_stateless_and_fails_closed():
@@ -217,11 +234,7 @@ def test_local_login_enforces_application_admission_before_session_issuance(
     )
 
     with TestClient(service, base_url="https://app.example.test") as client:
-        allowed = client.post(
-            "/reports/auth/user",
-            data={"email": "analyst@example.com", "password": "verified"},
-            follow_redirects=False,
-        )
+        allowed = _password_login(client, "reports")
         assert allowed.status_code == 303
         session = client.cookies.get("session")
         assert session
@@ -230,18 +243,10 @@ def test_local_login_enforces_application_admission_before_session_issuance(
         assert wrong_audience.headers["location"] == "/admin/login"
 
         client.cookies.clear()
-        wrong_role = client.post(
-            "/admin/auth/user",
-            data={"email": "analyst@example.com", "password": "verified"},
-            follow_redirects=False,
-        )
+        wrong_role = _password_login(client, "admin")
         assert wrong_role.status_code == 403
         assert client.cookies.get("session") is None
 
-        unlisted = client.post(
-            "/unlisted/auth/user",
-            data={"email": "analyst@example.com", "password": "verified"},
-            follow_redirects=False,
-        )
+        unlisted = _password_login(client, "unlisted")
         assert unlisted.status_code == 403
         assert client.cookies.get("session") is None

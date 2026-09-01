@@ -145,6 +145,9 @@ The contract test checks every row in this table against the dataclass model.
 | `session_absolute_max_age_seconds` | `AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS` | Absolute authenticated session lifetime. |
 | `session_https_only` | `AUTH_SESSION_HTTPS_ONLY` | Secure-cookie requirement; derived when omitted. |
 | `session_same_site` | `AUTH_SESSION_SAME_SITE` | Cookie SameSite policy. |
+| `session_max_claim_count` | `AUTH_SESSION_MAX_CLAIM_COUNT` | Maximum keys retained in an authenticated session identity. |
+| `session_max_identity_bytes` | `AUTH_SESSION_MAX_IDENTITY_BYTES` | Maximum canonical JSON bytes retained for an authenticated identity. |
+| `session_max_cookie_bytes` | `AUTH_SESSION_MAX_COOKIE_BYTES` | Maximum signed browser-session cookie value bytes. |
 | `max_request_body_bytes` | `MAX_REQUEST_BODY_BYTES` | Maximum request body size. |
 | `enable_browser_logs` | `ENABLE_BROWSER_LOGS` | Accept bounded browser diagnostics for authenticated services. |
 | `allow_noauth_browser_logs` | `ALLOW_NOAUTH_BROWSER_LOGS` | Explicitly expose bounded browser diagnostics in no-auth services. |
@@ -157,6 +160,7 @@ The contract test checks every row in this table against the dataclass model.
 | `login_rate_limit_window_seconds` | `AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS` | Password rate-limit window. |
 | `login_email_max_chars` | `AUTH_LOGIN_EMAIL_MAX_CHARS` | Maximum submitted email length. |
 | `login_password_max_chars` | `AUTH_LOGIN_PASSWORD_MAX_CHARS` | Maximum submitted password length. |
+| `login_csrf_ttl_seconds` | `AUTH_LOGIN_CSRF_TTL_SECONDS` | Lifetime of a one-time password-login CSRF transaction. |
 | `password_hash_max_concurrency` | `AUTH_PASSWORD_HASH_MAX_CONCURRENCY` | Concurrent password hash checks per worker. |
 | `password_hash_queue_timeout_seconds` | `AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS` | Password hash admission wait. |
 | `password_hash_timeout_seconds` | `AUTH_PASSWORD_HASH_TIMEOUT_SECONDS` | Maximum credential-verifier runtime. |

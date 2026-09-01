@@ -43,7 +43,12 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from itsdangerous import (
+    BadSignature,
+    SignatureExpired,
+    TimestampSigner,
+    URLSafeTimedSerializer,
+)
 from markupsafe import escape
 from packaging.utils import (
     InvalidWheelFilename,
@@ -1331,9 +1336,6 @@ async def _authenticate_local_user(
     normalized_email = str(email or "").strip().casefold()
     if len(normalized_email) > AUTH_LOGIN_EMAIL_MAX_CHARS or len(password or "") > AUTH_LOGIN_PASSWORD_MAX_CHARS:
         raise HTTPException(status_code=400, detail="Login fields exceed configured limits")
-    if not normalized_email or not isinstance(password, str) or not _allowed_email(normalized_email):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
     peer = request.client.host if request.client is not None else "unknown"
     account_key = hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()
     retry_after = 0
@@ -1345,6 +1347,10 @@ async def _authenticate_local_user(
                 detail="Too many login attempts",
                 headers={"Retry-After": str(retry_after)},
             )
+
+    email_allowed = bool(normalized_email and _allowed_email(normalized_email))
+    if not normalized_email or not isinstance(password, str):
+        password = ""
 
     try:
         await PASSWORD_HASH_GATE.acquire()
@@ -1359,6 +1365,13 @@ async def _authenticate_local_user(
     verifier_task = None
     try:
         authenticator = _configured_user_authenticator()
+        verifier = authenticator or _verify_configured_password
+        verifier_args = () if authenticator is not None else (normalized_email, password)
+        verifier_kwargs = (
+            {"email": normalized_email, "password": password, "request": request}
+            if authenticator is not None
+            else {}
+        )
         if authenticator is not None and inspect.iscoroutinefunction(authenticator):
             authenticated = await asyncio.wait_for(
                 authenticator(
@@ -1367,13 +1380,6 @@ async def _authenticate_local_user(
                 timeout=AUTH_PASSWORD_HASH_TIMEOUT_SECONDS,
             )
         else:
-            verifier = authenticator or _verify_configured_password
-            verifier_args = () if authenticator is not None else (normalized_email, password)
-            verifier_kwargs = (
-                {"email": normalized_email, "password": password, "request": request}
-                if authenticator is not None
-                else {}
-            )
             verifier_task = asyncio.create_task(
                 run_in_threadpool(verifier, *verifier_args, **verifier_kwargs)
             )
@@ -1394,7 +1400,7 @@ async def _authenticate_local_user(
                 authenticated = await asyncio.wait_for(
                     authenticated, timeout=AUTH_PASSWORD_HASH_TIMEOUT_SECONDS
                 )
-            if not authenticated:
+            if not authenticated or not email_allowed:
                 raise HTTPException(status_code=401, detail="Invalid email or password")
             if authenticated is True:
                 return {"email": normalized_email}
@@ -1412,11 +1418,12 @@ async def _authenticate_local_user(
         if release_gate:
             PASSWORD_HASH_GATE.release()
 
-    if password_valid:
+    if password_valid and email_allowed:
         return _configured_local_user_claims(normalized_email)
 
     if (
         ENABLE_DEV_EMAIL_LOGIN
+        and email_allowed
         and os.getenv("ALLOWED_EMAILS", "").strip()
         and _is_loopback_development_request(request)
     ):
@@ -1560,6 +1567,7 @@ def _clear_auth_session(request: Request) -> None:
         "saml_provider_id",
         "saml_request_id",
         "auth_issued_at",
+        "auth_expires_at",
         "login_csrf_token",
     ):
         request.session.pop(key, None)
@@ -1597,6 +1605,41 @@ def _safe_session_claim_value(value: Any) -> bool:
     except (TypeError, ValueError):
         return False
     return len(encoded.encode("utf-8")) <= 1024
+
+
+def _canonical_json_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _reject_oversized_session_identity(session_user: Mapping[str, Any]) -> None:
+    if len(session_user) > AUTH_SESSION_MAX_CLAIM_COUNT:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated identity exceeds session limits",
+        )
+    try:
+        identity_bytes = _canonical_json_bytes(session_user)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated identity exceeds session limits",
+        ) from exc
+    if len(identity_bytes) > AUTH_SESSION_MAX_IDENTITY_BYTES:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated identity exceeds session limits",
+        )
+
+
+def _signed_session_cookie_size(session: Mapping[str, Any]) -> int:
+    encoded = base64.b64encode(_canonical_json_bytes(session))
+    return len(TimestampSigner(SAML_SECRET_KEY).sign(encoded))
 
 
 def _build_auth_session_user(
@@ -1676,6 +1719,7 @@ def _build_auth_session_user(
             key: value for key, value in saml_identity.items() if value
         }
 
+    _reject_oversized_session_identity(session_user)
     return session_user
 
 
@@ -1694,20 +1738,46 @@ def _set_authenticated_user(
             status_code=403,
             detail="Identity is not authorized for this application",
         )
-    _clear_auth_session(request)
-    request.session["user"] = session_user
-    request.session["session_id"] = secrets.token_urlsafe(24)
-    request.session["csrf_token"] = secrets.token_urlsafe(32)
-    request.session["auth_issued_at"] = int(time.time())
+    candidate_session = dict(request.session)
+    for key in (
+        "user",
+        "session_id",
+        "csrf_token",
+        "saml_name_id",
+        "saml_session_index",
+        "saml_provider_id",
+        "saml_request_id",
+        "auth_issued_at",
+        "auth_expires_at",
+        "login_csrf_token",
+    ):
+        candidate_session.pop(key, None)
+    candidate_session["user"] = session_user
+    candidate_session["session_id"] = secrets.token_urlsafe(24)
+    candidate_session["csrf_token"] = secrets.token_urlsafe(32)
+    candidate_session["auth_issued_at"] = int(time.time())
     if authentication_expires_at is not None:
         if (
             not isinstance(authentication_expires_at, (int, float))
             or not math.isfinite(authentication_expires_at)
             or authentication_expires_at <= time.time()
         ):
-            _clear_auth_session(request)
             raise HTTPException(status_code=401, detail="Authentication has expired")
-        request.session["auth_expires_at"] = float(authentication_expires_at)
+        candidate_session["auth_expires_at"] = float(authentication_expires_at)
+    try:
+        cookie_size = _signed_session_cookie_size(candidate_session)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated identity exceeds session limits",
+        ) from exc
+    if cookie_size > AUTH_SESSION_MAX_COOKIE_BYTES:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated identity exceeds session limits",
+        )
+    request.session.clear()
+    request.session.update(candidate_session)
     return session_user
 
 
@@ -1803,7 +1873,19 @@ def _validate_csrf(request: Request, user: Any) -> None:
         raise HTTPException(status_code=403, detail="Origin validation failed")
 
 
-def _validate_preauthentication_request(request: Request, supplied_token: str) -> None:
+def _issue_login_csrf_transaction(request: Request, application: str) -> str:
+    token = secrets.token_urlsafe(32)
+    request.session["login_csrf_token"] = {
+        "application": application,
+        "issued_at": int(time.time()),
+        "token": token,
+    }
+    return token
+
+
+def _validate_preauthentication_request(
+    request: Request, supplied_token: str, application: str
+) -> None:
     """Bind browser login posts to the page and exact initiating origin."""
     origin = request.headers.get("origin")
     fetch_site = request.headers.get("sec-fetch-site", "").strip().casefold()
@@ -1811,10 +1893,22 @@ def _validate_preauthentication_request(request: Request, supplied_token: str) -
         raise HTTPException(status_code=403, detail="Origin validation failed")
     if fetch_site and fetch_site != "same-origin":
         raise HTTPException(status_code=403, detail="Fetch Metadata validation failed")
-    expected = request.session.get("login_csrf_token")
-    if expected and (
-        not supplied_token
-        or not hmac.compare_digest(str(expected), str(supplied_token))
+    transaction = request.session.pop("login_csrf_token", None)
+    if not isinstance(transaction, dict):
+        raise HTTPException(status_code=403, detail="Login CSRF validation failed")
+    expected = transaction.get("token")
+    expected_application = transaction.get("application")
+    issued_at = transaction.get("issued_at")
+    if (
+        not isinstance(expected, str)
+        or not expected
+        or expected_application != application
+        or not isinstance(issued_at, (int, float))
+        or not math.isfinite(issued_at)
+        or issued_at > time.time() + 60
+        or time.time() - issued_at > AUTH_LOGIN_CSRF_TTL_SECONDS
+        or not supplied_token
+        or not hmac.compare_digest(expected, str(supplied_token))
     ):
         raise HTTPException(status_code=403, detail="Login CSRF validation failed")
 
@@ -3139,6 +3233,10 @@ if _authentication_enabled() and not (
         raise RuntimeError(
             "Production authentication requires an HTTPS PYTINCTURE_CANONICAL_ORIGIN"
         )
+    if not AUTH_SESSION_HTTPS_ONLY:
+        raise RuntimeError(
+            "Production authentication requires AUTH_SESSION_HTTPS_ONLY=true"
+        )
 
 if TRUST_PROXY_HEADERS and (not ALLOWED_HOSTS or not CANONICAL_ORIGIN):
     raise RuntimeError(
@@ -3200,6 +3298,15 @@ if AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS < AUTH_SESSION_MAX_AGE_SECONDS:
 AUTH_SESSION_SAME_SITE = os.getenv("AUTH_SESSION_SAME_SITE", "lax").lower()
 if AUTH_SESSION_SAME_SITE not in {"lax", "strict", "none"}:
     raise RuntimeError("AUTH_SESSION_SAME_SITE must be lax, strict, or none")
+AUTH_SESSION_MAX_CLAIM_COUNT = int(
+    os.getenv("AUTH_SESSION_MAX_CLAIM_COUNT", "32")
+)
+AUTH_SESSION_MAX_IDENTITY_BYTES = int(
+    os.getenv("AUTH_SESSION_MAX_IDENTITY_BYTES", "2048")
+)
+AUTH_SESSION_MAX_COOKIE_BYTES = int(
+    os.getenv("AUTH_SESSION_MAX_COOKIE_BYTES", "3800")
+)
 MAX_REQUEST_BODY_BYTES = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(2 * 1024 * 1024)))
 if MAX_REQUEST_BODY_BYTES <= 0:
     raise RuntimeError("MAX_REQUEST_BODY_BYTES must be greater than zero")
@@ -3207,6 +3314,7 @@ AUTH_LOGIN_RATE_LIMIT_ATTEMPTS = int(os.getenv("AUTH_LOGIN_RATE_LIMIT_ATTEMPTS",
 AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS", "60"))
 AUTH_LOGIN_EMAIL_MAX_CHARS = int(os.getenv("AUTH_LOGIN_EMAIL_MAX_CHARS", "320"))
 AUTH_LOGIN_PASSWORD_MAX_CHARS = int(os.getenv("AUTH_LOGIN_PASSWORD_MAX_CHARS", "1024"))
+AUTH_LOGIN_CSRF_TTL_SECONDS = int(os.getenv("AUTH_LOGIN_CSRF_TTL_SECONDS", "600"))
 AUTH_PASSWORD_HASH_MAX_CONCURRENCY = int(os.getenv("AUTH_PASSWORD_HASH_MAX_CONCURRENCY", "2"))
 AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS = float(
     os.getenv("AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS", "1")
@@ -3219,6 +3327,10 @@ if min(
     AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS,
     AUTH_LOGIN_EMAIL_MAX_CHARS,
     AUTH_LOGIN_PASSWORD_MAX_CHARS,
+    AUTH_LOGIN_CSRF_TTL_SECONDS,
+    AUTH_SESSION_MAX_CLAIM_COUNT,
+    AUTH_SESSION_MAX_IDENTITY_BYTES,
+    AUTH_SESSION_MAX_COOKIE_BYTES,
     AUTH_PASSWORD_HASH_MAX_CONCURRENCY,
     AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS,
     AUTH_PASSWORD_HASH_TIMEOUT_SECONDS,
@@ -3995,6 +4107,7 @@ app.add_middleware(
     previous_secret_keys=AUTH_SESSION_PREVIOUS_SECRET_KEYS,
     max_age=AUTH_SESSION_MAX_AGE_SECONDS,
     absolute_max_age=AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS,
+    max_cookie_bytes=AUTH_SESSION_MAX_COOKIE_BYTES,
     same_site=AUTH_SESSION_SAME_SITE,
     https_only=AUTH_SESSION_HTTPS_ONLY,
 )
@@ -4610,8 +4723,7 @@ async def login(request: Request, application: str):
     enable_saml_auth = _resolve_auth_flag("ENABLE_SAML_AUTH", ENABLE_SAML_AUTH)
     enable_microsoft_auth = _resolve_auth_flag("ENABLE_MICROSOFT_AUTH", ENABLE_MICROSOFT_AUTH)
     login_help_text = os.getenv("LOGIN_HELP_TEXT", "").strip()
-    login_csrf_token = secrets.token_urlsafe(32)
-    request.session["login_csrf_token"] = login_csrf_token
+    login_csrf_token = _issue_login_csrf_transaction(request, application)
 
     saml_login_buttons = _get_saml_login_buttons() if enable_saml_auth else []
     if enable_saml_auth and not enable_google_auth and not enable_user_login and not enable_microsoft_auth and len(saml_login_buttons) == 1:
@@ -4790,9 +4902,8 @@ async def auth_user_callback(request: Request, application: str):
 
     form = await request.form()
     _validate_preauthentication_request(
-        request, str(form.get("login_csrf_token") or "")
+        request, str(form.get("login_csrf_token") or ""), application
     )
-    request.session.pop("login_csrf_token", None)
     email = str(form.get('email') or "")
     password = str(form.get('password') or "")
     authenticated_claims = await _authenticate_local_user(request, email, password)
@@ -4821,12 +4932,31 @@ async def auth_user_callback(request: Request, application: str):
 class MCPAuthInput(BaseModel):
     email: str
     password: str
+    login_csrf_token: str = ""
+
+
+@app.get(
+    "/{application}/auth/mcp",
+    operation_id="initiateMcpAuth",
+    responses={200: {"description": "One-time login CSRF transaction"}},
+)
+async def initiate_mcp_auth(request: Request, application: str):
+    """Issue the one-time browser-session transaction required for MCP login."""
+    if not ENABLE_USER_LOGIN:
+        raise HTTPException(status_code=403, detail="User login not enabled")
+    return {
+        "login_csrf_token": _issue_login_csrf_transaction(request, application),
+        "expires_in": AUTH_LOGIN_CSRF_TTL_SECONDS,
+    }
 
 @app.post("/{application}/auth/mcp", operation_id="mcpAuth", responses={200: {"description": "JSONResponse with status and session cookie"}, 401: {"description": "HTTPException if not authorized"}, 403: {"description": "HTTPException if user login not enabled"}})
 async def mcp_auth(request: Request, application: str, auth_input: MCPAuthInput = Body(...)):
     """
     MCP-specific authentication endpoint. Authenticates with email and password via JSON, sets session, and returns status. The response includes Set-Cookie header for session, which can be used in subsequent calls.
     """
+    _validate_preauthentication_request(
+        request, auth_input.login_csrf_token, application
+    )
     authenticated_claims = await _authenticate_local_user(
         request, auth_input.email, auth_input.password
     )

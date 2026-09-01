@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -14,7 +15,7 @@ PASSWORD_HASH = (
 )
 
 
-def production_config(modules_path: Path, *, https_only: bool = False):
+def production_config(modules_path: Path, *, https_only: bool = True):
     return PytinctureConfig(
         modules_path=str(modules_path),
         default_application="demo",
@@ -30,7 +31,7 @@ def production_config(modules_path: Path, *, https_only: bool = False):
     )
 
 
-def make_workers(tmp_path: Path, *, https_only: bool = False):
+def make_workers(tmp_path: Path, *, https_only: bool = True):
     (tmp_path / "demo.py").write_text(
         'APP_TITLE = "Production smoke"\n', encoding="utf-8"
     )
@@ -52,15 +53,23 @@ def make_saml_workers(tmp_path: Path):
         saml_idp_sso_url="https://idp.example/sso",
         saml_idp_x509_cert="test-certificate",
         session_secret="production-test-secret-at-least-32-bytes",
-        session_https_only=False,
+        session_https_only=True,
     )
     return create_app(config), create_app(config)
 
 
 def login(client: TestClient):
+    page = client.get("/demo/login")
+    token = re.search(
+        r'name="login_csrf_token" value="([^"]+)"', page.text
+    ).group(1)
     response = client.post(
         "/demo/auth/user",
-        data={"email": "e2e@example.com", "password": "demo-password"},
+        data={
+            "email": "e2e@example.com",
+            "password": "demo-password",
+            "login_csrf_token": token,
+        },
         follow_redirects=False,
     )
     assert response.status_code == 303
@@ -69,7 +78,9 @@ def login(client: TestClient):
 
 def test_signed_session_cookie_is_portable_between_workers(tmp_path):
     first, second = make_workers(tmp_path)
-    with TestClient(first) as first_client, TestClient(second) as second_client:
+    with TestClient(first, base_url="https://testserver") as first_client, TestClient(
+        second, base_url="https://testserver"
+    ) as second_client:
         login(first_client)
         second_client.cookies.update(first_client.cookies)
         response = second_client.get("/demo", follow_redirects=False)
@@ -136,7 +147,7 @@ def test_saml_handshake_is_portable_between_workers_without_redis(tmp_path):
 
     assert not hasattr(first_backend, "SAML_TRANSACTION_STORE")
     assert not hasattr(second_backend, "SAML_TRANSACTION_STORE")
-    with TestClient(second, base_url="http://service.example") as client:
+    with TestClient(second, base_url="https://service.example") as client:
         client.cookies.set(
             second_backend._SAML_HANDSHAKE_COOKIE,
             handshake_cookie,
@@ -156,7 +167,9 @@ def test_saml_handshake_is_portable_between_workers_without_redis(tmp_path):
 
 def test_local_revocations_are_worker_local_but_shared_store_propagates(tmp_path):
     first, second = make_workers(tmp_path)
-    with TestClient(first) as first_client, TestClient(second) as second_client:
+    with TestClient(first, base_url="https://testserver") as first_client, TestClient(
+        second, base_url="https://testserver"
+    ) as second_client:
         login(first_client)
         second_client.cookies.update(first_client.cookies)
         first_client.post(
@@ -196,7 +209,9 @@ def test_local_revocations_are_worker_local_but_shared_store_propagates(tmp_path
     )
     first.state.pytincture_backend.USE_REDIS_INSTANCE = "true"
     second.state.pytincture_backend.USE_REDIS_INSTANCE = "true"
-    with TestClient(first) as first_client, TestClient(second) as second_client:
+    with TestClient(first, base_url="https://testserver") as first_client, TestClient(
+        second, base_url="https://testserver"
+    ) as second_client:
         login(first_client)
         second_client.cookies.update(first_client.cookies)
         assert second_client.get("/demo", follow_redirects=False).status_code == 200
@@ -220,7 +235,7 @@ def test_https_deployment_sets_secure_session_cookie(tmp_path):
 def test_request_completion_log_is_structured(tmp_path, caplog):
     first, _ = make_workers(tmp_path)
     with caplog.at_level(logging.INFO, logger="pytincture.security"):
-        with TestClient(first) as client:
+        with TestClient(first, base_url="https://testserver") as client:
             response = client.get(
                 "/healthz?code=oauth-secret&state=state-secret",
                 headers={"X-Request-ID": "edge-request-42"},
