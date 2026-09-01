@@ -3,7 +3,10 @@ import os
 import re
 import subprocess
 import sys
+import threading
+from dataclasses import fields
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 from fastapi import FastAPI
@@ -12,6 +15,13 @@ from starlette.requests import Request
 
 from pytincture import PytinctureConfig, create_app, get_modules_path
 from pytincture.configuration import configuration_context
+
+
+_FLOAT_CONFIG_FIELDS = tuple(
+    name
+    for name, annotation in get_type_hints(PytinctureConfig).items()
+    if annotation is float
+)
 
 
 def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path):
@@ -274,11 +284,11 @@ def test_legacy_app_rejects_credentialed_wildcard_cors(tmp_path):
         ({"PYTINCTURE_TRUST_PROXY_HEADERS": "true"}, "cannot trust proxy headers"),
         (
             {"PYTINCTURE_ALLOWED_HOSTS": "public.example.test"},
-            "literal loopback allowed hosts",
+            "literal loopback allowed_hosts",
         ),
         (
             {"PYTINCTURE_CANONICAL_ORIGIN": "https://public.example.test"},
-            "literal loopback canonical origin",
+            "literal loopback canonical_origin",
         ),
         (
             {"ENABLE_GOOGLE_AUTH": "true"},
@@ -318,6 +328,48 @@ def test_saml_limits_do_not_constrain_services_with_saml_disabled(tmp_path):
         saml_response_max_bytes=2048,
     )
     assert config.enable_saml_auth is False
+
+
+@pytest.mark.parametrize("field_name", _FLOAT_CONFIG_FIELDS)
+@pytest.mark.parametrize("encoded_value", ("nan", "inf", "-inf"))
+def test_every_floating_point_environment_setting_rejects_non_finite_values(
+    tmp_path, field_name, encoded_value
+):
+    definitions = {definition.name: definition for definition in fields(PytinctureConfig)}
+    environment_name = definitions[field_name].metadata["env"]
+
+    with pytest.raises(ValueError, match="must be finite"):
+        PytinctureConfig.from_env(
+            {
+                "MODULES_PATH": str(tmp_path),
+                environment_name: encoded_value,
+            }
+        )
+
+
+@pytest.mark.parametrize("encoded_value", ("nan", "inf", "-inf"))
+def test_legacy_raw_asgi_import_uses_typed_non_finite_validation(
+    tmp_path, encoded_value
+):
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "MODULES_PATH": str(tmp_path),
+            "BFF_CALL_TIMEOUT_SECONDS": encoded_value,
+        }
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import pytincture.backend.app"],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "floating-point resource limits must be finite" in result.stderr
 
 
 def test_development_widget_version_is_validated_and_rendered(tmp_path):
@@ -872,6 +924,92 @@ def test_create_app_isolates_routes_registries_and_session_stores(tmp_path, monk
         assert first_client.get("/beta/appcode/appcode.pyt").status_code == 404
         assert second_client.get("/alpha/appcode/appcode.pyt").status_code == 404
         assert second_client.get("/beta/appcode/appcode.pyt").status_code == 200
+
+
+def test_concurrent_create_app_never_exposes_instance_environment(
+    tmp_path, monkeypatch
+):
+    import importlib
+
+    factory_module = importlib.import_module("pytincture.factory")
+    first_root = tmp_path / "first-concurrent"
+    second_root = tmp_path / "second-concurrent"
+    first_root.mkdir()
+    second_root.mkdir()
+    _write_application(first_root, "alpha", "first")
+    _write_application(second_root, "beta", "second")
+    monkeypatch.setenv("MODULES_PATH", "process-modules")
+    monkeypatch.setenv("PYTINCTURE_FACTORY_SENTINEL", "process-value")
+
+    entered_loader = threading.Event()
+    release_loader = threading.Event()
+    original_exec_module = factory_module.SourceFileLoader.exec_module
+    pause_lock = threading.Lock()
+    paused = False
+
+    def observed_exec_module(loader, module):
+        nonlocal paused
+        should_pause = False
+        with pause_lock:
+            if not paused and module.__name__.startswith("pytincture.backend._instance_"):
+                paused = True
+                should_pause = True
+        if should_pause:
+            entered_loader.set()
+            assert release_loader.wait(timeout=10)
+        return original_exec_module(loader, module)
+
+    monkeypatch.setattr(
+        factory_module.SourceFileLoader,
+        "exec_module",
+        observed_exec_module,
+    )
+    created = {}
+    errors = []
+
+    def build(name, root, private_value):
+        try:
+            created[name] = create_app(
+                PytinctureConfig(
+                    modules_path=str(root),
+                    environment={"PYTINCTURE_FACTORY_SENTINEL": private_value},
+                )
+            )
+        except Exception as exc:  # pragma: no cover - surfaced below
+            errors.append(exc)
+
+    first_thread = threading.Thread(
+        target=build,
+        args=("first", first_root, "private-first"),
+    )
+    second_thread = threading.Thread(
+        target=build,
+        args=("second", second_root, "private-second"),
+    )
+    first_thread.start()
+    assert entered_loader.wait(timeout=10)
+    second_thread.start()
+
+    # While one factory is paused inside backend execution and another is
+    # concurrently waiting, only the process owner's values remain observable.
+    assert os.environ["MODULES_PATH"] == "process-modules"
+    assert os.environ["PYTINCTURE_FACTORY_SENTINEL"] == "process-value"
+
+    release_loader.set()
+    first_thread.join(timeout=30)
+    second_thread.join(timeout=30)
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert errors == []
+    assert created["first"].state.pytincture_backend.BFF_REGISTRY_ROOT == str(
+        first_root.resolve()
+    )
+    assert created["second"].state.pytincture_backend.BFF_REGISTRY_ROOT == str(
+        second_root.resolve()
+    )
+    assert os.environ["MODULES_PATH"] == "process-modules"
+    assert os.environ["PYTINCTURE_FACTORY_SENTINEL"] == "process-value"
 
 
 def test_canonical_origin_and_allowed_hosts_are_enforced(tmp_path):

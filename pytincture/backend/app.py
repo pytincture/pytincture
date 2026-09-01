@@ -11,7 +11,7 @@ import json
 import logging
 import math
 import mimetypes
-import os
+import os as _stdlib_os
 import re
 import secrets
 import threading
@@ -66,6 +66,7 @@ from starlette.routing import Match, Route
 
 # Pytincture
 from pytincture import __version__, get_modules_path
+from pytincture.configuration import PytinctureConfig
 from pytincture.backend.auth import (
     SENSITIVE_USER_CLAIM_KEYS,
     allowed_email,
@@ -193,6 +194,38 @@ from pytincture.dataclass import (
     get_parsed_output,
     verify_bff_runtime_export,
 )
+
+
+class _ConfiguredOS:
+    """OS facade whose environment belongs only to this backend instance."""
+
+    def __init__(self, values: Mapping[str, str]):
+        self._values = dict(values)
+        self.environ = self._values
+
+    def getenv(self, key, default=None):
+        return self._values.get(key, default)
+
+    def __getattr__(self, name):
+        return getattr(_stdlib_os, name)
+
+
+# Factory-created modules receive an already validated config before execution.
+# The compatibility ``pytincture.backend.app:app`` import validates the real
+# environment through the exact same model. Factory-backed reads are local to
+# this module and cannot expose one app factory's settings to another thread.
+try:
+    _factory_config = _PYTINCTURE_CONFIG
+except NameError:
+    _factory_config = None
+if _factory_config is None:
+    _PYTINCTURE_CONFIG = PytinctureConfig.from_env()
+    # Preserve the deprecated raw module's runtime environment compatibility
+    # after its startup values have passed typed validation.
+    os = _stdlib_os
+else:
+    _PYTINCTURE_CONFIG = _factory_config
+    os = _ConfiguredOS(_PYTINCTURE_CONFIG.to_environ())
 
 # ========================
 #  FASTAPI SETUP

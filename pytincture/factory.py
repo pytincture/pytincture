@@ -7,10 +7,9 @@ import os
 import sys
 import threading
 import uuid
-from contextlib import contextmanager
 from importlib.machinery import SourceFileLoader
 from types import ModuleType
-from typing import Iterator, Mapping, Optional
+from typing import Mapping, Optional
 
 from fastapi import FastAPI
 
@@ -18,22 +17,6 @@ from .configuration import PytinctureConfig, configuration_context
 
 
 _FACTORY_LOCK = threading.RLock()
-
-
-class _ConfiguredOS:
-    """Delegate OS operations while resolving environment reads per app."""
-
-    def __init__(self, values: Mapping[str, str]):
-        self._values = dict(values)
-        # A backend instance must not see configuration belonging to another
-        # instance through the process-global environment.
-        self.environ = self._values
-
-    def getenv(self, key, default=None):
-        return self._values.get(key, default)
-
-    def __getattr__(self, name):
-        return getattr(os, name)
 
 
 class _ConfigurationContextMiddleware:
@@ -46,27 +29,6 @@ class _ConfigurationContextMiddleware:
             await self.app(scope, receive, send)
 
 
-@contextmanager
-def _temporary_environment(
-    values: Mapping[str, str], managed_names: set[str]
-) -> Iterator[None]:
-    missing = object()
-    previous = {name: os.environ.get(name, missing) for name in managed_names}
-    for name in managed_names:
-        if name in values:
-            os.environ[name] = values[name]
-        else:
-            os.environ.pop(name, None)
-    try:
-        yield
-    finally:
-        for name, value in previous.items():
-            if value is missing:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
-
-
 def _load_backend(config: PytinctureConfig) -> ModuleType:
     backend_path = os.path.join(os.path.dirname(__file__), "backend", "app.py")
     module_name = f"pytincture.backend._instance_{uuid.uuid4().hex}"
@@ -75,16 +37,17 @@ def _load_backend(config: PytinctureConfig) -> ModuleType:
     if spec is None:
         raise RuntimeError("Unable to create the Pytincture backend module")
     module = importlib.util.module_from_spec(spec)
+    # The backend constructs its module-local environment facade from this
+    # already validated configuration. Never publish instance settings through
+    # the process-global environment, even briefly.
+    module._PYTINCTURE_CONFIG = config
     sys.modules[module_name] = module
-    environment = config.to_environ()
-    managed_names = set(PytinctureConfig.environment_names()) | set(config.environment)
     try:
-        with configuration_context(config), _temporary_environment(environment, managed_names):
+        with configuration_context(config):
             loader.exec_module(module)
     except Exception:
         sys.modules.pop(module_name, None)
         raise
-    module.os = _ConfiguredOS(environment)
     return module
 
 

@@ -910,6 +910,39 @@
       "regression_tests": [
         "tests/test_release_security.py::test_docs_do_not_recommend_an_unsupported_mutable_container_image"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-CONFIG-FACTORY-ISOLATION",
+      "status": "remediated",
+      "title": "Typed startup parity, finite limits, and instance-local factory configuration",
+      "intentional_contract": "Multiple Pytincture application factories may coexist in one process without Redis, sticky routing, or process-global configuration handoff. The raw ASGI module remains a deprecated compatibility entrypoint.",
+      "security_boundary": "Every supported startup path validates through PytinctureConfig before route assembly. Every floating-point timeout and resource limit must be finite. Factory-specific settings are injected into an isolated backend module and are never copied into the real process environment, including during concurrent factory creation.",
+      "controls": {
+        "typed_validation_all_startup_paths": true,
+        "raw_asgi_import_fail_closed": true,
+        "raw_asgi_import_deprecated": true,
+        "non_finite_limits_rejected": true,
+        "factory_environment_process_global_mutation": false,
+        "concurrent_factories_isolated": true,
+        "multiple_factories_preserved": true,
+        "redis_required": false,
+        "process_memory_session_requirement_added": false
+      },
+      "implementation": [
+        "pytincture/configuration.py",
+        "pytincture/factory.py",
+        "pytincture/backend/app.py",
+        "pytincture/backend/browser_packages.py",
+        "pytincture/dataclass.py",
+        "scripts/smoke_optional_extra.py",
+        "docs/backend-architecture.md"
+      ],
+      "regression_tests": [
+        "tests/test_configuration.py::test_every_floating_point_environment_setting_rejects_non_finite_values",
+        "tests/test_configuration.py::test_legacy_raw_asgi_import_uses_typed_non_finite_validation",
+        "tests/test_configuration.py::test_concurrent_create_app_never_exposes_instance_environment",
+        "tests/test_configuration.py::test_create_app_isolates_routes_registries_and_session_stores"
+      ]
     }
   ]
 }
