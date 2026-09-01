@@ -194,6 +194,6 @@
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1, RC2, representative standalone/authenticated/federated applications, upgrade/rollback, performance, repository policy, security, and defect audits are recorded and passing. The release remains NO-GO until the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS evidence is recorded, and the release manager makes the final decision."
+    "notes": "RC1 and RC2 historical evidence is recorded and passing. Post-rc2 security hardening requires a published and fully qualified 1.0.0rc3 before final promotion. The release remains NO-GO until rc3 passes the complete latest-candidate matrix, the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS evidence is recorded, and the release manager makes the final decision."
   }
 }
