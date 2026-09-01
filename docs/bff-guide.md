@@ -116,6 +116,9 @@ that application, so a same-named module elsewhere cannot inherit a grant.
 Non-streaming calls are bounded by `BFF_CALL_TIMEOUT_SECONDS`. Streams are
 bounded by `BFF_STREAM_MAX_SECONDS` and `BFF_STREAM_MAX_BYTES`; Pytincture
 closes sync/async iterators on completion, timeout, byte limit, or disconnect.
+Finite generators returned by non-streaming methods become JSON arrays and are
+also bounded by the ordinary result item/depth/byte limits. Return an async
+iterable only from a method declared with `@bff_stream()`.
 The default stream framing is newline-delimited JSON. Use `@bff_stream(raw=True,
 media_type=...)` only when the method yields correctly encoded bytes/text.
 

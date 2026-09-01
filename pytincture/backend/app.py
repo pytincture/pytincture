@@ -146,7 +146,11 @@ from pytincture.backend.replay import (
     SharedReplayStoreAdapter,
     validate_atomic_replay_store,
 )
-from pytincture.backend.results import BFFResultLimitExceeded, encode_bff_result
+from pytincture.backend.results import (
+    BFFResultLimitExceeded,
+    encode_bff_result,
+    prepare_bff_result,
+)
 from pytincture.backend.saml import (
     SAMLProviderCatalog,
     SlidingWindowRateLimiter,
@@ -2724,7 +2728,12 @@ async def public_app_asset(request: Request, application: str, asset_path: str):
     )
 
 
-def _bounded_bff_result(result: Any, *, return_raw: bool = False):
+async def _bounded_bff_result(
+    request: Request,
+    result: Any,
+    *,
+    return_raw: bool = False,
+):
     if isinstance(result, Response):
         body = getattr(result, "body", None)
         if not isinstance(body, (bytes, bytearray)):
@@ -2736,7 +2745,9 @@ def _bounded_bff_result(result: Any, *, return_raw: bool = False):
             raise HTTPException(status_code=413, detail="BFF result byte limit exceeded")
         return result
     try:
-        payload = encode_bff_result(
+        converted, payload = await _run_bff_thread_stage(
+            request,
+            prepare_bff_result,
             result,
             max_bytes=BFF_RESULT_MAX_BYTES,
             max_depth=BFF_RESULT_MAX_DEPTH,
@@ -2745,7 +2756,7 @@ def _bounded_bff_result(result: Any, *, return_raw: bool = False):
     except BFFResultLimitExceeded as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     if return_raw:
-        return result
+        return converted
     return Response(content=payload, media_type="application/json")
 
 
@@ -3032,10 +3043,12 @@ async def class_call(
             async def collect_items():
                 nonlocal collected_bytes
                 async for item in result:
-                    if len(collected_items) >= BFF_STREAM_MAX_ITEMS:
+                    if len(collected_items) >= BFF_RESULT_MAX_ITEMS:
                         raise HTTPException(status_code=413, detail="BFF result item limit exceeded")
                     try:
-                        encoded_item = encode_bff_result(
+                        encoded_item = await _run_bff_thread_stage(
+                            request,
+                            encode_bff_result,
                             item,
                             max_bytes=max(1, BFF_RESULT_MAX_BYTES - collected_bytes),
                             max_depth=BFF_RESULT_MAX_DEPTH,
@@ -3044,7 +3057,7 @@ async def class_call(
                     except BFFResultLimitExceeded as exc:
                         raise HTTPException(status_code=413, detail=str(exc)) from exc
                     collected_bytes += len(encoded_item)
-                    if collected_bytes > BFF_STREAM_MAX_BYTES:
+                    if collected_bytes > BFF_RESULT_MAX_BYTES:
                         raise HTTPException(status_code=413, detail="BFF result byte limit exceeded")
                     collected_items.append(item)
             try:
@@ -3057,7 +3070,8 @@ async def class_call(
                 close = getattr(result, "aclose", None)
                 if callable(close):
                     await close()
-            return _bounded_bff_result(
+            return await _bounded_bff_result(
+                request,
                 collected_items,
                 return_raw=bool(request.scope.get("pytincture.return_raw_result")),
             )
@@ -3075,12 +3089,14 @@ async def class_call(
         if is_streaming or isinstance(result, StreamingResponse):
             return _as_streaming_response(result)
 
-        return _bounded_bff_result(
+        return await _bounded_bff_result(
+            request,
             result,
             return_raw=bool(request.scope.get("pytincture.return_raw_result")),
         )
 
-    return _bounded_bff_result(
+    return await _bounded_bff_result(
+        request,
         func,
         return_raw=bool(request.scope.get("pytincture.return_raw_result")),
     )

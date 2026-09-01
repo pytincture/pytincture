@@ -64,9 +64,12 @@ request-controlled path to server-side code execution. Its two conditional
 medium availability findings and related trust observations are disposed as
 follows:
 
-- Ordinary BFF generators must be bounded before general JSON conversion can
-  expand them. This confirmed defect is tracked in
-  [#280](https://github.com/pytincture/pytincture/issues/280). Explicit BFF
+- Ordinary BFF generators are now incrementally bounded before general JSON
+  conversion can expand them, and conversion runs outside the request event
+  loop. Finite generators remain JSON arrays; a generator is stopped and closed
+  after the configured item limit. Ordinary async iterables must use the
+  existing explicit streaming declaration. This remediation is tracked in
+  [#280](https://github.com/pytincture/pytincture/issues/280); explicit BFF
   streaming and `yield` remain supported.
 - Trusted-mode coroutine BFFs and async policy hooks use cooperative event-loop
   timeouts. The existing `BFF_EXECUTION_MODE=isolated-process` option already
