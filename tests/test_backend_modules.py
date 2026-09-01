@@ -1145,6 +1145,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-M-10-PUBLIC-FILE-APPCODE-CACHE",
         "REVIEW-2026-08-31-M-11-M-12-BLOCKING-SHARED-STORE",
         "REVIEW-2026-08-31-M-13-M-14-LOGS-DOCS-HSTS",
+        "REVIEW-2026-08-31-M-19-M-21-M-23-SECRET-SCAN",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1254,6 +1255,15 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert blocking_controls["negative_misses_cached"] is False
     assert blocking_controls["redis_required"] is False
     assert blocking_controls["normal_sessions_server_side"] is False
+    release_controls = dispositions[
+        "REVIEW-2026-08-31-M-19-M-21-M-23-SECRET-SCAN"
+    ]["controls"]
+    assert release_controls["uv_lock_frozen"] is True
+    assert release_controls["complete_pyodide_catalog_sbom"] is True
+    assert release_controls["official_pyodide_archive_verified"] is True
+    assert release_controls["repository_secret_scan"] is True
+    assert release_controls["redis_required"] is False
+    assert release_controls["runtime_state_added"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:

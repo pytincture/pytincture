@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import email.parser
-import fnmatch
 import hashlib
 import json
 import re
@@ -45,49 +44,88 @@ def _source_versions() -> tuple[str, str]:
 
 def _normalized_tar_names(path: Path) -> tuple[set[str], tarfile.TarFile]:
     archive = tarfile.open(path, "r:gz")
-    raw_names = {member.name.rstrip("/") for member in archive.getmembers() if member.name}
+    members = [member for member in archive.getmembers() if member.name]
+    raw_name_list = [member.name.rstrip("/") for member in members]
+    if len(raw_name_list) != len(set(raw_name_list)):
+        archive.close()
+        _fail(f"{path.name} contains duplicate archive members")
+    raw_names = set(raw_name_list)
     roots = {name.split("/", 1)[0] for name in raw_names}
     if len(roots) != 1:
         archive.close()
         _fail(f"{path.name} must contain exactly one root directory")
     root = next(iter(roots))
     names = {
-        name[len(root) + 1 :]
-        for name in raw_names
-        if name.startswith(root + "/") and name != root
+        member.name[len(root) + 1 :]
+        for member in members
+        if member.isfile() and member.name.startswith(root + "/")
     }
     return names, archive
 
 
-def _check_contents(
-    artifact: str,
-    names: set[str],
-    required: list[str],
-    forbidden_prefixes: list[str],
-) -> None:
-    missing = [pattern for pattern in required if not any(fnmatch.fnmatch(name, pattern) for name in names)]
-    forbidden = sorted(
-        name for name in names if any(name.startswith(prefix) for prefix in forbidden_prefixes)
+SENSITIVE_PARTS = {
+    ".env",
+    ".git",
+    ".github",
+    "__pycache__",
+    "id_rsa",
+    "id_ed25519",
+    "node_modules",
+    "tests",
+}
+SENSITIVE_SUFFIXES = (".key", ".pem", ".p12", ".pfx", ".sqlite", ".sqlite3")
+
+
+def _normalize_inventory_name(name: str, version: str) -> str:
+    name = re.sub(
+        rf"^pytincture-{re.escape(version)}\.dist-info/",
+        "{dist-info}/",
+        name,
+    )
+    return name.replace(
+        f"pytincture/frontend/integrity/pytincture-{version}.json",
+        "pytincture/frontend/integrity/{framework-version}.json",
+    ).replace(
+        f"integrity/pytincture-{version}.json",
+        "integrity/{framework-version}.json",
+    )
+
+
+def _check_contents(artifact: str, names: set[str], expected: list[str], version: str) -> str:
+    normalized = {_normalize_inventory_name(name, version) for name in names}
+    expected_set = set(expected)
+    missing = sorted(expected_set - normalized)
+    unexpected = sorted(normalized - expected_set)
+    sensitive = sorted(
+        name
+        for name in normalized
+        if any(part.lower() in SENSITIVE_PARTS for part in Path(name).parts)
+        or name.lower().endswith(SENSITIVE_SUFFIXES)
     )
     if missing:
         _fail(f"{artifact} is missing: {', '.join(missing)}")
-    if forbidden:
-        _fail(f"{artifact} contains forbidden files: {', '.join(forbidden[:10])}")
+    if unexpected:
+        _fail(f"{artifact} contains unexpected files: {', '.join(unexpected[:10])}")
+    if sensitive:
+        _fail(f"{artifact} contains sensitive files: {', '.join(sensitive[:10])}")
+    return hashlib.sha256(
+        ("\n".join(sorted(normalized)) + "\n").encode("utf-8")
+    ).hexdigest()
 
 
 def _requirement_name(value: str) -> str:
     return re.split(r"[ (<>=!~;\[]", value, maxsplit=1)[0].lower().replace("_", "-")
 
 
-def inspect_wheel(path: Path, contract: dict, version: str) -> None:
+def inspect_wheel(path: Path, contract: dict, version: str) -> str:
     with zipfile.ZipFile(path) as archive:
-        names = set(archive.namelist())
-        required = [
-            item
-            for item in contract["required"]
-            if item not in {"README.md", "LICENSE", "pyproject.toml"}
-        ]
-        _check_contents("wheel", names, required, contract["forbidden_prefixes"])
+        raw_names = archive.namelist()
+        if len(raw_names) != len(set(raw_names)):
+            _fail("wheel contains duplicate archive members")
+        names = set(raw_names)
+        inventory_hash = _check_contents(
+            "wheel", names, contract["wheel_inventory"], version
+        )
         if not any(name.endswith(".dist-info/licenses/LICENSE") for name in names):
             _fail("wheel is missing its MIT license file")
         metadata_names = [name for name in names if name.endswith(".dist-info/METADATA")]
@@ -115,12 +153,15 @@ def inspect_wheel(path: Path, contract: dict, version: str) -> None:
         ):
             if version.encode() not in archive.read(runtime_path):
                 _fail(f"wheel runtime {runtime_path} does not embed version {version}")
+        return inventory_hash
 
 
-def inspect_sdist(path: Path, contract: dict, version: str) -> None:
+def inspect_sdist(path: Path, contract: dict, version: str) -> str:
     names, archive = _normalized_tar_names(path)
     try:
-        _check_contents("sdist", names, contract["required"], contract["forbidden_prefixes"])
+        inventory_hash = _check_contents(
+            "sdist", names, contract["sdist_inventory"], version
+        )
         pkg_info = next((name for name in names if name == "PKG-INFO"), None)
         if pkg_info is None:
             _fail("sdist has no PKG-INFO")
@@ -129,14 +170,17 @@ def inspect_sdist(path: Path, contract: dict, version: str) -> None:
         metadata = email.parser.Parser().parsestr(member.read().decode() if member else "")
         if metadata["Version"] != version:
             _fail(f"sdist version {metadata['Version']} does not match {version}")
+        return inventory_hash
     finally:
         archive.close()
 
 
-def inspect_npm(path: Path, contract: dict, version: str) -> None:
+def inspect_npm(path: Path, contract: dict, version: str) -> str:
     names, archive = _normalized_tar_names(path)
     try:
-        _check_contents("npm package", names, contract["required"], contract["forbidden_prefixes"])
+        inventory_hash = _check_contents(
+            "npm package", names, contract["inventory"], version
+        )
         member = archive.extractfile("package/package.json")
         package = json.loads(member.read() if member else b"{}")
         npm_version = npm_version_for_python(version)
@@ -150,6 +194,7 @@ def inspect_npm(path: Path, contract: dict, version: str) -> None:
             member = archive.extractfile(runtime_path)
             if member is None or version.encode() not in member.read():
                 _fail(f"npm runtime {runtime_path} does not embed version {version}")
+        return inventory_hash
     finally:
         archive.close()
 
@@ -182,16 +227,23 @@ def main() -> None:
     }:
         _fail(f"source versions differ: {source_versions}")
 
-    inspect_wheel(args.wheel, contract["python"], project_version)
-    inspect_sdist(args.sdist, contract["python"], project_version)
-    inspect_npm(args.npm, contract["npm"], project_version)
+    inventory_hashes = {
+        "wheel": inspect_wheel(args.wheel, contract["python"], project_version),
+        "sdist": inspect_sdist(args.sdist, contract["python"], project_version),
+        "npm": inspect_npm(args.npm, contract["npm"], project_version),
+    }
     hashes = {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (args.wheel, args.sdist, args.npm)
     }
     print(
         json.dumps(
-            {"python_version": project_version, "npm_version": npm_version, "sha256": hashes},
+            {
+                "python_version": project_version,
+                "npm_version": npm_version,
+                "sha256": hashes,
+                "inventory_sha256": inventory_hashes,
+            },
             indent=2,
             sort_keys=True,
         )

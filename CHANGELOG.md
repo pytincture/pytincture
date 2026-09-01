@@ -5,6 +5,12 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Freeze Python CI and release-build inputs through the hash-bearing `uv.lock`,
+  enforce exact wheel/sdist/npm file inventories, generate a complete SPDX
+  inventory for every embedded Pyodide catalog component, verify vendored core
+  bytes against the official release archive, and add deterministic plus
+  history-wide secret scanning. These are release controls only and add no
+  runtime service, session state, or Redis requirement.
 - Protect dynamic responses with private/no-store and cookie/authorization
   variance; make raw Uvicorn access logging opt-in and path-only; strictly
   bound, rate-limit, and schema-check browser diagnostics while disabling them

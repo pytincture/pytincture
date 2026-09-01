@@ -27,8 +27,9 @@ features have explicit extras:
 
 Missing feature dependencies produce an installation hint such as `install
 pytincture[saml]` when that feature is enabled. Dependency ranges accept
-compatible non-breaking updates; the repository lockfiles pin the exact
-versions used by development and CI.
+compatible non-breaking updates for users. Development, CI, clean artifact
+installs, dependency audits, and release builds use the exact hashes in
+`uv.lock`; `uv lock --check` fails when project metadata and the lock drift.
 
 ## Local artifact verification
 
@@ -53,8 +54,18 @@ python scripts/inspect_release_artifacts.py \
 The validator applies
 [`contracts/release-artifacts-v1.json`](../contracts/release-artifacts-v1.json),
 checks source and artifact versions, verifies base dependencies and declared
-extras, rejects development files, confirms required browser/Pyodide assets,
-and prints SHA-256 hashes.
+extras, and requires the wheel, sdist, and npm tarball to match explicit exact
+file inventories. Any extra, missing, duplicate, or sensitive file fails the
+release. The output includes artifact hashes and hashes of the normalized
+inventories.
+
+The vendored Pyodide gate regenerates and compares the SPDX 2.3 SBOM, including
+the complete embedded 375-entry package catalog and libraries embedded in
+micropip. CI downloads the official 0.29.3 core release archive, verifies its
+recorded SHA-256 and size, compares all shipped core bytes, and allows only the
+documented stale upstream lock-version correction. Repository source is also
+scanned with deterministic credential patterns and Gitleaks history scanning
+before a release can be attested.
 
 Stable Python and npm versions are identical. For prereleases, the canonical
 PEP 440 version `1.0.0rc1` maps to npm SemVer `1.0.0-rc.1`; the embedded browser

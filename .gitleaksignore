@@ -1,0 +1,14 @@
+# Historical test-only placeholder values reviewed before the secret gate was enabled.
+145f34176998004d7dd27c8531389ab935f59da4:tests/test_application_admission.py:generic-api-key:190
+9858c547fce8d8b7ddda3a2eb563511ac1eb8929:tests/test_configuration.py:generic-api-key:31
+2f1aa38822506dc8650e1a855bc86217b1fb020c:tests/test_launcher.py:generic-api-key:73
+2f1aa38822506dc8650e1a855bc86217b1fb020c:tests/test_app.py:generic-api-key:383
+2f1aa38822506dc8650e1a855bc86217b1fb020c:tests/test_configuration.py:generic-api-key:197
+2f1aa38822506dc8650e1a855bc86217b1fb020c:tests/test_configuration.py:generic-api-key:230
+2f1aa38822506dc8650e1a855bc86217b1fb020c:tests/test_configuration.py:generic-api-key:255
+39bb4dcf3507291aa421fe70bea469d0efbaba5e:tests/test_configuration.py:generic-api-key:94
+39bb4dcf3507291aa421fe70bea469d0efbaba5e:tests/test_configuration.py:generic-api-key:125
+39bb4dcf3507291aa421fe70bea469d0efbaba5e:tests/test_configuration.py:generic-api-key:135
+b697cdfa59ba60b3e5c5c3456bca1703bc3c8d7f:tests/test_configuration.py:generic-api-key:90
+6a0b3fb772c816f7853362e2a17238141529a2c9:tests/test_configuration.py:generic-api-key:67
+6a0b3fb772c816f7853362e2a17238141529a2c9:tests/test_configuration.py:generic-api-key:73

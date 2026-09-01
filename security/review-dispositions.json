@@ -756,6 +756,54 @@
         "tests/test_release_gates.py::test_final_gate_requires_production_edge_hsts_and_proxy_evidence",
         "pytincture/frontend/tests/lifecycle.test.mjs::browser console forwarding redacts secrets and bounds complex messages"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-M-19-M-21-M-23-SECRET-SCAN",
+      "status": "remediated",
+      "title": "Release inputs, artifact inventories, vendored runtime provenance, and secret scans are fail-closed",
+      "intentional_contract": "User dependency ranges remain compatible while Pytincture development, qualification, and publication use a frozen hash-bearing dependency graph. These controls affect build and publication only; they add no service state, Redis, or sticky-routing requirement.",
+      "security_boundary": "CI verifies lock freshness, installs release dependencies from uv.lock with hashes, and builds without an unpinned isolated backend. Wheel, sdist, and npm archives must match exact normalized inventories and reject duplicate, unexpected, and sensitive entries. The generated SPDX inventory covers all embedded runtime files, micropip-vendored libraries, and every package in the Pyodide catalog. CI downloads the official Pyodide release archive, verifies its recorded digest and size, compares exact core bytes, and permits only one documented upstream metadata correction. Deterministic tracked-source and Gitleaks history scans block credential material before attestation.",
+      "controls": {
+        "uv_lock_frozen": true,
+        "registry_distribution_hashes_required": true,
+        "release_build_isolation_unpinned": false,
+        "exact_wheel_inventory": true,
+        "exact_sdist_inventory": true,
+        "exact_npm_inventory": true,
+        "unexpected_release_entries_rejected": true,
+        "sensitive_release_entries_rejected": true,
+        "complete_pyodide_catalog_sbom": true,
+        "micropip_embedded_libraries_inventoried": true,
+        "official_pyodide_archive_verified": true,
+        "repository_secret_scan": true,
+        "history_secret_scan": true,
+        "redis_required": false,
+        "runtime_state_added": false
+      },
+      "implementation": [
+        "uv.lock",
+        "pyproject.toml",
+        ".github/workflows/ci.yml",
+        ".gitleaksignore",
+        "contracts/release-artifacts-v1.json",
+        "scripts/install_locked_artifact.py",
+        "scripts/inspect_release_artifacts.py",
+        "scripts/generate_vendored_pyodide_sbom.py",
+        "scripts/validate_vendored_pyodide.py",
+        "scripts/scan_repository_secrets.py",
+        "security/pyodide-upstream.json",
+        "pytincture/frontend/pyodide/0.29.3/sbom.json"
+      ],
+      "regression_tests": [
+        "tests/test_release_security.py::test_release_contract_is_an_exact_inventory_and_rejects_extra_files",
+        "tests/test_release_security.py::test_release_inventory_rejects_sensitive_files_even_if_declared",
+        "tests/test_release_security.py::test_vendored_sbom_is_generated_and_covers_complete_pyodide_catalog",
+        "tests/test_release_security.py::test_upstream_pyodide_manifest_pins_official_release_archive",
+        "tests/test_release_security.py::test_secret_scanner_detects_seeded_credentials_without_returning_values",
+        "tests/test_release_security.py::test_uv_lock_covers_registry_inputs_with_sha256_hashes",
+        "tests/test_release_security.py::test_ci_uses_frozen_python_inputs_and_release_security_gates",
+        "tests/test_release_security.py::test_frozen_lock_has_no_drift"
+      ]
     }
   ]
 }

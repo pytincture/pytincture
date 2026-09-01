@@ -5,7 +5,8 @@ Only a maintained release commit with green required CI is publishable.
 1. Choose the canonical PEP 440 version and run
    `python scripts/set_release_version.py <version>`. It updates Python/project
    metadata, maps npm SemVer, rebuilds runtime bundles, updates examples, and
-   refreshes the lockfile.
+   refreshes `uv.lock`. `uv lock --check` must pass and release builds install
+   the exact hash-bearing graph.
 2. Update `CHANGELOG.md`, compatibility versions, migration notes, and the
    release qualification record.
 3. After the complete 1.0 CI workflow is on `main`, apply and verify the full

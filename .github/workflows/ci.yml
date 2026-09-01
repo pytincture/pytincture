@@ -37,18 +37,22 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
+
+      - name: Set up locked dependency installer
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.8.0"
 
       - name: Validate vendored Pyodide SBOM and checksums
         run: python scripts/validate_vendored_pyodide.py
 
-      - name: Install project
+      - name: Verify and install frozen dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install --editable '.[dev]'
+          uv lock --check
+          uv sync --frozen --extra dev --python "${{ matrix.python-version }}"
 
       - name: Run tests
-        run: python -m pytest -q
+        run: uv run --frozen --python "${{ matrix.python-version }}" python -m pytest -q
 
   python-package:
     name: Validate release artifacts
@@ -62,7 +66,16 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-          cache: pip
+
+      - name: Set up locked dependency installer
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.8.0"
+
+      - name: Verify frozen dependency graph and upstream runtime
+        run: |
+          uv lock --check
+          python scripts/validate_vendored_pyodide.py --verify-upstream
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -84,13 +97,12 @@ jobs:
 
       - name: Build distributions
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install build twine
-          python -m build
+          uv sync --frozen --extra dev
+          uv run --frozen python -m build --no-isolation
           python scripts/normalize_sdist.py dist/*.tar.gz "$SOURCE_DATE_EPOCH"
 
       - name: Validate distributions
-        run: python -m twine check dist/*.whl dist/*.tar.gz
+        run: uv run --frozen python -m twine check dist/*.whl dist/*.tar.gz
 
       - name: Inspect release contents and versions
         shell: bash
@@ -106,7 +118,7 @@ jobs:
       - name: Verify reproducible artifact bytes
         run: |
           mkdir -p .reproducible
-          python -m build --outdir .reproducible
+          uv run --frozen python -m build --no-isolation --outdir .reproducible
           python scripts/normalize_sdist.py .reproducible/*.tar.gz "$SOURCE_DATE_EPOCH"
           (
             cd pytincture/frontend
@@ -120,10 +132,14 @@ jobs:
         shell: bash
         run: |
           python -m venv /tmp/pytincture-wheel-smoke
-          /tmp/pytincture-wheel-smoke/bin/python -m pip install dist/*.whl
+          python scripts/install_locked_artifact.py \
+            --python /tmp/pytincture-wheel-smoke/bin/python \
+            --artifact dist/*.whl
           /tmp/pytincture-wheel-smoke/bin/python scripts/smoke_optional_extra.py base
           python -m venv /tmp/pytincture-sdist-smoke
-          /tmp/pytincture-sdist-smoke/bin/python -m pip install dist/*.tar.gz
+          python scripts/install_locked_artifact.py \
+            --python /tmp/pytincture-sdist-smoke/bin/python \
+            --artifact dist/*.tar.gz
           /tmp/pytincture-sdist-smoke/bin/python scripts/smoke_optional_extra.py base
 
       - name: Upload validated release artifacts
@@ -164,7 +180,11 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-          cache: pip
+
+      - name: Set up locked dependency installer
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.8.0"
 
       - name: Download validated artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -178,7 +198,10 @@ jobs:
           PYTINCTURE_EXTRA: ${{ matrix.extra }}
         run: |
           wheel_path=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
-          python -m pip install "${wheel_path}[${PYTINCTURE_EXTRA}]"
+          python scripts/install_locked_artifact.py \
+            --python "$(command -v python)" \
+            --artifact "$wheel_path" \
+            --extra "$PYTINCTURE_EXTRA"
           python scripts/smoke_optional_extra.py "$PYTINCTURE_EXTRA"
 
   upgrade-rollback:
@@ -281,15 +304,17 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-          cache: pip
 
-      - name: Install all runtime extras and audit tooling
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install '.[oauth,password,redis,saml,mcp]' 'pip-audit>=2.9,<3'
+      - name: Set up locked dependency installer
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.8.0"
+
+      - name: Install the frozen audited environment
+        run: uv sync --frozen --extra dev
 
       - name: Audit Python dependencies
-        run: python scripts/audit_python_dependencies.py
+        run: uv run --frozen python scripts/audit_python_dependencies.py
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -303,6 +328,38 @@ jobs:
         run: |
           npm ci
           npm audit --audit-level=low
+
+  secret-scan:
+    name: Repository secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Check out complete repository history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Scan tracked source with deterministic release rules
+        run: python scripts/scan_repository_secrets.py
+
+      - name: Scan repository history with pinned Gitleaks
+        shell: bash
+        run: |
+          curl --fail --location --silent --show-error \
+            --output /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" \
+            | sha256sum --check --strict
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks git --redact --no-banner --exit-code 1 .
 
   javascript-runtime:
     name: Validate JavaScript runtime
@@ -372,7 +429,11 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-          cache: pip
+
+      - name: Set up locked dependency installer
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.8.0"
 
       - name: Download validated release artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -382,8 +443,11 @@ jobs:
 
       - name: Install Pytincture and prepare the pinned widget wheel
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install --editable '.[dev]'
+          wheel_path=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          python scripts/install_locked_artifact.py \
+            --python "$(command -v python)" \
+            --artifact "$wheel_path" \
+            --extra dev
           python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.16
           cp tests/e2e_apps/dhxpyt-0.9.16-py3-none-any.whl tests/e2e_apps/dhxpyt-0.9.16+backend-py3-none-any.whl
 
@@ -454,7 +518,11 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-          cache: pip
+
+      - name: Set up locked dependency installer
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.8.0"
 
       - name: Download validated Python wheel
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -467,8 +535,9 @@ jobs:
         run: |
           python -m venv /tmp/pytincture-standalone-wheel
           standalone_python=/tmp/pytincture-standalone-wheel/bin/python
-          "$standalone_python" -m pip install --upgrade pip
-          "$standalone_python" -m pip install dist/pytincture-*.whl
+          python scripts/install_locked_artifact.py \
+            --python "$standalone_python" \
+            --artifact dist/pytincture-*.whl
           mkdir -p /tmp/pytincture-standalone-widget
           "$standalone_python" -m pip download \
             --no-deps \
@@ -544,7 +613,11 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-          cache: pip
+
+      - name: Set up locked dependency installer
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.8.0"
 
       - name: Download validated Python wheel
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -557,8 +630,9 @@ jobs:
         run: |
           python -m venv /tmp/pytincture-quickstart-wheel
           example_python=/tmp/pytincture-quickstart-wheel/bin/python
-          "$example_python" -m pip install --upgrade pip
-          "$example_python" -m pip install dist/pytincture-*.whl
+          python scripts/install_locked_artifact.py \
+            --python "$example_python" \
+            --artifact dist/pytincture-*.whl
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -606,7 +680,11 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-          cache: pip
+
+      - name: Set up locked dependency installer
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.8.0"
 
       - name: Download validated Python wheel
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -620,8 +698,10 @@ jobs:
           python -m venv /tmp/pytincture-saml-wheel
           saml_python=/tmp/pytincture-saml-wheel/bin/python
           wheel_path=$(find dist -maxdepth 1 -name 'pytincture-*.whl' -print -quit)
-          "$saml_python" -m pip install --upgrade pip
-          "$saml_python" -m pip install "${wheel_path}[saml]"
+          python scripts/install_locked_artifact.py \
+            --python "$saml_python" \
+            --artifact "$wheel_path" \
+            --extra saml
           "$saml_python" -m pip download \
             --no-deps \
             --dest tests/e2e_apps \
@@ -724,7 +804,11 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-          cache: pip
+
+      - name: Set up locked dependency installer
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.8.0"
 
       - name: Download validated release artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -734,8 +818,9 @@ jobs:
 
       - name: Install validated Pytincture wheel in a clean environment
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install dist/pytincture-*.whl
+          python scripts/install_locked_artifact.py \
+            --python "$(command -v python)" \
+            --artifact dist/pytincture-*.whl
           python -m pip download --no-deps --dest tests/e2e_apps dhxpyt==0.9.16
           cp \
             tests/e2e_apps/dhxpyt-0.9.16-py3-none-any.whl \
@@ -801,6 +886,7 @@ jobs:
       - upgrade-rollback
       - release-gates
       - security-audit
+      - secret-scan
       - javascript-runtime
       - browser-e2e
       - standalone-wheel-e2e
