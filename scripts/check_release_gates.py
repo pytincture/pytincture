@@ -60,6 +60,7 @@ def validate_static(record: dict) -> list[str]:
         "rollback_exercises",
         "performance_reviews",
         "repository_policy_reviews",
+        "production_edge_reviews",
         "security_reviews",
         "defect_audits",
         "final_decision",
@@ -234,6 +235,33 @@ def validate_final(record: dict) -> list[str]:
             latest_published_at,
         )
     )
+    edge_reviews = record.get("production_edge_reviews", [])
+    failures.extend(
+        passed_evidence(
+            edge_reviews,
+            "production_edge_reviews",
+            latest_version,
+            latest_published_at,
+        )
+    )
+    required_edge_checks = {
+        "https_redirect",
+        "hsts",
+        "canonical_origin",
+        "trusted_proxy_headers",
+    }
+    for index, review in enumerate(edge_reviews):
+        if review.get("version") != latest_version:
+            continue
+        checks = review.get("checks", {})
+        missing_checks = sorted(
+            check for check in required_edge_checks if checks.get(check) is not True
+        )
+        if missing_checks:
+            failures.append(
+                f"production_edge_reviews[{index}].checks must pass: "
+                f"{', '.join(missing_checks)}"
+            )
 
     reviews = record.get("security_reviews", [])
     failures.extend(

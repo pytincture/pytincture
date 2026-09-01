@@ -105,6 +105,12 @@ object traversal is depth/entry limited, cycles are replaced, and the final
 message is capped at 800 characters before the request is created. This is
 defense in depth: application code must not write credentials or secrets to the
 browser console, and deployments may set `enableBackendLogging: false`.
+Service pages enable forwarding only when the backend `/logs` route is
+available. It is available for authenticated services by default; no-auth
+services require the explicit `ALLOW_NOAUTH_BROWSER_LOGS=true` opt-in. The
+backend enforces an exact schema, request/message bounds, CSRF/origin controls
+where applicable, and a dedicated per-peer rate limit, and records only
+structured metadata rather than the message text.
 
 The legacy positional form `runTinctureApp(application, widgetlib,
 entrypoint)` remains supported through 1.x but object configuration is the

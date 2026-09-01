@@ -703,6 +703,59 @@
         "tests/test_configuration.py::test_replay_proofs_remain_optional_and_do_not_require_redis",
         "tests/test_production.py::test_saml_handshake_is_portable_between_workers_without_redis"
       ]
+    },
+    {
+      "id": "REVIEW-2026-08-31-M-13-M-14-LOGS-DOCS-HSTS",
+      "status": "remediated",
+      "title": "Dynamic responses, diagnostics, access logs, documentation, and edge HSTS are fail-closed",
+      "intentional_contract": "Browser-carried signed sessions and load balancing remain stateless. Browser diagnostics and API documentation remain optional service features. HSTS remains a TLS-edge responsibility because only the edge knows the public domain's subdomain and preload policy. None of these controls requires Redis, process memory, or sticky routing.",
+      "security_boundary": "The launcher disables raw Uvicorn access logging by default and strips complete query strings when an operator opts in. Structured request events record the normalized path only. Authentication, session, BFF, private appcode, MCP, browser-log, and documentation responses are private, non-cacheable, and vary on Cookie and Authorization. Browser diagnostics use a strict bounded schema, client-side secret redaction, server-side message/body limits, dedicated rate limiting, browser-origin/CSRF enforcement, and no-auth opt-in. API docs can be public, authenticated, or absent. Final 1.0 qualification fails until durable production-edge evidence passes HTTPS redirect, HSTS, canonical-origin, and trusted-proxy checks.",
+      "controls": {
+        "uvicorn_access_log_default": false,
+        "opt_in_access_log_query_string_recorded": false,
+        "structured_request_log_path_only": true,
+        "dynamic_private_no_store": true,
+        "dynamic_vary_cookie_authorization": true,
+        "browser_log_exact_schema": true,
+        "browser_log_message_bound": true,
+        "browser_log_body_bound": true,
+        "browser_log_rate_limit": true,
+        "browser_log_noauth_default": false,
+        "browser_log_noauth_explicit_opt_in": true,
+        "api_docs_public_mode": true,
+        "api_docs_authenticated_mode": true,
+        "api_docs_disabled_mode": true,
+        "hsts_edge_owned": true,
+        "production_edge_evidence_required_for_final": true,
+        "redis_required": false,
+        "process_memory_required": false,
+        "sticky_routing_required": false
+      },
+      "implementation": [
+        "pytincture/__init__.py",
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "pytincture/dataclass.py",
+        "pytincture/frontend/pytincture.js",
+        "scripts/check_release_gates.py",
+        "contracts/release-qualification-v1.schema.json",
+        "release/qualification.json",
+        "docs/production-deployment.md",
+        "security/accepted-architecture.md"
+      ],
+      "regression_tests": [
+        "tests/test_launcher.py::test_optional_uvicorn_access_log_strips_query_strings",
+        "tests/test_production.py::test_request_completion_log_is_structured",
+        "tests/test_app.py::test_logs_endpoint",
+        "tests/test_app.py::test_logs_endpoint_rejects_noncanonical_payloads",
+        "tests/test_app.py::test_logs_endpoint_has_dedicated_size_and_rate_limits",
+        "tests/test_app.py::test_noauth_browser_logging_requires_explicit_opt_in",
+        "tests/test_app.py::test_main_app_frontend_files_share_one_instance_uuid",
+        "tests/test_configuration.py::test_bff_documentation_can_require_authentication_or_be_disabled",
+        "tests/test_configuration.py::test_browser_diagnostic_and_documentation_controls_fail_closed",
+        "tests/test_release_gates.py::test_final_gate_requires_production_edge_hsts_and_proxy_evidence",
+        "pytincture/frontend/tests/lifecycle.test.mjs::browser console forwarding redacts secrets and bounds complex messages"
+      ]
     }
   ]
 }

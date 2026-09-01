@@ -18,6 +18,7 @@ import threading
 import time
 import uuid
 import zipfile
+from datetime import datetime
 from email.utils import formatdate
 from typing import (
     Any,
@@ -27,6 +28,7 @@ from typing import (
     Mapping,
     Optional,
     Set,
+    Literal,
 )
 from urllib.parse import parse_qsl, quote, urlparse, urlsplit, urlunsplit
 
@@ -51,7 +53,7 @@ from packaging.utils import (
 from packaging.version import InvalidVersion, Version
 
 # Pydantic for JSON validation
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.config import Config
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -186,7 +188,17 @@ from pytincture.dataclass import (
 #  FASTAPI SETUP
 # ========================
 
-app = FastAPI(title="pyTincture API")
+API_DOCS_MODE = os.getenv("PYTINCTURE_API_DOCS_MODE", "public").strip().lower()
+if API_DOCS_MODE not in {"public", "authenticated", "disabled"}:
+    raise RuntimeError(
+        "PYTINCTURE_API_DOCS_MODE must be public, authenticated, or disabled"
+    )
+app = FastAPI(
+    title="pyTincture API",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 _BASE_APP_LIFESPAN = app.router.lifespan_context
 logger = logging.getLogger("pytincture.security")
 _configured_log_level = os.getenv("PYTINCTURE_LOG_LEVEL", "INFO").strip().upper()
@@ -614,6 +626,57 @@ async def development_auth_origin_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+def _merge_vary_header(current: str, *values: str) -> str:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in (*current.split(","), *values):
+        normalized = value.strip()
+        key = normalized.casefold()
+        if normalized and key not in seen:
+            seen.add(key)
+            merged.append(normalized)
+    return ", ".join(merged)
+
+
+def _private_response_required(request: Request) -> bool:
+    path = request.url.path
+    path_parts = path.split("/")
+    if path.startswith("/frontend/") or (
+        len(path_parts) > 2 and path_parts[2] == "frontend"
+    ):
+        # Exact framework assets are intentionally immutable and public. The
+        # outer session middleware strips Set-Cookie and applies their public
+        # cache policy after this middleware returns.
+        return False
+    docs_path = f"/{os.getenv('BFF_DOCS_PATH', 'bff-docs').lstrip('/')}"
+    private_paths = {
+        "/logs",
+        "/_pytincture/state",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        docs_path,
+        f"{docs_path}/openapi.json",
+    }
+    if (
+        path in private_paths
+        or "/auth/" in path
+        or path.endswith("/login")
+        or "/classcall/" in path
+        or path.endswith("/appcode/appcode.pyt")
+        or path == "/mcp"
+        or path.startswith("/mcp/")
+    ):
+        return True
+    if request.headers.get("authorization"):
+        return True
+    session = request.scope.get("session")
+    if not isinstance(session, dict):
+        return False
+    user = session.get("user")
+    return isinstance(user, dict) and user.get("is_authenticated") is True
+
+
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
     started = time.monotonic()
@@ -636,6 +699,21 @@ async def correlation_id_middleware(request: Request, call_next):
         "img-src 'self' data: https:; connect-src 'self' https:; "
         "worker-src 'self' blob:",
     )
+    if _private_response_required(request):
+        cache_control = response.headers.get("cache-control", "")
+        if "public" not in cache_control.casefold():
+            normalized_cache_control = cache_control.casefold()
+            if not (
+                "private" in normalized_cache_control
+                and "no-store" in normalized_cache_control
+            ):
+                response.headers["Cache-Control"] = "private, no-store, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Vary"] = _merge_vary_header(
+                response.headers.get("vary", ""),
+                "Cookie",
+                "Authorization",
+            )
     csrf_token = request.session.get("csrf_token") if hasattr(request, "session") else None
     if csrf_token:
         response.set_cookie(
@@ -2796,14 +2874,133 @@ async def _invoke_mcp_bff(spec: MCPToolSpec, arguments: Dict[str, Any]) -> Any:
     finally:
         await admission.aclose()
 
-@app.post("/logs", operation_id="postLogs", responses={200: {"description": "JSONResponse ({\"status\": \"ok\"})"}, 401: {"description": "HTTPException (if authentication fails)"}})
-async def logs_endpoint(request: Request, user=Depends(require_authenticated_user)):
+ENABLE_BROWSER_LOGS = os.getenv("ENABLE_BROWSER_LOGS", "true").lower() == "true"
+ALLOW_NOAUTH_BROWSER_LOGS = (
+    os.getenv("ALLOW_NOAUTH_BROWSER_LOGS", "false").lower() == "true"
+)
+BROWSER_LOG_MAX_BYTES = int(os.getenv("BROWSER_LOG_MAX_BYTES", "4096"))
+BROWSER_LOG_RATE_LIMIT_ATTEMPTS = int(
+    os.getenv("BROWSER_LOG_RATE_LIMIT_ATTEMPTS", "60")
+)
+BROWSER_LOG_RATE_LIMIT_WINDOW_SECONDS = int(
+    os.getenv("BROWSER_LOG_RATE_LIMIT_WINDOW_SECONDS", "60")
+)
+if min(
+    BROWSER_LOG_MAX_BYTES,
+    BROWSER_LOG_RATE_LIMIT_ATTEMPTS,
+    BROWSER_LOG_RATE_LIMIT_WINDOW_SECONDS,
+) <= 0:
+    raise RuntimeError("browser log limits must be greater than zero")
+BROWSER_LOG_RATE_LIMITER = SlidingWindowRateLimiter(
+    BROWSER_LOG_RATE_LIMIT_ATTEMPTS,
+    BROWSER_LOG_RATE_LIMIT_WINDOW_SECONDS,
+)
+
+
+class BrowserLogPayload(BaseModel):
+    """Only the bounded diagnostic shape emitted by the browser runtime."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    level: Literal["log", "warn", "error", "info", "debug"]
+    message: str = Field(max_length=800)
+    timestamp: str = Field(min_length=1, max_length=64)
+
+
+def _unique_browser_log_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate browser log key")
+        result[key] = value
+    return result
+
+
+def _browser_logging_available() -> bool:
+    if not ENABLE_BROWSER_LOGS:
+        return False
+    authentication_enabled = any(
+        (
+            ENABLE_GOOGLE_AUTH,
+            ENABLE_MICROSOFT_AUTH,
+            ENABLE_USER_LOGIN,
+            ENABLE_SAML_AUTH,
+        )
+    )
+    return authentication_enabled or ALLOW_NOAUTH_BROWSER_LOGS
+
+
+@app.post(
+    "/logs",
+    operation_id="postLogs",
+    responses={
+        200: {"description": "JSONResponse ({\"status\": \"ok\"})"},
+        401: {"description": "HTTPException (if authentication fails)"},
+    },
+)
+async def logs_endpoint(request: Request):
+    if not _browser_logging_available():
+        raise HTTPException(status_code=404, detail="Browser logging not enabled")
+    _validate_bff_browser_request(request)
+    allowed, retry_after = BROWSER_LOG_RATE_LIMITER.allow(
+        _saml_acs_peer_key(request)
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Browser log rate limit exceeded",
+            headers={"Retry-After": str(retry_after)},
+        )
+    user = await _run_bounded_thread_stage(
+        REMOTE_STORE_GATE,
+        require_authenticated_user,
+        request,
+        timeout_seconds=REMOTE_STORE_TIMEOUT_SECONDS,
+        unavailable_detail="Session revocation store is temporarily unavailable",
+    )
     _validate_csrf(request, user)
-    data = await request.json()
-    logger.info(
-        "Browser log received correlation_id=%s keys=%s",
-        getattr(request.state, "correlation_id", ""),
-        sorted(data) if isinstance(data, dict) else [],
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > BROWSER_LOG_MAX_BYTES:
+                raise HTTPException(
+                    status_code=413, detail="Browser log request is too large"
+                )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail="Invalid Content-Length"
+            ) from exc
+    body = await request.body()
+    if not body or len(body) > BROWSER_LOG_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Browser log request is too large")
+    try:
+        decoded = json.loads(
+            body.decode("utf-8"),
+            object_pairs_hook=_unique_browser_log_object,
+        )
+        payload = BrowserLogPayload.model_validate(decoded)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValidationError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422, detail="Invalid browser log payload"
+        ) from exc
+    try:
+        parsed_timestamp = datetime.fromisoformat(
+            payload.timestamp.replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail="Invalid browser log payload"
+        ) from exc
+    if parsed_timestamp.tzinfo is None:
+        raise HTTPException(status_code=422, detail="Invalid browser log payload")
+
+    structured_log(
+        logger,
+        logging.INFO,
+        "browser.diagnostic",
+        correlation_id=getattr(request.state, "correlation_id", ""),
+        browser_level=payload.level,
+        message_chars=len(payload.message),
     )
     return {"status": "ok"}
 
@@ -4717,6 +4914,10 @@ async def main_app_route(response: Response, application: str, request: Request)
     index_html = index_html.replace(
         "***DEV_WHEEL_VERSION***", json.dumps(DEVELOPMENT_WIDGET_VERSION_TEXT)
     )
+    index_html = index_html.replace(
+        "***ENABLE_BACKEND_LOGGING***",
+        json.dumps(_browser_logging_available()),
+    )
 
     index_html = index_html.replace("***WIDGETSET***", widgetset)
     return HTMLResponse(
@@ -5006,10 +5207,24 @@ async def configured_favicon_asset(
     )
 
 
+async def _authorize_api_documentation(request: Request) -> None:
+    user = await _run_bounded_thread_stage(
+        REMOTE_STORE_GATE,
+        require_authenticated_user,
+        request,
+        timeout_seconds=REMOTE_STORE_TIMEOUT_SECONDS,
+        unavailable_detail="Session revocation store is temporarily unavailable",
+    )
+    if not isinstance(user, dict) or user.get("is_authenticated") is not True:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+
 add_bff_docs_to_app(
     app,
     operations=reload_bff_registry(get_modules_path()),
     asset_uuid=FRONTEND_INSTANCE_UUID,
+    docs_mode=API_DOCS_MODE,
+    authorize=_authorize_api_documentation,
 )
 reload_mcp_tools()
 

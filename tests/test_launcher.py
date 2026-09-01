@@ -3,6 +3,7 @@ import io
 import signal
 import zipfile
 import json
+import logging
 import pytest
 from multiprocessing import freeze_support
 from fastapi.testclient import TestClient
@@ -37,8 +38,9 @@ def test_main(monkeypatch):
     assert call["app_str"].title == "pyTincture API"
     assert call["host"] == "0.0.0.0"
     assert call["port"] == test_port
-    assert call["log_level"] == "debug"
-    assert call["access_log"] is True
+    assert call["log_level"] == "info"
+    assert call["access_log"] is False
+    assert "log_config" not in call
     assert call["reload"] is False
     assert call["ssl_keyfile"] == test_ssl_keyfile
     assert call["ssl_certfile"] == test_ssl_certfile
@@ -46,6 +48,41 @@ def test_main(monkeypatch):
     assert loop_value in {"asyncio", "uvloop"}
     set_modules_path(None)
     os.environ.pop("MODULES_PATH", None)
+
+
+def test_optional_uvicorn_access_log_strips_query_strings(monkeypatch):
+    calls = []
+    monkeypatch.setenv("PYTINCTURE_UVICORN_ACCESS_LOG", "true")
+
+    import pytincture.__init__ as launcher_mod
+
+    monkeypatch.setattr(
+        launcher_mod.uvicorn,
+        "run",
+        lambda app_str, **kwargs: calls.append({"app_str": app_str, **kwargs}),
+    )
+    main(9000)
+
+    assert calls[0]["access_log"] is True
+    assert "pytincture_path_only" in calls[0]["log_config"]["filters"]
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "%s %s HTTP/%s" %d',
+        (
+            "127.0.0.1:1",
+            "GET",
+            "/demo/auth/callback?code=secret&state=secret",
+            "1.1",
+            302,
+        ),
+        None,
+    )
+    assert launcher_mod._PathOnlyAccessFilter().filter(record) is True
+    assert record.args[2] == "/demo/auth/callback"
+    assert "secret" not in record.getMessage()
 
 
 def test_main_defaults_development_login_to_loopback(monkeypatch):

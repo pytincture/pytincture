@@ -135,6 +135,13 @@ The contract test checks every row in this table against the dataclass model.
 | `session_https_only` | `AUTH_SESSION_HTTPS_ONLY` | Secure-cookie requirement; derived when omitted. |
 | `session_same_site` | `AUTH_SESSION_SAME_SITE` | Cookie SameSite policy. |
 | `max_request_body_bytes` | `MAX_REQUEST_BODY_BYTES` | Maximum request body size. |
+| `enable_browser_logs` | `ENABLE_BROWSER_LOGS` | Accept bounded browser diagnostics for authenticated services. |
+| `allow_noauth_browser_logs` | `ALLOW_NOAUTH_BROWSER_LOGS` | Explicitly expose bounded browser diagnostics in no-auth services. |
+| `browser_log_max_bytes` | `BROWSER_LOG_MAX_BYTES` | Maximum browser diagnostic request bytes. |
+| `browser_log_rate_limit_attempts` | `BROWSER_LOG_RATE_LIMIT_ATTEMPTS` | Browser diagnostic requests allowed per peer and window. |
+| `browser_log_rate_limit_window_seconds` | `BROWSER_LOG_RATE_LIMIT_WINDOW_SECONDS` | Browser diagnostic rate-limit window in seconds. |
+| `api_docs_mode` | `PYTINCTURE_API_DOCS_MODE` | API documentation mode: public, authenticated, or disabled. |
+| `uvicorn_access_log` | `PYTINCTURE_UVICORN_ACCESS_LOG` | Enable sanitized path-only Uvicorn access logs. |
 | `login_rate_limit_attempts` | `AUTH_LOGIN_RATE_LIMIT_ATTEMPTS` | Password attempts per peer and window. |
 | `login_rate_limit_window_seconds` | `AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS` | Password rate-limit window. |
 | `login_email_max_chars` | `AUTH_LOGIN_EMAIL_MAX_CHARS` | Maximum submitted email length. |

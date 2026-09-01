@@ -5,6 +5,13 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Protect dynamic responses with private/no-store and cookie/authorization
+  variance; make raw Uvicorn access logging opt-in and path-only; strictly
+  bound, rate-limit, and schema-check browser diagnostics while disabling them
+  for no-auth services unless explicitly enabled. API documentation can now be
+  public, authenticated, or disabled, and final qualification requires durable
+  production-edge HTTPS/HSTS/canonical-origin/proxy evidence. These controls
+  add no session store and do not require Redis.
 - Offload SAML XML/signature validation and optional shared-store work from
   async request paths under bounded admission and deadlines. Readiness checks
   are briefly coalesced, and the legacy Redis read cache is disabled by

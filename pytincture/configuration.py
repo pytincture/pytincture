@@ -228,6 +228,41 @@ class PytinctureConfig:
     max_request_body_bytes: int = _setting(
         2 * 1024 * 1024, "MAX_REQUEST_BODY_BYTES", "Maximum request body size."
     )
+    enable_browser_logs: bool = _setting(
+        True,
+        "ENABLE_BROWSER_LOGS",
+        "Accept bounded browser diagnostics for authenticated services.",
+    )
+    allow_noauth_browser_logs: bool = _setting(
+        False,
+        "ALLOW_NOAUTH_BROWSER_LOGS",
+        "Explicitly expose bounded browser diagnostics in no-auth services.",
+    )
+    browser_log_max_bytes: int = _setting(
+        4096,
+        "BROWSER_LOG_MAX_BYTES",
+        "Maximum browser diagnostic request bytes.",
+    )
+    browser_log_rate_limit_attempts: int = _setting(
+        60,
+        "BROWSER_LOG_RATE_LIMIT_ATTEMPTS",
+        "Browser diagnostic requests allowed per peer and window.",
+    )
+    browser_log_rate_limit_window_seconds: int = _setting(
+        60,
+        "BROWSER_LOG_RATE_LIMIT_WINDOW_SECONDS",
+        "Browser diagnostic rate-limit window in seconds.",
+    )
+    api_docs_mode: str = _setting(
+        "public",
+        "PYTINCTURE_API_DOCS_MODE",
+        "API documentation mode: public, authenticated, or disabled.",
+    )
+    uvicorn_access_log: bool = _setting(
+        False,
+        "PYTINCTURE_UVICORN_ACCESS_LOG",
+        "Enable sanitized path-only Uvicorn access logs.",
+    )
     login_rate_limit_attempts: int = _setting(
         20, "AUTH_LOGIN_RATE_LIMIT_ATTEMPTS", "Password attempts per peer and window."
     )
@@ -525,6 +560,9 @@ class PytinctureConfig:
         ) <= 0:
             raise ValueError("SAML ACS rate-limit values must be greater than zero")
         positive_limits = (
+            self.browser_log_max_bytes,
+            self.browser_log_rate_limit_attempts,
+            self.browser_log_rate_limit_window_seconds,
             self.login_rate_limit_attempts,
             self.login_rate_limit_window_seconds,
             self.login_email_max_chars,
@@ -574,6 +612,12 @@ class PytinctureConfig:
             raise ValueError("saml_validation_max_queue cannot be negative")
         if self.remote_store_max_queue < 0:
             raise ValueError("remote_store_max_queue cannot be negative")
+        docs_mode = self.api_docs_mode.strip().lower()
+        if docs_mode not in {"public", "authenticated", "disabled"}:
+            raise ValueError(
+                "api_docs_mode must be public, authenticated, or disabled"
+            )
+        object.__setattr__(self, "api_docs_mode", docs_mode)
         execution_mode = self.bff_execution_mode.strip().lower()
         if execution_mode not in {"trusted-thread", "isolated-process"}:
             raise ValueError(
@@ -827,11 +871,14 @@ class PytinctureConfig:
             "enable_microsoft_auth", "enable_saml_auth", "enable_bff_replay_tokens",
             "bff_replay_require_shared_store",
             "use_redis_instance", "enable_mcp", "trusted_proxy_headers",
-            "allow_development_auth_origin",
+            "allow_development_auth_origin", "enable_browser_logs",
+            "allow_noauth_browser_logs", "uvicorn_access_log",
         }
         integer_fields = {
             "session_max_age_seconds", "session_absolute_max_age_seconds",
-            "max_request_body_bytes", "bff_stream_max_bytes",
+            "max_request_body_bytes", "browser_log_max_bytes",
+            "browser_log_rate_limit_attempts", "browser_log_rate_limit_window_seconds",
+            "bff_stream_max_bytes",
             "bff_replay_token_batch_size", "bff_replay_token_low_watermark",
             "bff_replay_token_ttl_seconds", "bff_replay_issue_session_limit",
             "bff_replay_issue_peer_limit", "bff_replay_issue_worker_limit",

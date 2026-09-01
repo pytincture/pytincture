@@ -60,6 +60,13 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "REMOTE_STORE_MAX_QUEUE": "12",
             "REMOTE_STORE_QUEUE_TIMEOUT_SECONDS": "0.5",
             "READINESS_CACHE_TTL_SECONDS": "2.5",
+            "ENABLE_BROWSER_LOGS": "false",
+            "ALLOW_NOAUTH_BROWSER_LOGS": "true",
+            "BROWSER_LOG_MAX_BYTES": "2048",
+            "BROWSER_LOG_RATE_LIMIT_ATTEMPTS": "12",
+            "BROWSER_LOG_RATE_LIMIT_WINDOW_SECONDS": "34",
+            "PYTINCTURE_API_DOCS_MODE": "authenticated",
+            "PYTINCTURE_UVICORN_ACCESS_LOG": "true",
         },
         bff_call_timeout_seconds=8.0,
     )
@@ -107,6 +114,13 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.remote_store_max_queue == 12
     assert config.remote_store_queue_timeout_seconds == 0.5
     assert config.readiness_cache_ttl_seconds == 2.5
+    assert config.enable_browser_logs is False
+    assert config.allow_noauth_browser_logs is True
+    assert config.browser_log_max_bytes == 2048
+    assert config.browser_log_rate_limit_attempts == 12
+    assert config.browser_log_rate_limit_window_seconds == 34
+    assert config.api_docs_mode == "authenticated"
+    assert config.uvicorn_access_log is True
     assert config.environment == {"APP_SPECIFIC_VALUE": "kept"}
     assert config.to_environ()["ENABLE_USER_LOGIN"] == "true"
     assert config.to_environ()["PYTINCTURE_DEV_WHEEL_VERSION"] == "42.0.dev1"
@@ -828,6 +842,55 @@ def test_bff_documentation_is_per_app_and_redacts_defaults(tmp_path):
     assert hidden_license.status_code == 404
 
 
+def test_bff_documentation_can_require_authentication_or_be_disabled(tmp_path):
+    (tmp_path / "demo.py").write_text('APP_TITLE = "Docs mode"\n')
+
+    authenticated = create_app(
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            api_docs_mode="authenticated",
+        )
+    )
+    authenticated_backend = authenticated.state.pytincture_backend
+    with TestClient(authenticated) as client:
+        for path in (
+            "/bff-docs",
+            "/bff-docs/openapi.json",
+            "/docs",
+            "/openapi.json",
+        ):
+            response = client.get(path, follow_redirects=False)
+            assert response.status_code == 401
+            assert response.headers["cache-control"] == "private, no-store, max-age=0"
+            assert set(response.headers["vary"].split(", ")) == {
+                "Cookie",
+                "Authorization",
+            }
+
+        authenticated_backend.require_auth = lambda _request: {
+            "is_authenticated": True,
+            "email": "docs@example.test",
+        }
+        assert client.get("/bff-docs").status_code == 200
+        assert client.get("/openapi.json").status_code == 200
+
+    disabled = create_app(
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            api_docs_mode="disabled",
+        )
+    )
+    with TestClient(disabled) as client:
+        for path in (
+            "/bff-docs",
+            "/bff-docs/openapi.json",
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+        ):
+            assert client.get(path, follow_redirects=False).status_code == 404
+
+
 def test_invalid_python_file_cannot_disable_unrelated_bff_application(tmp_path):
     (tmp_path / "healthy.py").write_text(
         "from pytincture.dataclass import backend_for_frontend\n"
@@ -867,6 +930,25 @@ def test_configuration_reference_document_matches_typed_model():
     for field_name, environment_name, description in PytinctureConfig.reference():
         expected_row = f"| `{field_name}` | `{environment_name}` | {description} |"
         assert expected_row in documentation
+
+
+def test_browser_diagnostic_and_documentation_controls_fail_closed(tmp_path):
+    defaults = PytinctureConfig(modules_path=str(tmp_path))
+    assert defaults.enable_browser_logs is True
+    assert defaults.allow_noauth_browser_logs is False
+    assert defaults.api_docs_mode == "public"
+    assert defaults.uvicorn_access_log is False
+
+    for field in (
+        "browser_log_max_bytes",
+        "browser_log_rate_limit_attempts",
+        "browser_log_rate_limit_window_seconds",
+    ):
+        with pytest.raises(ValueError, match="resource limits"):
+            PytinctureConfig(modules_path=str(tmp_path), **{field: 0})
+
+    with pytest.raises(ValueError, match="api_docs_mode"):
+        PytinctureConfig(modules_path=str(tmp_path), api_docs_mode="sometimes")
 
 
 def test_log_level_is_normalized_and_validated(tmp_path):

@@ -48,6 +48,13 @@ browser-carried sessions and optional Redis, are recorded in
 - Pin the Pytincture and widgetset versions in the deployment artifact.
 - Redis is optional. Load-balanced sessions and SAML handshakes are carried in
   signed browser cookies and work across workers without server-side state.
+- Choose `PYTINCTURE_API_DOCS_MODE=authenticated` or `disabled` when operation
+  metadata must not be public. The default remains `public` for compatibility;
+  all documentation/schema responses are private and non-cacheable.
+- Browser diagnostics are accepted for authenticated services by default and
+  carry only the exact bounded `{level,message,timestamp}` schema. Set
+  `ENABLE_BROWSER_LOGS=false` to disable them. No-auth services do not expose
+  `/logs` unless `ALLOW_NOAUTH_BROWSER_LOGS=true` is explicitly selected.
 
 Signed session and SAML handshake cookies can be read by any worker sharing the
 signing secret. Redis is only an optional enhancement for immediate
@@ -157,6 +164,19 @@ Collect `request.complete`, `bff.start`, and `bff.stream.finish`; index at least
 Alert on readiness failures, elevated 5xx/401/403 rates, BFF timeouts, stream
 `byte-limit`/`timeout` frequency, and p95 latency budget regressions. Control
 verbosity with `PYTINCTURE_LOG_LEVEL`.
+
+Raw Uvicorn access logging is disabled by default because callback query
+strings can contain OAuth or SAML material. If an operator explicitly sets
+`PYTINCTURE_UVICORN_ACCESS_LOG=true`, Pytincture installs a path-only filter
+that removes the complete query string before the access record is formatted.
+Authenticated BFF, login, callback, session-state, appcode, browser-log, MCP,
+and API-documentation responses carry `Cache-Control: private, no-store`,
+`Pragma: no-cache`, and `Vary: Cookie, Authorization`.
+
+HSTS remains the responsibility of the TLS-terminating edge, where the public
+domain, subdomain, and preload policies are known. Before final promotion,
+record durable `production_edge_reviews` evidence proving the live HTTPS
+redirect, HSTS policy, canonical origin, and trusted proxy-header replacement.
 
 The versioned [performance budgets](performance.md) cover health, generated
 application packages, representative BFF calls, and cold/warm browser startup

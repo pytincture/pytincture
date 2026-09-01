@@ -156,6 +156,17 @@ def complete_record():
         "rollback_exercises": [evidence(version)],
         "performance_reviews": [evidence(version)],
         "repository_policy_reviews": [evidence(version)],
+        "production_edge_reviews": [
+            evidence(
+                version,
+                checks={
+                    "https_redirect": True,
+                    "hsts": True,
+                    "canonical_origin": True,
+                    "trusted_proxy_headers": True,
+                },
+            )
+        ],
         "security_reviews": [evidence(version, open_critical=0, open_high=0)],
         "defect_audits": [evidence(version, open_p0=0, open_p1=0)],
         "final_decision": {
@@ -232,6 +243,16 @@ def test_final_gate_preserves_historical_rc_evidence():
     )
 
     assert gates.validate_final(record) == []
+
+
+def test_final_gate_requires_production_edge_hsts_and_proxy_evidence():
+    record = complete_record()
+    record["production_edge_reviews"][0]["checks"]["hsts"] = False
+
+    failures = gates.validate_final(record)
+
+    assert any("production_edge_reviews[0].checks" in failure for failure in failures)
+    assert any("hsts" in failure for failure in failures)
 
 
 def test_rc2_release_requires_valid_rc1_evidence(monkeypatch):

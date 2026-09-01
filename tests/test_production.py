@@ -222,7 +222,7 @@ def test_request_completion_log_is_structured(tmp_path, caplog):
     with caplog.at_level(logging.INFO, logger="pytincture.security"):
         with TestClient(first) as client:
             response = client.get(
-                "/healthz",
+                "/healthz?code=oauth-secret&state=state-secret",
                 headers={"X-Request-ID": "edge-request-42"},
             )
     assert response.status_code == 200
@@ -239,3 +239,5 @@ def test_request_completion_log_is_structured(tmp_path, caplog):
     assert completed["path"] == "/healthz"
     assert completed["status_code"] == 200
     assert completed["duration_ms"] >= 0
+    assert "oauth-secret" not in caplog.text
+    assert "state-secret" not in caplog.text
