@@ -2,7 +2,7 @@
 pyTincture uvicorn launcher
 """
 
-__version__ = "1.0.0rc3"
+__version__ = "1.0.0rc4"
 
 from multiprocessing import Process, freeze_support
 from copy import deepcopy

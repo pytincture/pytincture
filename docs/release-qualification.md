@@ -5,28 +5,32 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## Current decision: NO-GO pending observation and edge evidence
+## Current decision: NO-GO pending rc4, observation, and edge evidence
 
 Signed GitHub prereleases exist for `1.0.0rc1`, `1.0.0rc2`, and `1.0.0rc3`.
-Rc3 contains the post-rc2 external-review hardening and is now the latest
-qualified candidate. Its exact retained wheel, source distribution, and npm
-tarball are attested, integrity-recorded, and covered by the complete release
-acceptance matrix. The protected PyPI and npm OIDC publishers independently
-verified those bytes and are waiting for non-self environment approval;
-registry publication is a distribution task and does not invalidate the
-candidate evidence or reset the approved observation track.
+Rc3 is the latest qualified candidate. Its exact retained wheel, source
+distribution, and npm tarball are attested, integrity-recorded, and covered by
+the complete release acceptance matrix. The 2026-09-01 external review then
+identified 12 additional findings. Their remediations are merged on `main`,
+recorded in `security/review-2026-09-01.json`, and require a published and fully
+qualified `1.0.0rc4` before final promotion. The protected PyPI and npm OIDC
+publishers independently verified the rc3 bytes and are waiting for non-self
+environment approval; registry publication is a distribution task and does
+not invalidate candidate evidence or reset the approved observation track.
 
 The release manager approved the successful `pytincture_example` run, so the
 formal 30-day observation period began at `2026-08-29T02:08:06Z` and cannot
 complete before `2026-09-28T02:08:06Z`. RC2 has complete historical
 standalone, authenticated BFF, federated SAML, upgrade/rollback, performance,
 security/defect, and repository-policy evidence. Rc3 repeated and passed that
-complete matrix after publication. The release remains NO-GO until the time
-gate completes, a production-edge review records the deployed HTTPS
+complete matrix after publication. Rc4 must repeat the latest-candidate matrix
+after publication. The release remains NO-GO until rc4 qualification passes,
+the time gate completes, a production-edge review records the deployed HTTPS
 redirect, HSTS, canonical-origin, and trusted-proxy controls, and the release
-manager approves the final decision. The Starlette security blocker remains
-resolved by requiring the patched 1.6 release line and allowing no
-dependency-audit exceptions.
+manager approves the final decision. The rc4 hardening preserves the approved
+observation scope, so it does not reset the clock. The Starlette security
+blocker remains resolved by requiring the patched 1.6 release line and allowing
+no dependency-audit exceptions.
 
 Published and retained rc1 evidence:
 
@@ -98,6 +102,17 @@ environment approval. Their pre-publication stages verified the trusted
 release run, exact retained hashes, package identity, attestation, and version
 immutability. No environment protection was bypassed.
 
+Rc4 preparation status:
+
+- all 12 findings are remediated and closed by
+  <https://github.com/pytincture/pytincture/pull/276>;
+- scan-facing dispositions and compatibility notes are committed under
+  `security/`;
+- the complete pull-request and post-merge Python/browser/SAML/artifact matrix
+  passed; and
+- rc4 is not recorded as a passed candidate until its signed tag, release,
+  retained artifact hashes, and release-event qualification evidence exist.
+
 ## Evidence required after each RC
 
 For every release candidate, record:
@@ -167,8 +182,9 @@ its tracking issue is accidentally closed.
    hashes and CI evidence into the qualification record in a follow-up PR.
 4. Run representative applications and begin the observation log.
 5. Resolve discovered blockers, publish/record the next release candidate, and
-   repeat every latest-RC exercise. Rc3 now records the completed post-rc2
-   security hardening and repeated latest-candidate matrix.
+   repeat every latest-RC exercise. Rc3 records the post-rc2 hardening; rc4 is
+   the target for the 2026-09-01 review remediations and must repeat the complete
+   latest-candidate matrix.
 6. After at least 30 days from the approved observation start, complete
    security/defect audits, execute rollback, and record an explicit `go` or
    `no-go` decision with approvers.

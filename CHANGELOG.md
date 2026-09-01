@@ -5,6 +5,33 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+## 1.0.0rc4 — 2026-09-01
+
+- Pin the browser compatibility runtime to `dhxpyt==0.9.18`, which renders
+  assistant and ordinary widget data as inert content, isolates artifact
+  previews, authenticates preview messages, and bounds chat persistence.
+  Existing applications that explicitly configure a chat `storageKey` retain
+  persistence; implicit plaintext history persistence is removed.
+- Replace pickle across the optional isolated-process BFF boundary with a
+  bounded canonical JSON protocol and reject encrypted SAML assertions before
+  toolkit processing. Isolated-process calls must use JSON-compatible values,
+  and IdPs must send signed, unencrypted assertions.
+- Retain BFF admission until abandoned synchronous streams actually finish,
+  bound browser fetch/body/stream waits, make replay-token refill single-flight,
+  and preserve existing synchronous generated methods while adding async
+  companions. These controls add no Redis, sticky routing, or server session.
+- Bound, rate-limit, cache, and conditionally serve exact widget wheels; verify
+  the complete built-in dhxpyt wheel before import while keeping PyPI first and
+  backend real-version/development-version fallback behavior.
+- Qualify the exact production proxy virtual host and overwritten client IP,
+  reject special or ambiguous release-archive members, require explicit opt-in
+  for unverified external Pyodide, and byte-compare independently built release
+  artifacts from frozen dependency inputs.
+- Record machine-readable dispositions and compatibility effects for all 12
+  findings from the 2026-09-01 review. Class-level `@backend_for_frontend`,
+  pluggable widgetsets, stateless signed browser sessions, and load-balanced
+  Redis-free deployments remain supported.
+
 ## 1.0.0rc3 — 2026-09-01
 
 - Discover installed widget metadata from static source/distribution records

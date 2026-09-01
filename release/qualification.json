@@ -320,6 +320,6 @@
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1, RC2, and RC3 evidence is recorded and passing. RC3 includes the post-rc2 security hardening and passed the complete latest-candidate matrix. The release remains NO-GO until the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS/canonical-origin/trusted-proxy evidence is recorded, protected registry distribution tasks complete, and the release manager makes the final decision."
+    "notes": "RC1, RC2, and RC3 evidence is recorded and passing. The 2026-09-01 review remediations merged after rc3 require a published and fully qualified 1.0.0rc4 before final promotion. These hardening changes preserve the approved observation scope and do not reset its clock. The release remains NO-GO until rc4 passes the complete latest-candidate matrix, the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS/canonical-origin/trusted-proxy evidence is recorded, protected registry distribution tasks complete, and the release manager makes the final decision."
   }
 }
