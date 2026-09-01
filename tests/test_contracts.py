@@ -51,7 +51,7 @@ def test_vendored_pyodide_sbom_and_checksums_validate():
     script = ROOT / "scripts" / "validate_vendored_pyodide.py"
     namespace = {"__name__": "validation_test", "__file__": str(script)}
     exec(compile(script.read_text(), str(script), "exec"), namespace)
-    namespace["main"]()
+    namespace["_validate_local"]()
 
 
 def test_vendored_swagger_ui_is_exactly_pinned_and_hash_locked():

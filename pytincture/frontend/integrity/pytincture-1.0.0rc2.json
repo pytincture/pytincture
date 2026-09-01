@@ -68,8 +68,8 @@
     },
     {
       "path": "pyodide/0.29.3/sbom.json",
-      "sha256": "c616dc9bee2795795d2de25617079e0701d4b583dbb4e94850f5e79dddef4d0f",
-      "sri": "sha384-Yt5ULHacrARw0vwxyp1x/6BiGDM0lsyu9zKX5CNFNbsKwYmP42wBQfOWh8urC1cs"
+      "sha256": "8f452139a991a32a3d4f524b657116dcab1473c5d5051232935ac4a909bf425d",
+      "sri": "sha384-n+zoGekEI1Cv8jvaDze2M3kFem4h922zNbN7dtk3znjqJZJPz1UWHb6IF3thkmOO"
     },
     {
       "path": "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl",
