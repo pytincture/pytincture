@@ -30,7 +30,7 @@ def allowed_email(email: str, allowed_emails: str) -> bool:
 def verify_password(email: str, password: str, raw_hashes: str) -> bool:
     """Verify Argon2id or bcrypt credentials with constant work for unknown users."""
     if not raw_hashes.strip():
-        return False
+        raw_hashes = "{}"
     try:
         password_hashes = json.loads(raw_hashes)
     except json.JSONDecodeError as exc:

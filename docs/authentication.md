@@ -9,7 +9,9 @@ all Pytincture sessions.
 Production authentication also requires exact `PYTINCTURE_ALLOWED_HOSTS` and
 one HTTPS `PYTINCTURE_CANONICAL_ORIGIN`. Pytincture uses that fixed origin for
 OAuth and SAML URLs instead of trusting the request `Host`. Proxy-header trust
-is accepted only when both controls are configured.
+is accepted only when both controls are configured. Production authentication
+always uses Secure session cookies; an explicit
+`AUTH_SESSION_HTTPS_ONLY=false` is rejected.
 
 Local HTTP auth testing can explicitly set
 `PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN=true` and
@@ -38,6 +40,20 @@ provider. With `launch_service()`, the development mode automatically binds to
 bind is rejected. It must never be enabled in production.
 `LOGIN_HELP_TEXT` is escaped plain text suitable for disposable demo
 credentials.
+
+Password forms and the JSON `/auth/mcp` login require a one-time CSRF
+transaction bound to the application and signed browser session. Browser forms
+receive it from `/{application}/login`; JSON clients first call
+`GET /{application}/auth/mcp` and return its `login_csrf_token` in the login
+body. The transaction is consumed once and expires after
+`AUTH_LOGIN_CSRF_TTL_SECONDS`.
+
+The signed browser session retains only approved identity keys. Individual
+values, total key count, canonical identity JSON, and the final signed cookie
+are bounded by `AUTH_SESSION_MAX_CLAIM_COUNT`,
+`AUTH_SESSION_MAX_IDENTITY_BYTES`, and `AUTH_SESSION_MAX_COOKIE_BYTES`.
+Oversized provider identities are rejected before a session is issued. These
+checks remain stateless and require neither Redis nor sticky routing.
 
 ## OAuth/OIDC
 

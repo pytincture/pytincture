@@ -226,6 +226,21 @@ class PytinctureConfig:
         None, "AUTH_SESSION_HTTPS_ONLY", "Secure-cookie requirement; derived when omitted."
     )
     session_same_site: str = _setting("lax", "AUTH_SESSION_SAME_SITE", "Cookie SameSite policy.")
+    session_max_claim_count: int = _setting(
+        32,
+        "AUTH_SESSION_MAX_CLAIM_COUNT",
+        "Maximum keys retained in an authenticated session identity.",
+    )
+    session_max_identity_bytes: int = _setting(
+        2048,
+        "AUTH_SESSION_MAX_IDENTITY_BYTES",
+        "Maximum canonical JSON bytes retained for an authenticated identity.",
+    )
+    session_max_cookie_bytes: int = _setting(
+        3800,
+        "AUTH_SESSION_MAX_COOKIE_BYTES",
+        "Maximum signed browser-session cookie value bytes.",
+    )
     max_request_body_bytes: int = _setting(
         2 * 1024 * 1024, "MAX_REQUEST_BODY_BYTES", "Maximum request body size."
     )
@@ -275,6 +290,11 @@ class PytinctureConfig:
     )
     login_password_max_chars: int = _setting(
         1024, "AUTH_LOGIN_PASSWORD_MAX_CHARS", "Maximum submitted password length."
+    )
+    login_csrf_ttl_seconds: int = _setting(
+        600,
+        "AUTH_LOGIN_CSRF_TTL_SECONDS",
+        "Lifetime of a one-time password-login CSRF transaction.",
     )
     password_hash_max_concurrency: int = _setting(
         2, "AUTH_PASSWORD_HASH_MAX_CONCURRENCY", "Concurrent password hash checks per worker."
@@ -567,6 +587,9 @@ class PytinctureConfig:
         ) <= 0:
             raise ValueError("SAML ACS rate-limit values must be greater than zero")
         positive_limits = (
+            self.session_max_claim_count,
+            self.session_max_identity_bytes,
+            self.session_max_cookie_bytes,
             self.browser_log_max_bytes,
             self.browser_log_rate_limit_attempts,
             self.browser_log_rate_limit_window_seconds,
@@ -574,6 +597,7 @@ class PytinctureConfig:
             self.login_rate_limit_window_seconds,
             self.login_email_max_chars,
             self.login_password_max_chars,
+            self.login_csrf_ttl_seconds,
             self.password_hash_max_concurrency,
             self.password_hash_queue_timeout_seconds,
             self.password_hash_timeout_seconds,
@@ -861,6 +885,12 @@ class PytinctureConfig:
                 raise ValueError(
                     "production authentication requires an HTTPS canonical_origin"
                 )
+            if self.session_https_only is False:
+                raise ValueError(
+                    "production authentication requires session_https_only=true"
+                )
+            if self.session_https_only is None:
+                object.__setattr__(self, "session_https_only", True)
 
         if self.trusted_proxy_headers and (
             not self.allowed_hosts or not self.canonical_origin
@@ -891,6 +921,8 @@ class PytinctureConfig:
         }
         integer_fields = {
             "session_max_age_seconds", "session_absolute_max_age_seconds",
+            "session_max_claim_count", "session_max_identity_bytes",
+            "session_max_cookie_bytes",
             "max_request_body_bytes", "browser_log_max_bytes",
             "browser_log_rate_limit_attempts", "browser_log_rate_limit_window_seconds",
             "bff_stream_max_bytes",
@@ -904,6 +936,7 @@ class PytinctureConfig:
             "saml_validation_max_queue",
             "login_rate_limit_attempts", "login_rate_limit_window_seconds",
             "login_email_max_chars", "login_password_max_chars",
+            "login_csrf_ttl_seconds",
             "password_hash_max_concurrency", "bff_max_concurrency", "bff_max_queue",
             "bff_request_max_bytes", "bff_request_max_depth", "bff_request_max_items",
             "bff_result_max_bytes", "bff_result_max_depth", "bff_result_max_items",

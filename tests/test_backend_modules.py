@@ -1247,6 +1247,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-M-13-M-14-LOGS-DOCS-HSTS",
         "REVIEW-2026-08-31-M-19-M-21-M-23-SECRET-SCAN",
         "REVIEW-2026-08-31-M-17-WIDGET-TRUST",
+        "REVIEW-2026-08-31-M-15-M-16-M-18-PREAUTH-CSRF",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1375,6 +1376,17 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert widget_controls["html_script_metadata_context_safe"] is True
     assert widget_controls["redis_required"] is False
     assert widget_controls["runtime_state_added"] is False
+    session_controls = dispositions[
+        "REVIEW-2026-08-31-M-15-M-16-M-18-PREAUTH-CSRF"
+    ]["controls"]
+    assert session_controls["production_secure_cookie_forced"] is True
+    assert session_controls["mcp_json_login_one_time_csrf"] is True
+    assert session_controls["total_claim_count_limit"] is True
+    assert session_controls["signed_cookie_byte_limit"] is True
+    assert session_controls["signed_browser_session_preserved"] is True
+    assert session_controls["redis_required"] is False
+    assert session_controls["process_memory_required"] is False
+    assert session_controls["sticky_routing_required"] is False
 
     for disposition in dispositions.values():
         for relative_path in disposition["implementation"]:
