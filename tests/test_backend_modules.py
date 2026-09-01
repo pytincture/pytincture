@@ -733,6 +733,28 @@ def test_widgetset_discovery_reads_local_metadata_without_importing(tmp_path: Pa
     assert discover_widgetset("demo", str(tmp_path)) == "custom-widget==2.3.4"
 
 
+def test_widgetset_discovery_skips_distribution_scan_for_stdlib_imports(
+    tmp_path: Path, monkeypatch
+):
+    (tmp_path / "demo.py").write_text(
+        "import asyncio\nimport json\nimport custom_widget\n", encoding="utf-8"
+    )
+    (tmp_path / "custom_widget.py").write_text(
+        '__widgetset__ = "custom-widget"\n__version__ = "2.3.4"\n',
+        encoding="utf-8",
+    )
+
+    def reject_distribution_scan():
+        raise AssertionError("stdlib imports must not scan installed distributions")
+
+    monkeypatch.setattr(
+        "pytincture.backend.browser_packages.importlib_metadata.packages_distributions",
+        reject_distribution_scan,
+    )
+
+    assert discover_widgetset("demo", str(tmp_path)) == "custom-widget==2.3.4"
+
+
 def test_widgetset_discovery_reads_installed_distribution_without_importing(
     tmp_path: Path, monkeypatch
 ):

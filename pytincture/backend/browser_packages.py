@@ -7,6 +7,7 @@ import io
 import json
 import os
 import re
+import sys
 import threading
 import zipfile
 from collections import OrderedDict
@@ -405,15 +406,12 @@ def _valid_widget_spec(widgetset: object, version: object) -> str | None:
     return f"{widgetset.strip()}=={version.strip()}"
 
 
-def _installed_widget_metadata(module_name: str) -> str | None:
+def _installed_widget_metadata(
+    module_name: str,
+    distribution_names: tuple[str, ...] | list[str],
+) -> str | None:
     """Inspect distribution metadata/source without executing package code."""
 
-    try:
-        distribution_names = importlib_metadata.packages_distributions().get(
-            module_name, ()
-        )
-    except Exception:
-        distribution_names = ()
     discovered_specs: set[str] = set()
     for distribution_name in distribution_names:
         try:
@@ -489,6 +487,7 @@ def discover_widgetset(
         elif isinstance(node, ast.ImportFrom) and node.module:
             imports.append(node.module.split(".", 1)[0])
 
+    installed_packages: dict[str, list[str]] | None = None
     for module_name in imports:
         local_candidates = (
             os.path.join(root, f"{module_name}.py"),
@@ -510,7 +509,17 @@ def discover_widgetset(
                     return widget_spec
                 break
         if not has_local_candidate:
-            widget_spec = _installed_widget_metadata(module_name)
+            if module_name in sys.stdlib_module_names:
+                continue
+            if installed_packages is None:
+                try:
+                    installed_packages = importlib_metadata.packages_distributions()
+                except Exception:
+                    installed_packages = {}
+            widget_spec = _installed_widget_metadata(
+                module_name,
+                installed_packages.get(module_name, ()),
+            )
             if widget_spec:
                 return widget_spec
     return ""

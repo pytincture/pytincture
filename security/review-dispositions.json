@@ -835,6 +835,7 @@
       ],
       "regression_tests": [
         "tests/test_backend_modules.py::test_widgetset_discovery_reads_installed_distribution_without_importing",
+        "tests/test_backend_modules.py::test_widgetset_discovery_skips_distribution_scan_for_stdlib_imports",
         "tests/test_backend_modules.py::test_widget_trust_policy_is_an_exact_administrator_allowlist",
         "tests/test_configuration.py::test_deployment_widget_trust_policy_overrides_manifest_and_escapes_html",
         "tests/test_configuration.py::test_deployment_widget_trust_policy_fails_closed_for_unlisted_version",
