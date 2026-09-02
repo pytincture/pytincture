@@ -222,6 +222,7 @@ def _analyze_local_python_module(
     modules_root: str,
     secure_files: dict[str, Any] | None = None,
     max_file_bytes: int | None = None,
+    searched_directories: set[str] | None = None,
 ) -> tuple[bool, set[str]]:
     """Return the BFF-boundary flag and direct local Python imports."""
     try:
@@ -274,6 +275,12 @@ def _analyze_local_python_module(
                 os.path.join(modules_root, f"{module_relative}.py"),
                 os.path.join(modules_root, module_relative, "__init__.py"),
             ):
+                if searched_directories is not None:
+                    parent = os.path.dirname(candidate)
+                    while parent != root and not os.path.isdir(parent):
+                        parent = os.path.dirname(parent)
+                    if os.path.isdir(parent) and not os.path.islink(parent):
+                        searched_directories.add(os.path.realpath(parent))
                 candidate_relative = os.path.relpath(candidate, root).replace(os.sep, "/")
                 try:
                     discovered.add(resolve_contained_path(root, candidate_relative))
@@ -530,6 +537,10 @@ def configured_browser_files(
     modules_root: str,
     raw_patterns: str | None = None,
     max_files: int | None = None,
+    *,
+    max_directories: int | None = None,
+    max_scanned_files: int | None = None,
+    _scanned_directories: set[str] | None = None,
 ) -> set[str]:
     """Resolve explicitly configured browser-file globs inside ``modules_root``."""
     modules_root = canonical_root(modules_root)
@@ -539,7 +550,24 @@ def configured_browser_files(
 
     selected: set[str] = set()
     scanned_files = 0
+    scanned_directories = (
+        _scanned_directories if _scanned_directories is not None else set()
+    )
+    scan_limit = (
+        max_scanned_files
+        if max_scanned_files is not None
+        else max_files * 100 if max_files is not None else None
+    )
     for root, dirs, files in os.walk(modules_root):
+        scanned_directories.add(root)
+        if (
+            max_directories is not None
+            and len(scanned_directories) > max_directories
+        ):
+            raise HTTPException(
+                status_code=413,
+                detail="Appcode configured-directory scan limit exceeded",
+            )
         dirs[:] = [
             directory
             for directory in dirs
@@ -548,7 +576,7 @@ def configured_browser_files(
         ]
         for filename in files:
             scanned_files += 1
-            if max_files is not None and scanned_files > max_files * 100:
+            if scan_limit is not None and scanned_files > scan_limit:
                 raise HTTPException(
                     status_code=413,
                     detail="Appcode configured-file scan limit exceeded",
@@ -617,6 +645,9 @@ def browser_package_files(
     *,
     _secure_files: dict[str, Any] | None = None,
     _max_file_bytes: int | None = None,
+    _max_directories: int | None = None,
+    _max_scanned_files: int | None = None,
+    _scanned_directories: set[str] | None = None,
 ) -> set[str]:
     """Return the transitive local imports and explicit files for an app."""
     try:
@@ -636,7 +667,17 @@ def browser_package_files(
                 root,
                 secure_files=_secure_files,
                 max_file_bytes=_max_file_bytes,
+                searched_directories=_scanned_directories,
             )
+            if (
+                _max_directories is not None
+                and _scanned_directories is not None
+                and len(_scanned_directories) > _max_directories
+            ):
+                raise HTTPException(
+                    status_code=413,
+                    detail="Appcode import-directory scan limit exceeded",
+                )
             if not is_bff_module:
                 imported_files |= _browser_package_initializers(current, root)
         except UnsafePath as exc:
@@ -653,7 +694,14 @@ def browser_package_files(
                 if max_files is not None and len(selected) > max_files:
                     raise HTTPException(status_code=413, detail="Appcode file-count limit exceeded")
                 pending.append(imported)
-    selected |= configured_browser_files(root, raw_patterns, max_files=max_files)
+    selected |= configured_browser_files(
+        root,
+        raw_patterns,
+        max_files=max_files,
+        max_directories=_max_directories,
+        max_scanned_files=_max_scanned_files,
+        _scanned_directories=_scanned_directories,
+    )
     if max_files is not None and len(selected) > max_files:
         raise HTTPException(status_code=413, detail="Appcode file-count limit exceeded")
     return selected

@@ -576,6 +576,21 @@ class PytinctureConfig:
         "APPCODE_CACHE_MAX_BYTES",
         "Aggregate byte limit for the per-worker browser archive cache.",
     )
+    bff_application_graph_cache_entries: int = _setting(
+        128,
+        "BFF_APPLICATION_GRAPH_CACHE_ENTRIES",
+        "Per-worker cached application BFF membership graphs.",
+    )
+    bff_application_graph_max_directories: int = _setting(
+        2048,
+        "BFF_APPLICATION_GRAPH_MAX_DIRECTORIES",
+        "Maximum directories examined for one application BFF graph.",
+    )
+    bff_application_graph_max_scanned_files: int = _setting(
+        51200,
+        "BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES",
+        "Maximum files examined by browser-file globs for one BFF graph.",
+    )
     appcode_build_max_concurrency: int = _setting(
         2, "APPCODE_BUILD_MAX_CONCURRENCY", "Concurrent archive builds per worker."
     )
@@ -953,6 +968,9 @@ class PytinctureConfig:
             self.appcode_max_total_bytes,
             self.appcode_cache_entries,
             self.appcode_cache_max_bytes,
+            self.bff_application_graph_cache_entries,
+            self.bff_application_graph_max_directories,
+            self.bff_application_graph_max_scanned_files,
             self.appcode_build_max_concurrency,
             self.appcode_build_queue_timeout_seconds,
             self.public_asset_authorization_cache_entries,
@@ -1346,6 +1364,9 @@ class PytinctureConfig:
             "bff_stream_max_items", "appcode_max_files", "appcode_max_file_bytes",
             "appcode_max_total_bytes", "appcode_cache_entries",
             "appcode_cache_max_bytes",
+            "bff_application_graph_cache_entries",
+            "bff_application_graph_max_directories",
+            "bff_application_graph_max_scanned_files",
             "appcode_build_max_concurrency",
             "public_asset_authorization_cache_entries",
             "public_asset_max_bytes", "public_asset_max_concurrency",

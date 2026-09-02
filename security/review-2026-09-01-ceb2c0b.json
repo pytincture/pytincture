@@ -129,11 +129,20 @@
     {
       "id": "PT-09",
       "severity": "low_conditional",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/295",
       "disposition": "Cache bounded per-application graph snapshots with secure automatic invalidation and early impossible-operation rejection.",
+      "implementation": "BFF dispatch rejects missing registry operations before graph discovery. Valid targets use a bounded per-worker LRU keyed by application, browser-file declarations, root, and limits. Warm hits securely stat selected source identities and relevant directories; source edits, additions, removals, or newly glob-matched files invalidate before reuse. Cold discovery applies APPCODE file, per-file byte, and aggregate byte limits plus explicit directory and scanned-file bounds.",
+      "regression_tests": [
+        "tests/test_app.py::test_impossible_bff_operation_is_rejected_before_application_graph_scan",
+        "tests/test_app.py::test_application_graph_cache_reuses_and_invalidates_same_name_sources",
+        "tests/test_app.py::test_application_graph_cache_detects_new_globbed_file",
+        "tests/test_app.py::test_application_graph_cache_detects_new_import_in_existing_namespace",
+        "tests/test_app.py::test_application_graph_applies_aggregate_source_limit",
+        "tests/test_backend_modules.py::test_configured_browser_file_scan_has_explicit_directory_and_file_limits"
+      ],
       "potential_user_breakage": false,
-      "compatibility_note": "The process-local cache remains stateless and disposable, and same-name development edits must invalidate."
+      "compatibility_note": "The process-local cache remains stateless and disposable. Same-name development edits and new matching files invalidate automatically. The default bounds are generous and configurable; no Redis, sticky routing, or shared state is introduced."
     },
     {
       "id": "PT-10",

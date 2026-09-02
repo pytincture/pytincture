@@ -85,9 +85,14 @@ Production authentication cookies use the browser-enforced `__Host-` prefix,
 name deliberately requires users to sign in once; local HTTP development uses
 separate `pytincture-dev-*` names and remains supported.
 
-Resource admission counters and the appcode cache are bounded, disposable, and
-local to each worker. The archive LRU is independently capped by
-`APPCODE_CACHE_ENTRIES` and `APPCODE_CACHE_MAX_BYTES`. They do not contain
+Resource admission counters, the appcode cache, and the application BFF graph
+cache are bounded, disposable, and local to each worker. The archive LRU is
+independently capped by `APPCODE_CACHE_ENTRIES` and
+`APPCODE_CACHE_MAX_BYTES`; graph snapshots are capped by
+`BFF_APPLICATION_GRAPH_CACHE_ENTRIES` and revalidate secure source/directory
+metadata before every reuse. Cold graph discovery is bounded by the appcode
+file/byte settings plus `BFF_APPLICATION_GRAPH_MAX_DIRECTORIES` and
+`BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES`. They do not contain
 durable login/session state and do not require sticky routing. Size concurrency
 settings per worker, then apply a
 gateway-wide request-rate and connection limit across the deployment. Local

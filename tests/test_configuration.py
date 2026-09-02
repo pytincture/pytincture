@@ -39,6 +39,9 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "BFF_STREAM_WRITE_TIMEOUT_SECONDS": "5.5",
             "APPCODE_MAX_FILES": "80",
             "APPCODE_CACHE_MAX_BYTES": "67108864",
+            "BFF_APPLICATION_GRAPH_CACHE_ENTRIES": "19",
+            "BFF_APPLICATION_GRAPH_MAX_DIRECTORIES": "321",
+            "BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES": "4321",
             "PYTINCTURE_PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES": "17",
             "PYTINCTURE_PUBLIC_ASSET_MAX_BYTES": "8388608",
             "PYTINCTURE_PUBLIC_ASSET_MAX_CONCURRENCY": "44",
@@ -130,6 +133,9 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.bff_stream_write_timeout_seconds == 5.5
     assert config.appcode_max_files == 80
     assert config.appcode_cache_max_bytes == 67108864
+    assert config.bff_application_graph_cache_entries == 19
+    assert config.bff_application_graph_max_directories == 321
+    assert config.bff_application_graph_max_scanned_files == 4321
     assert config.public_asset_authorization_cache_entries == 17
     assert config.public_asset_max_bytes == 8388608
     assert config.public_asset_max_concurrency == 44

@@ -54,6 +54,10 @@ Required controls that remain in scope:
   browser/BFF graph.
 - Unscoped BFF routes do not exist; every call names and validates a real
   application graph.
+- Unknown registry operations are rejected before graph discovery. Valid graph
+  snapshots are process-local, bounded, and reused only while secure source and
+  relevant directory fingerprints remain current; development edits and new
+  matches invalidate automatically.
 - Browser-origin, Fetch Metadata, content-type, resource-limit, and optional
   policy controls still apply.
 
