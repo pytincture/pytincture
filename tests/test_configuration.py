@@ -50,6 +50,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "PYTINCTURE_WIDGET_WHEEL_QUEUE_TIMEOUT_SECONDS": "0.25",
             "PYTINCTURE_WIDGET_WHEEL_RATE_LIMIT_ATTEMPTS": "40",
             "PYTINCTURE_WIDGET_WHEEL_RATE_LIMIT_WINDOW_SECONDS": "20",
+            "PYTINCTURE_WIDGET_PUBLIC_INDEX_ALLOWLIST": '["Corp_Widget==1.2.3"]',
             "SAML_SECRET_KEY": "0123456789abcdef0123456789abcdef",
             "SAML_RESPONSE_MAX_BYTES": "262144",
             "SAML_RELAY_STATE_TTL_SECONDS": "480",
@@ -113,6 +114,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.public_widget_wheel_queue_timeout_seconds == 0.25
     assert config.public_widget_wheel_rate_limit_attempts == 40
     assert config.public_widget_wheel_rate_limit_window_seconds == 20
+    assert config.widget_public_index_allowlist == ("corp-widget==1.2.3",)
     assert config.trusted_proxy_headers is False
     assert config.saml_response_max_bytes == 262144
     assert config.saml_transaction_ttl_seconds == 480
@@ -152,6 +154,9 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.to_environ()["ENABLE_USER_LOGIN"] == "true"
     assert config.to_environ()["BFF_ASYNC_EXECUTION_MODE"] == "worker-thread"
     assert config.to_environ()["PYTINCTURE_DEV_WHEEL_VERSION"] == "42.0.dev1"
+    assert json.loads(
+        config.to_environ()["PYTINCTURE_WIDGET_PUBLIC_INDEX_ALLOWLIST"]
+    ) == ["corp-widget==1.2.3"]
 
 
 def test_replay_proofs_remain_optional_and_do_not_require_redis(tmp_path):
@@ -515,6 +520,7 @@ def test_development_widget_version_is_validated_and_rendered(tmp_path):
             modules_path=str(tmp_path),
             default_application="demo",
             dev_wheel_version="42.0.dev1",
+            widget_public_index_allowlist=("Demo_Widget==1.2.3",),
         )
     )
     with TestClient(application) as client:
@@ -525,10 +531,50 @@ def test_development_widget_version_is_validated_and_rendered(tmp_path):
 
     assert response.status_code == 200
     assert 'devWheelVersion: "42.0.dev1"' in response.text
+    assert "allowPublicWidgetIndex: true" in response.text
     assert "***DEV_WHEEL_VERSION***" not in response.text
     assert declared.status_code == 200
     assert development.status_code == 200
     assert rejected_default.status_code == 404
+
+
+def test_service_widget_public_index_is_deny_by_default_and_exactly_allowlisted(
+    tmp_path,
+):
+    (tmp_path / "demo.py").write_text("import demo_widget\n", encoding="utf-8")
+    (tmp_path / "demo_widget.py").write_text(
+        '__widgetset__ = "demo-widget"\n__version__ = "1.2.3"\n',
+        encoding="utf-8",
+    )
+
+    with TestClient(create_app(PytinctureConfig(modules_path=str(tmp_path)))) as client:
+        denied = client.get("/demo")
+    with TestClient(create_app(PytinctureConfig(
+        modules_path=str(tmp_path),
+        widget_public_index_allowlist=("demo-widget==1.2.3",),
+    ))) as client:
+        allowed = client.get("/demo")
+
+    assert "allowPublicWidgetIndex: false" in denied.text
+    assert "allowPublicWidgetIndex: true" in allowed.text
+
+
+@pytest.mark.parametrize(
+    "spec",
+    (
+        "demo-widget",
+        "demo-widget>=1.2.3",
+        "demo-widget==",
+        "demo-widget==1.2.3 ",
+        "demo widget==1.2.3",
+    ),
+)
+def test_widget_public_index_allowlist_rejects_nonexact_specs(tmp_path, spec):
+    with pytest.raises(ValueError, match="exact name==version"):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            widget_public_index_allowlist=(spec,),
+        )
 
 
 def test_deployment_widget_trust_policy_overrides_manifest_and_escapes_html(tmp_path):

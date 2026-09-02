@@ -303,6 +303,9 @@ try:
     )
 except WidgetTrustPolicyError as exc:
     raise RuntimeError(f"invalid PYTINCTURE_WIDGET_TRUST_POLICY: {exc}") from exc
+WIDGET_PUBLIC_INDEX_ALLOWLIST = frozenset(
+    _PYTINCTURE_CONFIG.widget_public_index_allowlist
+)
 if CANONICAL_ORIGIN:
     _canonical_parts = urlsplit(CANONICAL_ORIGIN)
     if (
@@ -890,6 +893,20 @@ def _trusted_widget_manifest(widgetset: str) -> dict[str, Any] | None:
     if not widgetset:
         return None
     return trusted_widget_manifest(WIDGET_TRUST_POLICY, widgetset)
+
+
+def _widget_public_index_allowed(widgetset: str) -> bool:
+    distribution, separator, version_text = widgetset.partition("==")
+    if not separator or not distribution.strip() or not version_text.strip():
+        return False
+    try:
+        normalized = (
+            f"{canonicalize_name(distribution.strip(), validate=True)}"
+            f"=={Version(version_text.strip())}"
+        )
+    except (InvalidVersion, ValueError):
+        return False
+    return normalized in WIDGET_PUBLIC_INDEX_ALLOWLIST
 
 
 def _html_script_json(value: Any) -> str:
@@ -5487,6 +5504,10 @@ async def main_app_route(response: Response, application: str, request: Request)
     index_html = index_html.replace(
         "***WIDGET_ASSET_MANIFEST_JSON***",
         _html_script_json(widget_asset_manifest),
+    )
+    index_html = index_html.replace(
+        "***ALLOW_PUBLIC_WIDGET_INDEX***",
+        _html_script_json(_widget_public_index_allowed(widgetset)),
     )
     return HTMLResponse(
         content=index_html,

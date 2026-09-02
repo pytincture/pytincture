@@ -2902,7 +2902,8 @@ def test_frontend_runtime_cache_busts_only_backend_micropip_installs(fresh_clien
     assert "withoutCacheBusting" not in response.text
     assert "activeRequestUuid" not in response.text
     assert "requestUuid ? withRequestUuid(source, requestUuid) : source" in response.text
-    assert "await installWidgetsetSource(pyodide, verifiedPrimarySource);" in response.text
+    assert "await installWidgetsetSource(pyodide, primarySource);" in response.text
+    assert "await installWidgetsetSource(pyodide, builtinLockedSource);" in response.text
     assert "await installWidgetsetSource(pyodide, lockedSource, config.requestUuid);" in response.text
     assert "#sha256=${backendWheel.sha256}" in response.text
 
@@ -2915,14 +2916,16 @@ def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_cli
     assert response.text.index("candidateVersions.push(pinnedMatch[1])") < response.text.index(
         "candidateVersions.push(config.devWheelVersion)"
     )
-    assert response.text.index("await installWidgetsetSource(pyodide, verifiedPrimarySource)") < response.text.index(
-        "const backendSources = await resolveBackendWidgetSources(config)"
-    )
-    assert "is not available from PyPI; checking backend wheels" in response.text
-    assert "Failed to install widgetset from ${primarySource}" not in response.text
     assert response.text.index("const backendWheel = await probeBackendWheel(source)") < response.text.index(
         "await installWidgetsetSource(pyodide, lockedSource, config.requestUuid)"
     )
+    assert response.text.index("const backendSources = await resolveBackendWidgetSources(config)") < response.text.index(
+        "const builtinLockedSource = BUILTIN_WIDGET_WHEEL_LOCKS[primarySource]"
+    )
+    assert response.text.index("const backendSources = await resolveBackendWidgetSources(config)") < response.text.index(
+        "if (config.allowPublicWidgetIndex)"
+    )
+    assert "No trusted backend wheel is available" in response.text
     assert "x-pytincture-sha256" in response.text
     assert "throw lastInstallError" in response.text
     assert 'name === "pytincture_csrf"' in response.text

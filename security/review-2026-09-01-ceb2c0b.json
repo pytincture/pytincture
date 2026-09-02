@@ -18,9 +18,17 @@
     {
       "id": "PT-01",
       "severity": "high_conditional",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/289",
       "disposition": "Make the backend-installed distribution and exact backend wheel authoritative; verify a server-owned complete-wheel SHA-256 before browser installation and make public-index use explicit.",
+      "implementation": "Hosted runtime installation now probes the declared-version and development-version backend wheels before any index source, installs the backend URL only with its X-Pytincture-SHA256 complete-wheel lock, retains the built-in dhxpyt immutable wheel lock, and allows a custom PyPI fallback only when the exact canonical spec appears in PYTINCTURE_WIDGET_PUBLIC_INDEX_ALLOWLIST.",
+      "regression_tests": [
+        "pytincture/frontend/tests/lifecycle.test.mjs: backend wheel wins before a matching public-index package",
+        "pytincture/frontend/tests/lifecycle.test.mjs: service custom widgets fail closed instead of silently using PyPI",
+        "pytincture/frontend/tests/lifecycle.test.mjs: an exact service widget may use PyPI only after explicit allowlisting",
+        "tests/test_configuration.py::test_service_widget_public_index_is_deny_by_default_and_exactly_allowlisted",
+        "tests/test_configuration.py::test_widget_public_index_allowlist_rejects_nonexact_specs"
+      ],
       "potential_user_breakage": true,
       "compatibility_note": "Custom widgetsets remain supported and continue to be installed on the backend. Private widgets no longer yield priority to an equal public package name and version."
     },

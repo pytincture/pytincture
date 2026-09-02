@@ -137,6 +137,14 @@ test("browser package requirements must be exact or hash-pinned wheels", () => {
     );
 });
 
+test("public widget index defaults to standalone-only", () => {
+    assert.equal(normalizeConfig({ widgetlib: "custom==1.0.0" }).allowPublicWidgetIndex, true);
+    assert.equal(normalizeConfig({
+        application: "sample",
+        widgetlib: "custom==1.0.0",
+    }).allowPublicWidgetIndex, false);
+});
+
 test("the built-in dhxpyt release verifies the complete PyPI wheel", async () => {
     const calls = [];
     const pyodide = fakePyodide();
@@ -206,7 +214,7 @@ test("widget asset loader is manifest-only and verifies ownership and hashes", a
     assert.equal(BUILTIN_WIDGET_ASSET_MANIFESTS["dhxpyt@0.9.18"].assets.length, 13);
 });
 
-test("backend fallback locks the wheel hash and disables transitive installs", async () => {
+test("backend wheel wins before a matching public-index package", async () => {
     const originalFetch = globalThis.fetch;
     const calls = [];
     const pyodide = fakePyodide();
@@ -228,10 +236,71 @@ test("backend fallback locks the wheel hash and disables transitive installs", a
             devWidgetHost: "https://widgets.example",
             devWheelVersion: "99.99.99",
             requestUuid: "instance-id",
+            allowPublicWidgetIndex: true,
         });
         assert.match(source, /#sha256=a{64}$/);
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].includes('"dhxpyt==1.2.3"'), false);
         assert.match(calls.at(-1), /sha256=a{64}/);
         assert.match(calls.at(-1), /deps=False/);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("service custom widgets fail closed instead of silently using PyPI", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+    const pyodide = fakePyodide();
+    pyodide.runPythonAsync = async source => calls.push(source);
+    globalThis.fetch = async () => ({
+        ok: false,
+        headers: { get: () => null },
+        body: { cancel: async () => undefined },
+    });
+    try {
+        await assert.rejects(
+            DEFAULT_RUNTIME_OPERATIONS.installWidgetset(pyodide, {
+                application: "sample",
+                widgetlib: "corp-widget==1.2.3",
+                widgetSource: null,
+                devWidgetHost: "https://widgets.example",
+                devWheelVersion: "99.99.99",
+                requestUuid: "instance-id",
+                allowPublicWidgetIndex: false,
+            }),
+            /No trusted backend wheel/,
+        );
+        assert.equal(calls.length, 0);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("an exact service widget may use PyPI only after explicit allowlisting", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+    const pyodide = fakePyodide();
+    pyodide.runPythonAsync = async source => calls.push(source);
+    globalThis.fetch = async () => ({
+        ok: false,
+        headers: { get: () => null },
+        body: { cancel: async () => undefined },
+    });
+    try {
+        const source = await DEFAULT_RUNTIME_OPERATIONS.installWidgetset(pyodide, {
+            application: "sample",
+            widgetlib: "corp-widget==1.2.3",
+            widgetSource: null,
+            devWidgetHost: "https://widgets.example",
+            devWheelVersion: "99.99.99",
+            requestUuid: "instance-id",
+            allowPublicWidgetIndex: true,
+        });
+        assert.equal(source, "corp-widget==1.2.3");
+        assert.equal(calls.length, 1);
+        assert.match(calls[0], /corp-widget==1\.2\.3/);
+        assert.equal(calls[0].includes("instance-id"), false);
     } finally {
         globalThis.fetch = originalFetch;
     }

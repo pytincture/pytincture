@@ -15,6 +15,7 @@ from types import MappingProxyType
 from typing import Iterator, Mapping, Optional
 from urllib.parse import urlparse
 
+from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from pytincture.backend.application_admission import canonical_application_admission
@@ -120,6 +121,35 @@ def canonical_browser_connect_origins(values: object) -> tuple[str, ...]:
     if len(set(canonical)) != len(canonical):
         raise ValueError("browser connect origins must not contain duplicates")
     return canonical
+
+
+def canonical_widget_public_index_specs(values: object) -> tuple[str, ...]:
+    """Return exact normalized widget specs explicitly allowed from PyPI."""
+
+    specs: list[str] = []
+    for raw in tuple(values or ()):
+        if not isinstance(raw, str) or raw != raw.strip():
+            raise ValueError(
+                "widget public-index allowlist entries must be exact name==version strings"
+            )
+        distribution, separator, version_text = raw.partition("==")
+        if not separator or "==" in version_text:
+            raise ValueError(
+                "widget public-index allowlist entries must be exact name==version strings"
+            )
+        try:
+            normalized_distribution = canonicalize_name(
+                distribution, validate=True
+            )
+            version = Version(version_text)
+        except (InvalidVersion, ValueError) as exc:
+            raise ValueError(
+                "widget public-index allowlist entries must be exact name==version strings"
+            ) from exc
+        specs.append(f"{normalized_distribution}=={version}")
+    if len(set(specs)) != len(specs):
+        raise ValueError("widget public-index allowlist must not contain duplicates")
+    return tuple(specs)
 
 
 def _setting(default, env: str, description: str, *, repr: bool = True):
@@ -533,6 +563,11 @@ class PytinctureConfig:
         "Optional deployment-owned widget distribution/version/asset-hash policy JSON or path.",
         repr=False,
     )
+    widget_public_index_allowlist: tuple[str, ...] = _setting(
+        (),
+        "PYTINCTURE_WIDGET_PUBLIC_INDEX_ALLOWLIST",
+        "Exact widget name==version specs allowed to use PyPI after backend wheels.",
+    )
     remote_store_timeout_seconds: float = _setting(
         2.0, "REMOTE_STORE_TIMEOUT_SECONDS", "Optional remote-store HTTP deadline."
     )
@@ -660,6 +695,7 @@ class PytinctureConfig:
             "browser_connect_origins",
             "allowed_hosts",
             "previous_session_secrets",
+            "widget_public_index_allowlist",
             "mcp_allowed_hosts",
             "mcp_allowed_origins",
         ):
@@ -688,6 +724,13 @@ class PytinctureConfig:
             self,
             "browser_connect_origins",
             canonical_browser_connect_origins(self.browser_connect_origins),
+        )
+        object.__setattr__(
+            self,
+            "widget_public_index_allowlist",
+            canonical_widget_public_index_specs(
+                self.widget_public_index_allowlist
+            ),
         )
 
         if self.default_application is not None:
@@ -1145,6 +1188,7 @@ class PytinctureConfig:
         tuple_fields = {
             "cors_allowed_origins", "allowed_hosts", "previous_session_secrets",
             "browser_connect_origins",
+            "widget_public_index_allowlist",
             "mcp_allowed_hosts", "mcp_allowed_origins",
         }
         for definition in fields(cls):
@@ -1166,6 +1210,7 @@ class PytinctureConfig:
                     if definition.name in {
                         "previous_session_secrets",
                         "browser_connect_origins",
+                        "widget_public_index_allowlist",
                         "mcp_allowed_hosts",
                         "mcp_allowed_origins",
                     }
