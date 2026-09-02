@@ -236,7 +236,7 @@ def test_local_login_enforces_application_admission_before_session_issuance(
     with TestClient(service, base_url="https://app.example.test") as client:
         allowed = _password_login(client, "reports")
         assert allowed.status_code == 303
-        session = client.cookies.get("session")
+        session = client.cookies.get(backend._SESSION_COOKIE)
         assert session
         wrong_audience = client.get("/admin", follow_redirects=False)
         assert wrong_audience.status_code == 307
@@ -245,8 +245,8 @@ def test_local_login_enforces_application_admission_before_session_issuance(
         client.cookies.clear()
         wrong_role = _password_login(client, "admin")
         assert wrong_role.status_code == 403
-        assert client.cookies.get("session") is None
+        assert client.cookies.get(backend._SESSION_COOKIE) is None
 
         unlisted = _password_login(client, "unlisted")
         assert unlisted.status_code == 403
-        assert client.cookies.get("session") is None
+        assert client.cookies.get(backend._SESSION_COOKIE) is None

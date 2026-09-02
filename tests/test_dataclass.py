@@ -608,7 +608,9 @@ def test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_fl
     warnings_sent = []
     js_module = types.ModuleType("js")
     js_module.XMLHttpRequest = types.SimpleNamespace(new=lambda: None)
-    js_module.document = types.SimpleNamespace(cookie="pytincture_csrf=test")
+    js_module.document = types.SimpleNamespace(
+        cookie="__Host-pytincture-csrf=test"
+    )
     js_module.fetch = fetch
     js_module.console = types.SimpleNamespace(warn=warnings_sent.append)
     js_module.window = types.SimpleNamespace(
@@ -761,7 +763,9 @@ def test_generated_bff_proxies_raise_safe_typed_errors_for_non_2xx(
     js_module = types.ModuleType("js")
     js_module.XMLHttpRequest = XMLHttpRequest
     js_module.TextDecoder = object()
-    js_module.document = types.SimpleNamespace(cookie="pytincture_csrf=test")
+    js_module.document = types.SimpleNamespace(
+        cookie="__Host-pytincture-csrf=test"
+    )
     js_module.fetch = fetch
     js_module.window = window
     pyodide_module = types.ModuleType("pyodide")
@@ -1059,7 +1063,8 @@ def test_generated_stub_sends_csrf_and_declared_http_method(tmp_path, monkeypatc
         str(file_path), "example.com", "https", application="demoapp"
     )
     assert "X-CSRF-Token" in stub
-    assert "pytincture_csrf" in stub
+    assert "__Host-pytincture-csrf" in stub
+    assert "pytincture-dev-csrf" in stub
     assert "response = self.fetch_sync(url, payload, 'GET')" in stub
 
 

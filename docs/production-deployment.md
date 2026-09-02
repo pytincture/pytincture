@@ -44,7 +44,7 @@ browser-carried sessions and optional Redis, are recorded in
 - SAML logins use an HttpOnly browser-binding cookie and a one-time transaction
   with exact `InResponseTo`, response-ID, and assertion-ID correlation. Keep
   `AUTH_SESSION_HTTPS_ONLY=true` so cross-site POST binding uses a Secure,
-  `SameSite=None` handshake cookie.
+  `SameSite=None`, application-specific `__Host-` handshake cookie.
 - Pin the Pytincture and widgetset versions in the deployment artifact.
 - Redis is optional. Load-balanced sessions and SAML handshakes are carried in
   signed browser cookies and work across workers without server-side state.
@@ -79,6 +79,11 @@ single consumption across workers is explicitly required, set
 `BFF_REPLAY_REQUIRE_SHARED_STORE=true` and install any provider implementing
 the public `AtomicReplayStore` contract. The optional Redis adapter is one such
 provider, not a framework requirement.
+
+Production authentication cookies use the browser-enforced `__Host-` prefix,
+`Secure`, `Path=/`, and no `Domain` attribute. Upgrading from an older cookie
+name deliberately requires users to sign in once; local HTTP development uses
+separate `pytincture-dev-*` names and remains supported.
 
 Resource admission counters and the appcode cache are bounded, disposable, and
 local to each worker. The archive LRU is independently capped by

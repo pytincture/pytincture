@@ -1436,7 +1436,7 @@ class PytinctureBFFError(RuntimeError):
             stub_class_code += "    def _csrf_token(self):\n"
             stub_class_code += "        for cookie in str(document.cookie).split(';'):\n"
             stub_class_code += "            name, separator, value = cookie.strip().partition('=')\n"
-            stub_class_code += "            if separator and name == 'pytincture_csrf':\n"
+            stub_class_code += "            if separator and name in {'__Host-pytincture-csrf', 'pytincture-dev-csrf'}:\n"
             stub_class_code += "                return value\n"
             stub_class_code += "        return ''\n"
             stub_class_code += "    def _decode_pytincture_state(self, encoded):\n"

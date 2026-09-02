@@ -85,7 +85,7 @@ async function callAuthenticatedBff(page) {
         const csrfToken = document.cookie
             .split(";")
             .map(value => value.trim().split("="))
-            .find(([name]) => name === "pytincture_csrf")
+            .find(([name]) => ["__Host-pytincture-csrf", "pytincture-dev-csrf"].includes(name))
             ?.slice(1).join("=") || "";
         const invoke = async (method, kwargs) => {
             const response = await fetch(`/e2e_app/classcall/e2e_data.py/E2EData/${method}`, {
@@ -111,7 +111,7 @@ async function measureAuthenticatedBff(page, sampleCount) {
         const csrfToken = document.cookie
             .split(";")
             .map(value => value.trim().split("="))
-            .find(([name]) => name === "pytincture_csrf")
+            .find(([name]) => ["__Host-pytincture-csrf", "pytincture-dev-csrf"].includes(name))
             ?.slice(1).join("=") || "";
         const measurements = [];
         for (let index = 0; index < count; index += 1) {

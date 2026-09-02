@@ -114,11 +114,17 @@
     {
       "id": "PT-08",
       "severity": "medium_conditional",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/294",
       "disposition": "Use host-prefixed HTTPS production authentication cookies and separate unprefixed HTTP development cookie names.",
+      "implementation": "HTTPS production uses __Host-pytincture-session and __Host-pytincture-csrf plus an application-specific __Host-pytincture-saml-handshake-* cookie. Every host-prefixed cookie is Secure, has Path=/, and has no Domain attribute. Local HTTP development uses separate pytincture-dev-* names, and generated/browser BFF clients recognize both CSRF names.",
+      "regression_tests": [
+        "tests/test_production.py::test_https_deployment_sets_host_only_prefixed_cookies",
+        "tests/test_production.py::test_http_development_uses_separate_unprefixed_cookie_names",
+        "tests/test_app.py::test_saml_login_embeds_replica_safe_relay_state"
+      ],
       "potential_user_breakage": true,
-      "compatibility_note": "Production users may need one fresh login. Local HTTP development remains supported."
+      "compatibility_note": "Production users need one fresh login because legacy cookie names are deliberately ignored. Local HTTP development remains supported. Application-specific SAML cookie names preserve concurrent handshakes for different applications."
     },
     {
       "id": "PT-09",

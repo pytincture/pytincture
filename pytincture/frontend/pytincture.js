@@ -35,6 +35,11 @@ const BUILTIN_WIDGET_ASSET_MANIFESTS = Object.freeze({
     },
 });
 
+const CSRF_COOKIE_NAMES = Object.freeze([
+    "__Host-pytincture-csrf",
+    "pytincture-dev-csrf",
+]);
+
 const DEFAULT_CONFIG = {
     application: null,
     entrypoint: null,
@@ -628,7 +633,7 @@ function enableBackendLogging(endpoint) {
         const csrfToken = String(document.cookie || "")
             .split(";")
             .map(cookie => cookie.trim().split("="))
-            .find(([name]) => name === "pytincture_csrf")?.slice(1).join("=") || "";
+            .find(([name]) => CSRF_COOKIE_NAMES.includes(name))?.slice(1).join("=") || "";
         const headers = { "Content-Type": "application/json" };
         if (csrfToken) {
             headers["X-CSRF-Token"] = csrfToken;
