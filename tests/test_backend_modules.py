@@ -14,11 +14,13 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
+import pytincture.backend.auth as auth_module
 from pytincture.backend.auth import (
     allowed_email,
     local_user_claims,
     normalize_roles,
     verify_password,
+    verify_password_hash,
 )
 from pytincture.backend.bff import BFFRegistry
 from pytincture.backend.browser_packages import (
@@ -461,6 +463,85 @@ def test_password_extra_has_actionable_install_hint(monkeypatch):
             "password",
             json.dumps({"user@example.com": "$argon2id$placeholder"}),
         )
+
+
+def test_password_verifier_uses_equal_work_for_unknown_and_oversized_bcrypt(
+    monkeypatch,
+):
+    calls = []
+
+    def record_argon2(encoded_hash, password):
+        calls.append(("argon2", encoded_hash, password))
+        return False
+
+    def record_bcrypt(encoded_hash, password):
+        calls.append(("bcrypt", encoded_hash, password))
+        return False
+
+    monkeypatch.setattr(auth_module, "_verify_argon2_hash", record_argon2)
+    monkeypatch.setattr(auth_module, "_verify_bcrypt_hash", record_bcrypt)
+
+    bcrypt_hash = "$2b$12$placeholder"
+    unknown_hashes = json.dumps({"known@example.com": bcrypt_hash})
+    assert not verify_password("unknown@example.com", "x" * 73, unknown_hashes)
+    unknown_calls = list(calls)
+    calls.clear()
+
+    assert not verify_password("known@example.com", "x" * 73, unknown_hashes)
+    assert calls == unknown_calls
+    assert calls == [("argon2", auth_module._DUMMY_PASSWORD_HASH, "x" * 73)]
+
+
+def test_password_verifier_selects_the_configured_hash_scheme(monkeypatch):
+    calls = []
+
+    def record_argon2(encoded_hash, password):
+        calls.append(("argon2", encoded_hash, password))
+        return password == "correct"
+
+    def record_bcrypt(encoded_hash, password):
+        calls.append(("bcrypt", encoded_hash, password))
+        return password == "correct"
+
+    monkeypatch.setattr(auth_module, "_verify_argon2_hash", record_argon2)
+    monkeypatch.setattr(auth_module, "_verify_bcrypt_hash", record_bcrypt)
+
+    argon_hash = "$argon2id$configured"
+    bcrypt_hash = "$2b$12$configured"
+    assert verify_password(
+        "argon@example.com",
+        "correct",
+        json.dumps({"argon@example.com": argon_hash}),
+    )
+    assert calls == [("argon2", argon_hash, "correct")]
+    calls.clear()
+
+    assert verify_password(
+        "bcrypt@example.com",
+        "correct",
+        json.dumps({"bcrypt@example.com": bcrypt_hash}),
+    )
+    assert calls == [("bcrypt", bcrypt_hash, "correct")]
+
+
+def test_successful_bcrypt_verification_returns_argon2id_upgrade():
+    import bcrypt
+
+    password = "correct horse battery staple"
+    bcrypt_hash = bcrypt.hashpw(
+        password.encode("utf-8"), bcrypt.gensalt(rounds=4)
+    ).decode("utf-8")
+
+    result = verify_password_hash(password, bcrypt_hash)
+
+    assert result.authenticated
+    assert result.replacement_hash
+    assert result.replacement_hash.startswith("$argon2id$")
+    assert verify_password_hash(
+        password,
+        result.replacement_hash,
+        generate_replacement=False,
+    ).authenticated
 
 
 def test_redis_extra_has_actionable_install_hint(monkeypatch):
@@ -1568,6 +1649,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-CONFIG-FACTORY-ISOLATION",
         "REVIEW-2026-09-01-PT-09",
         "REVIEW-2026-09-01-PT-13",
+        "REVIEW-2026-09-01-PT-14",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1621,6 +1703,13 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert microsoft_controls["mutable_email_admission_warning"] is True
     assert microsoft_controls["email_admission_removed"] is False
     assert microsoft_controls["redis_required"] is False
+    password_controls = dispositions["REVIEW-2026-09-01-PT-14"]["controls"]
+    assert password_controls["oversized_bcrypt_fast_error_reachable"] is False
+    assert password_controls[
+        "oversized_bcrypt_and_unknown_verifier_sequence_equal"
+    ] is True
+    assert password_controls["static_environment_mutated"] is False
+    assert password_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True

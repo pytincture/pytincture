@@ -1019,6 +1019,33 @@
         "tests/test_application_admission.py::test_application_admission_is_stateless_and_fails_closed",
         "tests/test_application_admission.py::test_application_admission_across_identity_providers"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-PT-14",
+      "status": "remediated",
+      "title": "Oversized bcrypt failures do not reveal configured accounts",
+      "intentional_contract": "Local password values and login APIs remain compatible. Static environment configuration is never mutated into hidden process-local credential state.",
+      "security_boundary": "A bcrypt password exceeding 72 UTF-8 bytes performs the same Argon2id dummy verification as an unknown account before denial. Mutable application-owned credential stores may persist a helper-provided Argon2id replacement after successful bcrypt authentication.",
+      "controls": {
+        "oversized_bcrypt_fast_error_reachable": false,
+        "oversized_bcrypt_and_unknown_verifier_sequence_equal": true,
+        "generic_login_failure_preserved": true,
+        "argon2id_replacement_available_after_bcrypt_success": true,
+        "static_environment_mutated": false,
+        "password_api_changed": false,
+        "redis_required": false,
+        "process_memory_credential_state_added": false
+      },
+      "implementation": [
+        "pytincture/backend/auth.py",
+        "docs/authentication.md",
+        "docs/migrations/0.10-to-1.0.md"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_password_verifier_uses_equal_work_for_unknown_and_oversized_bcrypt",
+        "tests/test_backend_modules.py::test_password_verifier_selects_the_configured_hash_scheme",
+        "tests/test_backend_modules.py::test_successful_bcrypt_verification_returns_argon2id_upgrade"
+      ]
     }
   ]
 }

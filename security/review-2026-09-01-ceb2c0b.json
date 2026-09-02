@@ -210,11 +210,17 @@
     {
       "id": "PT-14",
       "severity": "low_conditional",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/300",
       "disposition": "Equalize oversized-password failure work and transparently migrate successful bcrypt verification to Argon2id when supported.",
+      "implementation": "Known bcrypt passwords exceeding 72 UTF-8 bytes are denied through the same Argon2id dummy verification used for an unknown account, eliminating bcrypt 5's fast ValueError oracle. The credential-store helper returns a current Argon2id replacement after successful bcrypt verification or when an Argon2id hash needs rehashing.",
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_password_verifier_uses_equal_work_for_unknown_and_oversized_bcrypt",
+        "tests/test_backend_modules.py::test_password_verifier_selects_the_configured_hash_scheme",
+        "tests/test_backend_modules.py::test_successful_bcrypt_verification_returns_argon2id_upgrade"
+      ],
       "potential_user_breakage": false,
-      "compatibility_note": "Password values and the login API do not change."
+      "compatibility_note": "Password values and the login API do not change. Static AUTH_PASSWORD_HASHES remains immutable and stateless; custom authenticators with mutable external stores may persist the optional replacement without Redis or process-local state."
     },
     {
       "id": "PT-15",
