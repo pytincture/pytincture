@@ -36,8 +36,10 @@
       "runTinctureApp"
     ],
     "run_tincture_app_config": [
+      "allowPublicWidgetIndex",
       "allowUnverifiedExternalPyodide",
       "application",
+      "backendWidgetSources",
       "devWheelVersion",
       "devWidgetHost",
       "enableBackendLogging",

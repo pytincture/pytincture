@@ -101,6 +101,21 @@ the schema. Leaving this setting empty preserves normal pluggable widgetsets.
 This is a static deployment control and adds no Redis, process memory, sticky
 routing, or server-side session requirement.
 
+Hosted applications install their detected widgetset from a backend wheel
+before considering a public package index. Keep the exact wheel artifact beside
+the application modules; Pytincture verifies its distribution/version against
+the backend-discovered widget declaration, hashes the complete wheel, and gives
+the browser only the resulting hash-locked backend URL. The built-in `dhxpyt`
+compatibility release retains its Pytincture-owned complete-wheel lock.
+
+Custom service widgetsets fail closed when neither the declared nor configured
+development backend wheel exists. A deployment that intentionally uses PyPI
+for a custom widget may add its exact normalized spec to
+`widget_public_index_allowlist`, for example `("mywidgets==1.2.3",)`. This is an
+explicit source-trust decision; a broad or unpinned requirement is rejected.
+Standalone HTML owners remain responsible for choosing an exact or
+hash-locked source because no Pytincture backend exists in that mode.
+
 Writable module roots remain supported for local development and are the
 default. Service startup emits `security.modules_path_writable` when the
 effective account appears able to modify `MODULES_PATH`. Production deployments
@@ -216,6 +231,7 @@ The contract test checks every row in this table against the dataclass model.
 | `public_widget_wheel_rate_limit_attempts` | `PYTINCTURE_WIDGET_WHEEL_RATE_LIMIT_ATTEMPTS` | Widget-wheel requests allowed per peer/application window and worker. |
 | `public_widget_wheel_rate_limit_window_seconds` | `PYTINCTURE_WIDGET_WHEEL_RATE_LIMIT_WINDOW_SECONDS` | Widget-wheel request rate-limit window. |
 | `widget_trust_policy` | `PYTINCTURE_WIDGET_TRUST_POLICY` | Optional deployment-owned widget distribution/version/asset-hash policy JSON or path. |
+| `widget_public_index_allowlist` | `PYTINCTURE_WIDGET_PUBLIC_INDEX_ALLOWLIST` | Exact widget name==version specs allowed to use PyPI after backend wheels. |
 | `remote_store_timeout_seconds` | `REMOTE_STORE_TIMEOUT_SECONDS` | Optional remote-store HTTP deadline. |
 | `remote_store_failure_threshold` | `REMOTE_STORE_FAILURE_THRESHOLD` | Failures before opening the store circuit. |
 | `remote_store_cooldown_seconds` | `REMOTE_STORE_COOLDOWN_SECONDS` | Open-circuit cooldown. |

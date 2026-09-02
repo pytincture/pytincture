@@ -84,18 +84,26 @@ The policy is static and requires no shared runtime state.
 
 - Pytincture's built-in compatibility widget release uses an immutable PyPI
   file URL plus a deployment-owned complete-wheel SHA-256 lock recorded in
-  `security/widget-wheel-locks.json`. It is still a PyPI install and never
-  receives the backend instance UUID.
-- Other pluggable PyPI widgetsets use an exact `name==version` requirement;
-  micropip verifies the hash supplied by the package index. High-trust
-  deployments can instead set an administrator-owned `widgetSource` URL with
-  its own `#sha256=<64 hex>` lock.
+  `security/widget-wheel-locks.json`. Service mode still checks the backend
+  first; this safe compatibility lock is used only when no backend wheel is
+  available. PyPI installs never receive the backend instance UUID.
+- Hosted custom widgetsets use the backend wheel matching the discovered
+  installed distribution/version first, followed by the explicitly configured
+  development version. Retain or download the pure-Python wheel into
+  `MODULES_PATH`; a normal pip installation does not guarantee that the
+  original wheel archive remains available.
+- A hosted custom widget does not silently fall through to PyPI. A deployment
+  that intentionally trusts that source must list the exact `name==version` in
+  `PYTINCTURE_WIDGET_PUBLIC_INDEX_ALLOWLIST`. Standalone owners can make the
+  same explicit choice through `allowPublicWidgetIndex`, or preferably provide
+  an administrator-owned `widgetSource` URL with its own
+  `#sha256=<64 hex>` lock.
 - Explicit wheel sources include `#sha256=<64 hex>`.
-- A Pytincture backend computes the wheel SHA-256 and exposes it in
+- A Pytincture backend computes the complete wheel SHA-256 and exposes it in
   `X-Pytincture-SHA256`; the runtime adds that lock before giving the backend
-  URL to micropip. Without a deployment trust policy, the backend serves only
-  the application's declared version and `PYTINCTURE_DEV_WHEEL_VERSION`; the
-  normal real-version-first, `99.99.99`-last default fallback is unchanged.
+  URL to micropip. The backend serves only the application's declared version
+  and `PYTINCTURE_DEV_WHEEL_VERSION`; the normal real-version-first,
+  `99.99.99`-last default order is unchanged.
 - Backend wheel metadata is checked with `HEAD` first. A cache miss performs
   one bounded `GET` to compute the digest; subsequent requests reuse that
   digest only while the verified device/inode/size/mtime/ctime identity is

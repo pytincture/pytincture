@@ -303,6 +303,9 @@ try:
     )
 except WidgetTrustPolicyError as exc:
     raise RuntimeError(f"invalid PYTINCTURE_WIDGET_TRUST_POLICY: {exc}") from exc
+WIDGET_PUBLIC_INDEX_ALLOWLIST = frozenset(
+    _PYTINCTURE_CONFIG.widget_public_index_allowlist
+)
 if CANONICAL_ORIGIN:
     _canonical_parts = urlsplit(CANONICAL_ORIGIN)
     if (
@@ -890,6 +893,58 @@ def _trusted_widget_manifest(widgetset: str) -> dict[str, Any] | None:
     if not widgetset:
         return None
     return trusted_widget_manifest(WIDGET_TRUST_POLICY, widgetset)
+
+
+def _widget_public_index_allowed(widgetset: str) -> bool:
+    distribution, separator, version_text = widgetset.partition("==")
+    if not separator or not distribution.strip() or not version_text.strip():
+        return False
+    try:
+        normalized = (
+            f"{canonicalize_name(distribution.strip(), validate=True)}"
+            f"=={Version(version_text.strip())}"
+        )
+    except (InvalidVersion, ValueError):
+        return False
+    return normalized in WIDGET_PUBLIC_INDEX_ALLOWLIST
+
+
+def _available_backend_widget_sources(
+    application: str,
+    widgetset: str,
+    modules_root: str,
+) -> list[str]:
+    """Return only deployment-owned widget wheels that currently exist."""
+
+    distribution, separator, version_text = widgetset.partition("==")
+    if not separator or not distribution.strip() or not version_text.strip():
+        return []
+    try:
+        wheel_distribution = canonicalize_name(
+            distribution.strip(), validate=True
+        ).replace("-", "_")
+        declared_version = Version(version_text.strip())
+    except (InvalidVersion, ValueError):
+        return []
+
+    versions = [declared_version]
+    if DEVELOPMENT_WIDGET_VERSION not in versions:
+        versions.append(DEVELOPMENT_WIDGET_VERSION)
+    sources: list[str] = []
+    for version in versions:
+        filename = f"{wheel_distribution}-{version}-py3-none-any.whl"
+        if not _application_widget_wheel_allowed(
+            application, filename, modules_root
+        ):
+            continue
+        try:
+            stat_contained_file(modules_root, filename)
+        except (OSError, UnsafePath):
+            continue
+        sources.append(
+            f"/{quote(application, safe='')}/appcode/{quote(filename, safe='+._-')}"
+        )
+    return sources
 
 
 def _html_script_json(value: Any) -> str:
@@ -5421,6 +5476,11 @@ async def main_app_route(response: Response, application: str, request: Request)
         ) from exc
     safe_application = escape(application)
     request_uuid = FRONTEND_INSTANCE_UUID
+    backend_widget_sources = _available_backend_widget_sources(
+        application,
+        widgetset,
+        appcode_folder,
+    )
 
     # Modify the index.html to include the application name and widgetset
     index_html = open(f"{STATIC_PATH}/index.html").read()
@@ -5487,6 +5547,14 @@ async def main_app_route(response: Response, application: str, request: Request)
     index_html = index_html.replace(
         "***WIDGET_ASSET_MANIFEST_JSON***",
         _html_script_json(widget_asset_manifest),
+    )
+    index_html = index_html.replace(
+        "***BACKEND_WIDGET_SOURCES_JSON***",
+        _html_script_json(backend_widget_sources),
+    )
+    index_html = index_html.replace(
+        "***ALLOW_PUBLIC_WIDGET_INDEX***",
+        _html_script_json(_widget_public_index_allowed(widgetset)),
     )
     return HTMLResponse(
         content=index_html,

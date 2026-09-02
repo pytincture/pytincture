@@ -32,6 +32,8 @@ var DEFAULT_CONFIG = {
   widgetlib: "dhxpyt==0.9.18",
   widgetSource: null,
   widgetAssetManifest: null,
+  backendWidgetSources: null,
+  allowPublicWidgetIndex: null,
   requestUuid: null,
   mode: "auto",
   // 'package', 'inline', or 'auto'
@@ -352,6 +354,9 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
     merged.requestUuid = merged.requestUuid || makeRequestId();
     merged.entrypoint = merged.entrypoint || merged.application;
     merged.devWidgetHost = resolveDevWidgetHost(merged.devWidgetHost);
+    if (merged.allowPublicWidgetIndex === null) {
+      merged.allowPublicWidgetIndex = !merged.application;
+    }
     if (merged.application) {
       if (merged.serviceWorkerUrl === DEFAULT_CONFIG.serviceWorkerUrl) {
         merged.serviceWorkerUrl = `/${merged.application}/frontend/sw.js`;
@@ -383,6 +388,7 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
   config.pyodideBaseUrl = ensureTrailingSlash(config.pyodideBaseUrl);
   config.requestUuid = config.requestUuid || makeRequestId();
   config.devWidgetHost = resolveDevWidgetHost(config.devWidgetHost);
+  config.allowPublicWidgetIndex = !config.application;
   if (config.application) {
     config.serviceWorkerUrl = `/${config.application}/frontend/sw.js`;
     config.serviceWorkerScope = `/${config.application}/`;
@@ -440,6 +446,12 @@ function preflightConfig(config) {
     label: "Widgetset",
     allowPackagePin: !config.widgetSource
   });
+  if (typeof config.allowPublicWidgetIndex !== "boolean") {
+    throw new Error("allowPublicWidgetIndex must be a boolean.");
+  }
+  if (config.backendWidgetSources !== null && (!Array.isArray(config.backendWidgetSources) || config.backendWidgetSources.some((source) => typeof source !== "string" || !source))) {
+    throw new Error("backendWidgetSources must be null or an array of wheel URLs.");
+  }
   return {
     runtime: "pytincture",
     runtimeVersion: PYTINCTURE_RUNTIME_VERSION,
@@ -913,6 +925,9 @@ async function resolveBackendWidgetSources(config) {
   if (!config.application) {
     return [];
   }
+  if (Array.isArray(config.backendWidgetSources)) {
+    return config.backendWidgetSources.map((source) => withRequestUuid(source, config.requestUuid));
+  }
   const match = (config.widgetlib || "").match(/^[A-Za-z0-9_.\-]+/);
   const widgetPackage = match ? match[0] : DEFAULT_CONFIG.widgetlib;
   const pinnedMatch = (config.widgetlib || "").match(
@@ -1041,26 +1056,16 @@ async function installWidgetset(pyodide, config) {
   if (!primarySource) {
     return null;
   }
-  let installedSource = null;
-  let lastInstallError = null;
-  try {
-    validatePackageRequirement(primarySource, {
-      label: "Widgetset",
-      allowPackagePin: !config.widgetSource
-    });
-    const verifiedPrimarySource = config.widgetSource ? primarySource : BUILTIN_WIDGET_WHEEL_LOCKS[primarySource] || primarySource;
-    await installWidgetsetSource(pyodide, verifiedPrimarySource);
-    installedSource = verifiedPrimarySource;
-  } catch (error) {
-    lastInstallError = error;
-    if (config.widgetSource) {
-      throw error;
-    }
-    console.info(
-      `Widgetset ${primarySource} is not available from PyPI; checking backend wheels.`
-    );
+  validatePackageRequirement(primarySource, {
+    label: "Widgetset",
+    allowPackagePin: !config.widgetSource
+  });
+  if (config.widgetSource) {
+    await installWidgetsetSource(pyodide, primarySource);
+    return primarySource;
   }
-  if (!installedSource) {
+  let lastInstallError = null;
+  if (config.application) {
     const backendSources = await resolveBackendWidgetSources(config);
     for (const source of backendSources) {
       const backendWheel = await probeBackendWheel(source);
@@ -1070,18 +1075,29 @@ async function installWidgetset(pyodide, config) {
       try {
         const lockedSource = `${backendWheel.url}#sha256=${backendWheel.sha256}`;
         await installWidgetsetSource(pyodide, lockedSource, config.requestUuid);
-        installedSource = lockedSource;
-        break;
+        return lockedSource;
       } catch (error) {
         lastInstallError = error;
         console.warn(`Failed to install widgetset from ${sanitizeResource(source)}.`);
       }
     }
   }
-  if (!installedSource) {
-    throw lastInstallError || new Error(`No installable widgetset source found for ${primarySource}.`);
+  const builtinLockedSource = BUILTIN_WIDGET_WHEEL_LOCKS[primarySource];
+  if (builtinLockedSource) {
+    await installWidgetsetSource(pyodide, builtinLockedSource);
+    return builtinLockedSource;
   }
-  return installedSource;
+  if (config.allowPublicWidgetIndex) {
+    try {
+      await installWidgetsetSource(pyodide, primarySource);
+      return primarySource;
+    } catch (error) {
+      lastInstallError = error;
+    }
+  }
+  throw lastInstallError || new Error(
+    `No trusted backend wheel is available for ${primarySource}; configure the backend wheel or explicitly allow this exact public-index package.`
+  );
 }
 async function loadWidgetsetAssets(pyodide, config, installedSource) {
   var _a, _b;
