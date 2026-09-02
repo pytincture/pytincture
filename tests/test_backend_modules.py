@@ -2140,6 +2140,151 @@ def test_existing_streaming_response_is_wrapped_by_limits():
     assert asyncio.run(collect()) == [b"one", b"two"]
 
 
+def test_stream_write_timeout_closes_source_and_finishes_once():
+    closed = []
+    reasons = []
+
+    async def source():
+        try:
+            yield b"first"
+            yield b"second"
+        finally:
+            closed.append(True)
+
+    response = as_streaming_response(
+        source(),
+        raw=True,
+        media_type="application/octet-stream",
+        max_seconds=10,
+        max_bytes=100,
+        max_items=10,
+        idle_timeout_seconds=10,
+        write_timeout_seconds=0.01,
+        on_finish=lambda reason, size: reasons.append((reason, size)),
+    )
+
+    async def exercise():
+        blocked = asyncio.Event()
+
+        async def send(message):
+            if message["type"] == "http.response.body" and message["more_body"]:
+                await blocked.wait()
+
+        await response.stream_response(send)
+
+    asyncio.run(exercise())
+    assert closed == [True]
+    assert reasons == [("write-timeout", 0)]
+
+
+def test_stream_write_timeout_resets_while_chunks_keep_moving():
+    reasons = []
+    response = as_streaming_response(
+        iter([b"one", b"two", b"three"]),
+        raw=True,
+        media_type="application/octet-stream",
+        max_seconds=10,
+        max_bytes=100,
+        max_items=10,
+        idle_timeout_seconds=10,
+        write_timeout_seconds=0.05,
+        on_finish=lambda reason, size: reasons.append((reason, size)),
+    )
+
+    async def exercise():
+        messages = []
+
+        async def send(message):
+            await asyncio.sleep(0.02)
+            messages.append(message)
+
+        await response.stream_response(send)
+        return messages
+
+    messages = asyncio.run(exercise())
+    assert [message.get("body") for message in messages[1:-1]] == [
+        b"one",
+        b"two",
+        b"three",
+    ]
+    assert reasons == [("complete", 11)]
+
+
+def test_stream_header_write_timeout_closes_unstarted_source():
+    closed = []
+    reasons = []
+
+    class Source:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return b"unused"
+
+        def close(self):
+            closed.append(True)
+
+    response = as_streaming_response(
+        Source(),
+        raw=True,
+        media_type="application/octet-stream",
+        max_seconds=10,
+        max_bytes=100,
+        max_items=10,
+        idle_timeout_seconds=10,
+        write_timeout_seconds=0.01,
+        on_finish=lambda reason, size: reasons.append((reason, size)),
+    )
+
+    async def exercise():
+        blocked = asyncio.Event()
+
+        async def send(_message):
+            await blocked.wait()
+
+        await response.stream_response(send)
+
+    asyncio.run(exercise())
+    assert closed == [True]
+    assert reasons == [("write-timeout", 0)]
+
+
+def test_blocked_stream_send_cannot_outlive_absolute_stream_deadline():
+    closed = []
+    reasons = []
+
+    async def source():
+        try:
+            yield b"first"
+        finally:
+            closed.append(True)
+
+    response = as_streaming_response(
+        source(),
+        raw=True,
+        media_type="application/octet-stream",
+        max_seconds=0.01,
+        max_bytes=100,
+        max_items=10,
+        idle_timeout_seconds=10,
+        write_timeout_seconds=1,
+        on_finish=lambda reason, size: reasons.append((reason, size)),
+    )
+
+    async def exercise():
+        blocked = asyncio.Event()
+
+        async def send(message):
+            if message["type"] == "http.response.body" and message["more_body"]:
+                await blocked.wait()
+
+        await response.stream_response(send)
+
+    asyncio.run(exercise())
+    assert closed == [True]
+    assert reasons == [("timeout", 0)]
+
+
 def test_appcode_archive_limits_and_cache(tmp_path):
     (tmp_path / "demo.py").write_text("value = 1\n", encoding="utf-8")
     calls = []

@@ -119,6 +119,9 @@ This upload-only limit is independent of backend runtime. Non-streaming calls
 are then bounded by `BFF_CALL_TIMEOUT_SECONDS`. Streams are
 bounded by `BFF_STREAM_MAX_SECONDS` and `BFF_STREAM_MAX_BYTES`; Pytincture
 closes sync/async iterators on completion, timeout, byte limit, or disconnect.
+Each produced frame has its own `BFF_STREAM_WRITE_TIMEOUT_SECONDS` write
+deadline. The deadline resets while chunks keep moving, so it does not limit
+the total duration of a healthy stream.
 Finite generators returned by non-streaming methods become JSON arrays and are
 also bounded by the ordinary result item/depth/byte limits. Return an async
 iterable only from a method declared with `@bff_stream()`.

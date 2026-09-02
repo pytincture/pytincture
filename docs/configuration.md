@@ -216,6 +216,7 @@ The contract test checks every row in this table against the dataclass model.
 | `bff_stream_max_bytes` | `BFF_STREAM_MAX_BYTES` | Maximum BFF stream bytes. |
 | `bff_stream_max_items` | `BFF_STREAM_MAX_ITEMS` | Maximum BFF stream items. |
 | `bff_stream_idle_timeout_seconds` | `BFF_STREAM_IDLE_TIMEOUT_SECONDS` | Maximum wait between stream items. |
+| `bff_stream_write_timeout_seconds` | `BFF_STREAM_WRITE_TIMEOUT_SECONDS` | Maximum blocked write time for each BFF stream frame. |
 | `appcode_max_files` | `APPCODE_MAX_FILES` | Maximum files in one browser archive. |
 | `appcode_max_file_bytes` | `APPCODE_MAX_FILE_BYTES` | Maximum source file size in an archive. |
 | `appcode_max_total_bytes` | `APPCODE_MAX_TOTAL_BYTES` | Maximum aggregate source bytes per archive. |

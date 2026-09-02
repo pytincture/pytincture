@@ -123,7 +123,9 @@
       "other": "fail-closed"
     },
     "default_stream_media_type": "text/event-stream",
-    "default_stream_framing": "newline-delimited-json"
+    "default_stream_framing": "newline-delimited-json",
+    "stream_write_timeout_env": "BFF_STREAM_WRITE_TIMEOUT_SECONDS",
+    "stream_write_timeout_scope": "per-frame"
   },
   "appcode": {
     "contract_version": 1,

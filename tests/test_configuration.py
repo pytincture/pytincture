@@ -36,6 +36,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "BFF_REQUEST_MAX_DEPTH": "24",
             "BFF_REQUEST_MAX_ITEMS": "5000",
             "BFF_STREAM_IDLE_TIMEOUT_SECONDS": "4.5",
+            "BFF_STREAM_WRITE_TIMEOUT_SECONDS": "5.5",
             "APPCODE_MAX_FILES": "80",
             "APPCODE_CACHE_MAX_BYTES": "67108864",
             "REMOTE_STORE_TIMEOUT_SECONDS": "1.25",
@@ -101,6 +102,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.bff_request_max_depth == 24
     assert config.bff_request_max_items == 5000
     assert config.bff_stream_idle_timeout_seconds == 4.5
+    assert config.bff_stream_write_timeout_seconds == 5.5
     assert config.appcode_max_files == 80
     assert config.appcode_cache_max_bytes == 67108864
     assert config.remote_store_timeout_seconds == 1.25

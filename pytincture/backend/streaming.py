@@ -15,6 +15,101 @@ from pytincture.backend.results import BFFResultLimitExceeded, encode_bff_result
 _DEFERRED_SYNC_STREAM_CLEANUPS: set[asyncio.Task] = set()
 
 
+class _StreamSendTimeout(Exception):
+    """A stream send exceeded its write-idle or absolute deadline."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+class _BoundedStreamingResponse(StreamingResponse):
+    def __init__(
+        self,
+        *args,
+        max_seconds: float,
+        write_timeout_seconds: float,
+        on_send_timeout: Callable[[str, int], None],
+        close_unstarted_source: Callable[[], Any],
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.max_seconds = max_seconds
+        self.write_timeout_seconds = write_timeout_seconds
+        self.on_send_timeout = on_send_timeout
+        self.close_unstarted_source = close_unstarted_source
+
+    async def _send_frame(
+        self,
+        send,
+        message: dict[str, Any],
+        absolute_deadline: float,
+    ) -> None:
+        remaining = absolute_deadline - time.monotonic()
+        if remaining <= 0:
+            raise _StreamSendTimeout("timeout")
+        send_timeout = min(self.write_timeout_seconds, remaining)
+        try:
+            await asyncio.wait_for(
+                send(message),
+                timeout=send_timeout,
+            )
+        except asyncio.TimeoutError as exc:
+            reason = (
+                "timeout"
+                if remaining <= self.write_timeout_seconds
+                else "write-timeout"
+            )
+            raise _StreamSendTimeout(reason) from exc
+
+    async def stream_response(self, send) -> None:
+        absolute_deadline = time.monotonic() + self.max_seconds
+        sent_bytes = 0
+        body_iterator_started = False
+        try:
+            await self._send_frame(
+                send,
+                {
+                    "type": "http.response.start",
+                    "status": self.status_code,
+                    "headers": self.raw_headers,
+                },
+                absolute_deadline,
+            )
+            async for chunk in self.body_iterator:
+                body_iterator_started = True
+                if not isinstance(chunk, bytes | memoryview):
+                    chunk = chunk.encode(self.charset)
+                await self._send_frame(
+                    send,
+                    {
+                        "type": "http.response.body",
+                        "body": chunk,
+                        "more_body": True,
+                    },
+                    absolute_deadline,
+                )
+                sent_bytes += len(chunk)
+
+            await self._send_frame(
+                send,
+                {"type": "http.response.body", "body": b"", "more_body": False},
+                absolute_deadline,
+            )
+        except _StreamSendTimeout as exc:
+            # Release scarce admission before asking trusted application code
+            # to clean up its iterator. The shared completion callback is
+            # idempotent, so the iterator's own finally block cannot release
+            # the slot or log completion twice.
+            self.on_send_timeout(exc.reason, sent_bytes)
+            if body_iterator_started:
+                close = getattr(self.body_iterator, "aclose", None)
+                if callable(close):
+                    await close()
+            else:
+                await self.close_unstarted_source()
+
+
 def _next_sync_item(iterator):
     try:
         return True, next(iterator)
@@ -332,6 +427,7 @@ def as_streaming_response(
     max_bytes: int,
     max_items: int,
     idle_timeout_seconds: float,
+    write_timeout_seconds: float = 30.0,
     on_finish: Callable[[str, int], None] | None = None,
 ) -> StreamingResponse:
     status_code = 200
@@ -345,6 +441,19 @@ def as_streaming_response(
         background = result.background
         result = result.body_iterator
         raw = True
+
+    source_to_close = result
+
+    finished = False
+
+    def finish_once(reason: str, output_bytes: int) -> None:
+        nonlocal finished
+        if finished:
+            return
+        finished = True
+        if on_finish is not None:
+            on_finish(reason, output_bytes)
+
     if inspect.isasyncgen(result) or hasattr(result, "__aiter__"):
         content = limited_async_stream(
             result,
@@ -353,26 +462,44 @@ def as_streaming_response(
             max_bytes=max_bytes,
             max_items=max_items,
             idle_timeout_seconds=idle_timeout_seconds,
-            on_finish=on_finish,
+            on_finish=finish_once,
         )
     else:
         if isinstance(result, (str, bytes, bytearray, dict)):
             result = [result]
         elif not inspect.isgenerator(result) and not isinstance(result, Iterable):
             result = [result]
+        source_to_close = iter(result)
         content = limited_thread_stream(
-            iter(result),
+            source_to_close,
             raw=raw,
             max_seconds=max_seconds,
             max_bytes=max_bytes,
             max_items=max_items,
             idle_timeout_seconds=idle_timeout_seconds,
-            on_finish=on_finish,
+            on_finish=finish_once,
         )
-    return StreamingResponse(
+
+    async def close_unstarted_source() -> None:
+        async_close = getattr(source_to_close, "aclose", None)
+        if callable(async_close):
+            await async_close()
+            return
+        sync_close = getattr(source_to_close, "close", None)
+        if callable(sync_close):
+            await run_in_threadpool(sync_close)
+
+    return _BoundedStreamingResponse(
         content,
         status_code=status_code,
         headers=headers,
         media_type=media_type,
         background=background,
+        max_seconds=max_seconds,
+        write_timeout_seconds=write_timeout_seconds,
+        on_send_timeout=lambda reason, sent_bytes: finish_once(
+            reason,
+            sent_bytes,
+        ),
+        close_unstarted_source=close_unstarted_source,
     )
