@@ -942,7 +942,7 @@ def _available_backend_widget_sources(
         except (OSError, UnsafePath):
             continue
         sources.append(
-            f"/{quote(application, safe='')}/appcode/{quote(filename, safe='')}"
+            f"/{quote(application, safe='')}/appcode/{quote(filename, safe='+._-')}"
         )
     return sources
 

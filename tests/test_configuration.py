@@ -543,6 +543,27 @@ def test_development_widget_version_is_validated_and_rendered(tmp_path):
     assert rejected_default.status_code == 404
 
 
+def test_backend_widget_source_preserves_local_version_separator(tmp_path):
+    (tmp_path / "demo.py").write_text(
+        'import demo_widget\nAPP_TITLE = "Demo"\n', encoding="utf-8"
+    )
+    (tmp_path / "demo_widget.py").write_text(
+        '__widgetset__ = "demo-widget"\n__version__ = "1.2.3+backend"\n',
+        encoding="utf-8",
+    )
+    wheel = "demo_widget-1.2.3+backend-py3-none-any.whl"
+    (tmp_path / wheel).write_bytes(b"backend wheel")
+
+    application = create_app(
+        PytinctureConfig(modules_path=str(tmp_path), default_application="demo")
+    )
+    with TestClient(application) as client:
+        response = client.get("/demo")
+
+    assert response.status_code == 200
+    assert f'backendWidgetSources: ["/demo/appcode/{wheel}"]' in response.text
+
+
 def test_service_widget_public_index_is_deny_by_default_and_exactly_allowlisted(
     tmp_path,
 ):
