@@ -867,6 +867,33 @@ def test_configured_browser_files_fail_closed_on_sensitive_match(tmp_path: Path)
         browser_package_files("demo", str(tmp_path), '["*"]')
 
 
+def test_configured_browser_file_scan_has_explicit_directory_and_file_limits(
+    tmp_path: Path,
+):
+    (tmp_path / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "one.txt").write_text("one\n", encoding="utf-8")
+
+    with pytest.raises(HTTPException, match="directory scan limit"):
+        browser_package_files(
+            "demo",
+            str(tmp_path),
+            '["**/*.txt"]',
+            _max_directories=1,
+            _scanned_directories=set(),
+        )
+
+    with pytest.raises(HTTPException, match="file scan limit"):
+        browser_package_files(
+            "demo",
+            str(tmp_path),
+            '["**/*.txt"]',
+            _max_scanned_files=1,
+            _scanned_directories=set(),
+        )
+
+
 def test_configured_browser_asset_selection_applies_direct_serving_exclusions():
     patterns = '["assets/*.png", "build/*.js", ".private/*"]'
 
@@ -1539,6 +1566,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-M-15-M-16-M-18-PREAUTH-CSRF",
         "REVIEW-2026-08-31-M-24-CONTAINER-GUIDANCE",
         "REVIEW-2026-08-31-CONFIG-FACTORY-ISOLATION",
+        "REVIEW-2026-09-01-PT-09",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1582,6 +1610,11 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert scope_controls["exact_application_graph_membership_required"] is True
     assert scope_controls["redundant_method_allowlist_required"] is False
     assert scope_controls["redis_required"] is False
+    graph_controls = dispositions["REVIEW-2026-09-01-PT-09"]["controls"]
+    assert graph_controls["impossible_operation_rejected_before_graph_scan"] is True
+    assert graph_controls["same_name_source_edits_invalidate"] is True
+    assert graph_controls["new_glob_matches_invalidate"] is True
+    assert graph_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True

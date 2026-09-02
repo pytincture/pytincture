@@ -950,6 +950,43 @@
         "tests/test_configuration.py::test_concurrent_create_app_never_exposes_instance_environment",
         "tests/test_configuration.py::test_create_app_isolates_routes_registries_and_session_stores"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-PT-09",
+      "status": "remediated",
+      "title": "Application BFF graph discovery is cached, bounded, and self-invalidating",
+      "intentional_contract": "Application graphs may change during local development, while production replicas remain stateless and independently disposable.",
+      "security_boundary": "An impossible registry operation is rejected before application graph work. Valid operations use a bounded per-worker graph snapshot only while secure source identities and relevant directory identities remain unchanged. Cold discovery enforces file-count, per-file, aggregate-byte, directory, and scanned-file limits.",
+      "controls": {
+        "impossible_operation_rejected_before_graph_scan": true,
+        "process_local_lru_entries_bounded": true,
+        "source_identity_revalidated_on_hit": true,
+        "directory_identity_revalidated_on_hit": true,
+        "same_name_source_edits_invalidate": true,
+        "new_glob_matches_invalidate": true,
+        "cold_graph_files_bounded": true,
+        "cold_graph_bytes_bounded": true,
+        "cold_graph_directories_bounded": true,
+        "cold_graph_scanned_files_bounded": true,
+        "redis_required": false,
+        "sticky_routing_required": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/backend/browser_packages.py",
+        "pytincture/configuration.py",
+        "docs/configuration.md",
+        "docs/contracts/bff-v1.md",
+        "docs/production-deployment.md"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_impossible_bff_operation_is_rejected_before_application_graph_scan",
+        "tests/test_app.py::test_application_graph_cache_reuses_and_invalidates_same_name_sources",
+        "tests/test_app.py::test_application_graph_cache_detects_new_globbed_file",
+        "tests/test_app.py::test_application_graph_cache_detects_new_import_in_existing_namespace",
+        "tests/test_app.py::test_application_graph_applies_aggregate_source_limit",
+        "tests/test_backend_modules.py::test_configured_browser_file_scan_has_explicit_directory_and_file_limits"
+      ]
     }
   ]
 }

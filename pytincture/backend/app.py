@@ -516,6 +516,10 @@ def _browser_package_files(application: str) -> Set[str]:
         application,
         get_modules_path(),
         os.getenv("PYTINCTURE_BROWSER_FILES", ""),
+        max_files=APPCODE_MAX_FILES,
+        _max_file_bytes=APPCODE_MAX_FILE_BYTES,
+        _max_directories=BFF_APPLICATION_GRAPH_MAX_DIRECTORIES,
+        _max_scanned_files=BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES,
     )
 
 
@@ -1664,19 +1668,219 @@ def _assert_application_audience(user: Any, application: Optional[str]) -> None:
         raise HTTPException(status_code=403, detail="Identity is not authorized for this application")
 
 
+@dataclass(frozen=True, slots=True)
+class _ApplicationGraphSnapshot:
+    identifiers: frozenset[str]
+    source_fingerprints: tuple[tuple[Any, ...], ...]
+    directory_fingerprints: tuple[tuple[Any, ...], ...]
+
+
+class _ApplicationGraphCache:
+    """Bounded per-worker cache for application BFF membership graphs."""
+
+    def __init__(self, max_entries: int):
+        if max_entries <= 0:
+            raise ValueError("application graph cache size must be positive")
+        self.max_entries = max_entries
+        self._entries: OrderedDict[
+            tuple[Any, ...], _ApplicationGraphSnapshot
+        ] = OrderedDict()
+        self._build_locks: dict[tuple[Any, ...], threading.Lock] = {}
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _is_current(
+        modules_root: str,
+        snapshot: _ApplicationGraphSnapshot,
+    ) -> bool:
+        for relative_path, *identity in snapshot.source_fingerprints:
+            try:
+                current = stat_contained_file(modules_root, relative_path)
+            except (OSError, UnsafePath):
+                return False
+            if current.identity != tuple(identity):
+                return False
+        for path, *identity in snapshot.directory_fingerprints:
+            try:
+                current = os.stat(path, follow_symlinks=False)
+            except OSError:
+                return False
+            if (
+                current.st_dev,
+                current.st_ino,
+                current.st_mtime_ns,
+                current.st_ctime_ns,
+            ) != tuple(identity):
+                return False
+        return True
+
+    def get_or_create(
+        self,
+        key: tuple[Any, ...],
+        modules_root: str,
+        factory: Callable[[], _ApplicationGraphSnapshot],
+    ) -> _ApplicationGraphSnapshot:
+        snapshot = self._get_current(key, modules_root)
+        if snapshot is not None:
+            return snapshot
+        with self._lock:
+            build_lock = self._build_locks.setdefault(key, threading.Lock())
+
+        # Serialize cold discovery per application without making one slow
+        # application's scan block warm hits or builds for another application.
+        with build_lock:
+            snapshot = self._get_current(key, modules_root)
+            if snapshot is not None:
+                return snapshot
+            # Retry once if a development edit races discovery, then fail
+            # closed rather than caching a graph assembled from mixed revisions.
+            for _attempt in range(2):
+                snapshot = factory()
+                if self._is_current(modules_root, snapshot):
+                    break
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Application files changed during graph discovery",
+                )
+            with self._lock:
+                self._entries[key] = snapshot
+                self._entries.move_to_end(key)
+                while len(self._entries) > self.max_entries:
+                    evicted_key, _evicted = self._entries.popitem(last=False)
+                    self._build_locks.pop(evicted_key, None)
+            return snapshot
+
+    def _get_current(
+        self,
+        key: tuple[Any, ...],
+        modules_root: str,
+    ) -> _ApplicationGraphSnapshot | None:
+        with self._lock:
+            snapshot = self._entries.get(key)
+        if snapshot is None:
+            return None
+        current = self._is_current(modules_root, snapshot)
+        with self._lock:
+            if self._entries.get(key) is not snapshot:
+                return None
+            if not current:
+                self._entries.pop(key, None)
+                return None
+            self._entries[key] = snapshot
+            self._entries.move_to_end(key)
+            return snapshot
+
+
+def _build_application_graph_snapshot(
+    application: str,
+    modules_root: str,
+    raw_patterns: str,
+) -> _ApplicationGraphSnapshot:
+    secure_files: dict[str, Any] = {}
+    scanned_directories: set[str] = set()
+    files = browser_package_files(
+        application,
+        modules_root,
+        raw_patterns,
+        max_files=APPCODE_MAX_FILES,
+        _secure_files=secure_files,
+        _max_file_bytes=APPCODE_MAX_FILE_BYTES,
+        _max_directories=BFF_APPLICATION_GRAPH_MAX_DIRECTORIES,
+        _max_scanned_files=BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES,
+        _scanned_directories=scanned_directories,
+    )
+    source_fingerprints: list[tuple[Any, ...]] = []
+    identifiers: set[str] = set()
+    aggregate_bytes = 0
+    relevant_directories = {modules_root, *scanned_directories}
+    for file_path in sorted(path for path in files if path.endswith(".py")):
+        relative_path = os.path.relpath(file_path, modules_root).replace(os.sep, "/")
+        try:
+            secure_file = secure_files.get(file_path) or read_contained_file(
+                modules_root,
+                relative_path,
+                max_bytes=APPCODE_MAX_FILE_BYTES,
+            )
+        except (OSError, UnsafePath) as exc:
+            detail = (
+                "Application graph file-size limit exceeded"
+                if isinstance(exc, UnsafePath) and "size limit" in str(exc)
+                else "Application graph source is unavailable"
+            )
+            status_code = 413 if "size limit" in detail else 404
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+        aggregate_bytes += secure_file.size
+        if aggregate_bytes > APPCODE_MAX_TOTAL_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Application graph aggregate-size limit exceeded",
+            )
+        identifiers.add(secure_file.relative_path)
+        source_fingerprints.append(
+            (secure_file.relative_path, *secure_file.identity)
+        )
+        parent = os.path.dirname(secure_file.path)
+        while os.path.commonpath((modules_root, parent)) == modules_root:
+            relevant_directories.add(parent)
+            if parent == modules_root:
+                break
+            parent = os.path.dirname(parent)
+
+    if len(relevant_directories) > BFF_APPLICATION_GRAPH_MAX_DIRECTORIES:
+        raise HTTPException(
+            status_code=413,
+            detail="Application graph directory limit exceeded",
+        )
+    directory_fingerprints = []
+    for path in sorted(relevant_directories):
+        metadata = os.stat(path, follow_symlinks=False)
+        directory_fingerprints.append(
+            (
+                path,
+                metadata.st_dev,
+                metadata.st_ino,
+                metadata.st_mtime_ns,
+                metadata.st_ctime_ns,
+            )
+        )
+    return _ApplicationGraphSnapshot(
+        identifiers=frozenset(identifiers),
+        source_fingerprints=tuple(source_fingerprints),
+        directory_fingerprints=tuple(directory_fingerprints),
+    )
+
+
 def _application_bff_identifiers(application: str, modules_root: str) -> Set[str]:
-    """Return exact modules delivered to one browser application."""
+    """Return cached exact modules delivered to one browser application."""
     validate_application_name(application)
     root = os.path.realpath(modules_root)
+    raw_patterns = os.getenv("PYTINCTURE_BROWSER_FILES", "")
+    key = (
+        root,
+        application,
+        raw_patterns,
+        APPCODE_MAX_FILES,
+        APPCODE_MAX_FILE_BYTES,
+        APPCODE_MAX_TOTAL_BYTES,
+        BFF_APPLICATION_GRAPH_MAX_DIRECTORIES,
+        BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES,
+    )
     try:
-        files = _browser_package_files(application)
-    except HTTPException:
-        raise HTTPException(status_code=404, detail="Application not found") from None
-    return {
-        os.path.relpath(path, root).replace(os.sep, "/")
-        for path in files
-        if path.endswith(".py")
-    }
+        snapshot = APPLICATION_GRAPH_CACHE.get_or_create(
+            key,
+            root,
+            lambda: _build_application_graph_snapshot(
+                application,
+                root,
+                raw_patterns,
+            ),
+        )
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise HTTPException(status_code=404, detail="Application not found") from None
+        raise
+    return set(snapshot.identifiers)
 
 
 def _enforce_declared_bff_policy(
@@ -3308,6 +3512,27 @@ async def class_call(
     _assert_application_audience(user, application)
 
     modules_root = os.path.abspath(get_modules_path())
+    fs_relative = request_identifier_with_ext.replace("/", os.sep)
+    fs_relative = os.path.normpath(fs_relative)
+
+    if fs_relative.startswith("..") or os.path.isabs(fs_relative) or os.path.splitdrive(fs_relative)[0]:
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    if os.path.basename(fs_relative).startswith("."):
+        raise HTTPException(status_code=400, detail="Invalid file name")
+
+    # Reject an impossible registry target before discovering the application
+    # graph. Invalid class/method probes must not trigger an AST/glob scan.
+    operation = await _run_bff_thread_stage(
+        request,
+        _registered_bff_operation,
+        modules_root,
+        request_identifier_with_ext,
+        class_name,
+        function_name,
+    )
+    if operation is None:
+        raise HTTPException(status_code=404, detail="BFF operation not exported")
     application_identifiers = await _run_bff_thread_stage(
         request,
         _application_bff_identifiers,
@@ -3319,34 +3544,9 @@ async def class_call(
             status_code=404,
             detail="BFF operation not exported by this application",
         )
-    fs_relative = request_identifier_with_ext.replace("/", os.sep)
-    fs_relative = os.path.normpath(fs_relative)
-
-    if fs_relative.startswith("..") or os.path.isabs(fs_relative) or os.path.splitdrive(fs_relative)[0]:
-        raise HTTPException(status_code=400, detail="Invalid file path")
-
-    if os.path.basename(fs_relative).startswith("."):
-        raise HTTPException(status_code=400, detail="Invalid file name")
-
-    try:
-        module_file_path = resolve_contained_path(
-            modules_root,
-            request_identifier_with_ext,
-        )
-    except UnsafePath:
-        raise HTTPException(status_code=404, detail=f"File {request_identifier_with_ext} not found in appcode folder")
-
-    operation = await _run_bff_thread_stage(
-        request,
-        _registered_bff_operation,
-        modules_root,
-        request_identifier_with_ext,
-        class_name,
-        function_name,
-    )
-    if operation is None:
+    module_file_path = str(operation.get("_source_path") or "")
+    if not module_file_path:
         raise HTTPException(status_code=404, detail="BFF operation not exported")
-    module_file_path = str(operation.get("_source_path") or module_file_path)
     source_digest = str(operation.get("_source_digest") or "")
     structured_log(
         logger,
@@ -4178,6 +4378,15 @@ APPCODE_CACHE_ENTRIES = int(os.getenv("APPCODE_CACHE_ENTRIES", "16"))
 APPCODE_CACHE_MAX_BYTES = int(
     os.getenv("APPCODE_CACHE_MAX_BYTES", str(128 * 1024 * 1024))
 )
+BFF_APPLICATION_GRAPH_CACHE_ENTRIES = int(
+    os.getenv("BFF_APPLICATION_GRAPH_CACHE_ENTRIES", "128")
+)
+BFF_APPLICATION_GRAPH_MAX_DIRECTORIES = int(
+    os.getenv("BFF_APPLICATION_GRAPH_MAX_DIRECTORIES", "2048")
+)
+BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES = int(
+    os.getenv("BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES", "51200")
+)
 APPCODE_BUILD_MAX_CONCURRENCY = int(os.getenv("APPCODE_BUILD_MAX_CONCURRENCY", "2"))
 APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS = float(
     os.getenv("APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS", "1")
@@ -4258,6 +4467,9 @@ if min(
     APPCODE_MAX_TOTAL_BYTES,
     APPCODE_CACHE_ENTRIES,
     APPCODE_CACHE_MAX_BYTES,
+    BFF_APPLICATION_GRAPH_CACHE_ENTRIES,
+    BFF_APPLICATION_GRAPH_MAX_DIRECTORIES,
+    BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES,
     APPCODE_BUILD_MAX_CONCURRENCY,
     APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS,
     PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES,
@@ -4295,6 +4507,9 @@ BFF_ADMISSION_GATE = AsyncAdmissionGate(
 APPCODE_ARCHIVE_CACHE = AppcodeArchiveCache(
     APPCODE_CACHE_ENTRIES,
     APPCODE_CACHE_MAX_BYTES,
+)
+APPLICATION_GRAPH_CACHE = _ApplicationGraphCache(
+    BFF_APPLICATION_GRAPH_CACHE_ENTRIES
 )
 APPCODE_BUILD_GATE = threading.BoundedSemaphore(APPCODE_BUILD_MAX_CONCURRENCY)
 PUBLIC_ASSET_AUTHORIZATION_CACHE = _PublicAssetAuthorizationCache(

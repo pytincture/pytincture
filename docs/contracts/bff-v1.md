@@ -46,6 +46,15 @@ Generated proxies and manually written clients must always use the scoped
 route. In no-auth mode, `@backend_for_frontend` remains the complete public
 export decision; no redundant per-method allowlist is required.
 
+Registry membership is checked before application-graph discovery, so an
+unknown class or operation cannot trigger graph parsing. Valid application
+graphs use a bounded per-worker LRU and are reused only while secure metadata
+for every selected Python source and relevant directory remains unchanged.
+Source edits, removals, additions, and newly matched browser-file declarations
+invalidate automatically. Cold scans apply the appcode file, per-file byte,
+aggregate byte, directory, and scanned-file limits. This cache is disposable;
+it creates no Redis, shared-state, or sticky-routing requirement.
+
 Methods default to `POST`. `@bff_http_methods` may declare `GET`, `POST`,
 `PUT`, `PATCH`, or `DELETE`. A method mismatch returns `405` with `Allow`.
 

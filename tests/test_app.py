@@ -1977,6 +1977,133 @@ def test_noauth_bff_does_not_export_a_local_same_named_decorator(
     assert response.json() == {"detail": "BFF operation not exported"}
 
 
+def test_impossible_bff_operation_is_rejected_before_application_graph_scan(
+    dummy_module, monkeypatch, fresh_client
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setenv("MODULES_PATH", str(dummy_module))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
+
+    def unexpected_graph_scan(*_args, **_kwargs):
+        raise AssertionError("invalid registry target must not scan application graph")
+
+    monkeypatch.setattr(
+        backend_app,
+        "_application_bff_identifiers",
+        unexpected_graph_scan,
+    )
+    response = fresh_client.post(
+        "/demoapp/classcall/example.py/ExampleClass/not_exported",
+        json={"args": [], "kwargs": {}},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "BFF operation not exported"}
+
+
+def test_application_graph_cache_reuses_and_invalidates_same_name_sources(
+    tmp_path, monkeypatch
+):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "demo.py").write_text("import helper\n", encoding="utf-8")
+    helper = tmp_path / "helper.py"
+    helper.write_text("VALUE = 1\n", encoding="utf-8")
+    calls = []
+    original_discovery = backend_app.browser_package_files
+
+    def counted_discovery(*args, **kwargs):
+        calls.append(args[0])
+        return original_discovery(*args, **kwargs)
+
+    monkeypatch.setattr(backend_app, "browser_package_files", counted_discovery)
+    monkeypatch.setattr(
+        backend_app,
+        "APPLICATION_GRAPH_CACHE",
+        backend_app._ApplicationGraphCache(4),
+    )
+    first = backend_app._application_bff_identifiers("demo", str(tmp_path))
+    second = backend_app._application_bff_identifiers("demo", str(tmp_path))
+
+    assert first == second == {"demo.py", "helper.py"}
+    assert calls == ["demo"]
+
+    original_times = helper.stat()
+    helper.write_text("VALUE = 2\n", encoding="utf-8")
+    os.utime(
+        helper,
+        ns=(original_times.st_atime_ns, original_times.st_mtime_ns),
+    )
+    third = backend_app._application_bff_identifiers("demo", str(tmp_path))
+
+    assert third == first
+    assert calls == ["demo", "demo"]
+
+
+def test_application_graph_cache_detects_new_globbed_file(tmp_path, monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+    monkeypatch.setenv("PYTINCTURE_BROWSER_FILES", '["*.py"]')
+    monkeypatch.setattr(
+        backend_app,
+        "APPLICATION_GRAPH_CACHE",
+        backend_app._ApplicationGraphCache(4),
+    )
+
+    assert backend_app._application_bff_identifiers("demo", str(tmp_path)) == {
+        "demo.py"
+    }
+    (tmp_path / "added.py").write_text("VALUE = 2\n", encoding="utf-8")
+    assert backend_app._application_bff_identifiers("demo", str(tmp_path)) == {
+        "added.py",
+        "demo.py",
+    }
+
+
+def test_application_graph_cache_detects_new_import_in_existing_namespace(
+    tmp_path, monkeypatch
+):
+    import pytincture.backend.app as backend_app
+
+    namespace = tmp_path / "plugins"
+    namespace.mkdir()
+    (tmp_path / "demo.py").write_text("import plugins.optional\n", encoding="utf-8")
+    monkeypatch.setattr(
+        backend_app,
+        "APPLICATION_GRAPH_CACHE",
+        backend_app._ApplicationGraphCache(4),
+    )
+
+    assert backend_app._application_bff_identifiers("demo", str(tmp_path)) == {
+        "demo.py"
+    }
+    (namespace / "optional.py").write_text("VALUE = 1\n", encoding="utf-8")
+    assert backend_app._application_bff_identifiers("demo", str(tmp_path)) == {
+        "demo.py",
+        "plugins/optional.py",
+    }
+
+
+def test_application_graph_applies_aggregate_source_limit(tmp_path, monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "demo.py").write_text("VALUE = 'larger than limit'\n", encoding="utf-8")
+    monkeypatch.setattr(backend_app, "APPCODE_MAX_TOTAL_BYTES", 8)
+    monkeypatch.setattr(
+        backend_app,
+        "APPLICATION_GRAPH_CACHE",
+        backend_app._ApplicationGraphCache(4),
+    )
+
+    with pytest.raises(HTTPException, match="aggregate-size limit"):
+        backend_app._application_bff_identifiers("demo", str(tmp_path))
+
+
 def test_bff_rebinding_is_rejected_before_module_import(
     monkeypatch, fresh_client, tmp_path
 ):

@@ -233,6 +233,9 @@ The contract test checks every row in this table against the dataclass model.
 | `appcode_max_total_bytes` | `APPCODE_MAX_TOTAL_BYTES` | Maximum aggregate source bytes per archive. |
 | `appcode_cache_entries` | `APPCODE_CACHE_ENTRIES` | Per-worker bounded browser archive cache entries. |
 | `appcode_cache_max_bytes` | `APPCODE_CACHE_MAX_BYTES` | Aggregate byte limit for the per-worker browser archive cache. |
+| `bff_application_graph_cache_entries` | `BFF_APPLICATION_GRAPH_CACHE_ENTRIES` | Per-worker cached application BFF membership graphs. |
+| `bff_application_graph_max_directories` | `BFF_APPLICATION_GRAPH_MAX_DIRECTORIES` | Maximum directories examined for one application BFF graph. |
+| `bff_application_graph_max_scanned_files` | `BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES` | Maximum files examined by browser-file globs for one BFF graph. |
 | `appcode_build_max_concurrency` | `APPCODE_BUILD_MAX_CONCURRENCY` | Concurrent archive builds per worker. |
 | `appcode_build_queue_timeout_seconds` | `APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS` | Maximum archive build admission wait. |
 | `public_asset_authorization_cache_entries` | `PYTINCTURE_PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES` | Per-worker public-asset authorization cache entries. |
