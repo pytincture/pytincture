@@ -1567,6 +1567,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-08-31-M-24-CONTAINER-GUIDANCE",
         "REVIEW-2026-08-31-CONFIG-FACTORY-ISOLATION",
         "REVIEW-2026-09-01-PT-09",
+        "REVIEW-2026-09-01-PT-13",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1615,6 +1616,11 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert graph_controls["same_name_source_edits_invalidate"] is True
     assert graph_controls["new_glob_matches_invalidate"] is True
     assert graph_controls["redis_required"] is False
+    microsoft_controls = dispositions["REVIEW-2026-09-01-PT-13"]["controls"]
+    assert microsoft_controls["microsoft_oid_retained_in_signed_session"] is True
+    assert microsoft_controls["mutable_email_admission_warning"] is True
+    assert microsoft_controls["email_admission_removed"] is False
+    assert microsoft_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True

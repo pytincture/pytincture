@@ -15,6 +15,7 @@ _RULE_FIELDS = {
     "issuers",
     "tenants",
     "subjects",
+    "object_ids",
     "emails",
     "email_domains",
     "roles",
@@ -162,6 +163,9 @@ def identity_is_admitted(
             identity.get("tenant") or identity.get("tenant_id") or identity.get("tid") or ""
         ).strip(),
         "subjects": str(identity.get("subject") or identity.get("sub") or "").strip(),
+        "object_ids": str(
+            identity.get("object_id") or identity.get("oid") or ""
+        ).strip(),
         "emails": email,
         "email_domains": email_domain,
     }

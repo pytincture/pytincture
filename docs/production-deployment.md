@@ -85,6 +85,12 @@ Production authentication cookies use the browser-enforced `__Host-` prefix,
 name deliberately requires users to sign in once; local HTTP development uses
 separate `pytincture-dev-*` names and remains supported.
 
+For Microsoft admission, prefer immutable tenant plus Entra object id
+(`object_ids` matches the signed-session `oid`) or issuer plus subject. Email
+and domain policies remain supported, but startup logs
+`security.microsoft_mutable_email_admission` when they are the only Microsoft
+identity constraint. The warning is advisory and does not break existing apps.
+
 Resource admission counters, the appcode cache, and the application BFF graph
 cache are bounded, disposable, and local to each worker. The archive LRU is
 independently capped by `APPCODE_CACHE_ENTRIES` and

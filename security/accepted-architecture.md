@@ -148,7 +148,11 @@ Required controls that remain in scope:
 An intentionally single-trust service may use one global identity policy for
 all of its applications. A shared multi-app service can opt into a fail-closed
 application admission mapping for provider, issuer, tenant, subject,
-email/domain, and role constraints. Pytincture will not require server-side
+provider object id, email/domain, and role constraints. Microsoft email/domain
+admission remains an intentional convenience for simple apps, but sensitive
+Microsoft authorization should use tenant/object id, issuer/subject, or
+provider roles; the framework emits a non-blocking warning when only mutable
+email is configured. Pytincture will not require server-side
 session state to make this authorization decision.
 
 Why:

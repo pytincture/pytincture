@@ -193,11 +193,19 @@
     {
       "id": "PT-13",
       "severity": "low_conditional",
-      "status": "tracked",
+      "status": "remediated_additive_hardening",
       "issue": "https://github.com/pytincture/pytincture/issues/299",
       "disposition": "Expose immutable Microsoft identity clearly, document it for sensitive authorization, and warn when production admission relies only on mutable email.",
+      "implementation": "Microsoft callbacks retain the tenant-scoped immutable Entra object id as oid in the signed browser identity. Stateless application admission accepts object_ids alongside tenant/issuer/subject/role constraints. Startup emits a structured security.microsoft_mutable_email_admission warning when global or per-application Microsoft admission relies only on mutable email or domain.",
+      "regression_tests": [
+        "tests/test_app.py::test_microsoft_login_stores_only_compact_stateless_claims",
+        "tests/test_app.py::test_microsoft_mutable_email_admission_warns_without_breaking_configuration",
+        "tests/test_app.py::test_microsoft_stable_identity_admission_emits_no_mutable_email_warning",
+        "tests/test_application_admission.py::test_application_admission_is_stateless_and_fails_closed",
+        "tests/test_application_admission.py::test_application_admission_across_identity_providers"
+      ],
       "potential_user_breakage": false,
-      "compatibility_note": "Email and domain admission remain available for simple applications."
+      "compatibility_note": "Email and domain admission remain available for simple applications. The new warning is advisory, object_ids is additive, signed sessions remain browser-carried, and no Redis or sticky routing is introduced."
     },
     {
       "id": "PT-14",

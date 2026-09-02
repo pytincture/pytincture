@@ -1345,9 +1345,43 @@ def validate_modules_path_trust_configuration() -> None:
     )
 
 
+def validate_microsoft_identity_admission_configuration() -> None:
+    """Warn when production Microsoft admission relies on mutable email."""
+    if not ENABLE_MICROSOFT_AUTH:
+        return
+    mutable_scopes: list[str] = []
+    if os.getenv("ALLOWED_EMAILS", "").strip():
+        mutable_scopes.append("global_allowed_emails")
+    for application, rule in APPLICATION_ADMISSION.items():
+        providers = rule.get("providers")
+        applies_to_microsoft = providers is None or "microsoft" in providers
+        uses_email = bool(rule.get("emails") or rule.get("email_domains"))
+        has_stable_authorization = bool(
+            rule.get("object_ids") or rule.get("subjects") or rule.get("roles")
+        )
+        if applies_to_microsoft and uses_email and not has_stable_authorization:
+            mutable_scopes.append(application)
+    if not mutable_scopes:
+        return
+    structured_log(
+        logger,
+        logging.WARNING,
+        "security.microsoft_mutable_email_admission",
+        scopes=",".join(sorted(mutable_scopes))[:1024],
+        enforcement=False,
+        production_control=(
+            "authorize Microsoft users with tenant plus object_ids, or issuer "
+            "plus subjects; treat email as display data"
+        ),
+    )
+
+
 app.router.add_event_handler("startup", validate_modules_path_trust_configuration)
 app.router.add_event_handler("startup", validate_bff_policy_configuration)
 app.router.add_event_handler("startup", validate_bff_replay_store_configuration)
+app.router.add_event_handler(
+    "startup", validate_microsoft_identity_admission_configuration
+)
 
 
 def set_user_authenticator(authenticator: Optional[Callable[..., Any]]):
@@ -2075,12 +2109,15 @@ def _build_auth_session_user(
     issuer = str(source.get("issuer") or source.get("iss") or "").strip()
     subject = str(source.get("subject") or source.get("sub") or "").strip()
     tenant = str(source.get("tenant") or source.get("tid") or "").strip()
+    object_id = str(source.get("object_id") or source.get("oid") or "").strip()
     if issuer:
         session_user["issuer"] = issuer
     if subject:
         session_user["subject"] = subject
     if tenant:
         session_user["tenant"] = tenant
+    if object_id:
+        session_user["oid"] = object_id
 
     saml_source = source.get("saml")
     if isinstance(saml_source, dict):

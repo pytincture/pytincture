@@ -987,6 +987,38 @@
         "tests/test_app.py::test_application_graph_applies_aggregate_source_limit",
         "tests/test_backend_modules.py::test_configured_browser_file_scan_has_explicit_directory_and_file_limits"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-PT-13",
+      "status": "remediated_additive_hardening",
+      "title": "Microsoft immutable object identity is available for authorization",
+      "intentional_contract": "Applications may continue using email and domain admission for simple workflows; Pytincture does not silently change their authorization policy.",
+      "security_boundary": "Microsoft sessions retain the immutable tenant-scoped oid claim. Stateless per-application admission can match object_ids, and production startup emits a structured advisory warning when Microsoft admission relies only on mutable email or domain. Sensitive applications should use tenant/object id, issuer/subject, or provider roles.",
+      "controls": {
+        "microsoft_oid_retained_in_signed_session": true,
+        "application_object_ids_supported": true,
+        "mutable_email_admission_warning": true,
+        "warning_is_non_blocking": true,
+        "email_admission_removed": false,
+        "domain_admission_removed": false,
+        "redis_required": false,
+        "sticky_routing_required": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/backend/application_admission.py",
+        "docs/authentication.md",
+        "docs/configuration.md",
+        "docs/production-deployment.md",
+        "docs/migrations/0.10-to-1.0.md"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_microsoft_login_stores_only_compact_stateless_claims",
+        "tests/test_app.py::test_microsoft_mutable_email_admission_warns_without_breaking_configuration",
+        "tests/test_app.py::test_microsoft_stable_identity_admission_emits_no_mutable_email_warning",
+        "tests/test_application_admission.py::test_application_admission_is_stateless_and_fails_closed",
+        "tests/test_application_admission.py::test_application_admission_across_identity_providers"
+      ]
     }
   ]
 }

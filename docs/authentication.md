@@ -65,8 +65,13 @@ checks remain stateless and require neither Redis nor sticky routing.
 Set the Google or Microsoft enable flag and client credentials. Microsoft also
 requires `MICROSOFT_TENANT_ID`; the multi-tenant `common` issuer is not
 accepted. Google callbacks require a verified email and both providers retain
-the immutable issuer/subject identity in the signed session. Register the exact
-callback URL shown by the route:
+the immutable issuer/subject identity in the signed session. Microsoft also
+retains the tenant-scoped immutable Entra object id as `oid`. For sensitive
+authorization, use tenant plus `oid` (the `object_ids` application-admission
+field), or issuer plus subject. Microsoft email is mutable display data;
+email/domain admission remains supported for simple applications and emits a
+non-blocking production warning when no stable identity/role constraint is
+present. Register the exact callback URL shown by the route:
 
 Microsoft requests only `openid email profile`. Pytincture does not retain or
 refresh provider tokens, so it does not request `offline_access`.

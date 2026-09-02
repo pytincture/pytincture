@@ -2869,6 +2869,65 @@ def test_legacy_app_modules_path_trust_handler_warns_or_fails(
         backend_app.validate_modules_path_trust_configuration()
 
 
+def test_microsoft_mutable_email_admission_warns_without_breaking_configuration(
+    monkeypatch, caplog
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", True)
+    monkeypatch.setattr(
+        backend_app,
+        "APPLICATION_ADMISSION",
+        {
+            "email_only": {
+                "providers": ("microsoft",),
+                "email_domains": ("example.com",),
+            },
+            "stable": {
+                "providers": ("microsoft",),
+                "tenants": ("tenant-123",),
+                "object_ids": ("object-456",),
+                "emails": ("person@example.com",),
+            },
+        },
+    )
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+
+    with caplog.at_level("WARNING", logger="pytincture.security"):
+        backend_app.validate_microsoft_identity_admission_configuration()
+
+    event = json.loads(caplog.records[-1].message)
+    assert event["event"] == "security.microsoft_mutable_email_admission"
+    assert event["enforcement"] is False
+    assert event["scopes"] == "email_only,global_allowed_emails"
+    assert "stable" not in event["scopes"]
+
+
+def test_microsoft_stable_identity_admission_emits_no_mutable_email_warning(
+    monkeypatch, caplog
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_MICROSOFT_AUTH", True)
+    monkeypatch.setattr(
+        backend_app,
+        "APPLICATION_ADMISSION",
+        {
+            "stable": {
+                "providers": ("microsoft",),
+                "tenants": ("tenant-123",),
+                "object_ids": ("object-456",),
+            }
+        },
+    )
+    monkeypatch.delenv("ALLOWED_EMAILS", raising=False)
+
+    with caplog.at_level("WARNING", logger="pytincture.security"):
+        backend_app.validate_microsoft_identity_admission_configuration()
+
+    assert "security.microsoft_mutable_email_admission" not in caplog.text
+
+
 @pytest.mark.parametrize("async_execution_mode", ["event-loop", "worker-thread"])
 def test_class_call_streaming(
     monkeypatch,
@@ -4703,6 +4762,7 @@ def test_microsoft_login_stores_only_compact_stateless_claims(
                     "tid": "tenant-123",
                     "iss": "https://login.microsoftonline.com/tenant-123/v2.0",
                     "sub": "subject-123",
+                    "oid": "object-456",
                 },
             }
 
@@ -4739,6 +4799,7 @@ def test_microsoft_login_stores_only_compact_stateless_claims(
         "issuer": "https://login.microsoftonline.com/tenant-123/v2.0",
         "subject": "subject-123",
         "tenant": "tenant-123",
+        "oid": "object-456",
         "application": "demoapp",
     }
     assert "access_token" not in session_data

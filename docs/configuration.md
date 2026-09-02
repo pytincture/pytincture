@@ -55,6 +55,7 @@ config = PytinctureConfig(
         "reports": {
             "providers": ["microsoft"],
             "tenants": ["contoso-tenant-id"],
+            "object_ids": ["entra-object-id"],
             "email_domains": ["example.com"],
             "roles": ["reader", "administrator"],
         },
@@ -67,9 +68,16 @@ config = PytinctureConfig(
 ```
 
 Supported rule fields are `providers`, `issuers`, `tenants`, `subjects`,
-`emails`, `email_domains`, and `roles`. A string or list of strings is accepted
-for each field. Values in one field are alternatives, while every configured
-field must match; a roles rule requires at least one matching normalized role.
+`object_ids`, `emails`, `email_domains`, and `roles`. A string or list of
+strings is accepted for each field. Values in one field are alternatives,
+while every configured field must match; a roles rule requires at least one
+matching normalized role. Microsoft sessions expose the immutable Entra
+object id as `oid`; `object_ids` matches that claim. For sensitive Microsoft
+authorization prefer `tenants` plus `object_ids`, or `issuers` plus `subjects`.
+Email remains available for display and simple admission, but Microsoft email
+can change or be reassigned. A production service logs
+`security.microsoft_mutable_email_admission` when its Microsoft admission
+relies only on email or domain; the warning does not reject existing settings.
 Once any application rule is configured, applications missing from the mapping
 fail closed. An empty rule (`"reports": {}`) explicitly admits any globally
 verified identity to that application.
