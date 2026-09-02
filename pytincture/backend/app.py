@@ -2454,12 +2454,8 @@ def _admit_bff_replay_issuance(request: Request, session_id: str) -> None:
         (BFF_REPLAY_PEER_ISSUE_LIMITER, _bff_replay_peer_key(request)),
         (BFF_REPLAY_WORKER_ISSUE_LIMITER, "worker"),
     )
-    retry_after = 0
-    for limiter, key in checks:
-        allowed, wait_seconds = limiter.allow(key)
-        if not allowed:
-            retry_after = max(retry_after, wait_seconds)
-    if retry_after:
+    allowed, retry_after = SlidingWindowRateLimiter.allow_all(checks)
+    if not allowed:
         raise HTTPException(
             status_code=429,
             detail="BFF request-proof issuance rate exceeded",

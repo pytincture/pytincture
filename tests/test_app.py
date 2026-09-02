@@ -841,6 +841,43 @@ def test_bff_replay_refills_have_session_peer_and_worker_quotas(
     assert rejected.json() == {"detail": "BFF request-proof issuance rate exceeded"}
 
 
+def test_bff_replay_refill_session_denial_does_not_consume_broader_quotas(
+    fresh_client, monkeypatch, dummy_module
+):
+    import pytincture.backend.app as backend_app
+    from pytincture.backend.saml import SlidingWindowRateLimiter
+
+    headers = _prepare_bff_replay_refill(fresh_client, monkeypatch, dummy_module)
+    session_id = _decode_session_cookie(
+        fresh_client,
+        backend_app.SAML_SECRET_KEY,
+    )["session_id"]
+    session_limiter = SlidingWindowRateLimiter(1, 60, max_keys=10)
+    peer_limiter = SlidingWindowRateLimiter(1, 60, max_keys=10)
+    worker_limiter = SlidingWindowRateLimiter(1, 60, max_keys=10)
+    assert session_limiter.allow(session_id) == (True, 0)
+    monkeypatch.setattr(
+        backend_app,
+        "BFF_REPLAY_SESSION_ISSUE_LIMITER",
+        session_limiter,
+    )
+    monkeypatch.setattr(
+        backend_app,
+        "BFF_REPLAY_PEER_ISSUE_LIMITER",
+        peer_limiter,
+    )
+    monkeypatch.setattr(
+        backend_app,
+        "BFF_REPLAY_WORKER_ISSUE_LIMITER",
+        worker_limiter,
+    )
+
+    rejected = fresh_client.post("/_pytincture/state", headers=headers)
+    assert rejected.status_code == 429
+    assert len(peer_limiter._entries) == 0
+    assert len(worker_limiter._entries) == 0
+
+
 def test_bff_replay_refill_rejects_full_local_store_without_partial_issue(
     fresh_client, monkeypatch, dummy_module
 ):

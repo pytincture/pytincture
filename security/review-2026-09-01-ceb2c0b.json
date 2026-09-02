@@ -155,11 +155,16 @@
     {
       "id": "PT-11",
       "severity": "medium_conditional",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/297",
       "disposition": "Make replay-refill quota accounting denial-safe through ordered short-circuiting or transactional reservations.",
+      "implementation": "Replay refill now checks the ordered session, peer, and worker buckets under one atomic multi-limiter admission operation. Counts are committed only when every bucket permits the refill; any denial leaves every bucket unchanged.",
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_saml_rate_limiter_batch_admission_is_atomic",
+        "tests/test_app.py::test_bff_replay_refill_session_denial_does_not_consume_broader_quotas"
+      ],
       "potential_user_breakage": false,
-      "compatibility_note": "Accepted requests are unchanged and replay refill remains disabled by default."
+      "compatibility_note": "Accepted requests, configured limits, stateless operation, and valid-user throughput are unchanged. Replay refill remains disabled by default and requires neither Redis nor sticky routing."
     },
     {
       "id": "PT-12",
