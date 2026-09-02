@@ -44,9 +44,15 @@
     {
       "id": "PT-03",
       "severity": "medium",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/290",
       "disposition": "Bound capped request-body ingress before BFF execution admission with a separate configurable timeout.",
+      "implementation": "The BFF dependency reads and progressively byte-limits the body under BFF_REQUEST_INGRESS_TIMEOUT_SECONDS before acquiring BFF_ADMISSION_GATE. The execution deadline starts only after admission.",
+      "regression_tests": [
+        "tests/test_app.py::test_slow_bff_body_times_out_before_execution_admission",
+        "tests/test_app.py::test_bff_ingress_is_cached_and_does_not_spend_execution_time",
+        "tests/test_configuration.py::test_from_env_applies_defaults_environment_then_explicit_overrides"
+      ],
       "potential_user_breakage": true,
       "compatibility_note": "Only slow request upload is bounded; long-running backend execution retains its separate timeout."
     },

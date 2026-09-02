@@ -31,6 +31,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "ENABLE_USER_LOGIN": "true",
             "BFF_CALL_TIMEOUT_SECONDS": "12.5",
             "BFF_MAX_CONCURRENCY": "9",
+            "BFF_REQUEST_INGRESS_TIMEOUT_SECONDS": "6.5",
             "BFF_REQUEST_MAX_BYTES": "524288",
             "BFF_REQUEST_MAX_DEPTH": "24",
             "BFF_REQUEST_MAX_ITEMS": "5000",
@@ -95,6 +96,7 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.enable_user_login is True
     assert config.bff_call_timeout_seconds == 8.0
     assert config.bff_max_concurrency == 9
+    assert config.bff_request_ingress_timeout_seconds == 6.5
     assert config.bff_request_max_bytes == 524288
     assert config.bff_request_max_depth == 24
     assert config.bff_request_max_items == 5000

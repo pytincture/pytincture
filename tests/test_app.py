@@ -2567,6 +2567,130 @@ def test_class_call_timeout_returns_gateway_timeout(monkeypatch, fresh_client, t
     assert response.json()["correlation_id"]
 
 
+def test_slow_bff_body_times_out_before_execution_admission(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    class TrackingGate:
+        def __init__(self):
+            self.acquire_calls = 0
+
+        async def acquire(self):
+            self.acquire_calls += 1
+
+        def release(self):
+            pass
+
+    async def exercise():
+        gate = TrackingGate()
+        waiting = asyncio.Event()
+        receive_calls = 0
+
+        async def receive():
+            nonlocal receive_calls
+            receive_calls += 1
+            if receive_calls == 1:
+                return {
+                    "type": "http.request",
+                    "body": b'{"args":',
+                    "more_body": True,
+                }
+            await waiting.wait()
+            raise AssertionError("unreachable")
+
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "POST",
+                "scheme": "https",
+                "path": "/demo/classcall/demo.py/Demo/run",
+                "raw_path": b"/demo/classcall/demo.py/Demo/run",
+                "query_string": b"",
+                "headers": [(b"content-type", b"application/json")],
+                "client": ("127.0.0.1", 50000),
+                "server": ("127.0.0.1", 443),
+            },
+            receive,
+        )
+        monkeypatch.setattr(backend_app, "BFF_ADMISSION_GATE", gate)
+        monkeypatch.setattr(
+            backend_app,
+            "BFF_REQUEST_INGRESS_TIMEOUT_SECONDS",
+            0.01,
+        )
+        admission = backend_app._admit_bff_call(request)
+        with pytest.raises(HTTPException) as timed_out:
+            await admission.__anext__()
+        assert timed_out.value.status_code == 408
+        assert timed_out.value.detail == "BFF request body timed out"
+        assert gate.acquire_calls == 0
+
+    asyncio.run(exercise())
+
+
+def test_bff_ingress_is_cached_and_does_not_spend_execution_time(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    class TrackingGate:
+        def __init__(self):
+            self.acquire_calls = 0
+            self.release_calls = 0
+
+        async def acquire(self):
+            self.acquire_calls += 1
+
+        def release(self):
+            self.release_calls += 1
+
+    async def exercise():
+        payload = b'{"args":[],"kwargs":{}}'
+        gate = TrackingGate()
+
+        async def receive():
+            await asyncio.sleep(0.02)
+            return {
+                "type": "http.request",
+                "body": payload,
+                "more_body": False,
+            }
+
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "POST",
+                "scheme": "https",
+                "path": "/demo/classcall/demo.py/Demo/run",
+                "raw_path": b"/demo/classcall/demo.py/Demo/run",
+                "query_string": b"",
+                "headers": [(b"content-type", b"application/json")],
+                "client": ("127.0.0.1", 50000),
+                "server": ("127.0.0.1", 443),
+            },
+            receive,
+        )
+        monkeypatch.setattr(backend_app, "BFF_ADMISSION_GATE", gate)
+        monkeypatch.setattr(
+            backend_app,
+            "BFF_REQUEST_INGRESS_TIMEOUT_SECONDS",
+            0.1,
+        )
+        monkeypatch.setattr(backend_app, "BFF_CALL_TIMEOUT_SECONDS", 0.5)
+
+        admission = backend_app._admit_bff_call(request)
+        await admission.__anext__()
+        try:
+            assert gate.acquire_calls == 1
+            assert request.state.bff_request_body == payload
+            assert await request.body() == payload
+            assert backend_app._remaining_bff_seconds(request) > 0.45
+        finally:
+            await admission.aclose()
+        assert gate.release_calls == 1
+
+    asyncio.run(exercise())
+
+
 def test_opt_in_async_worker_mode_keeps_health_responsive(
     monkeypatch,
     tmp_path,
