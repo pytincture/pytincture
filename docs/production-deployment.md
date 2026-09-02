@@ -61,6 +61,12 @@ browser-carried sessions and optional Redis, are recorded in
   HTTPS/WSS origins. PyPI is never added to `script-src`; external
   Pyodide/icon resources still require SRI, and executable widget assets still
   require their SHA-256 manifest locks.
+- MCP bearer tokens must carry finite `iat` and `exp` claims. Pytincture also
+  enforces `nbf`, a clock-skew allowance, maximum age, and maximum declared
+  lifetime. The defaults allow bounded tokens up to 24 hours; reduce the
+  `MCP_JWT_*` limits to match the issuer. Use
+  `MCP_ALLOW_LEGACY_TIMELESS_TOKENS=true` only as a temporary migration setting
+  for an existing issuer, never as the production target.
 
 Signed session and SAML handshake cookies can be read by any worker sharing the
 signing secret. Redis is only an optional enhancement for immediate

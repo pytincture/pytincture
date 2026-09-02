@@ -784,6 +784,26 @@ class PytinctureConfig:
     mcp_jwt_issuer: str = _setting("", "MCP_JWT_ISSUER", "Required JWT issuer.")
     mcp_jwt_audience: str = _setting("", "MCP_JWT_AUDIENCE", "Required JWT audience.")
     mcp_jwt_algorithm: str = _setting("", "MCP_JWT_ALGORITHM", "Optional JWT algorithm.")
+    mcp_allow_legacy_timeless_tokens: bool = _setting(
+        False,
+        "MCP_ALLOW_LEGACY_TIMELESS_TOKENS",
+        "Allow legacy MCP JWTs without exp/iat claims.",
+    )
+    mcp_jwt_clock_skew_seconds: float = _setting(
+        60.0,
+        "MCP_JWT_CLOCK_SKEW_SECONDS",
+        "MCP JWT clock-skew allowance.",
+    )
+    mcp_jwt_max_token_age_seconds: float = _setting(
+        86400.0,
+        "MCP_JWT_MAX_TOKEN_AGE_SECONDS",
+        "Maximum MCP JWT age since iat.",
+    )
+    mcp_jwt_max_token_lifetime_seconds: float = _setting(
+        86400.0,
+        "MCP_JWT_MAX_TOKEN_LIFETIME_SECONDS",
+        "Maximum MCP JWT exp-to-iat lifetime.",
+    )
     trusted_proxy_headers: bool = _setting(
         False, "PYTINCTURE_TRUST_PROXY_HEADERS", "Trust forwarded host/protocol headers."
     )
@@ -959,6 +979,8 @@ class PytinctureConfig:
             self.remote_store_max_concurrency,
             self.remote_store_queue_timeout_seconds,
             self.readiness_cache_ttl_seconds,
+            self.mcp_jwt_max_token_age_seconds,
+            self.mcp_jwt_max_token_lifetime_seconds,
         )
         floating_limits = (
             self.saml_validation_queue_timeout_seconds,
@@ -987,6 +1009,9 @@ class PytinctureConfig:
             self.remote_store_cooldown_seconds,
             self.remote_store_queue_timeout_seconds,
             self.readiness_cache_ttl_seconds,
+            self.mcp_jwt_clock_skew_seconds,
+            self.mcp_jwt_max_token_age_seconds,
+            self.mcp_jwt_max_token_lifetime_seconds,
         )
         if not all(math.isfinite(value) for value in floating_limits):
             raise ValueError("floating-point resource limits must be finite")
@@ -1004,6 +1029,8 @@ class PytinctureConfig:
             raise ValueError("saml_validation_max_queue cannot be negative")
         if self.remote_store_max_queue < 0:
             raise ValueError("remote_store_max_queue cannot be negative")
+        if self.mcp_jwt_clock_skew_seconds < 0:
+            raise ValueError("mcp_jwt_clock_skew_seconds cannot be negative")
         docs_mode = self.api_docs_mode.strip().lower()
         if docs_mode not in {"public", "authenticated", "disabled"}:
             raise ValueError(
@@ -1286,6 +1313,7 @@ class PytinctureConfig:
             "enable_microsoft_auth", "enable_saml_auth", "enable_bff_replay_tokens",
             "bff_replay_require_shared_store",
             "use_redis_instance", "enable_mcp", "trusted_proxy_headers",
+            "mcp_allow_legacy_timeless_tokens",
             "allow_development_auth_origin", "enable_browser_logs",
             "allow_noauth_browser_logs", "uvicorn_access_log",
         }
@@ -1350,6 +1378,8 @@ class PytinctureConfig:
             "public_asset_queue_timeout_seconds", "public_asset_max_seconds",
             "public_asset_write_timeout_seconds",
             "public_widget_wheel_queue_timeout_seconds",
+            "mcp_jwt_clock_skew_seconds", "mcp_jwt_max_token_age_seconds",
+            "mcp_jwt_max_token_lifetime_seconds",
         }
         tuple_fields = {
             "cors_allowed_origins", "allowed_hosts", "previous_session_secrets",

@@ -52,6 +52,10 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "REMOTE_STORE_TIMEOUT_SECONDS": "1.25",
             "MCP_ALLOWED_HOSTS": '["mcp.example.test"]',
             "MCP_ALLOWED_ORIGINS": '["https://mcp.example.test"]',
+            "MCP_ALLOW_LEGACY_TIMELESS_TOKENS": "true",
+            "MCP_JWT_CLOCK_SKEW_SECONDS": "15",
+            "MCP_JWT_MAX_TOKEN_AGE_SECONDS": "7200",
+            "MCP_JWT_MAX_TOKEN_LIFETIME_SECONDS": "3600",
             "PYTINCTURE_ALLOWED_HOSTS": "app.example.test,api.example.test",
             "PYTINCTURE_CANONICAL_ORIGIN": "https://app.example.test/",
             "OAUTH_INITIATION_RATE_LIMIT_ATTEMPTS": "333",
@@ -139,6 +143,10 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.remote_store_timeout_seconds == 1.25
     assert config.mcp_allowed_hosts == ("mcp.example.test",)
     assert config.mcp_allowed_origins == ("https://mcp.example.test",)
+    assert config.mcp_allow_legacy_timeless_tokens is True
+    assert config.mcp_jwt_clock_skew_seconds == 15
+    assert config.mcp_jwt_max_token_age_seconds == 7200
+    assert config.mcp_jwt_max_token_lifetime_seconds == 3600
     assert config.allowed_hosts == ("app.example.test", "api.example.test")
     assert config.canonical_origin == "https://app.example.test"
     assert config.oauth_initiation_rate_limit_attempts == 333
@@ -840,6 +848,8 @@ def test_microsoft_auth_requires_explicit_tenant(tmp_path):
         ({"bff_max_queue": -1}, "bff_max_queue"),
         ({"bff_request_max_depth": 0}, "resource limits"),
         ({"password_hash_max_concurrency": 0}, "resource limits"),
+        ({"mcp_jwt_clock_skew_seconds": -1}, "clock_skew"),
+        ({"mcp_jwt_max_token_age_seconds": 0}, "resource limits"),
         ({"saml_response_max_bytes": 0}, "saml_response_max_bytes"),
         ({"saml_transaction_ttl_seconds": 0}, "saml_transaction_ttl_seconds"),
         ({"saml_acs_rate_limit_attempts": 0}, "rate-limit"),
