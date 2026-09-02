@@ -52,6 +52,36 @@ class AsyncAdmissionGate:
             self.release()
 
 
+class KeyedConcurrencyGate:
+    """Bound active work per disposable caller key without durable state."""
+
+    def __init__(self, concurrency_per_key: int, max_keys: int):
+        if concurrency_per_key <= 0 or max_keys <= 0:
+            raise ValueError("invalid keyed concurrency limits")
+        self.concurrency_per_key = concurrency_per_key
+        self.max_keys = max_keys
+        self._active: dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    def try_acquire(self, key: str) -> bool:
+        with self._lock:
+            active = self._active.get(key, 0)
+            if active >= self.concurrency_per_key:
+                return False
+            if active == 0 and len(self._active) >= self.max_keys:
+                return False
+            self._active[key] = active + 1
+            return True
+
+    def release(self, key: str) -> None:
+        with self._lock:
+            active = self._active.get(key, 0)
+            if active <= 1:
+                self._active.pop(key, None)
+            else:
+                self._active[key] = active - 1
+
+
 class CircuitOpen(RuntimeError):
     """Raised while a failing optional remote dependency is cooling down."""
 

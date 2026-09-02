@@ -18,6 +18,8 @@ import threading
 import time
 import uuid
 import zipfile
+from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import datetime
 from email.utils import formatdate
 from typing import (
@@ -121,7 +123,11 @@ from pytincture.backend.mcp import (
     parse_tool_specs,
     register_bff_tools,
 )
-from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate
+from pytincture.backend.limits import (
+    AdmissionRejected,
+    AsyncAdmissionGate,
+    KeyedConcurrencyGate,
+)
 from pytincture.backend.widget_trust import (
     WidgetTrustPolicyError,
     canonical_widget_trust_policy,
@@ -195,7 +201,7 @@ from pytincture.backend.source_loading import (
     load_source_module,
 )
 from pytincture.backend.storage import RedisDict
-from pytincture.backend.streaming import as_streaming_response
+from pytincture.backend.streaming import BoundedStreamingResponse, as_streaming_response
 from pytincture.dataclass import (
     add_bff_docs_to_app,
     get_bff_manifest,
@@ -2558,6 +2564,85 @@ _DEFAULT_PUBLIC_ASSET_EXTENSIONS = {
 _NEVER_PUBLIC_ASSET_EXTENSIONS = {".py", ".pyc", ".pyi", ".pyo", ".pyw"}
 
 
+@dataclass(frozen=True, slots=True)
+class _PublicAssetAuthorizationSnapshot:
+    entrypoint_identity: tuple[int, int, int, int, int]
+    configured_patterns: tuple[str, ...]
+    browser_files: str
+    favicon_assets: frozenset[str]
+    directory_fingerprints: tuple[tuple[str, int, int, int, int], ...]
+
+
+class _PublicAssetAuthorizationCache:
+    """Bounded, disposable cache for one application's public asset policy."""
+
+    def __init__(self, max_entries: int):
+        if max_entries <= 0:
+            raise ValueError("public asset authorization cache must be positive")
+        self.max_entries = max_entries
+        self._entries: OrderedDict[
+            tuple[str, str, str, str], _PublicAssetAuthorizationSnapshot
+        ] = OrderedDict()
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _directories_are_current(
+        fingerprints: tuple[tuple[str, int, int, int, int], ...],
+    ) -> bool:
+        for path, device, inode, modified_ns, changed_ns in fingerprints:
+            try:
+                metadata = os.stat(path, follow_symlinks=False)
+            except OSError:
+                return False
+            if (
+                metadata.st_dev,
+                metadata.st_ino,
+                metadata.st_mtime_ns,
+                metadata.st_ctime_ns,
+            ) != (device, inode, modified_ns, changed_ns):
+                return False
+        return True
+
+    def get_or_create(
+        self,
+        key: tuple[str, str, str, str],
+        entrypoint_identity: tuple[int, int, int, int, int],
+        factory: Callable[[], _PublicAssetAuthorizationSnapshot],
+    ) -> _PublicAssetAuthorizationSnapshot:
+        with self._lock:
+            snapshot = self._entries.get(key)
+            if snapshot is not None:
+                if (
+                    snapshot.entrypoint_identity == entrypoint_identity
+                    and self._directories_are_current(
+                        snapshot.directory_fingerprints
+                    )
+                ):
+                    self._entries.move_to_end(key)
+                    return snapshot
+                self._entries.pop(key, None)
+
+            # Build under the cache lock so a cold burst cannot duplicate the
+            # bounded read and AST parse for one application.
+            snapshot = factory()
+            self._entries[key] = snapshot
+            self._entries.move_to_end(key)
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
+        return snapshot
+
+
+def _directory_fingerprint(path: str) -> tuple[str, int, int, int, int]:
+    metadata = os.stat(path, follow_symlinks=False)
+    return (
+        path,
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
 def _configured_public_asset_patterns(application: str) -> tuple[str, ...]:
     raw_patterns = os.getenv("PYTINCTURE_PUBLIC_ASSET_PATHS", "").strip()
     if not raw_patterns:
@@ -2591,10 +2676,8 @@ def _configured_public_asset_patterns(application: str) -> tuple[str, ...]:
 
 
 def _declared_app_asset_allowed(
-    application: str,
     relative_path: str,
-    entrypoint_path: str,
-    entrypoint_source: str,
+    snapshot: _PublicAssetAuthorizationSnapshot,
 ) -> bool:
     if not browser_asset_path_is_safe(relative_path):
         return False
@@ -2604,19 +2687,12 @@ def _declared_app_asset_allowed(
 
     configured_public = any(
         fnmatch.fnmatch(relative_path, pattern)
-        for pattern in _configured_public_asset_patterns(application)
+        for pattern in snapshot.configured_patterns
     )
     if configured_public:
         return True
 
-    try:
-        favicon_assets = find_app_favicon_assets(
-            entrypoint_path,
-            source_code=entrypoint_source,
-        )
-    except OSError:
-        favicon_assets = []
-    if relative_path in favicon_assets and _is_favicon_asset(
+    if relative_path in snapshot.favicon_assets and _is_favicon_asset(
         os.path.basename(relative_path)
     ):
         return True
@@ -2625,7 +2701,7 @@ def _declared_app_asset_allowed(
         return False
     return configured_browser_asset_path_selected(
         relative_path,
-        os.getenv("PYTINCTURE_BROWSER_FILES", ""),
+        snapshot.browser_files,
     )
 
 
@@ -2638,6 +2714,75 @@ def _read_application_entrypoint(application: str, modules_root: str):
         )
     except (OSError, UnsafePath):
         raise HTTPException(status_code=404, detail="Asset not found") from None
+
+
+def _public_asset_authorization_snapshot(
+    application: str,
+    modules_root: str,
+) -> _PublicAssetAuthorizationSnapshot:
+    public_patterns = os.getenv("PYTINCTURE_PUBLIC_ASSET_PATHS", "").strip()
+    browser_files = os.getenv("PYTINCTURE_BROWSER_FILES", "")
+    key = (modules_root, application, public_patterns, browser_files)
+    try:
+        entrypoint_metadata = stat_contained_file(
+            modules_root,
+            f"{application}.py",
+            max_bytes=APPCODE_MAX_FILE_BYTES,
+        )
+    except (OSError, UnsafePath):
+        raise HTTPException(status_code=404, detail="Asset not found") from None
+    def build_snapshot() -> _PublicAssetAuthorizationSnapshot:
+        entrypoint = _read_application_entrypoint(application, modules_root)
+        try:
+            entrypoint_source = decode_python_source(entrypoint.content)
+        except (SyntaxError, UnicodeDecodeError):
+            raise HTTPException(status_code=404, detail="Asset not found") from None
+        try:
+            favicon_assets = frozenset(
+                find_app_favicon_assets(
+                    entrypoint.path,
+                    source_code=entrypoint_source,
+                )
+            )
+        except OSError:
+            favicon_assets = frozenset()
+
+        directories = [modules_root]
+        favicon_path = find_app_favicon(
+            entrypoint.path,
+            source_code=entrypoint_source,
+        )
+        if favicon_path:
+            try:
+                favicon_directory = resolve_contained_path(
+                    modules_root,
+                    favicon_path,
+                    require_file=False,
+                )
+            except UnsafePath:
+                pass
+            else:
+                directories.append(favicon_directory)
+        try:
+            directory_fingerprints = tuple(
+                _directory_fingerprint(path) for path in dict.fromkeys(directories)
+            )
+        except OSError:
+            directory_fingerprints = (_directory_fingerprint(modules_root),)
+
+        return _PublicAssetAuthorizationSnapshot(
+            entrypoint_identity=entrypoint.identity,
+            configured_patterns=_configured_public_asset_patterns(application),
+            browser_files=browser_files,
+            favicon_assets=favicon_assets,
+            directory_fingerprints=directory_fingerprints,
+        )
+
+    return PUBLIC_ASSET_AUTHORIZATION_CACHE.get_or_create(
+        key,
+        entrypoint_metadata.identity,
+        build_snapshot,
+    )
 
 
 def _public_asset_response_headers(
@@ -2673,19 +2818,24 @@ def _resolve_public_asset(
     modules_root: str,
 ):
     """Authorize an asset and return metadata without reading its body."""
-    entrypoint = _read_application_entrypoint(application, modules_root)
-    try:
-        entrypoint_source = decode_python_source(entrypoint.content)
-    except (SyntaxError, UnicodeDecodeError):
-        raise HTTPException(status_code=404, detail="Asset not found") from None
-    asset_allowed = _declared_app_asset_allowed(
-        application,
-        normalized,
-        entrypoint.path,
-        entrypoint_source,
-    ) or _application_widget_wheel_allowed(
-        application, normalized, modules_root
-    )
+    if normalized.lower().endswith(".whl"):
+        try:
+            stat_contained_file(
+                modules_root,
+                f"{application}.py",
+                max_bytes=APPCODE_MAX_FILE_BYTES,
+            )
+        except (OSError, UnsafePath):
+            raise HTTPException(status_code=404, detail="Asset not found") from None
+        asset_allowed = _application_widget_wheel_allowed(
+            application, normalized, modules_root
+        )
+    else:
+        snapshot = _public_asset_authorization_snapshot(application, modules_root)
+        asset_allowed = _declared_app_asset_allowed(
+            normalized,
+            snapshot,
+        )
     if not asset_allowed:
         raise HTTPException(status_code=404, detail="Asset not found")
     try:
@@ -2771,7 +2921,19 @@ async def _public_file_response(
     max_bytes: int | None = None,
     digest_cache: SecureFileDigestCache | None = None,
     on_finish: Callable[[], None] | None = None,
+    max_seconds: float | None = None,
+    write_timeout_seconds: float | None = None,
 ):
+    finished = False
+
+    def finish_once() -> None:
+        nonlocal finished
+        if finished:
+            return
+        finished = True
+        if on_finish is not None:
+            on_finish()
+
     media_type = mimetypes.guess_type(metadata.path)[0] or "application/octet-stream"
     cached_digest = digest_cache.get(metadata) if include_digest and digest_cache else None
     metadata_headers = _public_asset_response_headers(
@@ -2814,7 +2976,7 @@ async def _public_file_response(
                 try:
                     digest = await asyncio.shield(digest_task)
                 except asyncio.CancelledError:
-                    _defer_public_asset_finish(handle, digest_task, on_finish)
+                    _defer_public_asset_finish(handle, digest_task, finish_once)
                     handle = None
                     release_on_return = False
                     raise
@@ -2830,14 +2992,75 @@ async def _public_file_response(
                 await run_in_threadpool(handle.close)
             raise HTTPException(status_code=404, detail="Asset not found") from None
         release_on_return = False
-        return StreamingResponse(
-            _stream_public_asset(handle, on_finish=on_finish),
+        content = _stream_public_asset(handle, on_finish=finish_once)
+
+        async def close_unstarted_source() -> None:
+            await _finish_public_asset_worker(handle, None, finish_once)
+
+        return BoundedStreamingResponse(
+            content,
             media_type=media_type,
             headers=headers,
+            max_seconds=max_seconds or PUBLIC_ASSET_MAX_SECONDS,
+            write_timeout_seconds=(
+                write_timeout_seconds or PUBLIC_ASSET_WRITE_TIMEOUT_SECONDS
+            ),
+            on_send_timeout=lambda _reason, _sent_bytes: finish_once(),
+            close_unstarted_source=close_unstarted_source,
         )
     finally:
-        if release_on_return and on_finish is not None:
-            on_finish()
+        if release_on_return:
+            finish_once()
+
+
+async def _admit_public_asset(
+    request: Request,
+    application: str,
+) -> Callable[[], None]:
+    """Apply cheap per-peer and worker admission before filesystem work."""
+    peer = request.client.host if request.client is not None else "unknown"
+    allowed, retry_after = PUBLIC_ASSET_RATE_LIMITER.allow(
+        f"{peer}:{application}"
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Public asset rate limit exceeded",
+            headers={"Retry-After": str(retry_after)},
+        )
+    peer_key = f"{peer}:{application}"
+    if not PUBLIC_ASSET_PEER_GATE.try_acquire(peer_key):
+        raise HTTPException(
+            status_code=429,
+            detail="Public asset per-peer concurrency exceeded",
+            headers={"Retry-After": "1"},
+        )
+    try:
+        await PUBLIC_ASSET_GATE.acquire()
+    except AdmissionRejected as exc:
+        PUBLIC_ASSET_PEER_GATE.release(peer_key)
+        raise HTTPException(
+            status_code=503,
+            detail="Public asset capacity is temporarily exhausted",
+            headers={"Retry-After": "1"},
+        ) from exc
+    except BaseException:
+        PUBLIC_ASSET_PEER_GATE.release(peer_key)
+        raise
+
+    released = False
+
+    def release_once() -> None:
+        nonlocal released
+        if released:
+            return
+        released = True
+        try:
+            PUBLIC_ASSET_GATE.release()
+        finally:
+            PUBLIC_ASSET_PEER_GATE.release(peer_key)
+
+    return release_once
 
 
 def _application_widget_wheel_allowed(
@@ -2892,54 +3115,80 @@ async def public_app_asset(request: Request, application: str, asset_path: str):
         raise HTTPException(status_code=404, detail="Asset not found")
     if any(part.startswith(".") for part in normalized.split("/")):
         raise HTTPException(status_code=404, detail="Asset not found")
+    release_public_asset = await _admit_public_asset(request, application)
+    release_on_return = True
     modules_root = os.path.realpath(get_modules_path())
     try:
-        metadata = await run_in_threadpool(
-            _resolve_public_asset,
-            application,
-            normalized,
-            modules_root,
+        try:
+            metadata = await run_in_threadpool(
+                _resolve_public_asset,
+                application,
+                normalized,
+                modules_root,
+            )
+        except (OSError, UnsafePath):
+            raise HTTPException(status_code=404, detail="Asset not found")
+        is_widget_wheel = normalized.lower().endswith(".whl")
+        if not is_widget_wheel:
+            if metadata.size > PUBLIC_ASSET_MAX_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Public asset exceeds configured size limit",
+                )
+            response = await _public_file_response(
+                request,
+                modules_root,
+                normalized,
+                metadata,
+                max_bytes=PUBLIC_ASSET_MAX_BYTES,
+                on_finish=release_public_asset,
+            )
+            release_on_return = False
+            return response
+        if metadata.size > PUBLIC_WIDGET_WHEEL_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Widget wheel exceeds configured size limit")
+        peer = request.client.host if request.client is not None else "unknown"
+        allowed, retry_after = PUBLIC_WIDGET_WHEEL_RATE_LIMITER.allow(
+            f"{peer}:{application}"
         )
-    except (OSError, UnsafePath):
-        raise HTTPException(status_code=404, detail="Asset not found")
-    is_widget_wheel = normalized.lower().endswith(".whl")
-    if not is_widget_wheel:
-        return await _public_file_response(
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail="Widget wheel rate limit exceeded",
+                headers={"Retry-After": str(retry_after)},
+            )
+        try:
+            await PUBLIC_WIDGET_WHEEL_GATE.acquire()
+        except AdmissionRejected as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Widget wheel capacity is temporarily exhausted",
+                headers={"Retry-After": "1"},
+            ) from exc
+        release_widget = True
+
+        def release_wheel_and_public() -> None:
+            nonlocal release_widget
+            if release_widget:
+                release_widget = False
+                PUBLIC_WIDGET_WHEEL_GATE.release()
+            release_public_asset()
+
+        response = await _public_file_response(
             request,
             modules_root,
             normalized,
             metadata,
+            include_digest=True,
+            max_bytes=PUBLIC_WIDGET_WHEEL_MAX_BYTES,
+            digest_cache=PUBLIC_WIDGET_WHEEL_DIGEST_CACHE,
+            on_finish=release_wheel_and_public,
         )
-    if metadata.size > PUBLIC_WIDGET_WHEEL_MAX_BYTES:
-        raise HTTPException(status_code=413, detail="Widget wheel exceeds configured size limit")
-    peer = request.client.host if request.client is not None else "unknown"
-    allowed, retry_after = PUBLIC_WIDGET_WHEEL_RATE_LIMITER.allow(
-        f"{peer}:{application}"
-    )
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail="Widget wheel rate limit exceeded",
-            headers={"Retry-After": str(retry_after)},
-        )
-    try:
-        await PUBLIC_WIDGET_WHEEL_GATE.acquire()
-    except AdmissionRejected as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Widget wheel capacity is temporarily exhausted",
-            headers={"Retry-After": "1"},
-        ) from exc
-    return await _public_file_response(
-        request,
-        modules_root,
-        normalized,
-        metadata,
-        include_digest=True,
-        max_bytes=PUBLIC_WIDGET_WHEEL_MAX_BYTES,
-        digest_cache=PUBLIC_WIDGET_WHEEL_DIGEST_CACHE,
-        on_finish=PUBLIC_WIDGET_WHEEL_GATE.release,
-    )
+        release_on_return = False
+        return response
+    finally:
+        if release_on_return:
+            release_public_asset()
 
 
 async def _bounded_bff_result(
@@ -3829,6 +4078,36 @@ APPCODE_BUILD_MAX_CONCURRENCY = int(os.getenv("APPCODE_BUILD_MAX_CONCURRENCY", "
 APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS = float(
     os.getenv("APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS", "1")
 )
+PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES = int(
+    os.getenv("PYTINCTURE_PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES", "128")
+)
+PUBLIC_ASSET_MAX_BYTES = int(
+    os.getenv("PYTINCTURE_PUBLIC_ASSET_MAX_BYTES", str(64 * 1024 * 1024))
+)
+PUBLIC_ASSET_MAX_CONCURRENCY = int(
+    os.getenv("PYTINCTURE_PUBLIC_ASSET_MAX_CONCURRENCY", "128")
+)
+PUBLIC_ASSET_MAX_CONCURRENCY_PER_PEER = int(
+    os.getenv("PYTINCTURE_PUBLIC_ASSET_MAX_CONCURRENCY_PER_PEER", "64")
+)
+PUBLIC_ASSET_MAX_QUEUE = int(
+    os.getenv("PYTINCTURE_PUBLIC_ASSET_MAX_QUEUE", "256")
+)
+PUBLIC_ASSET_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("PYTINCTURE_PUBLIC_ASSET_QUEUE_TIMEOUT_SECONDS", "1")
+)
+PUBLIC_ASSET_RATE_LIMIT_ATTEMPTS = int(
+    os.getenv("PYTINCTURE_PUBLIC_ASSET_RATE_LIMIT_ATTEMPTS", "60000")
+)
+PUBLIC_ASSET_RATE_LIMIT_WINDOW_SECONDS = int(
+    os.getenv("PYTINCTURE_PUBLIC_ASSET_RATE_LIMIT_WINDOW_SECONDS", "60")
+)
+PUBLIC_ASSET_MAX_SECONDS = float(
+    os.getenv("PYTINCTURE_PUBLIC_ASSET_MAX_SECONDS", "300")
+)
+PUBLIC_ASSET_WRITE_TIMEOUT_SECONDS = float(
+    os.getenv("PYTINCTURE_PUBLIC_ASSET_WRITE_TIMEOUT_SECONDS", "30")
+)
 PUBLIC_WIDGET_WHEEL_MAX_BYTES = int(
     os.getenv("PYTINCTURE_WIDGET_WHEEL_MAX_BYTES", str(64 * 1024 * 1024))
 )
@@ -3877,6 +4156,15 @@ if min(
     APPCODE_CACHE_MAX_BYTES,
     APPCODE_BUILD_MAX_CONCURRENCY,
     APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS,
+    PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES,
+    PUBLIC_ASSET_MAX_BYTES,
+    PUBLIC_ASSET_MAX_CONCURRENCY,
+    PUBLIC_ASSET_MAX_CONCURRENCY_PER_PEER,
+    PUBLIC_ASSET_QUEUE_TIMEOUT_SECONDS,
+    PUBLIC_ASSET_RATE_LIMIT_ATTEMPTS,
+    PUBLIC_ASSET_RATE_LIMIT_WINDOW_SECONDS,
+    PUBLIC_ASSET_MAX_SECONDS,
+    PUBLIC_ASSET_WRITE_TIMEOUT_SECONDS,
     PUBLIC_WIDGET_WHEEL_MAX_BYTES,
     PUBLIC_WIDGET_WHEEL_DIGEST_CACHE_ENTRIES,
     PUBLIC_WIDGET_WHEEL_MAX_CONCURRENCY,
@@ -3887,6 +4175,8 @@ if min(
     raise RuntimeError("BFF timeout and stream limits must be greater than zero")
 if BFF_MAX_QUEUE < 0:
     raise RuntimeError("BFF_MAX_QUEUE cannot be negative")
+if PUBLIC_ASSET_MAX_QUEUE < 0:
+    raise RuntimeError("PYTINCTURE_PUBLIC_ASSET_MAX_QUEUE cannot be negative")
 if PUBLIC_WIDGET_WHEEL_MAX_QUEUE < 0:
     raise RuntimeError("PYTINCTURE_WIDGET_WHEEL_MAX_QUEUE cannot be negative")
 if BFF_EXECUTION_MODE not in {"trusted-thread", "isolated-process"}:
@@ -3903,6 +4193,22 @@ APPCODE_ARCHIVE_CACHE = AppcodeArchiveCache(
     APPCODE_CACHE_MAX_BYTES,
 )
 APPCODE_BUILD_GATE = threading.BoundedSemaphore(APPCODE_BUILD_MAX_CONCURRENCY)
+PUBLIC_ASSET_AUTHORIZATION_CACHE = _PublicAssetAuthorizationCache(
+    PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES
+)
+PUBLIC_ASSET_GATE = AsyncAdmissionGate(
+    PUBLIC_ASSET_MAX_CONCURRENCY,
+    PUBLIC_ASSET_MAX_QUEUE,
+    PUBLIC_ASSET_QUEUE_TIMEOUT_SECONDS,
+)
+PUBLIC_ASSET_PEER_GATE = KeyedConcurrencyGate(
+    PUBLIC_ASSET_MAX_CONCURRENCY_PER_PEER,
+    PUBLIC_ASSET_MAX_CONCURRENCY + PUBLIC_ASSET_MAX_QUEUE,
+)
+PUBLIC_ASSET_RATE_LIMITER = SlidingWindowRateLimiter(
+    PUBLIC_ASSET_RATE_LIMIT_ATTEMPTS,
+    PUBLIC_ASSET_RATE_LIMIT_WINDOW_SECONDS,
+)
 PUBLIC_WIDGET_WHEEL_GATE = AsyncAdmissionGate(
     PUBLIC_WIDGET_WHEEL_MAX_CONCURRENCY,
     PUBLIC_WIDGET_WHEEL_MAX_QUEUE,
@@ -5886,28 +6192,53 @@ async def configured_favicon_asset(
 
     try:
         validate_application_name(application)
-        await run_in_threadpool(
-            _read_application_entrypoint, application, get_modules_path()
-        )
-    except (HTTPException, ValueError):
+    except ValueError:
         raise HTTPException(status_code=404, detail="Favicon asset not found") from None
 
-    favicon_directory = _get_configured_favicon_directory(application)
-    if favicon_directory is None:
-        raise HTTPException(status_code=404, detail="Favicon asset not found")
-
+    release_public_asset = await _admit_public_asset(request, application)
+    release_on_return = True
     try:
-        metadata = await run_in_threadpool(
-            stat_contained_file, favicon_directory, asset_name
+        try:
+            await run_in_threadpool(
+                stat_contained_file,
+                get_modules_path(),
+                f"{application}.py",
+                max_bytes=APPCODE_MAX_FILE_BYTES,
+            )
+        except (OSError, UnsafePath):
+            raise HTTPException(
+                status_code=404,
+                detail="Favicon asset not found",
+            ) from None
+
+        favicon_directory = _get_configured_favicon_directory(application)
+        if favicon_directory is None:
+            raise HTTPException(status_code=404, detail="Favicon asset not found")
+
+        try:
+            metadata = await run_in_threadpool(
+                stat_contained_file, favicon_directory, asset_name
+            )
+        except (OSError, UnsafePath):
+            raise HTTPException(status_code=404, detail="Favicon asset not found")
+        if metadata.size > PUBLIC_ASSET_MAX_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Favicon asset exceeds configured size limit",
+            )
+        response = await _public_file_response(
+            request,
+            favicon_directory,
+            asset_name,
+            metadata,
+            max_bytes=PUBLIC_ASSET_MAX_BYTES,
+            on_finish=release_public_asset,
         )
-    except (OSError, UnsafePath):
-        raise HTTPException(status_code=404, detail="Favicon asset not found")
-    return await _public_file_response(
-        request,
-        favicon_directory,
-        asset_name,
-        metadata,
-    )
+        release_on_return = False
+        return response
+    finally:
+        if release_on_return:
+            release_public_asset()
 
 
 async def _authorize_api_documentation(request: Request) -> None:

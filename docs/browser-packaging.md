@@ -85,6 +85,15 @@ and ETag metadata without reading the asset body. Authorized widget-wheel GET
 responses additionally compute and return `X-Pytincture-SHA256` incrementally;
 the browser uses that value to create the hash-locked micropip URL. HEAD does
 not hash or return the wheel digest.
+
+Public-asset authorization is cached per worker using the application's secure
+entrypoint identity and current declaration settings. Source or directory
+changes invalidate it automatically, while same-name asset content is always
+opened and verified anew. Delivery has generous configurable concurrency,
+per-peer concurrency and rate, size, total-duration, and blocked-write limits.
+These caches and limits are disposable worker-local controls: they require no
+Redis, sticky routing, or persistent server state. Large media can raise the
+defaults or use an object store/CDN designed for that workload.
 `PYTINCTURE_PUBLIC_ASSET_PATHS` controls direct HTTP exposure only—use the
 narrowest setting for each. SVG remains supported for declared application
 assets and favicons, but its response receives a no-script sandbox CSP and

@@ -224,6 +224,16 @@ The contract test checks every row in this table against the dataclass model.
 | `appcode_cache_max_bytes` | `APPCODE_CACHE_MAX_BYTES` | Aggregate byte limit for the per-worker browser archive cache. |
 | `appcode_build_max_concurrency` | `APPCODE_BUILD_MAX_CONCURRENCY` | Concurrent archive builds per worker. |
 | `appcode_build_queue_timeout_seconds` | `APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS` | Maximum archive build admission wait. |
+| `public_asset_authorization_cache_entries` | `PYTINCTURE_PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES` | Per-worker public-asset authorization cache entries. |
+| `public_asset_max_bytes` | `PYTINCTURE_PUBLIC_ASSET_MAX_BYTES` | Maximum bytes in one directly served public asset. |
+| `public_asset_max_concurrency` | `PYTINCTURE_PUBLIC_ASSET_MAX_CONCURRENCY` | Concurrent public-asset responses per worker. |
+| `public_asset_max_concurrency_per_peer` | `PYTINCTURE_PUBLIC_ASSET_MAX_CONCURRENCY_PER_PEER` | Concurrent public-asset responses per peer/application and worker. |
+| `public_asset_max_queue` | `PYTINCTURE_PUBLIC_ASSET_MAX_QUEUE` | Maximum queued public-asset responses per worker. |
+| `public_asset_queue_timeout_seconds` | `PYTINCTURE_PUBLIC_ASSET_QUEUE_TIMEOUT_SECONDS` | Maximum public-asset admission wait. |
+| `public_asset_rate_limit_attempts` | `PYTINCTURE_PUBLIC_ASSET_RATE_LIMIT_ATTEMPTS` | Public-asset requests allowed per peer/application window and worker. |
+| `public_asset_rate_limit_window_seconds` | `PYTINCTURE_PUBLIC_ASSET_RATE_LIMIT_WINDOW_SECONDS` | Public-asset request rate-limit window. |
+| `public_asset_max_seconds` | `PYTINCTURE_PUBLIC_ASSET_MAX_SECONDS` | Maximum total duration of one public-asset response. |
+| `public_asset_write_timeout_seconds` | `PYTINCTURE_PUBLIC_ASSET_WRITE_TIMEOUT_SECONDS` | Maximum blocked write time for each public-asset frame. |
 | `dev_wheel_version` | `PYTINCTURE_DEV_WHEEL_VERSION` | Explicit development widget-wheel fallback version. |
 | `public_widget_wheel_max_bytes` | `PYTINCTURE_WIDGET_WHEEL_MAX_BYTES` | Maximum bytes in one backend-served widget wheel. |
 | `public_widget_wheel_digest_cache_entries` | `PYTINCTURE_WIDGET_WHEEL_DIGEST_CACHE_ENTRIES` | Per-worker verified widget-wheel digest cache entries. |
