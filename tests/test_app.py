@@ -3154,6 +3154,110 @@ def test_class_call_uses_optional_process_isolation_when_configured(
     assert stream_response.status_code == 501
 
 
+def test_isolated_process_fairness_uses_stable_hmac_identity():
+    import pytincture.backend.app as backend_app
+
+    def request(session_id):
+        return Request({
+            "type": "http",
+            "headers": [],
+            "client": ("203.0.113.8", 50000),
+            "session": {"session_id": session_id},
+        })
+
+    first_session = request("session-one")
+    second_session = request("session-two")
+    stable_user = {
+        "is_authenticated": True,
+        "auth_provider": "microsoft",
+        "issuer": "https://login.microsoftonline.com/tenant/v2.0",
+        "tenant": "TENANT",
+        "subject": "immutable-user-id",
+        "email": "mutable@example.com",
+    }
+    first_key = backend_app._isolated_bff_subject(first_session, stable_user)
+    second_key = backend_app._isolated_bff_subject(second_session, {
+        **stable_user,
+        "email": "changed@example.com",
+    })
+
+    assert first_key == second_key
+    assert len(first_key) == 64
+    assert "immutable-user-id" not in first_key
+    assert first_key != backend_app._isolated_bff_subject(
+        request("session-three"),
+        {**stable_user, "subject": "different-user-id"},
+    )
+
+    local_key = backend_app._isolated_bff_subject(first_session, {
+        "is_authenticated": True,
+        "auth_provider": "user",
+        "email": "Person@Example.com",
+    })
+    assert local_key == backend_app._isolated_bff_subject(second_session, {
+        "is_authenticated": True,
+        "auth_provider": "user",
+        "email": " person@example.COM ",
+    })
+    unidentified_external = {
+        "is_authenticated": True,
+        "auth_provider": "custom-oidc",
+        "issuer": "https://issuer.example",
+        "email": "first@example.com",
+    }
+    assert backend_app._isolated_bff_subject(
+        first_session,
+        unidentified_external,
+    ) == backend_app._isolated_bff_subject(second_session, {
+        **unidentified_external,
+        "email": "second@example.com",
+    })
+
+
+def test_multiple_sessions_share_one_isolated_process_fairness_quota():
+    import pytincture.backend.app as backend_app
+    from pytincture.backend.execution import (
+        IsolatedExecutionRejected,
+        ProcessIsolatedBFFExecutor,
+    )
+
+    executor = ProcessIsolatedBFFExecutor(
+        max_concurrency=2,
+        max_per_user=1,
+        cpu_seconds=2,
+        memory_bytes=64 * 1024 * 1024 * 1024,
+        result_max_bytes=1024,
+        result_max_depth=8,
+        result_max_items=100,
+    )
+    user = {
+        "is_authenticated": True,
+        "auth_provider": "google",
+        "issuer": "https://accounts.google.com",
+        "subject": "stable-subject",
+        "email": "person@example.com",
+    }
+    first = Request({
+        "type": "http",
+        "headers": [],
+        "session": {"session_id": "first-session"},
+    })
+    second = Request({
+        "type": "http",
+        "headers": [],
+        "session": {"session_id": "second-session"},
+    })
+    first_key = backend_app._isolated_bff_subject(first, user)
+    second_key = backend_app._isolated_bff_subject(second, user)
+
+    executor._acquire(first_key)
+    try:
+        with pytest.raises(IsolatedExecutionRejected, match="per-identity"):
+            executor._acquire(second_key)
+    finally:
+        executor._release(first_key)
+
+
 def test_timed_out_sync_bff_holds_capacity_until_worker_recovers(monkeypatch):
     import time
     from starlette.requests import Request

@@ -149,10 +149,12 @@ must keep the default or create that resource inside the worker-thread call.
 
 `BFF_EXECUTION_MODE=isolated-process` is an explicit harder boundary
 for non-streaming methods: each call runs in a killable child with per-worker
-and per-user admission, wall-time, CPU, memory where the operating system
-supports it, and serialized-output limits. Streaming operations return `501`
-in this optional mode. Process isolation is not required for ordinary trusted
-BFF modules and does not change their browser API.
+and per-identity admission, wall-time, CPU, memory where the operating system
+supports it, and serialized-output limits. Per-identity fairness uses a stable,
+opaque key, so opening more sessions does not multiply process capacity.
+Streaming operations return `501` in this optional mode. Process isolation is
+not required for ordinary trusted BFF modules and does not change their browser
+API.
 
 ## Generated proxy behavior
 

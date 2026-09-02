@@ -530,7 +530,7 @@ class PytinctureConfig:
     bff_isolated_max_per_user: int = _setting(
         2,
         "BFF_ISOLATED_MAX_PER_USER",
-        "Concurrent optional isolated BFF child processes per user.",
+        "Concurrent optional isolated BFF child processes per stable authenticated identity. Multiple sessions share this allowance.",
     )
     bff_isolated_cpu_seconds: float = _setting(
         30.0,
