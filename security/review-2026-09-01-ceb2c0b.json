@@ -59,9 +59,16 @@
     {
       "id": "PT-04",
       "severity": "medium",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/291",
       "disposition": "Bound each blocked streaming response write and release stream admission exactly once after timeout.",
+      "implementation": "Every ASGI stream frame is sent under the independent BFF_STREAM_WRITE_TIMEOUT_SECONDS deadline. Timeout completes admission once and closes the bounded iterator; each successfully moving frame receives a fresh deadline.",
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_stream_write_timeout_closes_source_and_finishes_once",
+        "tests/test_backend_modules.py::test_stream_write_timeout_resets_while_chunks_keep_moving",
+        "tests/test_backend_modules.py::test_stream_header_write_timeout_closes_unstarted_source",
+        "tests/test_backend_modules.py::test_blocked_stream_send_cannot_outlive_absolute_stream_deadline"
+      ],
       "potential_user_breakage": true,
       "compatibility_note": "Generators, async generators, yield, moving chunks, and long-running streams remain supported; only a blocked client write is disconnected."
     },

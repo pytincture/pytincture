@@ -499,6 +499,11 @@ class PytinctureConfig:
     bff_stream_idle_timeout_seconds: float = _setting(
         30.0, "BFF_STREAM_IDLE_TIMEOUT_SECONDS", "Maximum wait between stream items."
     )
+    bff_stream_write_timeout_seconds: float = _setting(
+        30.0,
+        "BFF_STREAM_WRITE_TIMEOUT_SECONDS",
+        "Maximum blocked write time for each BFF stream frame.",
+    )
     appcode_max_files: int = _setting(
         512, "APPCODE_MAX_FILES", "Maximum files in one browser archive."
     )
@@ -807,6 +812,7 @@ class PytinctureConfig:
             self.bff_stream_max_bytes,
             self.bff_stream_max_items,
             self.bff_stream_idle_timeout_seconds,
+            self.bff_stream_write_timeout_seconds,
             self.appcode_max_files,
             self.appcode_max_file_bytes,
             self.appcode_max_total_bytes,
@@ -841,6 +847,7 @@ class PytinctureConfig:
             self.bff_isolated_cpu_seconds,
             self.bff_stream_max_seconds,
             self.bff_stream_idle_timeout_seconds,
+            self.bff_stream_write_timeout_seconds,
             self.appcode_build_queue_timeout_seconds,
             self.public_widget_wheel_queue_timeout_seconds,
             self.remote_store_timeout_seconds,
@@ -1187,7 +1194,8 @@ class PytinctureConfig:
             "bff_queue_timeout_seconds", "bff_request_ingress_timeout_seconds",
             "bff_stream_max_seconds",
             "bff_isolated_cpu_seconds",
-            "bff_stream_idle_timeout_seconds", "remote_store_timeout_seconds",
+            "bff_stream_idle_timeout_seconds", "bff_stream_write_timeout_seconds",
+            "remote_store_timeout_seconds",
             "remote_store_cooldown_seconds", "remote_store_queue_timeout_seconds",
             "readiness_cache_ttl_seconds", "saml_validation_queue_timeout_seconds",
             "saml_validation_timeout_seconds", "appcode_build_queue_timeout_seconds",

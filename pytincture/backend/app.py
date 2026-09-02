@@ -3255,6 +3255,7 @@ async def class_call(
                 max_bytes=BFF_STREAM_MAX_BYTES,
                 max_items=BFF_STREAM_MAX_ITEMS,
                 idle_timeout_seconds=BFF_STREAM_IDLE_TIMEOUT_SECONDS,
+                write_timeout_seconds=BFF_STREAM_WRITE_TIMEOUT_SECONDS,
                 on_finish=log_stream_finish,
             )
             request.state.bff_stream_owns_slot = True
@@ -3814,6 +3815,9 @@ BFF_STREAM_MAX_SECONDS = float(os.getenv("BFF_STREAM_MAX_SECONDS", "300"))
 BFF_STREAM_MAX_BYTES = int(os.getenv("BFF_STREAM_MAX_BYTES", str(10 * 1024 * 1024)))
 BFF_STREAM_MAX_ITEMS = int(os.getenv("BFF_STREAM_MAX_ITEMS", "10000"))
 BFF_STREAM_IDLE_TIMEOUT_SECONDS = float(os.getenv("BFF_STREAM_IDLE_TIMEOUT_SECONDS", "30"))
+BFF_STREAM_WRITE_TIMEOUT_SECONDS = float(
+    os.getenv("BFF_STREAM_WRITE_TIMEOUT_SECONDS", "30")
+)
 APPCODE_MAX_FILES = int(os.getenv("APPCODE_MAX_FILES", "512"))
 APPCODE_MAX_FILE_BYTES = int(os.getenv("APPCODE_MAX_FILE_BYTES", str(4 * 1024 * 1024)))
 APPCODE_MAX_TOTAL_BYTES = int(os.getenv("APPCODE_MAX_TOTAL_BYTES", str(32 * 1024 * 1024)))
@@ -3865,6 +3869,7 @@ if min(
     BFF_STREAM_MAX_BYTES,
     BFF_STREAM_MAX_ITEMS,
     BFF_STREAM_IDLE_TIMEOUT_SECONDS,
+    BFF_STREAM_WRITE_TIMEOUT_SECONDS,
     APPCODE_MAX_FILES,
     APPCODE_MAX_FILE_BYTES,
     APPCODE_MAX_TOTAL_BYTES,
