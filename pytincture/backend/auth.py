@@ -1,6 +1,7 @@
 """Authentication primitives without application-global configuration."""
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 SENSITIVE_USER_CLAIM_KEYS = {
@@ -19,6 +20,14 @@ _DUMMY_PASSWORD_HASH = (
 )
 
 
+@dataclass(frozen=True)
+class PasswordHashVerification:
+    """Result of verifying one stored hash, including an optional safe upgrade."""
+
+    authenticated: bool
+    replacement_hash: str | None = None
+
+
 def allowed_email(email: str, allowed_emails: str) -> bool:
     """Check a normalized email against an optional comma-separated allowlist."""
     configured = {
@@ -27,8 +36,84 @@ def allowed_email(email: str, allowed_emails: str) -> bool:
     return not configured or email.casefold() in configured
 
 
+def _argon2_password_hasher():
+    try:
+        from argon2 import PasswordHasher
+    except ImportError as exc:
+        raise RuntimeError(
+            "Local password authentication requires optional dependencies; "
+            "install pytincture[password]"
+        ) from exc
+    return PasswordHasher()
+
+
+def _verify_argon2_hash(encoded_hash: str, password: str) -> bool:
+    try:
+        from argon2.exceptions import VerificationError
+    except ImportError as exc:
+        raise RuntimeError(
+            "Local password authentication requires optional dependencies; "
+            "install pytincture[password]"
+        ) from exc
+
+    try:
+        return bool(_argon2_password_hasher().verify(encoded_hash, password))
+    except (VerificationError, ValueError, TypeError):
+        return False
+
+
+def _verify_bcrypt_hash(encoded_hash: str, password: str) -> bool:
+    password_bytes = password.encode("utf-8")
+    if len(password_bytes) > 72:
+        # bcrypt 5 rejects overlong input before doing expensive work. Use the
+        # same Argon2id dummy verification as an unknown account, then deny it.
+        _verify_argon2_hash(_DUMMY_PASSWORD_HASH, password)
+        return False
+    try:
+        import bcrypt
+    except ImportError as exc:
+        raise RuntimeError(
+            "Local password authentication requires optional dependencies; "
+            "install pytincture[password]"
+        ) from exc
+
+    try:
+        return bool(bcrypt.checkpw(password_bytes, encoded_hash.encode("utf-8")))
+    except (ValueError, TypeError):
+        return False
+
+
+def verify_password_hash(
+    password: str,
+    encoded_hash: str,
+    *,
+    generate_replacement: bool = True,
+) -> PasswordHashVerification:
+    """Verify one hash and optionally return an Argon2id replacement.
+
+    Credential stores that support writes can persist ``replacement_hash``
+    after successful authentication. Static ``AUTH_PASSWORD_HASHES`` values
+    remain immutable deployment configuration.
+    """
+    if encoded_hash.startswith("$argon2id$"):
+        authenticated = _verify_argon2_hash(encoded_hash, password)
+        replacement_hash = None
+        if authenticated and generate_replacement:
+            hasher = _argon2_password_hasher()
+            if hasher.check_needs_rehash(encoded_hash):
+                replacement_hash = hasher.hash(password)
+        return PasswordHashVerification(authenticated, replacement_hash)
+    if encoded_hash.startswith(("$2a$", "$2b$", "$2y$")):
+        authenticated = _verify_bcrypt_hash(encoded_hash, password)
+        replacement_hash = None
+        if authenticated and generate_replacement:
+            replacement_hash = _argon2_password_hasher().hash(password)
+        return PasswordHashVerification(authenticated, replacement_hash)
+    raise RuntimeError("Password hashes must be Argon2id or bcrypt")
+
+
 def verify_password(email: str, password: str, raw_hashes: str) -> bool:
-    """Verify Argon2id or bcrypt credentials with constant work for unknown users."""
+    """Verify configured credentials with equal oversized/unknown failure work."""
     if not raw_hashes.strip():
         raw_hashes = "{}"
     try:
@@ -42,38 +127,25 @@ def verify_password(email: str, password: str, raw_hashes: str) -> bool:
     )
     known_user = isinstance(configured_hash, str)
     encoded_hash = configured_hash if known_user else _DUMMY_PASSWORD_HASH
-    try:
-        if encoded_hash.startswith("$argon2id$"):
-            try:
-                from argon2 import PasswordHasher
-                from argon2.exceptions import VerificationError
-            except ImportError as exc:
-                raise RuntimeError(
-                    "Local password authentication requires optional dependencies; "
-                    "install pytincture[password]"
-                ) from exc
-
-            try:
-                verified = PasswordHasher().verify(encoded_hash, password)
-                return known_user and verified
-            except VerificationError:
-                return False
-        if encoded_hash.startswith(("$2a$", "$2b$", "$2y$")):
-            try:
-                import bcrypt
-            except ImportError as exc:
-                raise RuntimeError(
-                    "Local password authentication requires optional dependencies; "
-                    "install pytincture[password]"
-                ) from exc
-
-            verified = bcrypt.checkpw(
-                password.encode("utf-8"), encoded_hash.encode("utf-8")
-            )
-            return known_user and verified
-    except (ValueError, TypeError):
-        return False
-    raise RuntimeError("AUTH_PASSWORD_HASHES values must be Argon2id or bcrypt hashes")
+    if known_user and not encoded_hash.startswith(
+        ("$argon2id$", "$2a$", "$2b$", "$2y$")
+    ):
+        raise RuntimeError(
+            "AUTH_PASSWORD_HASHES values must be Argon2id or bcrypt hashes"
+        )
+    oversized_bcrypt = bool(
+        known_user
+        and encoded_hash.startswith(("$2a$", "$2b$", "$2y$"))
+        and len(password.encode("utf-8")) > 72
+    )
+    if oversized_bcrypt:
+        encoded_hash = _DUMMY_PASSWORD_HASH
+    result = verify_password_hash(
+        password,
+        encoded_hash,
+        generate_replacement=False,
+    )
+    return known_user and not oversized_bcrypt and result.authenticated
 
 
 def local_user_claims(email: str, raw_claims: str, source_name: str) -> dict[str, Any]:

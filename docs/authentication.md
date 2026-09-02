@@ -35,6 +35,17 @@ allowlist, not a password database. Hash values must be Argon2id or bcrypt:
 python -c 'from argon2 import PasswordHasher; print(PasswordHasher().hash("change-me"))'
 ```
 
+Argon2id is preferred for new hashes. Bcrypt remains compatible, including its
+72-byte input boundary: an oversized bcrypt attempt is rejected only after the
+same Argon2id dummy work used for an unknown account, preventing the fast-error
+account probe introduced by bcrypt 5. Credential stores implemented through
+`AUTH_USER_AUTHENTICATOR` may call
+`pytincture.backend.auth.verify_password_hash()` and, after successful
+authentication, atomically persist its optional `replacement_hash`. That value
+upgrades bcrypt (and outdated Argon2id parameters) to the current Argon2id
+policy. `AUTH_PASSWORD_HASHES` is static deployment configuration, so
+Pytincture never mutates it or keeps a process-local replacement.
+
 `ENABLE_DEV_EMAIL_LOGIN=true` bypasses password verification only when the
 actual network peer and direct browser-facing `Host` are literal loopback IP
 addresses. Any supplied `Origin` or `Referer` must also use a literal loopback
