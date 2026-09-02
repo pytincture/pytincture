@@ -3231,15 +3231,35 @@ async def _bounded_bff_result(
 
 
 def _isolated_bff_subject(request: Request, user: Any) -> str:
-    session_id = request.session.get("session_id")
-    if isinstance(session_id, str) and session_id:
-        return session_id
-    if isinstance(user, dict):
-        for key in ("subject", "sub", "email", "client_id"):
-            value = user.get(key)
-            if value:
-                return hashlib.sha256(str(value).encode("utf-8")).hexdigest()
-    return "noauth"
+    identity: list[str]
+    if isinstance(user, dict) and user.get("is_authenticated") is True:
+        provider = str(
+            user.get("auth_provider") or user.get("auth_type") or "authenticated"
+        ).strip().casefold()
+        issuer = str(user.get("issuer") or user.get("iss") or "").strip()
+        tenant = str(
+            user.get("tenant") or user.get("tenant_id") or user.get("tid") or ""
+        ).strip().casefold()
+        subject = str(user.get("subject") or user.get("sub") or "").strip()
+        if subject:
+            identity = ["subject", provider, issuer, tenant, subject]
+        elif provider in {"local", "password", "user"}:
+            email = str(user.get("email") or "").strip().casefold()
+            identity = ["local-email", provider, email]
+        else:
+            # External identities without an immutable subject share a
+            # conservative provider bucket instead of falling back to the
+            # attacker-refreshable session id or mutable email address.
+            identity = ["unidentified", provider, issuer, tenant]
+    else:
+        peer = request.client.host if request.client is not None else "unknown"
+        identity = ["anonymous-peer", str(peer)[:128]]
+    payload = _canonical_json_bytes(identity)
+    return hmac.new(
+        SAML_SECRET_KEY.encode("utf-8"),
+        b"pytincture-isolated-fairness-v1\x00" + payload,
+        hashlib.sha256,
+    ).hexdigest()
 
 
 @app.get("/{application}/classcall/{file_path:path}/{class_name}/{function_name}", operation_id="getApplicationClassCall", response_model=Any)

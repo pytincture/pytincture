@@ -253,9 +253,11 @@ executor for deployments that deliberately run less-trusted application code.
 Ordinary results are byte/depth/item bounded before a response is retained.
 Stream items are serialized under the remaining byte budget before being
 retained. The opt-in process executor provides killable wall-time execution,
-per-worker/per-user admission, CPU limits on POSIX, address-space limits on
-Linux, and the same output boundary. It intentionally rejects streaming BFFs;
-trusted mode remains the default and keeps current streaming/object behavior.
+per-worker/per-identity admission keyed by a stable HMAC, CPU limits on POSIX,
+address-space limits on Linux, and the same output boundary. It intentionally
+rejects streaming BFFs. Excess isolated calls fail fast instead of blocking a
+worker thread; the ordinary bounded BFF admission queue still applies.
+Trusted mode remains the default and keeps current streaming/object behavior.
 The child-to-parent channel is a bounded, versioned byte protocol carrying
 canonical JSON or fixed failure statuses. The parent never performs pickle or
 another executable deserialization operation on child-controlled bytes.

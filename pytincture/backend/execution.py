@@ -20,7 +20,7 @@ from pytincture.dataclass import verify_bff_runtime_export
 
 
 class IsolatedExecutionRejected(RuntimeError):
-    """Raised when bounded process or per-user capacity is exhausted."""
+    """Raised when bounded process or per-identity capacity is exhausted."""
 
 
 class IsolatedExecutionTimeout(RuntimeError):
@@ -238,7 +238,7 @@ class ProcessIsolatedBFFExecutor:
             current = self._user_counts.get(subject, 0)
             if current >= self.max_per_user:
                 self._capacity.release()
-                raise IsolatedExecutionRejected("isolated BFF per-user capacity is full")
+                raise IsolatedExecutionRejected("isolated BFF per-identity capacity is full")
             self._user_counts[subject] = current + 1
 
     def _release(self, subject: str) -> None:

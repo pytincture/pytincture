@@ -169,11 +169,17 @@
     {
       "id": "PT-12",
       "severity": "medium_conditional",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/298",
-      "disposition": "Key only isolated-process fairness to an HMAC-protected stable authenticated identity and use generous configurable concurrency with fair queuing.",
+      "disposition": "Key only isolated-process fairness to an HMAC-protected stable authenticated identity and retain configurable concurrency with bounded admission.",
+      "implementation": "The optional isolated-process executor now keys its per-identity active-call counter to a domain-separated HMAC over provider, issuer, tenant, and immutable subject. Built-in local authentication falls back to normalized email only when no subject exists. External identities without a subject share a conservative provider bucket instead of using mutable email or a refreshable session ID. Anonymous isolated calls use an HMAC-protected peer bucket.",
+      "regression_tests": [
+        "tests/test_app.py::test_isolated_process_fairness_uses_stable_hmac_identity",
+        "tests/test_app.py::test_multiple_sessions_share_one_isolated_process_fairness_quota",
+        "tests/test_backend_modules.py::test_optional_process_executor_enforces_per_user_and_output_limits"
+      ],
       "potential_user_breakage": true,
-      "compatibility_note": "Ordinary cooperative async BFF calls and normal async multitasking are not limited by this control."
+      "compatibility_note": "Multiple sessions for one authenticated identity share only the existing configurable isolated-process concurrency allowance. This is not a request-volume quota. Ordinary cooperative async/sync BFF calls, normal async multitasking, and streaming are unaffected; no shared storage, Redis, or sticky routing is required."
     },
     {
       "id": "PT-13",

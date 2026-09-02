@@ -581,7 +581,7 @@
       "status": "remediated",
       "title": "BFF result serialization is bounded and harder isolation is optional",
       "intentional_contract": "BFF modules remain deployment-trusted server application code. Trusted thread/async execution stays the simple default so normal object, async, and streaming behavior is preserved; process isolation is an explicit opt-in and is not required for ordinary BFFs.",
-      "security_boundary": "Ordinary JSON results are encoded under configurable byte, depth, and item limits before a response is retained. Stream items are encoded under the remaining byte budget before retention. Timed-out trusted threads retain their admission slot until exit. The optional non-streaming process executor has per-worker and per-user admission, killable wall time, CPU limits on POSIX, address-space limits on Linux, and the same output limits; it releases capacity after timeout so later work can recover.",
+      "security_boundary": "Ordinary JSON results are encoded under configurable byte, depth, and item limits before a response is retained. Stream items are encoded under the remaining byte budget before retention. Timed-out trusted threads retain their admission slot until exit. The optional non-streaming process executor has per-worker and per-identity admission keyed by a domain-separated HMAC over stable signed identity, killable wall time, CPU limits on POSIX, address-space limits on Linux, and the same output limits; it releases capacity after timeout so later work can recover.",
       "controls": {
         "ordinary_result_byte_limit": true,
         "ordinary_result_depth_limit": true,
@@ -595,6 +595,7 @@
         "optional_process_memory_limit_linux": true,
         "optional_process_output_limit": true,
         "optional_process_per_user_limit": true,
+        "optional_process_stable_identity_key": true,
         "isolated_streaming_supported": false,
         "redis_required": false
       },
@@ -616,6 +617,8 @@
         "tests/test_app.py::test_class_call_timeout_returns_gateway_timeout",
         "tests/test_app.py::test_timed_out_sync_bff_holds_capacity_until_worker_recovers",
         "tests/test_app.py::test_class_call_uses_optional_process_isolation_when_configured",
+        "tests/test_app.py::test_isolated_process_fairness_uses_stable_hmac_identity",
+        "tests/test_app.py::test_multiple_sessions_share_one_isolated_process_fairness_quota",
         "tests/test_configuration.py::test_trusted_bff_execution_remains_the_simple_default"
       ]
     },
