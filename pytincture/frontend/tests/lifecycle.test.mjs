@@ -164,6 +164,30 @@ test("the built-in dhxpyt release verifies the complete PyPI wheel", async () =>
     assert.match(calls[0], /deps=False/);
 });
 
+test("service metadata skips probes for backend wheels that do not exist", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+    const pyodide = fakePyodide();
+    pyodide.runPythonAsync = async source => calls.push(source);
+    globalThis.fetch = async () => {
+        throw new Error("generated service metadata must suppress missing-wheel probes");
+    };
+    try {
+        const source = await DEFAULT_RUNTIME_OPERATIONS.installWidgetset(pyodide, {
+            application: "sample",
+            widgetlib: "dhxpyt==0.9.18",
+            widgetSource: null,
+            backendWidgetSources: [],
+            requestUuid: "backend-instance",
+            allowPublicWidgetIndex: false,
+        });
+        assert.equal(source, BUILTIN_WIDGET_WHEEL_LOCKS["dhxpyt==0.9.18"]);
+        assert.equal(calls.length, 1);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test("explicit widget sources require caller-provided wheel integrity", () => {
     const config = normalizeConfig({
         application: "sample",

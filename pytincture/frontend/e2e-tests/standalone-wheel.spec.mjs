@@ -124,7 +124,7 @@ test("standalone app runs from the Python wheel runtime", async ({ page, request
             const url = new URL(entry.url);
             return url.hostname !== "127.0.0.1" && url.href.toLowerCase().includes("dhxpyt");
         });
-        expect(externalWidgetRequests.length).toBeGreaterThan(0);
+        expect(externalWidgetRequests).toEqual([]);
         for (const externalRequest of externalWidgetRequests) {
             expect(new URL(externalRequest.url).searchParams.has("uuid"), externalRequest.url).toBe(false);
         }

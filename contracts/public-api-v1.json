@@ -39,6 +39,7 @@
       "allowPublicWidgetIndex",
       "allowUnverifiedExternalPyodide",
       "application",
+      "backendWidgetSources",
       "devWheelVersion",
       "devWidgetHost",
       "enableBackendLogging",

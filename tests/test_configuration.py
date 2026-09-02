@@ -532,6 +532,11 @@ def test_development_widget_version_is_validated_and_rendered(tmp_path):
     assert response.status_code == 200
     assert 'devWheelVersion: "42.0.dev1"' in response.text
     assert "allowPublicWidgetIndex: true" in response.text
+    assert (
+        'backendWidgetSources: ["/demo/appcode/demo_widget-1.2.3-py3-none-any.whl",'
+        '"/demo/appcode/demo_widget-42.0.dev1-py3-none-any.whl"]'
+        in response.text
+    )
     assert "***DEV_WHEEL_VERSION***" not in response.text
     assert declared.status_code == 200
     assert development.status_code == 200

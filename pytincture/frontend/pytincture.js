@@ -41,6 +41,7 @@ const DEFAULT_CONFIG = {
     widgetlib: "dhxpyt==0.9.18",
     widgetSource: null,
     widgetAssetManifest: null,
+    backendWidgetSources: null,
     allowPublicWidgetIndex: null,
     requestUuid: null,
     mode: "auto", // 'package', 'inline', or 'auto'
@@ -497,6 +498,15 @@ function preflightConfig(config) {
     });
     if (typeof config.allowPublicWidgetIndex !== "boolean") {
         throw new Error("allowPublicWidgetIndex must be a boolean.");
+    }
+    if (
+        config.backendWidgetSources !== null
+        && (
+            !Array.isArray(config.backendWidgetSources)
+            || config.backendWidgetSources.some(source => typeof source !== "string" || !source)
+        )
+    ) {
+        throw new Error("backendWidgetSources must be null or an array of wheel URLs.");
     }
     return {
         runtime: "pytincture",
@@ -1023,6 +1033,11 @@ async function probeBackendWheel(url) {
 async function resolveBackendWidgetSources(config) {
     if (!config.application) {
         return [];
+    }
+    if (Array.isArray(config.backendWidgetSources)) {
+        return config.backendWidgetSources.map(source => (
+            withRequestUuid(source, config.requestUuid)
+        ));
     }
 
     const match = (config.widgetlib || "").match(/^[A-Za-z0-9_.\-]+/);

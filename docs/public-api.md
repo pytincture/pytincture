@@ -131,6 +131,7 @@ Two pre-load globals are public:
 | `widgetlib` | `"dhxpyt==0.9.18"` | Exact PyPI package/version for the widgetset. |
 | `widgetSource` | `null` | Explicit `#sha256=`-locked wheel URL; disables backend fallback. |
 | `widgetAssetManifest` | `null` | Optional hashed asset manifest for a controlled legacy widget wheel. |
+| `backendWidgetSources` | service metadata | Existing deployment-owned backend wheel URLs. Generated service pages supply this; standalone owners normally leave it unset. |
 | `allowPublicWidgetIndex` | standalone: `true`; service: backend policy | Permit an exact custom widget package pin to use PyPI only after backend-wheel resolution. Hosted pages enable it only for specs in `PYTINCTURE_WIDGET_PUBLIC_INDEX_ALLOWLIST`. |
 | `requestUuid` | generated | Cache namespace; service mode supplies one per server process. |
 | `mode` | `"auto"` | `"package"`, `"inline"`, or automatic selection. |

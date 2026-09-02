@@ -34,6 +34,7 @@ var PytinctureRuntime = (() => {
     widgetlib: "dhxpyt==0.9.18",
     widgetSource: null,
     widgetAssetManifest: null,
+    backendWidgetSources: null,
     allowPublicWidgetIndex: null,
     requestUuid: null,
     mode: "auto",
@@ -449,6 +450,9 @@ var PytinctureRuntime = (() => {
     });
     if (typeof config.allowPublicWidgetIndex !== "boolean") {
       throw new Error("allowPublicWidgetIndex must be a boolean.");
+    }
+    if (config.backendWidgetSources !== null && (!Array.isArray(config.backendWidgetSources) || config.backendWidgetSources.some((source) => typeof source !== "string" || !source))) {
+      throw new Error("backendWidgetSources must be null or an array of wheel URLs.");
     }
     return {
       runtime: "pytincture",
@@ -922,6 +926,9 @@ await micropip.install(${libLiteral}, deps=False)
   async function resolveBackendWidgetSources(config) {
     if (!config.application) {
       return [];
+    }
+    if (Array.isArray(config.backendWidgetSources)) {
+      return config.backendWidgetSources.map((source) => withRequestUuid(source, config.requestUuid));
     }
     const match = (config.widgetlib || "").match(/^[A-Za-z0-9_.\-]+/);
     const widgetPackage = match ? match[0] : DEFAULT_CONFIG.widgetlib;
