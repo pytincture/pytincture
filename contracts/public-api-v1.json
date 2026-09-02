@@ -84,6 +84,8 @@
     ],
     "request_body_representation": "single-canonical-json-object",
     "request_validation_before_application_import": true,
+    "request_ingress_before_execution_admission": true,
+    "request_ingress_timeout_env": "BFF_REQUEST_INGRESS_TIMEOUT_SECONDS",
     "ordinary_response_limits": [
       "bytes",
       "depth",

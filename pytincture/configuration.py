@@ -432,6 +432,11 @@ class PytinctureConfig:
     bff_queue_timeout_seconds: float = _setting(
         2.0, "BFF_QUEUE_TIMEOUT_SECONDS", "Maximum BFF admission wait."
     )
+    bff_request_ingress_timeout_seconds: float = _setting(
+        10.0,
+        "BFF_REQUEST_INGRESS_TIMEOUT_SECONDS",
+        "Maximum time to upload one BFF request body before execution admission.",
+    )
     bff_request_max_bytes: int = _setting(
         1024 * 1024, "BFF_REQUEST_MAX_BYTES", "Maximum canonical BFF JSON body size."
     )
@@ -787,6 +792,7 @@ class PytinctureConfig:
             self.bff_call_timeout_seconds,
             self.bff_max_concurrency,
             self.bff_queue_timeout_seconds,
+            self.bff_request_ingress_timeout_seconds,
             self.bff_request_max_bytes,
             self.bff_request_max_depth,
             self.bff_request_max_items,
@@ -831,6 +837,7 @@ class PytinctureConfig:
             self.password_hash_timeout_seconds,
             self.bff_call_timeout_seconds,
             self.bff_queue_timeout_seconds,
+            self.bff_request_ingress_timeout_seconds,
             self.bff_isolated_cpu_seconds,
             self.bff_stream_max_seconds,
             self.bff_stream_idle_timeout_seconds,
@@ -1177,7 +1184,8 @@ class PytinctureConfig:
         float_fields = {
             "password_hash_queue_timeout_seconds", "bff_call_timeout_seconds",
             "password_hash_timeout_seconds",
-            "bff_queue_timeout_seconds", "bff_stream_max_seconds",
+            "bff_queue_timeout_seconds", "bff_request_ingress_timeout_seconds",
+            "bff_stream_max_seconds",
             "bff_isolated_cpu_seconds",
             "bff_stream_idle_timeout_seconds", "remote_store_timeout_seconds",
             "remote_store_cooldown_seconds", "remote_store_queue_timeout_seconds",

@@ -199,6 +199,7 @@ The contract test checks every row in this table against the dataclass model.
 | `bff_max_concurrency` | `BFF_MAX_CONCURRENCY` | Concurrent admitted BFF calls per worker. |
 | `bff_max_queue` | `BFF_MAX_QUEUE` | Maximum queued BFF calls per worker. |
 | `bff_queue_timeout_seconds` | `BFF_QUEUE_TIMEOUT_SECONDS` | Maximum BFF admission wait. |
+| `bff_request_ingress_timeout_seconds` | `BFF_REQUEST_INGRESS_TIMEOUT_SECONDS` | Maximum time to upload one BFF request body before execution admission. |
 | `bff_request_max_bytes` | `BFF_REQUEST_MAX_BYTES` | Maximum canonical BFF JSON body size. |
 | `bff_request_max_depth` | `BFF_REQUEST_MAX_DEPTH` | Maximum canonical BFF JSON nesting depth. |
 | `bff_request_max_items` | `BFF_REQUEST_MAX_ITEMS` | Maximum aggregate BFF JSON container items. |

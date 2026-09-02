@@ -2110,15 +2110,14 @@ async def _canonical_bff_arguments(
     request: Request,
     operation: Mapping[str, Any],
 ) -> BFFArguments:
+    body = getattr(request.state, "bff_request_body", None)
+    if body is None:
+        body = await _buffer_bff_request_body(request)
     if request.method == "GET":
-        body = await request.body()
         if body:
             raise HTTPException(status_code=400, detail="GET BFF requests cannot have a body")
         arguments = BFFArguments((), {})
     else:
-        body = await request.body()
-        if len(body) > BFF_REQUEST_MAX_BYTES:
-            raise HTTPException(status_code=413, detail="BFF request body is too large")
         try:
             arguments = parse_canonical_bff_body(
                 body,
@@ -2135,6 +2134,61 @@ async def _canonical_bff_arguments(
     return arguments
 
 
+async def _buffer_bff_request_body(request: Request) -> bytes:
+    """Read one bounded BFF body before scarce execution admission."""
+
+    buffered = getattr(request.state, "bff_request_body", None)
+    if buffered is not None:
+        return buffered
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            declared_length = int(content_length)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length") from exc
+        if declared_length < 0:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length")
+        if declared_length > BFF_REQUEST_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="BFF request body is too large")
+
+    deadline = time.monotonic() + BFF_REQUEST_INGRESS_TIMEOUT_SECONDS
+    body = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise HTTPException(status_code=408, detail="BFF request body timed out")
+        try:
+            message = await asyncio.wait_for(request.receive(), timeout=remaining)
+        except asyncio.TimeoutError as exc:
+            raise HTTPException(
+                status_code=408,
+                detail="BFF request body timed out",
+            ) from exc
+        message_type = message.get("type")
+        if message_type == "http.disconnect":
+            raise HTTPException(
+                status_code=400,
+                detail="Client disconnected while sending BFF request body",
+            )
+        if message_type != "http.request":
+            continue
+        chunk = message.get("body", b"")
+        if len(body) + len(chunk) > BFF_REQUEST_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="BFF request body is too large")
+        body.extend(chunk)
+        if not message.get("more_body", False):
+            break
+
+    buffered = bytes(body)
+    request.state.bff_request_body = buffered
+    # Preserve Starlette's normal Request.body() caching contract for policy
+    # hooks or other trusted application code that receives this Request.
+    request._body = buffered
+    request._stream_consumed = True
+    return buffered
+
+
 def _release_bff_slot(request: Request) -> None:
     if getattr(request.state, "bff_slot_held", False):
         request.state.bff_slot_held = False
@@ -2142,6 +2196,10 @@ def _release_bff_slot(request: Request) -> None:
 
 
 async def _admit_bff_call(request: Request):
+    # Slow clients must finish their bounded upload before consuming an
+    # execution slot. This ingress deadline is intentionally separate from
+    # the BFF call deadline, which begins only after admission.
+    await _buffer_bff_request_body(request)
     try:
         await BFF_ADMISSION_GATE.acquire()
     except AdmissionRejected as exc:
@@ -3730,6 +3788,9 @@ BFF_CALL_TIMEOUT_SECONDS = float(os.getenv("BFF_CALL_TIMEOUT_SECONDS", "30"))
 BFF_MAX_CONCURRENCY = int(os.getenv("BFF_MAX_CONCURRENCY", "32"))
 BFF_MAX_QUEUE = int(os.getenv("BFF_MAX_QUEUE", "64"))
 BFF_QUEUE_TIMEOUT_SECONDS = float(os.getenv("BFF_QUEUE_TIMEOUT_SECONDS", "2"))
+BFF_REQUEST_INGRESS_TIMEOUT_SECONDS = float(
+    os.getenv("BFF_REQUEST_INGRESS_TIMEOUT_SECONDS", "10")
+)
 BFF_REQUEST_MAX_BYTES = int(os.getenv("BFF_REQUEST_MAX_BYTES", str(1024 * 1024)))
 BFF_REQUEST_MAX_DEPTH = int(os.getenv("BFF_REQUEST_MAX_DEPTH", "32"))
 BFF_REQUEST_MAX_ITEMS = int(os.getenv("BFF_REQUEST_MAX_ITEMS", "10000"))
@@ -3789,6 +3850,7 @@ if min(
     BFF_CALL_TIMEOUT_SECONDS,
     BFF_MAX_CONCURRENCY,
     BFF_QUEUE_TIMEOUT_SECONDS,
+    BFF_REQUEST_INGRESS_TIMEOUT_SECONDS,
     BFF_REQUEST_MAX_BYTES,
     BFF_REQUEST_MAX_DEPTH,
     BFF_REQUEST_MAX_ITEMS,

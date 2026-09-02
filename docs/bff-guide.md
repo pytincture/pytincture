@@ -113,7 +113,10 @@ that application, so a same-named module elsewhere cannot inherit a grant.
 
 ## Limits and streaming
 
-Non-streaming calls are bounded by `BFF_CALL_TIMEOUT_SECONDS`. Streams are
+The bounded request body must arrive within
+`BFF_REQUEST_INGRESS_TIMEOUT_SECONDS` before it consumes a BFF execution slot.
+This upload-only limit is independent of backend runtime. Non-streaming calls
+are then bounded by `BFF_CALL_TIMEOUT_SECONDS`. Streams are
 bounded by `BFF_STREAM_MAX_SECONDS` and `BFF_STREAM_MAX_BYTES`; Pytincture
 closes sync/async iterators on completion, timeout, byte limit, or disconnect.
 Finite generators returned by non-streaming methods become JSON arrays and are
