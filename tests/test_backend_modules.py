@@ -1344,6 +1344,27 @@ def test_saml_rate_limiter_is_windowed_and_memory_bounded():
     assert limiter.allow("first") == (True, 0)
 
 
+def test_saml_rate_limiter_batch_admission_is_atomic():
+    now = [10.0]
+    session = SlidingWindowRateLimiter(1, 5, clock=lambda: now[0])
+    peer = SlidingWindowRateLimiter(1, 5, clock=lambda: now[0])
+    worker = SlidingWindowRateLimiter(1, 5, clock=lambda: now[0])
+
+    assert peer.allow("peer") == (True, 0)
+    assert SlidingWindowRateLimiter.allow_all(
+        (
+            (session, "session"),
+            (peer, "peer"),
+            (worker, "worker"),
+        )
+    ) == (False, 5)
+
+    # The session reservation was rolled back and the later worker bucket was
+    # never consumed when the peer bucket denied the group.
+    assert session.allow("session") == (True, 0)
+    assert worker.allow("worker") == (True, 0)
+
+
 def test_keyed_concurrency_gate_is_fair_and_drops_idle_keys():
     from pytincture.backend.limits import KeyedConcurrencyGate
 

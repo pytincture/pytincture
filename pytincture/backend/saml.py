@@ -222,25 +222,62 @@ class SlidingWindowRateLimiter:
         self._entries: OrderedDict[str, deque[float]] = OrderedDict()
         self._lock = threading.Lock()
 
-    def allow(self, key: str) -> tuple[bool, int]:
-        now = self.clock()
-        cutoff = now - self.window_seconds
-        with self._lock:
-            attempts = self._entries.get(key)
-            if attempts is None:
-                if len(self._entries) >= self.max_keys:
-                    self._entries.popitem(last=False)
-                attempts = deque()
-                self._entries[key] = attempts
-            else:
-                self._entries.move_to_end(key)
-            while attempts and attempts[0] <= cutoff:
-                attempts.popleft()
-            if len(attempts) >= self.limit:
-                retry_after = max(1, int(self.window_seconds - (now - attempts[0]) + 0.999))
-                return False, retry_after
-            attempts.append(now)
+    @classmethod
+    def allow_all(
+        cls,
+        checks: tuple[tuple["SlidingWindowRateLimiter", str], ...],
+    ) -> tuple[bool, int]:
+        """Atomically admit every bucket or leave all bucket counts unchanged."""
+        if not checks:
             return True, 0
+        unique_limiters = {id(limiter): limiter for limiter, _ in checks}
+        limiters = sorted(unique_limiters.values(), key=id)
+        for limiter in limiters:
+            limiter._lock.acquire()
+        try:
+            snapshots: dict[
+                tuple[int, str],
+                tuple[SlidingWindowRateLimiter, str, list[float], list[float]],
+            ] = {}
+            for limiter, key in checks:
+                now = limiter.clock()
+                cutoff = now - limiter.window_seconds
+                snapshot_key = (id(limiter), key)
+                snapshot = snapshots.get(snapshot_key)
+                if snapshot is None:
+                    active = [
+                        timestamp
+                        for timestamp in limiter._entries.get(key, ())
+                        if timestamp > cutoff
+                    ]
+                    staged: list[float] = []
+                    snapshot = (limiter, key, active, staged)
+                    snapshots[snapshot_key] = snapshot
+                else:
+                    _, _, active, staged = snapshot
+                    active[:] = [timestamp for timestamp in active if timestamp > cutoff]
+                    staged[:] = [timestamp for timestamp in staged if timestamp > cutoff]
+                if len(active) + len(staged) >= limiter.limit:
+                    oldest = active[0] if active else staged[0]
+                    retry_after = max(
+                        1,
+                        int(limiter.window_seconds - (now - oldest) + 0.999),
+                    )
+                    return False, retry_after
+                staged.append(now)
+
+            for limiter, key, active, staged in snapshots.values():
+                if key not in limiter._entries and len(limiter._entries) >= limiter.max_keys:
+                    limiter._entries.popitem(last=False)
+                limiter._entries[key] = deque((*active, *staged))
+                limiter._entries.move_to_end(key)
+            return True, 0
+        finally:
+            for limiter in reversed(limiters):
+                limiter._lock.release()
+
+    def allow(self, key: str) -> tuple[bool, int]:
+        return self.allow_all(((self, key),))
 
 
 def split_csv(value: Any) -> list[str]:

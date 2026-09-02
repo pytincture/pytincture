@@ -88,6 +88,8 @@ protection is enabled, generated stubs additionally carry
 
 Replay proofs are disabled by default. When enabled, refill admission is
 bounded independently per signed session, direct network peer, and worker.
+Those three checks commit atomically: a denial at any scope consumes no quota
+from the other scopes.
 The built-in single-worker store has fixed worker/session capacities and uses
 an expiration index, so expiry cleanup does not scan a growing mapping. This
 optional local mode does not provide cross-worker single consumption. A
