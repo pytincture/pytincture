@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "recorded_on": "2026-09-01",
+  "reviewed_commit": "ceb2c0b653aa0a7cc0fb9b330b3f8f4a7273647f",
+  "status": "tracked",
+  "summary": "One conditional high, ten medium, four low, and one informational source-review finding were triaged. Fourteen actionable items are tracked. Stateless SAML single-consumption and application-owned IdP group authorization remain documented architecture decisions.",
+  "compatibility_constraints": {
+    "class_level_bff_export_preserved": true,
+    "synchronous_bff_preserved": true,
+    "asynchronous_bff_preserved": true,
+    "explicit_streaming_yield_preserved": true,
+    "pluggable_widgetsets_preserved": true,
+    "application_owned_authorization_preserved": true,
+    "redis_required": false,
+    "sticky_routing_required": false
+  },
+  "findings": [
+    {
+      "id": "PT-01",
+      "severity": "high_conditional",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/289",
+      "disposition": "Make the backend-installed distribution and exact backend wheel authoritative; verify a server-owned complete-wheel SHA-256 before browser installation and make public-index use explicit.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Custom widgetsets remain supported and continue to be installed on the backend. Private widgets no longer yield priority to an equal public package name and version."
+    },
+    {
+      "id": "PT-02",
+      "severity": "medium_conditional",
+      "status": "accepted_architecture",
+      "disposition": "Preserve stateless SAML browser transactions. Add accurate fresh-client replay coverage and offer a vendor-neutral atomic provider only as an optional strict mode.",
+      "potential_user_breakage": false,
+      "existing_mitigation": "Signed browser binding, short transaction and assertion expiry, ACS rate limiting, normal-browser replay rejection, secure cookies, and session audience controls.",
+      "compatibility_note": "No Redis, process memory, sticky routing, or shared store is required. Global single consumption is impossible without shared atomic state."
+    },
+    {
+      "id": "PT-03",
+      "severity": "medium",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/290",
+      "disposition": "Bound capped request-body ingress before BFF execution admission with a separate configurable timeout.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Only slow request upload is bounded; long-running backend execution retains its separate timeout."
+    },
+    {
+      "id": "PT-04",
+      "severity": "medium",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/291",
+      "disposition": "Bound each blocked streaming response write and release stream admission exactly once after timeout.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Generators, async generators, yield, moving chunks, and long-running streams remain supported; only a blocked client write is disconnected."
+    },
+    {
+      "id": "PT-05",
+      "severity": "medium_conditional",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/292",
+      "disposition": "Bound OAuth initiation and callback rates, exchange concurrency, and provider deadlines; validate application existence before initiation.",
+      "potential_user_breakage": false,
+      "compatibility_note": "Normal OAuth remains stateless and Redis-free; strict globally atomic callback consumption remains optional."
+    },
+    {
+      "id": "PT-06",
+      "severity": "medium_conditional",
+      "status": "rejected_as_framework_defect",
+      "disposition": "Preserve signed IdP group values as authenticated identity claims. Application code, decorators, and policies own authorization and any mapping.",
+      "potential_user_breakage": false,
+      "existing_mitigation": "An attacker cannot forge signed group values; Pytincture defines no implicit privileged group name.",
+      "compatibility_note": "SAML_ALLOWED_ROLES is login eligibility, not a filter or framework-owned grant mapping."
+    },
+    {
+      "id": "PT-07",
+      "severity": "medium_conditional",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/293",
+      "disposition": "Enforce finite expiration, not-before, issued-at, clock-skew, maximum-age, and maximum-lifetime policy for MCP JWTs.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Non-expiring tokens require migration or an explicit compatibility setting; secure production mode requires bounded tokens."
+    },
+    {
+      "id": "PT-08",
+      "severity": "medium_conditional",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/294",
+      "disposition": "Use host-prefixed HTTPS production authentication cookies and separate unprefixed HTTP development cookie names.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Production users may need one fresh login. Local HTTP development remains supported."
+    },
+    {
+      "id": "PT-09",
+      "severity": "low_conditional",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/295",
+      "disposition": "Cache bounded per-application graph snapshots with secure automatic invalidation and early impossible-operation rejection.",
+      "potential_user_breakage": false,
+      "compatibility_note": "The process-local cache remains stateless and disposable, and same-name development edits must invalidate."
+    },
+    {
+      "id": "PT-10",
+      "severity": "medium_conditional",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/296",
+      "disposition": "Cache public-asset authorization and add configurable admission, byte, and blocked-write limits.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Public assets remain unauthenticated. Large media may need raised limits or external object storage; same-name changes remain visible."
+    },
+    {
+      "id": "PT-11",
+      "severity": "medium_conditional",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/297",
+      "disposition": "Make replay-refill quota accounting denial-safe through ordered short-circuiting or transactional reservations.",
+      "potential_user_breakage": false,
+      "compatibility_note": "Accepted requests are unchanged and replay refill remains disabled by default."
+    },
+    {
+      "id": "PT-12",
+      "severity": "medium_conditional",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/298",
+      "disposition": "Key only isolated-process fairness to an HMAC-protected stable authenticated identity and use generous configurable concurrency with fair queuing.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Ordinary cooperative async BFF calls and normal async multitasking are not limited by this control."
+    },
+    {
+      "id": "PT-13",
+      "severity": "low_conditional",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/299",
+      "disposition": "Expose immutable Microsoft identity clearly, document it for sensitive authorization, and warn when production admission relies only on mutable email.",
+      "potential_user_breakage": false,
+      "compatibility_note": "Email and domain admission remain available for simple applications."
+    },
+    {
+      "id": "PT-14",
+      "severity": "low_conditional",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/300",
+      "disposition": "Equalize oversized-password failure work and transparently migrate successful bcrypt verification to Argon2id when supported.",
+      "potential_user_breakage": false,
+      "compatibility_note": "Password values and the login API do not change."
+    },
+    {
+      "id": "PT-15",
+      "severity": "low",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/301",
+      "disposition": "Compare exact runtime type and value for Literal validation and handle None explicitly.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Only JSON values whose type violates the declared annotation are rejected."
+    },
+    {
+      "id": "PT-16",
+      "severity": "informational",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/302",
+      "disposition": "Add optional production controls for API documentation and detailed readiness while preserving a minimal public health endpoint.",
+      "potential_user_breakage": false,
+      "compatibility_note": "Development defaults remain convenient and no forced behavior change is required."
+    }
+  ],
+  "accepted_residual_risks": [
+    {
+      "id": "STATELESS-LOGOUT",
+      "reason": "Immediate fleet-wide revocation of a copied stateless cookie requires shared mutable state. Absolute expiry, key rotation, Secure and HttpOnly cookies, and application audience restrictions remain the no-store controls."
+    },
+    {
+      "id": "EXTERNAL-PYODIDE-SUPPORT-FILES",
+      "reason": "Hosted service mode uses the vendored runtime. External runtime mode is an explicit application trust decision and its bootstrap scripts retain SRI."
+    },
+    {
+      "id": "POLICY-NONE-COMPATIBILITY",
+      "reason": "A policy hook returning None retains the documented allow compatibility contract; application-owned conditional policies must explicitly deny or raise."
+    },
+    {
+      "id": "TRUSTED-THREAD-CANCELLATION",
+      "reason": "Python threads cannot be killed safely. Isolated-process mode provides bounded killable containment for trusted non-streaming work that requires hard termination."
+    },
+    {
+      "id": "EXTERNAL-WIDGETSET-CODE",
+      "reason": "Pytincture authenticates selected browser packages but does not sandbox separately maintained widgetset implementations."
+    }
+  ]
+}

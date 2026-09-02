@@ -113,6 +113,56 @@ The machine-readable record for this scan is
 It includes compatibility effects so future scans do not reinterpret accepted
 architecture as an unaddressed defect.
 
+## 2026-09-01 `ceb2c0b` review disposition
+
+The source-only review of commit `ceb2c0b653aa0a7cc0fb9b330b3f8f4a7273647f`
+reported PT-01 through PT-16. The findings are tracked with the compatibility
+decisions made during triage:
+
+| Finding | Disposition | Compatibility boundary |
+|---|---|---|
+| PT-01 custom widget dependency confusion | Fix in [#289](https://github.com/pytincture/pytincture/issues/289). The backend-installed distribution and exact backend wheel become authoritative, and the browser verifies a server-owned complete-wheel SHA-256 before installation. | Pluggable custom widgetsets remain supported. The widgetset must be installed on the backend as already required; public-index use becomes explicit rather than taking priority over the backend wheel. |
+| PT-02 reusable raw SAML exchange | Accepted stateless boundary; document and test the fresh-client raw replay. A vendor-neutral atomic transaction provider may be offered as an optional strict mode. | Redis, process memory, sticky routing, and shared mutable state remain unnecessary. Global single consumption cannot be guaranteed without some shared atomic state. Signed browser binding, short expiry, rate limits, and normal-browser replay rejection remain required. |
+| PT-03 slow BFF request ingress | Fix in [#290](https://github.com/pytincture/pytincture/issues/290) by applying a configurable body-ingress timeout before execution admission. | The ingress timeout covers only request upload. Long backend execution retains its separate configurable timeout. |
+| PT-04 blocked streaming writes | Fix in [#291](https://github.com/pytincture/pytincture/issues/291) with a configurable per-write timeout and exact cleanup. | Generators, async generators, `yield`, and long-running streams remain supported. Moving chunks reset the timeout; only a blocked client write is disconnected. |
+| PT-05 OAuth callback amplification | Fix in [#292](https://github.com/pytincture/pytincture/issues/292) with bounded admission, rate controls, explicit provider deadlines, and application validation. | Normal OAuth remains stateless and Redis-free. Strict globally atomic callback consumption remains optional. |
+| PT-06 generic SAML groups as roles | No framework mapping or filtering change. Signed IdP groups are authenticated identity claims supplied to application-owned authorization decorators and policies. | Applications intentionally define their own authorization. Pytincture must not invent privileged role names or reinterpret group values; it only transports the signed claims developers elect to use. `SAML_ALLOWED_ROLES` controls login eligibility, not a granted-role filter. |
+| PT-07 MCP token time requirements | Fix in [#293](https://github.com/pytincture/pytincture/issues/293) with finite expiration, `nbf`/`iat`, skew, age, and lifetime policy. | Existing non-expiring tokens need migration or an explicit compatibility setting; secure production mode requires bounded tokens. |
+| PT-08 cookie tossing | Fix in [#294](https://github.com/pytincture/pytincture/issues/294) with host-prefixed HTTPS production cookies and separate HTTP development names. | Existing production sessions may require one fresh login. Local HTTP development remains supported. |
+| PT-09 repeated application graph scans | Fix in [#295](https://github.com/pytincture/pytincture/issues/295) with bounded, fingerprint-invalidated, process-local graph snapshots. | The cache is disposable and requires no shared state, sticky routing, or Redis. Same-name development edits must invalidate correctly. |
+| PT-10 public asset amplification | Fix in [#296](https://github.com/pytincture/pytincture/issues/296) with cached authorization plus configurable size, admission, and write limits. | Explicit public assets remain unauthenticated. Ordinary assets become faster; unusually large media can raise limits or use object storage. Same-name changes must remain visible. |
+| PT-11 replay-refill quota poisoning | Fix in [#297](https://github.com/pytincture/pytincture/issues/297) with denial-safe ordered or transactional accounting. | Accepted requests are unchanged and replay refill remains disabled by default. |
+| PT-12 per-session isolated-process quota | Fix in [#298](https://github.com/pytincture/pytincture/issues/298) by keying only scarce isolated-process fairness to stable authenticated identity. | Ordinary cooperative async BFF calls are not subject to this limit. Isolated execution uses configurable, generous concurrency and fair queuing rather than a usage-volume limit. |
+| PT-13 mutable Microsoft email | Add stable-identity guidance and production warnings in [#299](https://github.com/pytincture/pytincture/issues/299). | Email/domain admission remains available for simple applications. Sensitive authorization should use immutable tenant/object or issuer/subject identity. |
+| PT-14 password verification timing | Fix in [#300](https://github.com/pytincture/pytincture/issues/300) with equivalent failure work and supported transparent bcrypt migration. | Password values and the login API do not change. |
+| PT-15 numeric `Literal` equality | Fix in [#301](https://github.com/pytincture/pytincture/issues/301) by comparing exact type and value. | Only requests whose JSON type already violates the declared annotation are rejected. |
+| PT-16 public diagnostics | Add optional production controls in [#302](https://github.com/pytincture/pytincture/issues/302). | Development remains convenient and a minimal public health response remains available for load balancers. |
+
+Additional residual risks remain accepted architecture:
+
+- Stateless logout cannot revoke a copied session cookie across every worker
+  without an optional shared revocation provider. Absolute session expiry,
+  signing-key rotation, Secure/HttpOnly cookies, and application audience
+  limits remain the Redis-free controls.
+- External Pyodide mode does not authenticate every runtime support file. The
+  hosted service uses the vendored runtime; external mode is an explicit
+  application trust decision and its bootstrap scripts retain SRI checks.
+- A BFF policy hook returning `None` retains the documented compatibility
+  meaning of allow. Applications that implement conditional authorization must
+  explicitly deny or raise according to the policy contract.
+- Cooperative trusted-thread timeouts cannot kill Python threads. The bounded,
+  killable isolated-process mode exists for non-streaming operations that need
+  hard termination; it is resource containment for deployment-trusted code,
+  not a hostile-code sandbox.
+- `dhxpyt` and other widgetset implementations remain separately reviewed
+  dependencies. Pytincture authenticates what it loads but does not claim to
+  sandbox trusted browser packages.
+
+The machine-readable record for this review is
+[`security/review-2026-09-01-ceb2c0b.json`](security/review-2026-09-01-ceb2c0b.json).
+It must be updated as each linked issue is remediated so later scans can
+distinguish completed controls, compatibility choices, and accepted risk.
+
 The machine-readable dispositions and their regression-test mappings are in
 [`security/review-dispositions.json`](security/review-dispositions.json).
 The exact version, source integrity, license, and file hashes for the vendored
