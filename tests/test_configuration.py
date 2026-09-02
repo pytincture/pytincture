@@ -39,6 +39,16 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "BFF_STREAM_WRITE_TIMEOUT_SECONDS": "5.5",
             "APPCODE_MAX_FILES": "80",
             "APPCODE_CACHE_MAX_BYTES": "67108864",
+            "PYTINCTURE_PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES": "17",
+            "PYTINCTURE_PUBLIC_ASSET_MAX_BYTES": "8388608",
+            "PYTINCTURE_PUBLIC_ASSET_MAX_CONCURRENCY": "44",
+            "PYTINCTURE_PUBLIC_ASSET_MAX_CONCURRENCY_PER_PEER": "22",
+            "PYTINCTURE_PUBLIC_ASSET_MAX_QUEUE": "88",
+            "PYTINCTURE_PUBLIC_ASSET_QUEUE_TIMEOUT_SECONDS": "0.4",
+            "PYTINCTURE_PUBLIC_ASSET_RATE_LIMIT_ATTEMPTS": "900",
+            "PYTINCTURE_PUBLIC_ASSET_RATE_LIMIT_WINDOW_SECONDS": "15",
+            "PYTINCTURE_PUBLIC_ASSET_MAX_SECONDS": "90",
+            "PYTINCTURE_PUBLIC_ASSET_WRITE_TIMEOUT_SECONDS": "8",
             "REMOTE_STORE_TIMEOUT_SECONDS": "1.25",
             "MCP_ALLOWED_HOSTS": '["mcp.example.test"]',
             "MCP_ALLOWED_ORIGINS": '["https://mcp.example.test"]',
@@ -105,6 +115,16 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.bff_stream_write_timeout_seconds == 5.5
     assert config.appcode_max_files == 80
     assert config.appcode_cache_max_bytes == 67108864
+    assert config.public_asset_authorization_cache_entries == 17
+    assert config.public_asset_max_bytes == 8388608
+    assert config.public_asset_max_concurrency == 44
+    assert config.public_asset_max_concurrency_per_peer == 22
+    assert config.public_asset_max_queue == 88
+    assert config.public_asset_queue_timeout_seconds == 0.4
+    assert config.public_asset_rate_limit_attempts == 900
+    assert config.public_asset_rate_limit_window_seconds == 15
+    assert config.public_asset_max_seconds == 90
+    assert config.public_asset_write_timeout_seconds == 8
     assert config.remote_store_timeout_seconds == 1.25
     assert config.mcp_allowed_hosts == ("mcp.example.test",)
     assert config.mcp_allowed_origins == ("https://mcp.example.test",)

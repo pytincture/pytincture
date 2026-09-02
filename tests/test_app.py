@@ -1153,6 +1153,216 @@ def test_large_public_asset_head_is_metadata_only_and_get_streams_off_loop(
     assert max(read_sizes) <= 64 * 1024
 
 
+def test_public_asset_authorization_cache_invalidates_on_entrypoint_change(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.delenv("PYTINCTURE_PUBLIC_ASSET_PATHS", raising=False)
+    monkeypatch.setattr(
+        backend_app,
+        "PUBLIC_ASSET_AUTHORIZATION_CACHE",
+        backend_app._PublicAssetAuthorizationCache(4),
+    )
+    entrypoint = tmp_path / "demoapp.py"
+    entrypoint.write_text('APP_FAVICON = "old.png"\n', encoding="utf-8")
+    (tmp_path / "old.png").write_bytes(b"old")
+    (tmp_path / "new.png").write_bytes(b"new-content")
+
+    original_read = backend_app.read_contained_file
+    entrypoint_reads = []
+
+    def tracked_read(root, relative_path, **kwargs):
+        if relative_path == "demoapp.py":
+            entrypoint_reads.append(relative_path)
+        return original_read(root, relative_path, **kwargs)
+
+    monkeypatch.setattr(backend_app, "read_contained_file", tracked_read)
+    assert fresh_client.get("/demoapp/appcode/missing-one.png").status_code == 404
+    assert fresh_client.get("/demoapp/appcode/missing-two.png").status_code == 404
+    old = fresh_client.get("/demoapp/appcode/old.png")
+    assert old.status_code == 200
+    assert old.content == b"old"
+    assert entrypoint_reads == ["demoapp.py"]
+
+    entrypoint.write_text('APP_FAVICON = "new.png"\n', encoding="utf-8")
+    changed = fresh_client.get("/demoapp/appcode/new.png")
+    assert changed.status_code == 200
+    assert changed.content == b"new-content"
+    assert fresh_client.get("/demoapp/appcode/old.png").status_code == 404
+    assert entrypoint_reads == ["demoapp.py", "demoapp.py"]
+
+    (tmp_path / "new.png").write_bytes(b"replacement-content")
+    replacement = fresh_client.get("/demoapp/appcode/new.png")
+    assert replacement.status_code == 200
+    assert replacement.content == b"replacement-content"
+
+
+def test_public_asset_size_rate_and_admission_apply_before_resolution(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+    from pytincture.backend.limits import AdmissionRejected
+
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setenv("PYTINCTURE_PUBLIC_ASSET_PATHS", "asset.bin")
+    (tmp_path / "demoapp.py").write_text("# demo app\n", encoding="utf-8")
+    (tmp_path / "asset.bin").write_bytes(b"five!")
+
+    monkeypatch.setattr(backend_app, "PUBLIC_ASSET_MAX_BYTES", 4)
+    assert fresh_client.get("/demoapp/appcode/asset.bin").status_code == 413
+    monkeypatch.setattr(backend_app, "PUBLIC_ASSET_MAX_BYTES", 1024)
+
+    class RejectingRateLimiter:
+        def allow(self, _key):
+            return False, 9
+
+    def resolution_must_not_run(*_args, **_kwargs):
+        raise AssertionError("resolution ran before cheap admission")
+
+    monkeypatch.setattr(
+        backend_app, "PUBLIC_ASSET_RATE_LIMITER", RejectingRateLimiter()
+    )
+    monkeypatch.setattr(backend_app, "_resolve_public_asset", resolution_must_not_run)
+    rejected = fresh_client.get("/demoapp/appcode/asset.bin")
+    assert rejected.status_code == 429
+    assert rejected.headers["retry-after"] == "9"
+
+    class AllowingRateLimiter:
+        def allow(self, _key):
+            return True, 0
+
+    class RejectingGate:
+        async def acquire(self):
+            raise AdmissionRejected("full")
+
+        def release(self):
+            raise AssertionError("unacquired gate cannot be released")
+
+    monkeypatch.setattr(
+        backend_app, "PUBLIC_ASSET_RATE_LIMITER", AllowingRateLimiter()
+    )
+    monkeypatch.setattr(backend_app, "PUBLIC_ASSET_GATE", RejectingGate())
+    saturated = fresh_client.get("/demoapp/appcode/asset.bin")
+    assert saturated.status_code == 503
+    assert saturated.headers["retry-after"] == "1"
+
+
+def test_blocked_public_asset_write_closes_descriptor_and_finishes_once(
+    monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+    from starlette.requests import Request
+
+    payload_path = tmp_path / "asset.bin"
+    payload_path.write_bytes(b"payload")
+    metadata = backend_app.stat_contained_file(str(tmp_path), "asset.bin")
+    opened = []
+    finished = []
+    original_open = backend_app.open_contained_file
+
+    def tracked_open(*args, **kwargs):
+        handle = original_open(*args, **kwargs)
+        opened.append(handle)
+        return handle
+
+    monkeypatch.setattr(backend_app, "open_contained_file", tracked_open)
+
+    async def exercise():
+        request = Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/demoapp/appcode/asset.bin",
+            "headers": [],
+        })
+        response = await backend_app._public_file_response(
+            request,
+            str(tmp_path),
+            "asset.bin",
+            metadata,
+            max_bytes=1024,
+            max_seconds=1,
+            write_timeout_seconds=0.01,
+            on_finish=lambda: finished.append(True),
+        )
+        blocked = asyncio.Event()
+
+        async def send(message):
+            if message["type"] == "http.response.body" and message["more_body"]:
+                await blocked.wait()
+
+        await response.stream_response(send)
+
+    asyncio.run(exercise())
+    assert len(opened) == 1
+    assert opened[0].descriptor == -1
+    assert finished == [True]
+
+
+def test_public_asset_total_deadline_covers_a_stalled_file_read(
+    monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+    from starlette.requests import Request
+
+    (tmp_path / "asset.bin").write_bytes(b"payload")
+    metadata = backend_app.stat_contained_file(str(tmp_path), "asset.bin")
+    opened = []
+    finished = []
+    release_read = threading.Event()
+    original_open = backend_app.open_contained_file
+    original_read = backend_app.os.read
+
+    def tracked_open(*args, **kwargs):
+        handle = original_open(*args, **kwargs)
+        opened.append(handle)
+        return handle
+
+    def stalled_read(descriptor, size):
+        release_read.wait(timeout=1)
+        return original_read(descriptor, size)
+
+    monkeypatch.setattr(backend_app, "open_contained_file", tracked_open)
+    monkeypatch.setattr(backend_app.os, "read", stalled_read)
+
+    async def exercise():
+        request = Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/demoapp/appcode/asset.bin",
+            "headers": [],
+        })
+        response = await backend_app._public_file_response(
+            request,
+            str(tmp_path),
+            "asset.bin",
+            metadata,
+            max_bytes=1024,
+            max_seconds=0.01,
+            write_timeout_seconds=1,
+            on_finish=lambda: finished.append(True),
+        )
+
+        async def send(_message):
+            return None
+
+        await response.stream_response(send)
+        assert finished == [True]
+        release_read.set()
+        for _ in range(100):
+            if opened[0].descriptor == -1:
+                break
+            await asyncio.sleep(0.01)
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        release_read.set()
+    assert opened[0].descriptor == -1
+    assert finished == [True]
+
+
 def test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not(
     fresh_client, monkeypatch, tmp_path
 ):

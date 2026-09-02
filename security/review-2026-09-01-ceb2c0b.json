@@ -120,11 +120,19 @@
     {
       "id": "PT-10",
       "severity": "medium_conditional",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/296",
       "disposition": "Cache public-asset authorization and add configurable admission, byte, and blocked-write limits.",
+      "implementation": "A bounded per-worker cache reuses parsed authorization only while the secure application entrypoint and relevant directories remain unchanged. Generous configurable worker admission plus per-peer concurrency and rate controls run before source parsing or file opening. Direct assets have configurable byte, total-duration, and per-frame blocked-write limits with idempotent descriptor and admission cleanup.",
+      "regression_tests": [
+        "tests/test_app.py::test_public_asset_authorization_cache_invalidates_on_entrypoint_change",
+        "tests/test_app.py::test_public_asset_size_rate_and_admission_apply_before_resolution",
+        "tests/test_app.py::test_blocked_public_asset_write_closes_descriptor_and_finishes_once",
+        "tests/test_app.py::test_public_asset_total_deadline_covers_a_stalled_file_read",
+        "tests/test_configuration.py::test_from_env_applies_defaults_environment_then_explicit_overrides"
+      ],
       "potential_user_breakage": true,
-      "compatibility_note": "Public assets remain unauthenticated. Large media may need raised limits or external object storage; same-name changes remain visible."
+      "compatibility_note": "Public assets remain unauthenticated. The 64 MiB default can be raised for large media. Moving responses reset the write deadline; same-name source and asset changes remain visible. All state is disposable and worker-local, so Redis and sticky routing are unnecessary."
     },
     {
       "id": "PT-11",

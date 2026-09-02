@@ -1344,6 +1344,24 @@ def test_saml_rate_limiter_is_windowed_and_memory_bounded():
     assert limiter.allow("first") == (True, 0)
 
 
+def test_keyed_concurrency_gate_is_fair_and_drops_idle_keys():
+    from pytincture.backend.limits import KeyedConcurrencyGate
+
+    gate = KeyedConcurrencyGate(concurrency_per_key=2, max_keys=2)
+    assert gate.try_acquire("first") is True
+    assert gate.try_acquire("first") is True
+    assert gate.try_acquire("first") is False
+    assert gate.try_acquire("second") is True
+    assert gate.try_acquire("third") is False
+
+    gate.release("first")
+    assert gate.try_acquire("first") is True
+    gate.release("first")
+    gate.release("first")
+    assert "first" not in gate._active
+    assert gate.try_acquire("third") is True
+
+
 def test_saml_mitigation_evidence_matches_the_enforced_runtime():
     root = Path(__file__).resolve().parents[1]
     evidence = json.loads(

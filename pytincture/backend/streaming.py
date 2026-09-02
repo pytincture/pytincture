@@ -23,7 +23,8 @@ class _StreamSendTimeout(Exception):
         self.reason = reason
 
 
-class _BoundedStreamingResponse(StreamingResponse):
+class BoundedStreamingResponse(StreamingResponse):
+    """Streaming response whose ASGI writes have idle and absolute deadlines."""
     def __init__(
         self,
         *args,
@@ -76,8 +77,21 @@ class _BoundedStreamingResponse(StreamingResponse):
                 },
                 absolute_deadline,
             )
-            async for chunk in self.body_iterator:
+            body_iterator = self.body_iterator.__aiter__()
+            while True:
+                remaining = absolute_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _StreamSendTimeout("timeout")
                 body_iterator_started = True
+                try:
+                    chunk = await asyncio.wait_for(
+                        body_iterator.__anext__(),
+                        timeout=remaining,
+                    )
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError as exc:
+                    raise _StreamSendTimeout("timeout") from exc
                 if not isinstance(chunk, bytes | memoryview):
                     chunk = chunk.encode(self.charset)
                 await self._send_frame(
@@ -489,7 +503,7 @@ def as_streaming_response(
         if callable(sync_close):
             await run_in_threadpool(sync_close)
 
-    return _BoundedStreamingResponse(
+    return BoundedStreamingResponse(
         content,
         status_code=status_code,
         headers=headers,
