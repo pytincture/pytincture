@@ -205,6 +205,15 @@ only when it contains 1–128 letters, digits, `.`, `_`, `:`, or `-`.
   one off-loop refresh and reuse it only for the short configured cache TTL.
 - Do not place either endpoint behind application authentication.
 
+The public status and HTTP code remain available in every mode. Set
+`PYTINCTURE_DIAGNOSTIC_DETAILS_MODE=minimal` to omit the framework version and
+named readiness checks, or set it to `operator` with a strong
+`PYTINCTURE_DIAGNOSTIC_OPERATOR_TOKEN` and send that value as a Bearer token
+only from operator probes. The default `public` mode preserves development and
+existing deployment behavior. These controls are stateless and need neither
+Redis nor sticky routing. Independently set `PYTINCTURE_API_DOCS_MODE` to
+`authenticated` or `disabled` in production.
+
 Pytincture emits one-line JSON events on the `pytincture.security` logger.
 Collect `request.complete`, `bff.start`, and `bff.stream.finish`; index at least
 `correlation_id`, `path`, `status_code`, `duration_ms`, and streaming `reason`.

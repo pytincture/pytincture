@@ -5,6 +5,12 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Add opt-in minimal and operator-only health/readiness detail modes while
+  preserving public probe status, existing detailed development responses,
+  and the existing public/authenticated/disabled API-documentation controls.
+  Operator details use a strong stateless Bearer token; no Redis or sticky
+  routing is required.
+
 ## 1.0.0rc4 — 2026-09-01
 
 - Pin the browser compatibility runtime to `dhxpyt==0.9.18`, which renders
