@@ -126,3 +126,45 @@ def test_static_signature_binding_supports_varargs_kwargs_and_positional_only():
             BFFArguments(("first", "not-int"), {}),
             parameters,
         )
+
+
+@pytest.mark.parametrize(
+    ("annotation", "accepted", "rejected"),
+    (
+        ("Literal[True]", True, (1, 1.0, False, None, "true")),
+        ("Literal[1]", 1, (True, 1.0, 0, None, "1")),
+        ("Literal[1.0]", 1.0, (True, 1, 0.0, None, "1.0")),
+        ('Literal["1"]', "1", (True, 1, 1.0, None, "one")),
+        ("Literal[None]", None, (False, 0, 0.0, "", "none")),
+    ),
+)
+def test_literal_validation_requires_exact_runtime_type(
+    annotation,
+    accepted,
+    rejected,
+):
+    parameters = (
+        {
+            "name": "selector",
+            "kind": "positional_or_keyword",
+            "required": True,
+            "annotation": annotation,
+        },
+    )
+    validate_bff_arguments(BFFArguments((accepted,), {}), parameters)
+    for value in rejected:
+        with pytest.raises(BFFRequestValidationError, match="wrong type"):
+            validate_bff_arguments(BFFArguments((value,), {}), parameters)
+
+
+@pytest.mark.parametrize("value", (True, 1, 1.0, "1", None))
+def test_literal_validation_accepts_each_exact_option_in_a_mixed_literal(value):
+    parameters = (
+        {
+            "name": "selector",
+            "kind": "positional_or_keyword",
+            "required": True,
+            "annotation": 'Literal[True, 1, 1.0, "1", None]',
+        },
+    )
+    validate_bff_arguments(BFFArguments((value,), {}), parameters)

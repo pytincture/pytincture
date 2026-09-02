@@ -81,6 +81,11 @@ arguments, and values that conflict with common static annotations such as
 and `Literal`. Application-specific annotations remain application-owned, but
 argument names/counts are still bound statically.
 
+`Literal` validation compares both the exact JSON runtime type and value.
+Python's equality aliases do not cross the request boundary: `true` does not
+match `Literal[1]`, `1` does not match `Literal[True]` or `Literal[1.0]`, and
+JSON `null` matches only an explicit `None` option.
+
 State-changing dispatcher requests require `Content-Type: application/json`.
 Declaring GET is an explicit developer promise that the operation is
 parameterless, read-only, safe to repeat, and bodyless. Browser requests that
