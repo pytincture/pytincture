@@ -341,6 +341,10 @@ class _OptionalOAuthError(Exception):
     """Placeholder used until the OAuth extra is loaded."""
 
 
+class _OptionalOAuthTransportError(Exception):
+    """Placeholder used until the OAuth HTTP transport is loaded."""
+
+
 class _OptionalSamlValidationError(Exception):
     """Placeholder used until the SAML extra is loaded."""
 
@@ -354,6 +358,8 @@ class _DisabledMCP:
 
 OAuth = None
 OAuthError = _OptionalOAuthError
+OAuthTransportError = _OptionalOAuthTransportError
+OAuthTimeout = None
 FastMCP = None
 OneLogin_Saml2_Auth = None
 OneLogin_Saml2_Settings = None
@@ -363,9 +369,13 @@ OneLogin_Saml2_ValidationError = _OptionalSamlValidationError
 try:
     from authlib.integrations.starlette_client import OAuth as _InstalledOAuth
     from authlib.integrations.starlette_client import OAuthError as _InstalledOAuthError
+    from httpx import Timeout as _InstalledOAuthTimeout
+    from httpx import TimeoutException as _InstalledOAuthTransportError
 
     OAuth = _InstalledOAuth
     OAuthError = _InstalledOAuthError
+    OAuthTransportError = _InstalledOAuthTransportError
+    OAuthTimeout = _InstalledOAuthTimeout
 except ImportError:
     pass
 
@@ -3937,10 +3947,14 @@ if ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH:
     try:
         from authlib.integrations.starlette_client import OAuth as _OAuth
         from authlib.integrations.starlette_client import OAuthError as _OAuthError
+        from httpx import Timeout as _OAuthTimeout
+        from httpx import TimeoutException as _OAuthTransportError
     except ImportError as exc:
         raise _optional_dependency_error("OAuth", "oauth", exc) from exc
     OAuth = _OAuth
     OAuthError = _OAuthError
+    OAuthTransportError = _OAuthTransportError
+    OAuthTimeout = _OAuthTimeout
 
 if ENABLE_SAML_AUTH:
     try:
@@ -4033,6 +4047,69 @@ PASSWORD_HASH_GATE = AsyncAdmissionGate(
     AUTH_PASSWORD_HASH_MAX_CONCURRENCY,
     max(1, AUTH_PASSWORD_HASH_MAX_CONCURRENCY * 4),
     AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS,
+)
+OAUTH_INITIATION_RATE_LIMIT_ATTEMPTS = int(
+    os.getenv("OAUTH_INITIATION_RATE_LIMIT_ATTEMPTS", "1200")
+)
+OAUTH_CALLBACK_RATE_LIMIT_ATTEMPTS = int(
+    os.getenv("OAUTH_CALLBACK_RATE_LIMIT_ATTEMPTS", "600")
+)
+OAUTH_RATE_LIMIT_WINDOW_SECONDS = int(
+    os.getenv("OAUTH_RATE_LIMIT_WINDOW_SECONDS", "60")
+)
+OAUTH_EXCHANGE_MAX_CONCURRENCY = int(
+    os.getenv("OAUTH_EXCHANGE_MAX_CONCURRENCY", "8")
+)
+OAUTH_EXCHANGE_MAX_QUEUE = int(os.getenv("OAUTH_EXCHANGE_MAX_QUEUE", "16"))
+OAUTH_EXCHANGE_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("OAUTH_EXCHANGE_QUEUE_TIMEOUT_SECONDS", "1")
+)
+OAUTH_EXCHANGE_TIMEOUT_SECONDS = float(
+    os.getenv("OAUTH_EXCHANGE_TIMEOUT_SECONDS", "15")
+)
+OAUTH_CONNECT_TIMEOUT_SECONDS = float(
+    os.getenv("OAUTH_CONNECT_TIMEOUT_SECONDS", "5")
+)
+OAUTH_READ_TIMEOUT_SECONDS = float(os.getenv("OAUTH_READ_TIMEOUT_SECONDS", "10"))
+OAUTH_WRITE_TIMEOUT_SECONDS = float(
+    os.getenv("OAUTH_WRITE_TIMEOUT_SECONDS", "10")
+)
+OAUTH_POOL_TIMEOUT_SECONDS = float(os.getenv("OAUTH_POOL_TIMEOUT_SECONDS", "2"))
+_OAUTH_TIMEOUT_VALUES = (
+    OAUTH_EXCHANGE_QUEUE_TIMEOUT_SECONDS,
+    OAUTH_EXCHANGE_TIMEOUT_SECONDS,
+    OAUTH_CONNECT_TIMEOUT_SECONDS,
+    OAUTH_READ_TIMEOUT_SECONDS,
+    OAUTH_WRITE_TIMEOUT_SECONDS,
+    OAUTH_POOL_TIMEOUT_SECONDS,
+)
+if min(
+    OAUTH_INITIATION_RATE_LIMIT_ATTEMPTS,
+    OAUTH_CALLBACK_RATE_LIMIT_ATTEMPTS,
+    OAUTH_RATE_LIMIT_WINDOW_SECONDS,
+    OAUTH_EXCHANGE_MAX_CONCURRENCY,
+    OAUTH_EXCHANGE_QUEUE_TIMEOUT_SECONDS,
+    OAUTH_EXCHANGE_TIMEOUT_SECONDS,
+    OAUTH_CONNECT_TIMEOUT_SECONDS,
+    OAUTH_READ_TIMEOUT_SECONDS,
+    OAUTH_WRITE_TIMEOUT_SECONDS,
+    OAUTH_POOL_TIMEOUT_SECONDS,
+) <= 0 or OAUTH_EXCHANGE_MAX_QUEUE < 0 or not all(
+    math.isfinite(value) for value in _OAUTH_TIMEOUT_VALUES
+):
+    raise RuntimeError("OAuth resource limits must be valid and positive")
+OAUTH_INITIATION_RATE_LIMITER = SlidingWindowRateLimiter(
+    OAUTH_INITIATION_RATE_LIMIT_ATTEMPTS,
+    OAUTH_RATE_LIMIT_WINDOW_SECONDS,
+)
+OAUTH_CALLBACK_RATE_LIMITER = SlidingWindowRateLimiter(
+    OAUTH_CALLBACK_RATE_LIMIT_ATTEMPTS,
+    OAUTH_RATE_LIMIT_WINDOW_SECONDS,
+)
+OAUTH_EXCHANGE_GATE = AsyncAdmissionGate(
+    OAUTH_EXCHANGE_MAX_CONCURRENCY,
+    OAUTH_EXCHANGE_MAX_QUEUE,
+    OAUTH_EXCHANGE_QUEUE_TIMEOUT_SECONDS,
 )
 BFF_CALL_TIMEOUT_SECONDS = float(os.getenv("BFF_CALL_TIMEOUT_SECONDS", "30"))
 BFF_MAX_CONCURRENCY = int(os.getenv("BFF_MAX_CONCURRENCY", "32"))
@@ -4864,6 +4941,19 @@ def _sanitize_return_to(value: Optional[str]) -> Optional[str]:
 # consent and refresh-token exposure.
 _MICROSOFT_OIDC_SCOPES = "openid email profile"
 
+
+def _oauth_client_kwargs(scope: str) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"scope": scope}
+    if OAuthTimeout is not None:
+        kwargs["timeout"] = OAuthTimeout(
+            connect=OAUTH_CONNECT_TIMEOUT_SECONDS,
+            read=OAUTH_READ_TIMEOUT_SECONDS,
+            write=OAUTH_WRITE_TIMEOUT_SECONDS,
+            pool=OAUTH_POOL_TIMEOUT_SECONDS,
+        )
+    return kwargs
+
+
 # Create an OAuth object and register supported providers
 if ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH:
     oauth = OAuth(config)
@@ -4874,7 +4964,7 @@ if ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH:
             client_secret=config.get("GOOGLE_CLIENT_SECRET"),
             # Use the well-known OIDC discovery document
             server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-            client_kwargs={"scope": "openid email profile"},
+            client_kwargs=_oauth_client_kwargs("openid email profile"),
         )
     if ENABLE_MICROSOFT_AUTH:
         microsoft_tenant_id = config.get("MICROSOFT_TENANT_ID")
@@ -4896,7 +4986,7 @@ if ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH:
             client_id=config.get("MICROSOFT_CLIENT_ID"),
             client_secret=config.get("MICROSOFT_CLIENT_SECRET"),
             server_metadata_url=f"https://login.microsoftonline.com/{microsoft_tenant_id}/v2.0/.well-known/openid-configuration",
-            client_kwargs={"scope": _MICROSOFT_OIDC_SCOPES},
+            client_kwargs=_oauth_client_kwargs(_MICROSOFT_OIDC_SCOPES),
         )
 else:
     oauth = None
@@ -5365,6 +5455,70 @@ async def _saml_metadata(request: Request, application: str, provider_id: Option
 
     return Response(content=metadata_xml, media_type="application/xml")
 
+
+async def _admit_oauth_request(
+    request: Request,
+    application: str,
+    provider_name: str,
+    *,
+    callback: bool,
+) -> None:
+    try:
+        validate_application_name(application)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Application not found") from None
+    peer = request.client.host if request.client is not None else "unknown"
+    limiter = (
+        OAUTH_CALLBACK_RATE_LIMITER
+        if callback
+        else OAUTH_INITIATION_RATE_LIMITER
+    )
+    allowed, retry_after = limiter.allow(f"{peer}:{application}:{provider_name}")
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="OAuth request rate exceeded",
+            headers={"Retry-After": str(retry_after)},
+        )
+    try:
+        await run_in_threadpool(
+            stat_contained_file,
+            get_modules_path(),
+            f"{application}.py",
+            max_bytes=APPCODE_MAX_FILE_BYTES,
+        )
+    except (OSError, UnsafePath):
+        raise HTTPException(status_code=404, detail="Application not found") from None
+
+
+async def _oauth_access_token(provider, request: Request, provider_name: str):
+    try:
+        await OAUTH_EXCHANGE_GATE.acquire()
+    except AdmissionRejected as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication provider capacity is temporarily exhausted",
+            headers={"Retry-After": "1"},
+        ) from exc
+    try:
+        try:
+            return await asyncio.wait_for(
+                provider.authorize_access_token(request),
+                timeout=OAUTH_EXCHANGE_TIMEOUT_SECONDS,
+            )
+        except (asyncio.TimeoutError, OAuthTransportError) as exc:
+            logger.warning(
+                "%s OAuth provider exchange timed out or was unavailable",
+                provider_name,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Authentication provider is temporarily unavailable",
+                headers={"Retry-After": "1"},
+            ) from exc
+    finally:
+        OAUTH_EXCHANGE_GATE.release()
+
 @app.get("/{application}/auth/google", operation_id="initiateGoogleAuth", response_class=RedirectResponse, responses={302: {"description": "RedirectResponse (to Google OAuth URL)"}})
 async def auth_google(request: Request, application: str):
     """
@@ -5373,6 +5527,12 @@ async def auth_google(request: Request, application: str):
 
     if oauth is None or not ENABLE_GOOGLE_AUTH:
         raise HTTPException(status_code=404, detail="Google authentication not enabled")
+    await _admit_oauth_request(
+        request,
+        application,
+        "google",
+        callback=False,
+    )
     redirect_uri = f"{_request_origin(request)}/{application}/auth/google/callback"
 
     return await oauth.google.authorize_redirect(request, redirect_uri)
@@ -5385,8 +5545,14 @@ async def auth_google_callback(request: Request, application: str):
     """
     if oauth is None or not ENABLE_GOOGLE_AUTH:
         raise HTTPException(status_code=404, detail="Google authentication not enabled")
+    await _admit_oauth_request(
+        request,
+        application,
+        "google",
+        callback=True,
+    )
     try:
-        token = await oauth.google.authorize_access_token(request)
+        token = await _oauth_access_token(oauth.google, request, "Google")
     except OAuthError as e:
         logger.info("Google OAuth callback rejected", exc_info=e)
         return JSONResponse({"error": "Authentication failed"}, status_code=401)
@@ -5431,6 +5597,12 @@ async def auth_microsoft(request: Request, application: str):
     """
     if oauth is None or not ENABLE_MICROSOFT_AUTH:
         raise HTTPException(status_code=404, detail="Microsoft authentication not enabled")
+    await _admit_oauth_request(
+        request,
+        application,
+        "microsoft",
+        callback=False,
+    )
 
     redirect_uri = f"{_request_origin(request)}/{application}/auth/microsoft/callback"
 
@@ -5444,9 +5616,15 @@ async def auth_microsoft_callback(request: Request, application: str):
     """
     if oauth is None or not ENABLE_MICROSOFT_AUTH:
         raise HTTPException(status_code=404, detail="Microsoft authentication not enabled")
+    await _admit_oauth_request(
+        request,
+        application,
+        "microsoft",
+        callback=True,
+    )
 
     try:
-        token = await oauth.microsoft.authorize_access_token(request)
+        token = await _oauth_access_token(oauth.microsoft, request, "Microsoft")
     except OAuthError as e:
         logger.info("Microsoft OAuth callback rejected", exc_info=e)
         return JSONResponse({"error": "Authentication failed"}, status_code=401)

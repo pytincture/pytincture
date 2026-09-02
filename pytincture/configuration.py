@@ -273,6 +273,61 @@ class PytinctureConfig:
     microsoft_tenant_id: str = _setting(
         "", "MICROSOFT_TENANT_ID", "Required Microsoft Entra tenant id."
     )
+    oauth_initiation_rate_limit_attempts: int = _setting(
+        1200,
+        "OAUTH_INITIATION_RATE_LIMIT_ATTEMPTS",
+        "OAuth login initiations allowed per peer/application/provider window.",
+    )
+    oauth_callback_rate_limit_attempts: int = _setting(
+        600,
+        "OAUTH_CALLBACK_RATE_LIMIT_ATTEMPTS",
+        "OAuth callbacks allowed per peer/application/provider window.",
+    )
+    oauth_rate_limit_window_seconds: int = _setting(
+        60,
+        "OAUTH_RATE_LIMIT_WINDOW_SECONDS",
+        "OAuth initiation and callback rate-limit window.",
+    )
+    oauth_exchange_max_concurrency: int = _setting(
+        8,
+        "OAUTH_EXCHANGE_MAX_CONCURRENCY",
+        "Concurrent OAuth provider exchanges per worker.",
+    )
+    oauth_exchange_max_queue: int = _setting(
+        16,
+        "OAUTH_EXCHANGE_MAX_QUEUE",
+        "Maximum queued OAuth provider exchanges per worker.",
+    )
+    oauth_exchange_queue_timeout_seconds: float = _setting(
+        1.0,
+        "OAUTH_EXCHANGE_QUEUE_TIMEOUT_SECONDS",
+        "Maximum OAuth provider-exchange admission wait.",
+    )
+    oauth_exchange_timeout_seconds: float = _setting(
+        15.0,
+        "OAUTH_EXCHANGE_TIMEOUT_SECONDS",
+        "Overall OAuth provider-exchange deadline.",
+    )
+    oauth_connect_timeout_seconds: float = _setting(
+        5.0,
+        "OAUTH_CONNECT_TIMEOUT_SECONDS",
+        "OAuth provider connection deadline.",
+    )
+    oauth_read_timeout_seconds: float = _setting(
+        10.0,
+        "OAUTH_READ_TIMEOUT_SECONDS",
+        "OAuth provider read-idle deadline.",
+    )
+    oauth_write_timeout_seconds: float = _setting(
+        10.0,
+        "OAUTH_WRITE_TIMEOUT_SECONDS",
+        "OAuth provider write-idle deadline.",
+    )
+    oauth_pool_timeout_seconds: float = _setting(
+        2.0,
+        "OAUTH_POOL_TIMEOUT_SECONDS",
+        "OAuth provider connection-pool deadline.",
+    )
     saml_providers: str = _setting(
         "", "SAML_PROVIDERS", "JSON object or array of SAML identity providers.", repr=False
     )
@@ -841,6 +896,16 @@ class PytinctureConfig:
             self.login_email_max_chars,
             self.login_password_max_chars,
             self.login_csrf_ttl_seconds,
+            self.oauth_initiation_rate_limit_attempts,
+            self.oauth_callback_rate_limit_attempts,
+            self.oauth_rate_limit_window_seconds,
+            self.oauth_exchange_max_concurrency,
+            self.oauth_exchange_queue_timeout_seconds,
+            self.oauth_exchange_timeout_seconds,
+            self.oauth_connect_timeout_seconds,
+            self.oauth_read_timeout_seconds,
+            self.oauth_write_timeout_seconds,
+            self.oauth_pool_timeout_seconds,
             self.password_hash_max_concurrency,
             self.password_hash_queue_timeout_seconds,
             self.password_hash_timeout_seconds,
@@ -900,6 +965,12 @@ class PytinctureConfig:
             self.saml_validation_timeout_seconds,
             self.password_hash_queue_timeout_seconds,
             self.password_hash_timeout_seconds,
+            self.oauth_exchange_queue_timeout_seconds,
+            self.oauth_exchange_timeout_seconds,
+            self.oauth_connect_timeout_seconds,
+            self.oauth_read_timeout_seconds,
+            self.oauth_write_timeout_seconds,
+            self.oauth_pool_timeout_seconds,
             self.bff_call_timeout_seconds,
             self.bff_queue_timeout_seconds,
             self.bff_request_ingress_timeout_seconds,
@@ -923,6 +994,8 @@ class PytinctureConfig:
             raise ValueError("resource limits must be greater than zero")
         if self.bff_max_queue < 0:
             raise ValueError("bff_max_queue cannot be negative")
+        if self.oauth_exchange_max_queue < 0:
+            raise ValueError("oauth_exchange_max_queue cannot be negative")
         if self.public_asset_max_queue < 0:
             raise ValueError("public_asset_max_queue cannot be negative")
         if self.public_widget_wheel_max_queue < 0:
@@ -1234,6 +1307,9 @@ class PytinctureConfig:
             "login_rate_limit_attempts", "login_rate_limit_window_seconds",
             "login_email_max_chars", "login_password_max_chars",
             "login_csrf_ttl_seconds",
+            "oauth_initiation_rate_limit_attempts",
+            "oauth_callback_rate_limit_attempts", "oauth_rate_limit_window_seconds",
+            "oauth_exchange_max_concurrency", "oauth_exchange_max_queue",
             "password_hash_max_concurrency", "bff_max_concurrency", "bff_max_queue",
             "bff_request_max_bytes", "bff_request_max_depth", "bff_request_max_items",
             "bff_result_max_bytes", "bff_result_max_depth", "bff_result_max_items",
@@ -1260,6 +1336,9 @@ class PytinctureConfig:
         float_fields = {
             "password_hash_queue_timeout_seconds", "bff_call_timeout_seconds",
             "password_hash_timeout_seconds",
+            "oauth_exchange_queue_timeout_seconds", "oauth_exchange_timeout_seconds",
+            "oauth_connect_timeout_seconds", "oauth_read_timeout_seconds",
+            "oauth_write_timeout_seconds", "oauth_pool_timeout_seconds",
             "bff_queue_timeout_seconds", "bff_request_ingress_timeout_seconds",
             "bff_stream_max_seconds",
             "bff_isolated_cpu_seconds",

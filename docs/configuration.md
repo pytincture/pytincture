@@ -158,6 +158,17 @@ The contract test checks every row in this table against the dataclass model.
 | `microsoft_client_id` | `MICROSOFT_CLIENT_ID` | Microsoft OAuth client id. |
 | `microsoft_client_secret` | `MICROSOFT_CLIENT_SECRET` | Microsoft OAuth client secret. |
 | `microsoft_tenant_id` | `MICROSOFT_TENANT_ID` | Required Microsoft Entra tenant id. |
+| `oauth_initiation_rate_limit_attempts` | `OAUTH_INITIATION_RATE_LIMIT_ATTEMPTS` | OAuth login initiations allowed per peer/application/provider window. |
+| `oauth_callback_rate_limit_attempts` | `OAUTH_CALLBACK_RATE_LIMIT_ATTEMPTS` | OAuth callbacks allowed per peer/application/provider window. |
+| `oauth_rate_limit_window_seconds` | `OAUTH_RATE_LIMIT_WINDOW_SECONDS` | OAuth initiation and callback rate-limit window. |
+| `oauth_exchange_max_concurrency` | `OAUTH_EXCHANGE_MAX_CONCURRENCY` | Concurrent OAuth provider exchanges per worker. |
+| `oauth_exchange_max_queue` | `OAUTH_EXCHANGE_MAX_QUEUE` | Maximum queued OAuth provider exchanges per worker. |
+| `oauth_exchange_queue_timeout_seconds` | `OAUTH_EXCHANGE_QUEUE_TIMEOUT_SECONDS` | Maximum OAuth provider-exchange admission wait. |
+| `oauth_exchange_timeout_seconds` | `OAUTH_EXCHANGE_TIMEOUT_SECONDS` | Overall OAuth provider-exchange deadline. |
+| `oauth_connect_timeout_seconds` | `OAUTH_CONNECT_TIMEOUT_SECONDS` | OAuth provider connection deadline. |
+| `oauth_read_timeout_seconds` | `OAUTH_READ_TIMEOUT_SECONDS` | OAuth provider read-idle deadline. |
+| `oauth_write_timeout_seconds` | `OAUTH_WRITE_TIMEOUT_SECONDS` | OAuth provider write-idle deadline. |
+| `oauth_pool_timeout_seconds` | `OAUTH_POOL_TIMEOUT_SECONDS` | OAuth provider connection-pool deadline. |
 | `saml_providers` | `SAML_PROVIDERS` | JSON object or array of SAML identity providers. |
 | `saml_idp_entity_id` | `SAML_IDP_ENTITY_ID` | Default SAML identity-provider entity id. |
 | `saml_idp_sso_url` | `SAML_IDP_SSO_URL` | Default SAML identity-provider sign-in URL. |

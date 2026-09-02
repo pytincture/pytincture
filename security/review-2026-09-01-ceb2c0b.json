@@ -75,11 +75,18 @@
     {
       "id": "PT-05",
       "severity": "medium_conditional",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/292",
       "disposition": "Bound OAuth initiation and callback rates, exchange concurrency, and provider deadlines; validate application existence before initiation.",
+      "implementation": "OAuth initiation and callback routes now apply configurable per-peer/application/provider rate controls. Token exchange uses a bounded per-worker admission gate, explicit HTTP phase deadlines, and an overall deadline. Application existence is verified with contained no-follow file metadata before any provider work.",
+      "regression_tests": [
+        "tests/test_app.py::test_oauth_initiation_rejects_missing_app_before_provider_redirect",
+        "tests/test_app.py::test_oauth_callback_rate_limit_runs_before_provider_exchange",
+        "tests/test_app.py::test_oauth_exchange_timeout_releases_admission",
+        "tests/test_app.py::test_oauth_http_client_has_explicit_phase_deadlines"
+      ],
       "potential_user_breakage": false,
-      "compatibility_note": "Normal OAuth remains stateless and Redis-free; strict globally atomic callback consumption remains optional."
+      "compatibility_note": "Normal OAuth remains stateless, load-balancer friendly, and Redis-free. Limits are deliberately generous and configurable. Strict globally atomic callback consumption remains optional."
     },
     {
       "id": "PT-06",
