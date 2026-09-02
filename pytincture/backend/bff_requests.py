@@ -161,7 +161,14 @@ def _matches_annotation(value: Any, node: ast.AST) -> bool:
                 literal_values.append(ast.literal_eval(argument))
             except (TypeError, ValueError):
                 return True
-        return value in literal_values
+        for literal_value in literal_values:
+            if literal_value is None:
+                if value is None:
+                    return True
+                continue
+            if type(value) is type(literal_value) and value == literal_value:
+                return True
+        return False
     if container_name in {"list", "List", "Sequence", "MutableSequence"}:
         return isinstance(value, list) and (
             not arguments

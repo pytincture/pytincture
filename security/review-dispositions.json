@@ -1046,6 +1046,31 @@
         "tests/test_backend_modules.py::test_password_verifier_selects_the_configured_hash_scheme",
         "tests/test_backend_modules.py::test_successful_bcrypt_verification_returns_argon2id_upgrade"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-PT-15",
+      "status": "remediated",
+      "title": "BFF Literal values require their declared JSON type",
+      "intentional_contract": "Literal annotations remain convenient request declarations and support mixed bool, integer, float, string, and None options.",
+      "security_boundary": "A JSON value satisfies a Literal only when both its exact Python runtime type and value match one declared option. None is matched by identity, preventing bool/int/float equality aliases from bypassing a type-sensitive selector.",
+      "controls": {
+        "literal_exact_runtime_type_required": true,
+        "literal_exact_value_required": true,
+        "none_matched_explicitly": true,
+        "boolean_integer_alias_accepted": false,
+        "integer_float_alias_accepted": false,
+        "valid_literal_api_preserved": true,
+        "redis_required": false,
+        "runtime_state_added": false
+      },
+      "implementation": [
+        "pytincture/backend/bff_requests.py",
+        "docs/contracts/bff-v1.md"
+      ],
+      "regression_tests": [
+        "tests/test_bff_requests.py::test_literal_validation_requires_exact_runtime_type",
+        "tests/test_bff_requests.py::test_literal_validation_accepts_each_exact_option_in_a_mixed_literal"
+      ]
     }
   ]
 }

@@ -1650,6 +1650,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-09-01-PT-09",
         "REVIEW-2026-09-01-PT-13",
         "REVIEW-2026-09-01-PT-14",
+        "REVIEW-2026-09-01-PT-15",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1710,6 +1711,11 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     ] is True
     assert password_controls["static_environment_mutated"] is False
     assert password_controls["redis_required"] is False
+    literal_controls = dispositions["REVIEW-2026-09-01-PT-15"]["controls"]
+    assert literal_controls["literal_exact_runtime_type_required"] is True
+    assert literal_controls["boolean_integer_alias_accepted"] is False
+    assert literal_controls["integer_float_alias_accepted"] is False
+    assert literal_controls["valid_literal_api_preserved"] is True
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True

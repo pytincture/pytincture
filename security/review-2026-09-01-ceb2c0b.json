@@ -225,11 +225,16 @@
     {
       "id": "PT-15",
       "severity": "low",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/301",
       "disposition": "Compare exact runtime type and value for Literal validation and handle None explicitly.",
+      "implementation": "Static BFF Literal validation requires exact runtime type plus equal value for every option and handles None only through identity. Python's bool/int/float equality aliases cannot cross the JSON request boundary.",
+      "regression_tests": [
+        "tests/test_bff_requests.py::test_literal_validation_requires_exact_runtime_type",
+        "tests/test_bff_requests.py::test_literal_validation_accepts_each_exact_option_in_a_mixed_literal"
+      ],
       "potential_user_breakage": true,
-      "compatibility_note": "Only JSON values whose type violates the declared annotation are rejected."
+      "compatibility_note": "Only JSON values whose type violates the declared annotation are rejected. Correctly typed bool, int, float, string, and None literals remain accepted."
     },
     {
       "id": "PT-16",
