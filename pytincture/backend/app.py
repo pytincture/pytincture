@@ -828,9 +828,10 @@ async def correlation_id_middleware(request: Request, call_next):
     csrf_token = request.session.get("csrf_token") if hasattr(request, "session") else None
     if csrf_token:
         response.set_cookie(
-            "pytincture_csrf",
+            _CSRF_COOKIE,
             csrf_token,
             max_age=AUTH_SESSION_MAX_AGE_SECONDS,
+            path="/",
             secure=AUTH_SESSION_HTTPS_ONLY,
             httponly=False,
             samesite=AUTH_SESSION_SAME_SITE,
@@ -3906,6 +3907,16 @@ AUTH_SESSION_HTTPS_ONLY = os.getenv(
     "AUTH_SESSION_HTTPS_ONLY",
     "false" if DEV_EMAIL_LOGIN_ONLY else "true",
 ).lower() == "true"
+_SESSION_COOKIE = (
+    "__Host-pytincture-session"
+    if AUTH_SESSION_HTTPS_ONLY
+    else "pytincture-dev-session"
+)
+_CSRF_COOKIE = (
+    "__Host-pytincture-csrf"
+    if AUTH_SESSION_HTTPS_ONLY
+    else "pytincture-dev-csrf"
+)
 
 if ALLOW_DEVELOPMENT_AUTH_ORIGIN:
     if not _authentication_enabled():
@@ -4515,7 +4526,6 @@ def _get_saml_role_attribute_keys(provider: Optional[Dict[str, Any]] = None) -> 
 # consumption requires an optional shared atomic deployment control.
 _SAML_RELAY_STATE_SALT = "pytincture-saml-relay-state-v2"
 _SAML_HANDSHAKE_COOKIE_SALT = "pytincture-saml-handshake-cookie-v1"
-_SAML_HANDSHAKE_COOKIE = "pytincture_saml_handshake"
 
 
 def _get_saml_relay_state_serializer() -> URLSafeTimedSerializer:
@@ -4562,7 +4572,19 @@ def _get_saml_handshake_cookie_serializer() -> URLSafeTimedSerializer:
     )
 
 
+def _saml_handshake_cookie_name(application: str) -> str:
+    prefix = (
+        "__Host-pytincture-saml-handshake-"
+        if AUTH_SESSION_HTTPS_ONLY
+        else "pytincture-dev-saml-handshake-"
+    )
+    return f"{prefix}{application}"
+
+
 def _saml_handshake_cookie_path(application: str) -> str:
+    if AUTH_SESSION_HTTPS_ONLY:
+        # The __Host- prefix requires Path=/ and forbids Domain.
+        return "/"
     return f"/{quote(application, safe='')}/auth/saml"
 
 
@@ -4572,7 +4594,7 @@ def _set_saml_handshake_cookie(
     transaction: Dict[str, Any],
 ) -> None:
     response.set_cookie(
-        _SAML_HANDSHAKE_COOKIE,
+        _saml_handshake_cookie_name(application),
         _get_saml_handshake_cookie_serializer().dumps(transaction),
         max_age=SAML_RELAY_STATE_TTL_SECONDS,
         path=_saml_handshake_cookie_path(application),
@@ -4586,9 +4608,10 @@ def _set_saml_handshake_cookie(
 
 def _load_saml_handshake_cookie(
     request: Request,
+    application: str,
     transaction_id: str,
 ) -> Dict[str, Any]:
-    token = request.cookies.get(_SAML_HANDSHAKE_COOKIE, "")
+    token = request.cookies.get(_saml_handshake_cookie_name(application), "")
     if not token:
         raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
     try:
@@ -4615,7 +4638,7 @@ def _load_saml_handshake_cookie(
 
 def _delete_saml_handshake_cookie(response: Response, application: str) -> None:
     response.delete_cookie(
-        _SAML_HANDSHAKE_COOKIE,
+        _saml_handshake_cookie_name(application),
         path=_saml_handshake_cookie_path(application),
         secure=AUTH_SESSION_HTTPS_ONLY,
         httponly=True,
@@ -4754,7 +4777,7 @@ def _debug_session_state(stage: str, request: Request) -> None:
     Emit diagnostic information about the Starlette session + cookies.
     """
     try:
-        cookie_value = request.cookies.get("session")
+        cookie_value = request.cookies.get(_SESSION_COOKIE)
         cookie_present = cookie_value is not None
         cookie_length = len(cookie_value) if cookie_present else 0
         session_keys = list(request.session.keys())
@@ -4995,6 +5018,7 @@ else:
 app.add_middleware(
     RotatingSessionMiddleware,
     secret_key=SAML_SECRET_KEY,
+    session_cookie=_SESSION_COOKIE,
     previous_secret_keys=AUTH_SESSION_PREVIOUS_SECRET_KEYS,
     max_age=AUTH_SESSION_MAX_AGE_SECONDS,
     absolute_max_age=AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS,
@@ -5268,7 +5292,11 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
     relay_token = post_data.get("RelayState")
     relay_state = _load_saml_relay_state(relay_token)
     transaction_id = relay_state["transaction_id"]
-    transaction = _load_saml_handshake_cookie(request, transaction_id)
+    transaction = _load_saml_handshake_cookie(
+        request,
+        application,
+        transaction_id,
+    )
     if transaction.get("application") != application:
         raise HTTPException(status_code=400, detail="Invalid or expired SAML login")
 
@@ -5679,7 +5707,13 @@ def logout(request: Request,  application: str):
 
     # 3) Redirect anywhere in *your* app after local logout
     response = RedirectResponse(url=f"/{application}/login", status_code=302)
-    response.delete_cookie("pytincture_csrf")
+    response.delete_cookie(
+        _CSRF_COOKIE,
+        path="/",
+        secure=AUTH_SESSION_HTTPS_ONLY,
+        httponly=False,
+        samesite=AUTH_SESSION_SAME_SITE,
+    )
     return response
 
 # ======================

@@ -10,15 +10,20 @@ Production authentication also requires exact `PYTINCTURE_ALLOWED_HOSTS` and
 one HTTPS `PYTINCTURE_CANONICAL_ORIGIN`. Pytincture uses that fixed origin for
 OAuth and SAML URLs instead of trusting the request `Host`. Proxy-header trust
 is accepted only when both controls are configured. Production authentication
-always uses Secure session cookies; an explicit
-`AUTH_SESSION_HTTPS_ONLY=false` is rejected.
+always uses Secure host-only cookies: `__Host-pytincture-session` for the
+HttpOnly session, `__Host-pytincture-csrf` for the readable CSRF token, and an
+application-specific `__Host-pytincture-saml-handshake-*` cookie during SAML
+login. Each uses `Path=/` with no `Domain` attribute so a sibling hostname
+cannot inject it. An explicit `AUTH_SESSION_HTTPS_ONLY=false` is rejected.
 
 Local HTTP auth testing can explicitly set
 `PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN=true` and
 `AUTH_SESSION_HTTPS_ONLY=false`. The supported launcher confines this mode to a
 literal loopback listener, and the application rejects non-loopback peers even
 under another ASGI launcher. It cannot be combined with trusted proxy headers
-or production host/origin controls.
+or production host/origin controls. HTTP development uses separate
+`pytincture-dev-*` cookie names rather than weakening the production cookie
+contract.
 
 ## Local password login
 

@@ -30,7 +30,10 @@ async function callBff(page) {
         const csrfToken = document.cookie
             .split(";")
             .map(value => value.trim().split("="))
-            .find(([name]) => name === "pytincture_csrf")
+            .find(([name]) => [
+                "__Host-pytincture-csrf",
+                "pytincture-dev-csrf",
+            ].includes(name))
             ?.slice(1).join("=") || "";
         const response = await fetch("/e2e_app/classcall/e2e_data.py/E2EData/sync_call", {
             method: "POST",
@@ -76,7 +79,7 @@ test("Keycloak SAML login authenticates the packaged app and BFF", async ({ page
         await page.waitForURL(/127\.0\.0\.1:8085\/realms\/pytincture-acceptance\/protocol\/saml/);
 
         const handshakeCookie = (await page.context().cookies()).find(
-            cookie => cookie.name === "pytincture_saml_handshake",
+            cookie => cookie.name === "pytincture-dev-saml-handshake-e2e_app",
         );
         expect(handshakeCookie).toMatchObject({
             httpOnly: true,
@@ -97,7 +100,7 @@ test("Keycloak SAML login authenticates the packaged app and BFF", async ({ page
         await expect(page.locator("#e2e-ready")).toBeVisible();
         expect(new URL(page.url()).search).toBe("");
         expect(await page.context().cookies()).not.toEqual(expect.arrayContaining([
-            expect.objectContaining({ name: "pytincture_saml_handshake" }),
+            expect.objectContaining({ name: "pytincture-dev-saml-handshake-e2e_app" }),
         ]));
 
         const bff = await callBff(page);
@@ -109,7 +112,7 @@ test("Keycloak SAML login authenticates the packaged app and BFF", async ({ page
         expect(page.url()).toBe("http://127.0.0.1:8084/e2e_app");
 
         const csrfCookie = (await page.context().cookies()).find(
-            cookie => cookie.name === "pytincture_csrf",
+            cookie => cookie.name === "pytincture-dev-csrf",
         );
         const logoutResponse = await page.request.post("/e2e_app/auth/logout", {
             headers: { "X-CSRF-Token": csrfCookie.value },
@@ -118,7 +121,7 @@ test("Keycloak SAML login authenticates the packaged app and BFF", async ({ page
         expect(logoutResponse.status()).toBe(302);
         expect(logoutResponse.headers().location).toBe("/e2e_app/login");
         expect(await page.context().cookies()).not.toEqual(expect.arrayContaining([
-            expect.objectContaining({ name: "pytincture_csrf" }),
+            expect.objectContaining({ name: "pytincture-dev-csrf" }),
         ]));
 
         const anonymousBff = await page.request.post("/e2e_app/classcall/e2e_data.py/E2EData/sync_call", {

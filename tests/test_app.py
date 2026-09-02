@@ -26,6 +26,8 @@ from pytincture.backend.replay import LocalReplayStore
 from pytincture.backend.app import (
     app,
     ALLOWED_NOAUTH_CLASSCALLS,
+    _CSRF_COOKIE,
+    _SESSION_COOKIE,
     _build_dynamic_module_name,
     _sanitize_return_to,
     set_bff_policy_hook,
@@ -35,7 +37,7 @@ from fastapi import HTTPException, Request
 
 
 def _decode_session_cookie(client, secret_key):
-    cookie_value = client.cookies.get("session")
+    cookie_value = client.cookies.get(_SESSION_COOKIE)
     assert cookie_value
     unsigned = TimestampSigner(secret_key).unsign(cookie_value)
     return json.loads(base64.b64decode(unsigned))
@@ -57,7 +59,7 @@ def _tamper_token(token):
 
 
 def _csrf_headers(client):
-    token = client.cookies.get("pytincture_csrf")
+    token = client.cookies.get(_CSRF_COOKIE)
     assert token
     return {"X-CSRF-Token": token}
 
@@ -3263,7 +3265,7 @@ def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_cli
     assert "No trusted backend wheel is available" in response.text
     assert "x-pytincture-sha256" in response.text
     assert "throw lastInstallError" in response.text
-    assert 'name === "pytincture_csrf"' in response.text
+    assert 'CSRF_COOKIE_NAMES.includes(name)' in response.text
     assert 'headers["X-CSRF-Token"] = csrfToken' in response.text
 
 def test_service_worker_only_caches_manifested_framework_assets(fresh_client):
@@ -3692,7 +3694,7 @@ def test_oversized_authenticator_claims_fail_login_without_session(
     )
 
     assert response.status_code == 401
-    assert fresh_client.cookies.get("session") is None
+    assert fresh_client.cookies.get(_SESSION_COOKIE) is None
 
 
 def test_stateless_session_survives_logout_in_another_browser_and_replica(
@@ -3729,8 +3731,8 @@ def test_stateless_session_survives_logout_in_another_browser_and_replica(
             follow_redirects=False,
         )
         assert second_login.status_code == 303
-        second_cookie = second_browser.cookies.get("session")
-        second_csrf_cookie = second_browser.cookies.get("pytincture_csrf")
+        second_cookie = second_browser.cookies.get(_SESSION_COOKIE)
+        second_csrf_cookie = second_browser.cookies.get(_CSRF_COOKIE)
         assert second_cookie
         assert second_csrf_cookie
 
@@ -3744,8 +3746,8 @@ def test_stateless_session_survives_logout_in_another_browser_and_replica(
             follow_redirects=False,
         )
 
-        another_replica.cookies.set("session", second_cookie)
-        another_replica.cookies.set("pytincture_csrf", second_csrf_cookie)
+        another_replica.cookies.set(_SESSION_COOKIE, second_cookie)
+        another_replica.cookies.set(_CSRF_COOKIE, second_csrf_cookie)
         response = another_replica.post(
             "/demoapp/classcall/example.py/ExampleClass/testfunc",
             json={"args": [], "kwargs": {"source": "replica"}},
@@ -3776,11 +3778,11 @@ def test_tampered_and_expired_stateless_sessions_are_rejected(
         password="secret",
         follow_redirects=False,
     )
-    valid_cookie = fresh_client.cookies.get("session")
+    valid_cookie = fresh_client.cookies.get(_SESSION_COOKIE)
     assert valid_cookie
 
     fresh_client.cookies.clear()
-    fresh_client.cookies.set("session", _tamper_token(valid_cookie))
+    fresh_client.cookies.set(_SESSION_COOKIE, _tamper_token(valid_cookie))
     tampered_response = fresh_client.get(
         "/demoapp/classcall/example.py/ExampleClass/testfunc"
     )
@@ -3795,7 +3797,7 @@ def test_tampered_and_expired_stateless_sessions_are_rejected(
         backend_app.AUTH_SESSION_MAX_AGE_SECONDS,
     )
     fresh_client.cookies.clear()
-    fresh_client.cookies.set("session", expired_cookie)
+    fresh_client.cookies.set(_SESSION_COOKIE, expired_cookie)
     expired_response = fresh_client.get(
         "/demoapp/classcall/example.py/ExampleClass/testfunc"
     )
@@ -3869,7 +3871,9 @@ def test_saml_login_embeds_replica_safe_relay_state(fresh_client, monkeypatch):
     relay_state = backend_app._load_saml_relay_state(query["RelayState"][0])
     assert relay_state["version"] == 2
     transaction = backend_app._get_saml_handshake_cookie_serializer().loads(
-        fresh_client.cookies[backend_app._SAML_HANDSHAKE_COOKIE],
+        fresh_client.cookies[
+            backend_app._saml_handshake_cookie_name("demoapp")
+        ],
         max_age=backend_app.SAML_RELAY_STATE_TTL_SECONDS,
     )
     assert transaction == {
@@ -3881,6 +3885,13 @@ def test_saml_login_embeds_replica_safe_relay_state(fresh_client, monkeypatch):
         "return_to": "/demoapp/work",
     }
     set_cookie = response.headers["set-cookie"].lower()
+    assert backend_app._saml_handshake_cookie_name("demoapp").startswith("__Host-")
+    assert (
+        backend_app._saml_handshake_cookie_name("demoapp")
+        != backend_app._saml_handshake_cookie_name("anotherapp")
+    )
+    assert "path=/" in set_cookie
+    assert "domain=" not in set_cookie
     assert "httponly" in set_cookie
     assert "secure" in set_cookie
     assert "samesite=none" in set_cookie
@@ -4056,9 +4067,9 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
         backend_app._get_saml_handshake_cookie_serializer().dumps(transaction)
     )
     fresh_client.cookies.set(
-        backend_app._SAML_HANDSHAKE_COOKIE,
+        backend_app._saml_handshake_cookie_name("demoapp"),
         handshake_cookie,
-        path="/demoapp/auth/saml",
+        path=backend_app._saml_handshake_cookie_path("demoapp"),
     )
     relay_state = backend_app._sign_saml_relay_state({
         "version": 2,
@@ -4089,24 +4100,25 @@ def test_saml_acs_creates_compact_session_that_authorizes_bff_calls(
     assert "saml_session_index" not in session_data
     assert 0 < session_data["auth_expires_at"] - time.time() <= 90
     assert len(session_data["saml_replay_proof"]) == 64
-    assert "ONELOGIN_response" not in fresh_client.cookies["session"]
-    assert "ONELOGIN_assertion" not in fresh_client.cookies["session"]
+    assert "ONELOGIN_response" not in fresh_client.cookies[_SESSION_COOKIE]
+    assert "ONELOGIN_assertion" not in fresh_client.cookies[_SESSION_COOKIE]
     assert any(
-        backend_app._SAML_HANDSHAKE_COOKIE in value and "Max-Age=0" in value
+        backend_app._saml_handshake_cookie_name("demoapp") in value
+        and "Max-Age=0" in value
         for value in response.headers.get_list("set-cookie")
     )
     session_cookie_header = next(
         value
         for value in response.headers.get_list("set-cookie")
-        if value.startswith("session=")
+        if value.startswith(f"{_SESSION_COOKIE}=")
     )
     assert "Max-Age=90" in session_cookie_header or "Max-Age=89" in session_cookie_header
     # Even a raw client that restores the consumed handshake cookie is rejected
     # by the replay proof carried in the signed browser session.
     fresh_client.cookies.set(
-        backend_app._SAML_HANDSHAKE_COOKIE,
+        backend_app._saml_handshake_cookie_name("demoapp"),
         handshake_cookie,
-        path="/demoapp/auth/saml",
+        path=backend_app._saml_handshake_cookie_path("demoapp"),
     )
 
     replay = fresh_client.post(
@@ -4140,7 +4152,7 @@ def test_saml_acs_rejects_relay_state_copied_to_another_browser(
     # A second browser may have its own valid handshake cookie, but it must not
     # be able to submit the victim browser's copied RelayState.
     fresh_client.cookies.set(
-        backend_app._SAML_HANDSHAKE_COOKIE,
+        backend_app._saml_handshake_cookie_name("demoapp"),
         backend_app._get_saml_handshake_cookie_serializer().dumps(
             {
                 "version": 1,
@@ -4151,7 +4163,7 @@ def test_saml_acs_rejects_relay_state_copied_to_another_browser(
                 "return_to": "/demoapp",
             }
         ),
-        path="/demoapp/auth/saml",
+        path=backend_app._saml_handshake_cookie_path("demoapp"),
     )
     response = fresh_client.post(
         "/demoapp/auth/saml/acs",
@@ -4204,9 +4216,9 @@ def test_saml_acs_requires_exact_in_response_to(fresh_client, monkeypatch):
         "return_to": "/demoapp",
     }
     fresh_client.cookies.set(
-        backend_app._SAML_HANDSHAKE_COOKIE,
+        backend_app._saml_handshake_cookie_name("demoapp"),
         backend_app._get_saml_handshake_cookie_serializer().dumps(record),
-        path="/demoapp/auth/saml",
+        path=backend_app._saml_handshake_cookie_path("demoapp"),
     )
     relay_state = backend_app._sign_saml_relay_state(
         {"version": 2, "transaction_id": transaction_id}
@@ -4512,11 +4524,11 @@ def test_authenticated_session_has_absolute_lifetime(
     expired_absolute_cookie = TimestampSigner(
         backend_app.SAML_SECRET_KEY
     ).sign(encoded).decode("utf-8")
-    fresh_client.cookies.set("session", expired_absolute_cookie)
+    fresh_client.cookies.set(_SESSION_COOKIE, expired_absolute_cookie)
     response = fresh_client.post(
         "/demoapp/classcall/example.py/ExampleClass/testfunc",
         json={"args": [], "kwargs": {}},
-        headers={"X-CSRF-Token": fresh_client.cookies["pytincture_csrf"]},
+        headers={"X-CSRF-Token": fresh_client.cookies[_CSRF_COOKIE]},
     )
     assert response.status_code == 401
 

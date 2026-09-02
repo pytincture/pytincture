@@ -149,9 +149,9 @@ def test_saml_handshake_is_portable_between_workers_without_redis(tmp_path):
     assert not hasattr(second_backend, "SAML_TRANSACTION_STORE")
     with TestClient(second, base_url="https://service.example") as client:
         client.cookies.set(
-            second_backend._SAML_HANDSHAKE_COOKIE,
+            second_backend._saml_handshake_cookie_name("demo"),
             handshake_cookie,
-            path="/demo/auth/saml",
+            path=second_backend._saml_handshake_cookie_path("demo"),
         )
         response = client.post(
             "/demo/auth/saml/acs",
@@ -174,7 +174,11 @@ def test_local_revocations_are_worker_local_but_shared_store_propagates(tmp_path
         second_client.cookies.update(first_client.cookies)
         first_client.post(
             "/demo/auth/logout",
-            headers={"X-CSRF-Token": first_client.cookies["pytincture_csrf"]},
+            headers={
+                "X-CSRF-Token": first_client.cookies[
+                    first.state.pytincture_backend._CSRF_COOKIE
+                ]
+            },
             follow_redirects=False,
         )
         assert second_client.get("/demo", follow_redirects=False).status_code == 200
@@ -217,7 +221,11 @@ def test_local_revocations_are_worker_local_but_shared_store_propagates(tmp_path
         assert second_client.get("/demo", follow_redirects=False).status_code == 200
         first_client.post(
             "/demo/auth/logout",
-            headers={"X-CSRF-Token": first_client.cookies["pytincture_csrf"]},
+            headers={
+                "X-CSRF-Token": first_client.cookies[
+                    first.state.pytincture_backend._CSRF_COOKIE
+                ]
+            },
             follow_redirects=False,
         )
         rejected = second_client.get("/demo", follow_redirects=False)
@@ -225,11 +233,62 @@ def test_local_revocations_are_worker_local_but_shared_store_propagates(tmp_path
         assert rejected.headers["location"] == "/demo/login"
 
 
-def test_https_deployment_sets_secure_session_cookie(tmp_path):
+def test_https_deployment_sets_host_only_prefixed_cookies(tmp_path):
     first, _ = make_workers(tmp_path, https_only=True)
+    backend = first.state.pytincture_backend
     with TestClient(first, base_url="https://service.example") as client:
         response = login(client)
-    assert "secure" in response.headers["set-cookie"].lower()
+    cookie_headers = response.headers.get_list("set-cookie")
+    session_cookie = next(
+        value for value in cookie_headers
+        if value.startswith(f"{backend._SESSION_COOKIE}=")
+    )
+    csrf_cookie = next(
+        value for value in cookie_headers
+        if value.startswith(f"{backend._CSRF_COOKIE}=")
+    )
+    assert backend._SESSION_COOKIE == "__Host-pytincture-session"
+    assert backend._CSRF_COOKIE == "__Host-pytincture-csrf"
+    assert "path=/" in session_cookie.lower()
+    assert "secure" in session_cookie.lower()
+    assert "httponly" in session_cookie.lower()
+    assert "domain=" not in session_cookie.lower()
+    assert "path=/" in csrf_cookie.lower()
+    assert "secure" in csrf_cookie.lower()
+    assert "httponly" not in csrf_cookie.lower()
+    assert "domain=" not in csrf_cookie.lower()
+
+
+def test_http_development_uses_separate_unprefixed_cookie_names(tmp_path):
+    (tmp_path / "demo.py").write_text(
+        'APP_TITLE = "Development smoke"\n', encoding="utf-8"
+    )
+    service = create_app(
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            default_application="demo",
+            enable_user_login=True,
+            enable_dev_email_login=True,
+            session_https_only=False,
+            environment={"ALLOWED_EMAILS": "dev@example.com"},
+        )
+    )
+    backend = service.state.pytincture_backend
+    with TestClient(
+        service,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    ) as client:
+        response = client.get("/demo/login")
+    session_cookie = next(
+        value for value in response.headers.get_list("set-cookie")
+        if value.startswith(f"{backend._SESSION_COOKIE}=")
+    )
+    assert backend._SESSION_COOKIE == "pytincture-dev-session"
+    assert backend._CSRF_COOKIE == "pytincture-dev-csrf"
+    assert "__Host-" not in session_cookie
+    assert "secure" not in session_cookie.lower()
+    assert "domain=" not in session_cookie.lower()
 
 
 def test_request_completion_log_is_structured(tmp_path, caplog):

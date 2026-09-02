@@ -26,6 +26,10 @@ var BUILTIN_WIDGET_ASSET_MANIFESTS = Object.freeze({
     ]
   }
 });
+var CSRF_COOKIE_NAMES = Object.freeze([
+  "__Host-pytincture-csrf",
+  "pytincture-dev-csrf"
+]);
 var DEFAULT_CONFIG = {
   application: null,
   entrypoint: null,
@@ -551,7 +555,7 @@ function enableBackendLogging(endpoint) {
   });
   function sendToBackend(level, message) {
     var _a;
-    const csrfToken = ((_a = String(document.cookie || "").split(";").map((cookie) => cookie.trim().split("=")).find(([name]) => name === "pytincture_csrf")) == null ? void 0 : _a.slice(1).join("=")) || "";
+    const csrfToken = ((_a = String(document.cookie || "").split(";").map((cookie) => cookie.trim().split("=")).find(([name]) => CSRF_COOKIE_NAMES.includes(name))) == null ? void 0 : _a.slice(1).join("=")) || "";
     const headers = { "Content-Type": "application/json" };
     if (csrfToken) {
       headers["X-CSRF-Token"] = csrfToken;
