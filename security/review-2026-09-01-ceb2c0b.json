@@ -2,8 +2,8 @@
   "schema_version": 1,
   "recorded_on": "2026-09-01",
   "reviewed_commit": "ceb2c0b653aa0a7cc0fb9b330b3f8f4a7273647f",
-  "status": "tracked",
-  "summary": "One conditional high, ten medium, four low, and one informational source-review finding were triaged. Fourteen actionable items are tracked. Stateless SAML single-consumption and application-owned IdP group authorization remain documented architecture decisions.",
+  "status": "remediated",
+  "summary": "One conditional high, ten medium, four low, and one informational source-review finding were triaged. All fourteen actionable items are remediated. Stateless SAML single-consumption and application-owned IdP group authorization remain documented architecture decisions.",
   "compatibility_constraints": {
     "class_level_bff_export_preserved": true,
     "synchronous_bff_preserved": true,
@@ -239,11 +239,18 @@
     {
       "id": "PT-16",
       "severity": "informational",
-      "status": "tracked",
+      "status": "remediated_additive_hardening",
       "issue": "https://github.com/pytincture/pytincture/issues/302",
-      "disposition": "Add optional production controls for API documentation and detailed readiness while preserving a minimal public health endpoint.",
+      "disposition": "Retain existing public/authenticated/disabled API-documentation modes and add public/minimal/operator detail modes to the always-public health and readiness status probes.",
+      "implementation": "Health and readiness always expose their status and meaningful HTTP code. PYTINCTURE_DIAGNOSTIC_DETAILS_MODE=minimal omits version and named checks; operator mode returns details only for a constant-time matched strong Bearer token. Responses are private/no-store, operator responses vary on Authorization, and all controls are stateless.",
+      "regression_tests": [
+        "tests/test_app.py::test_health_and_readiness_endpoints",
+        "tests/test_app.py::test_diagnostic_details_can_be_minimal_or_operator_only",
+        "tests/test_configuration.py::test_bff_documentation_can_require_authentication_or_be_disabled",
+        "tests/test_configuration.py::test_browser_diagnostic_and_documentation_controls_fail_closed"
+      ],
       "potential_user_breakage": false,
-      "compatibility_note": "Development defaults remain convenient and no forced behavior change is required."
+      "compatibility_note": "The default response bodies remain unchanged. Minimal and operator modes are opt-in, load balancer status stays public, and no Redis or sticky routing is required."
     }
   ],
   "accepted_residual_risks": [

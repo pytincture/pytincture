@@ -1071,6 +1071,38 @@
         "tests/test_bff_requests.py::test_literal_validation_requires_exact_runtime_type",
         "tests/test_bff_requests.py::test_literal_validation_accepts_each_exact_option_in_a_mixed_literal"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-01-PT-16",
+      "status": "remediated_additive_hardening",
+      "title": "Public probe status is separate from optional diagnostic details",
+      "intentional_contract": "Load balancers can always read liveness/readiness status and HTTP codes, while development retains the existing detailed response by default.",
+      "security_boundary": "API documentation already supports public, authenticated, and disabled modes. Health and readiness details now support public, minimal, and operator modes. Operator detail requires a strong stateless Bearer token compared in constant time; responses are private and not stored by caches.",
+      "controls": {
+        "public_health_status_preserved": true,
+        "public_readiness_status_preserved": true,
+        "version_can_be_hidden": true,
+        "named_readiness_checks_can_be_hidden": true,
+        "operator_bearer_details_available": true,
+        "operator_token_strong_and_redacted": true,
+        "api_docs_authenticated_or_disabled_available": true,
+        "development_default_changed": false,
+        "redis_required": false,
+        "sticky_routing_required": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "docs/configuration.md",
+        "docs/production-deployment.md",
+        "docs/migrations/0.10-to-1.0.md"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_health_and_readiness_endpoints",
+        "tests/test_app.py::test_diagnostic_details_can_be_minimal_or_operator_only",
+        "tests/test_configuration.py::test_bff_documentation_can_require_authentication_or_be_disabled",
+        "tests/test_configuration.py::test_browser_diagnostic_and_documentation_controls_fail_closed"
+      ]
     }
   ]
 }

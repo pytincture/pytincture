@@ -116,6 +116,10 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "BROWSER_LOG_RATE_LIMIT_ATTEMPTS": "12",
             "BROWSER_LOG_RATE_LIMIT_WINDOW_SECONDS": "34",
             "PYTINCTURE_API_DOCS_MODE": "authenticated",
+            "PYTINCTURE_DIAGNOSTIC_DETAILS_MODE": "operator",
+            "PYTINCTURE_DIAGNOSTIC_OPERATOR_TOKEN": (
+                "operator-token-with-32-distinct-ish-characters-1234"
+            ),
             "PYTINCTURE_UVICORN_ACCESS_LOG": "true",
         },
         bff_call_timeout_seconds=8.0,
@@ -209,6 +213,10 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.browser_log_rate_limit_attempts == 12
     assert config.browser_log_rate_limit_window_seconds == 34
     assert config.api_docs_mode == "authenticated"
+    assert config.diagnostic_details_mode == "operator"
+    assert config.diagnostic_operator_token == (
+        "operator-token-with-32-distinct-ish-characters-1234"
+    )
     assert config.uvicorn_access_log is True
     assert config.environment == {"APP_SPECIFIC_VALUE": "kept"}
     assert config.to_environ()["ENABLE_USER_LOGIN"] == "true"
@@ -1560,6 +1568,8 @@ def test_browser_diagnostic_and_documentation_controls_fail_closed(tmp_path):
     assert defaults.enable_browser_logs is True
     assert defaults.allow_noauth_browser_logs is False
     assert defaults.api_docs_mode == "public"
+    assert defaults.diagnostic_details_mode == "public"
+    assert defaults.diagnostic_operator_token == ""
     assert defaults.uvicorn_access_log is False
 
     for field in (
@@ -1572,6 +1582,27 @@ def test_browser_diagnostic_and_documentation_controls_fail_closed(tmp_path):
 
     with pytest.raises(ValueError, match="api_docs_mode"):
         PytinctureConfig(modules_path=str(tmp_path), api_docs_mode="sometimes")
+
+    with pytest.raises(ValueError, match="diagnostic_details_mode"):
+        PytinctureConfig(
+            modules_path=str(tmp_path), diagnostic_details_mode="sometimes"
+        )
+
+    with pytest.raises(ValueError, match="strong diagnostic_operator_token"):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            diagnostic_details_mode="operator",
+            diagnostic_operator_token="weak",
+        )
+
+    token = "operator-token-with-32-distinct-ish-characters-1234"
+    configured = PytinctureConfig(
+        modules_path=str(tmp_path),
+        diagnostic_details_mode="OPERATOR",
+        diagnostic_operator_token=token,
+    )
+    assert configured.diagnostic_details_mode == "operator"
+    assert token not in repr(configured)
 
 
 def test_log_level_is_normalized_and_validated(tmp_path):

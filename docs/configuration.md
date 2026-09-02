@@ -205,6 +205,8 @@ The contract test checks every row in this table against the dataclass model.
 | `browser_log_rate_limit_attempts` | `BROWSER_LOG_RATE_LIMIT_ATTEMPTS` | Browser diagnostic requests allowed per peer and window. |
 | `browser_log_rate_limit_window_seconds` | `BROWSER_LOG_RATE_LIMIT_WINDOW_SECONDS` | Browser diagnostic rate-limit window in seconds. |
 | `api_docs_mode` | `PYTINCTURE_API_DOCS_MODE` | API documentation mode: public, authenticated, or disabled. |
+| `diagnostic_details_mode` | `PYTINCTURE_DIAGNOSTIC_DETAILS_MODE` | Health/readiness detail mode: public, minimal, or operator. |
+| `diagnostic_operator_token` | `PYTINCTURE_DIAGNOSTIC_OPERATOR_TOKEN` | Bearer token for operator-only health/readiness details. |
 | `uvicorn_access_log` | `PYTINCTURE_UVICORN_ACCESS_LOG` | Enable sanitized path-only Uvicorn access logs. |
 | `login_rate_limit_attempts` | `AUTH_LOGIN_RATE_LIMIT_ATTEMPTS` | Password attempts per peer and window. |
 | `login_rate_limit_window_seconds` | `AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS` | Password rate-limit window. |

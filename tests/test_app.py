@@ -3673,6 +3673,53 @@ def test_health_and_readiness_endpoints(fresh_client):
     assert all(readiness.json()["checks"].values())
 
 
+def test_diagnostic_details_can_be_minimal_or_operator_only(tmp_path):
+    from pytincture.configuration import PytinctureConfig
+    from pytincture.factory import create_app
+
+    token = "operator-token-with-32-distinct-ish-characters-1234"
+    minimal = create_app(
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            diagnostic_details_mode="minimal",
+        )
+    )
+    with TestClient(minimal) as client:
+        health = client.get("/healthz")
+        readiness = client.get("/readyz")
+        assert health.json() == {"status": "ok"}
+        assert readiness.json() == {"status": "ready"}
+        assert health.headers["cache-control"] == "private, no-store, max-age=0"
+
+    operator = create_app(
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            diagnostic_details_mode="operator",
+            diagnostic_operator_token=token,
+        )
+    )
+    with TestClient(operator) as client:
+        anonymous_health = client.get("/healthz")
+        wrong_readiness = client.get(
+            "/readyz", headers={"Authorization": "Bearer incorrect"}
+        )
+        detailed_health = client.get(
+            "/healthz", headers={"Authorization": f"Bearer {token}"}
+        )
+        detailed_readiness = client.get(
+            "/readyz", headers={"Authorization": f"Bearer {token}"}
+        )
+
+        assert anonymous_health.json() == {"status": "ok"}
+        assert wrong_readiness.json() == {"status": "ready"}
+        assert detailed_health.json()["version"]
+        assert all(detailed_readiness.json()["checks"].values())
+        assert anonymous_health.headers["vary"] == "Authorization"
+        assert detailed_readiness.headers["cache-control"] == (
+            "private, no-store, max-age=0"
+        )
+
+
 def test_readiness_fails_when_modules_path_is_unavailable(
     fresh_client, monkeypatch, tmp_path
 ):
@@ -3730,14 +3777,23 @@ def test_readiness_checks_are_offloaded_coalesced_and_briefly_cached(monkeypatch
     )
 
     async def exercise():
+        request = Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/readyz",
+                "headers": [],
+            }
+        )
         pending = [
-            asyncio.create_task(backend_app.readiness_check()) for _ in range(5)
+            asyncio.create_task(backend_app.readiness_check(request))
+            for _ in range(5)
         ]
         while not entered.is_set():
             await asyncio.sleep(0)
         release.set()
         responses = await asyncio.gather(*pending)
-        cached = await backend_app.readiness_check()
+        cached = await backend_app.readiness_check(request)
         return responses, cached
 
     responses, cached = asyncio.run(exercise())

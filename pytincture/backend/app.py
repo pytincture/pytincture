@@ -250,6 +250,16 @@ if API_DOCS_MODE not in {"public", "authenticated", "disabled"}:
     raise RuntimeError(
         "PYTINCTURE_API_DOCS_MODE must be public, authenticated, or disabled"
     )
+DIAGNOSTIC_DETAILS_MODE = os.getenv(
+    "PYTINCTURE_DIAGNOSTIC_DETAILS_MODE", "public"
+).strip().lower()
+if DIAGNOSTIC_DETAILS_MODE not in {"public", "minimal", "operator"}:
+    raise RuntimeError(
+        "PYTINCTURE_DIAGNOSTIC_DETAILS_MODE must be public, minimal, or operator"
+    )
+DIAGNOSTIC_OPERATOR_TOKEN = os.getenv(
+    "PYTINCTURE_DIAGNOSTIC_OPERATOR_TOKEN", ""
+)
 app = FastAPI(
     title="pyTincture API",
     docs_url=None,
@@ -561,10 +571,43 @@ async def default_application_redirect():
     return RedirectResponse(url=f"/{application_path}", status_code=302)
 
 
+def _diagnostic_details_visible(request: Request) -> bool:
+    if DIAGNOSTIC_DETAILS_MODE == "public":
+        return True
+    if DIAGNOSTIC_DETAILS_MODE != "operator":
+        return False
+    scheme, separator, supplied = request.headers.get("authorization", "").partition(
+        " "
+    )
+    return bool(
+        separator
+        and scheme.casefold() == "bearer"
+        and DIAGNOSTIC_OPERATOR_TOKEN
+        and hmac.compare_digest(supplied, DIAGNOSTIC_OPERATOR_TOKEN)
+    )
+
+
+def _diagnostic_response(
+    payload: dict[str, Any],
+    *,
+    status_code: int = 200,
+) -> JSONResponse:
+    headers = {
+        "Cache-Control": "private, no-store, max-age=0",
+        "Pragma": "no-cache",
+    }
+    if DIAGNOSTIC_DETAILS_MODE == "operator":
+        headers["Vary"] = "Authorization"
+    return JSONResponse(payload, status_code=status_code, headers=headers)
+
+
 @app.get("/healthz", include_in_schema=False)
-async def health_check():
+async def health_check(request: Request):
     """Process liveness: successful while the ASGI worker can answer requests."""
-    return {"status": "ok", "version": __version__}
+    payload = {"status": "ok"}
+    if _diagnostic_details_visible(request):
+        payload["version"] = __version__
+    return _diagnostic_response(payload)
 
 
 @app.get("/_pytincture/edge-client", include_in_schema=False)
@@ -638,7 +681,7 @@ _READINESS_CACHE_VALUE: Optional[
 
 
 @app.get("/readyz", include_in_schema=False)
-async def readiness_check():
+async def readiness_check(request: Request):
     """Traffic readiness for application files, frontend assets, and shared stores."""
     global _READINESS_CACHE_VALUE
 
@@ -693,8 +736,11 @@ async def readiness_check():
                     ready,
                     dict(checks),
                 )
-    return JSONResponse(
-        {"status": "ready" if ready else "not-ready", "checks": checks},
+    payload: dict[str, Any] = {"status": "ready" if ready else "not-ready"}
+    if _diagnostic_details_visible(request):
+        payload["checks"] = checks
+    return _diagnostic_response(
+        payload,
         status_code=200 if ready else 503,
     )
 

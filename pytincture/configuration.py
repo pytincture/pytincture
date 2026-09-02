@@ -444,6 +444,17 @@ class PytinctureConfig:
         "PYTINCTURE_API_DOCS_MODE",
         "API documentation mode: public, authenticated, or disabled.",
     )
+    diagnostic_details_mode: str = _setting(
+        "public",
+        "PYTINCTURE_DIAGNOSTIC_DETAILS_MODE",
+        "Health/readiness detail mode: public, minimal, or operator.",
+    )
+    diagnostic_operator_token: str = _setting(
+        "",
+        "PYTINCTURE_DIAGNOSTIC_OPERATOR_TOKEN",
+        "Bearer token for operator-only health/readiness details.",
+        repr=False,
+    )
     uvicorn_access_log: bool = _setting(
         False,
         "PYTINCTURE_UVICORN_ACCESS_LOG",
@@ -1055,6 +1066,22 @@ class PytinctureConfig:
                 "api_docs_mode must be public, authenticated, or disabled"
             )
         object.__setattr__(self, "api_docs_mode", docs_mode)
+        diagnostic_details_mode = self.diagnostic_details_mode.strip().lower()
+        if diagnostic_details_mode not in {"public", "minimal", "operator"}:
+            raise ValueError(
+                "diagnostic_details_mode must be public, minimal, or operator"
+            )
+        if diagnostic_details_mode == "operator" and (
+            len(self.diagnostic_operator_token) < 32
+            or len(set(self.diagnostic_operator_token)) < 8
+        ):
+            raise ValueError(
+                "operator diagnostic details require a strong "
+                "diagnostic_operator_token"
+            )
+        object.__setattr__(
+            self, "diagnostic_details_mode", diagnostic_details_mode
+        )
         execution_mode = self.bff_execution_mode.strip().lower()
         if execution_mode not in {"trusted-thread", "isolated-process"}:
             raise ValueError(
