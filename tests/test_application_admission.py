@@ -36,6 +36,7 @@ def test_application_admission_is_stateless_and_fails_closed():
                 "issuers": ["https://accounts.google.com"],
                 "tenants": ["tenant-1"],
                 "subjects": ["subject-1"],
+                "object_ids": ["object-1"],
                 "emails": ["Analyst@Example.com"],
                 "email_domains": ["@Example.com"],
                 "roles": ["Reader", "admin"],
@@ -47,6 +48,7 @@ def test_application_admission_is_stateless_and_fails_closed():
         "issuer": "https://accounts.google.com",
         "tenant": "tenant-1",
         "subject": "subject-1",
+        "oid": "object-1",
         "email": "analyst@example.com",
         "roles": ["reader"],
     }
@@ -55,6 +57,9 @@ def test_application_admission_is_stateless_and_fails_closed():
     assert not identity_is_admitted(policies, "admin", identity)
     assert not identity_is_admitted(
         policies, "reports", {**identity, "subject": "different"}
+    )
+    assert not identity_is_admitted(
+        policies, "reports", {**identity, "oid": "different"}
     )
 
 
@@ -79,6 +84,7 @@ def test_application_admission_is_stateless_and_fails_closed():
                 "issuer": "https://login.microsoftonline.com/tenant-1/v2.0",
                 "tenant": "tenant-1",
                 "subject": "microsoft-subject",
+                "oid": "microsoft-object",
                 "email": "user@example.com",
                 "roles": ["operator"],
             },
@@ -126,6 +132,7 @@ def test_application_admission_across_identity_providers(
                 ],
                 "tenants": ["tenant-1"],
                 "subjects": ["microsoft-subject"],
+                "object_ids": ["microsoft-object"],
                 "roles": ["operator"],
             },
             "saml_app": {
@@ -170,6 +177,7 @@ def test_config_normalizes_application_admission_and_round_trips_to_environment(
             "reports": {
                 "emails": ["analyst@example.com"],
                 "email_domains": ["Example.com"],
+                "object_ids": ["object-1"],
                 "roles": ["Reader"],
             }
         },
@@ -180,6 +188,7 @@ def test_config_normalizes_application_admission_and_round_trips_to_environment(
         "reports": {
             "emails": ["analyst@example.com"],
             "email_domains": ["example.com"],
+            "object_ids": ["object-1"],
             "roles": ["reader"],
         }
     }
