@@ -100,11 +100,16 @@
     {
       "id": "PT-07",
       "severity": "medium_conditional",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/293",
       "disposition": "Enforce finite expiration, not-before, issued-at, clock-skew, maximum-age, and maximum-lifetime policy for MCP JWTs.",
+      "implementation": "The Pytincture JWT verifier now requires finite exp and iat claims by default, enforces optional nbf, rejects future or over-age tokens, and caps exp-to-iat lifetime. Clock skew, age, and lifetime are typed settings. A disabled-by-default legacy flag permits migration from timeless tokens.",
+      "regression_tests": [
+        "tests/test_mcp_security.py::test_mcp_rejects_missing_malformed_or_unbounded_time_claims",
+        "tests/test_mcp_security.py::test_mcp_legacy_timeless_token_requires_explicit_compatibility_flag"
+      ],
       "potential_user_breakage": true,
-      "compatibility_note": "Non-expiring tokens require migration or an explicit compatibility setting; secure production mode requires bounded tokens."
+      "compatibility_note": "Non-expiring tokens require migration or the explicit MCP_ALLOW_LEGACY_TIMELESS_TOKENS compatibility setting. Normal expiring tokens, MCP scopes, and BFF mappings are unchanged."
     },
     {
       "id": "PT-08",

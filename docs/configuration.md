@@ -285,6 +285,10 @@ The contract test checks every row in this table against the dataclass model.
 | `mcp_jwt_issuer` | `MCP_JWT_ISSUER` | Required JWT issuer. |
 | `mcp_jwt_audience` | `MCP_JWT_AUDIENCE` | Required JWT audience. |
 | `mcp_jwt_algorithm` | `MCP_JWT_ALGORITHM` | Optional JWT algorithm. |
+| `mcp_allow_legacy_timeless_tokens` | `MCP_ALLOW_LEGACY_TIMELESS_TOKENS` | Allow legacy MCP JWTs without exp/iat claims. |
+| `mcp_jwt_clock_skew_seconds` | `MCP_JWT_CLOCK_SKEW_SECONDS` | MCP JWT clock-skew allowance. |
+| `mcp_jwt_max_token_age_seconds` | `MCP_JWT_MAX_TOKEN_AGE_SECONDS` | Maximum MCP JWT age since iat. |
+| `mcp_jwt_max_token_lifetime_seconds` | `MCP_JWT_MAX_TOKEN_LIFETIME_SECONDS` | Maximum MCP JWT exp-to-iat lifetime. |
 | `trusted_proxy_headers` | `PYTINCTURE_TRUST_PROXY_HEADERS` | Trust forwarded host/protocol headers. |
 | `log_level` | `PYTINCTURE_LOG_LEVEL` | Structured application log level. |
 

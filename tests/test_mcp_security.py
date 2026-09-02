@@ -1,4 +1,5 @@
 import json
+import time
 
 import jwt
 import pytest
@@ -9,7 +10,7 @@ from fastapi.testclient import TestClient
 from pytincture import PytinctureConfig, create_app
 
 
-def _mcp_fixture(tmp_path):
+def _mcp_fixture(tmp_path, **config_overrides):
     (tmp_path / "demoapp.py").write_text("from service import Service\n")
     (tmp_path / "service.py").write_text(
         """from pytincture.dataclass import backend_for_frontend
@@ -39,7 +40,7 @@ class Service:
         "scopes": ["demo:greet"],
         "description": "Return a greeting.",
     }])
-    config = PytinctureConfig(
+    config_values = dict(
         modules_path=str(tmp_path),
         enable_mcp=True,
         mcp_tools=tools,
@@ -49,18 +50,25 @@ class Service:
         mcp_jwt_issuer="https://issuer.example.test",
         mcp_jwt_audience="pytincture-mcp",
     )
+    config_values.update(config_overrides)
+    config = PytinctureConfig(**config_values)
     return create_app(config), private_pem
 
 
-def _token(private_key, scope="demo:greet"):
+def _token(private_key, scope="demo:greet", *, include_times=True, claims=None):
+    payload = {
+        "iss": "https://issuer.example.test",
+        "aud": "pytincture-mcp",
+        "sub": "automation-client",
+        "client_id": "automation-client",
+        "scope": scope,
+    }
+    if include_times:
+        issued_at = int(time.time())
+        payload.update({"iat": issued_at, "exp": issued_at + 300})
+    payload.update(claims or {})
     return jwt.encode(
-        {
-            "iss": "https://issuer.example.test",
-            "aud": "pytincture-mcp",
-            "sub": "automation-client",
-            "client_id": "automation-client",
-            "scope": scope,
-        },
+        payload,
         private_key,
         algorithm="RS256",
     )
@@ -132,6 +140,57 @@ def test_mcp_transport_rejects_dns_rebinding_and_untrusted_origins(tmp_path):
             json=_call_payload(),
         )
         assert wrong_origin.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {},
+        {"iat": lambda now: now},
+        {"exp": lambda now: now + 300},
+        {"iat": lambda now: "invalid", "exp": lambda now: now + 300},
+        {"iat": lambda now: now, "exp": lambda now: "invalid"},
+        {"iat": lambda now: now, "exp": lambda now: float("inf")},
+        {"iat": lambda now: now + 120, "exp": lambda now: now + 300},
+        {
+            "iat": lambda now: now,
+            "exp": lambda now: now + 300,
+            "nbf": lambda now: now + 120,
+        },
+        {"iat": lambda now: now - 86500, "exp": lambda now: now + 300},
+        {"iat": lambda now: now, "exp": lambda now: now + 86500},
+    ],
+)
+def test_mcp_rejects_missing_malformed_or_unbounded_time_claims(tmp_path, claims):
+    app, private_key = _mcp_fixture(tmp_path)
+    now = int(time.time())
+    resolved_claims = {name: value(now) for name, value in claims.items()}
+    token = _token(private_key, include_times=False, claims=resolved_claims)
+
+    with TestClient(app, base_url="https://mcp.example.test") as client:
+        response = client.post(
+            "/mcp",
+            headers=_headers(token),
+            json=_call_payload(),
+        )
+
+    assert response.status_code == 401
+
+
+def test_mcp_legacy_timeless_token_requires_explicit_compatibility_flag(tmp_path):
+    app, private_key = _mcp_fixture(
+        tmp_path,
+        mcp_allow_legacy_timeless_tokens=True,
+    )
+    with TestClient(app, base_url="https://mcp.example.test") as client:
+        response = client.post(
+            "/mcp",
+            headers=_headers(_token(private_key, include_times=False)),
+            json=_call_payload(),
+        )
+
+    assert response.status_code == 200
+    assert '"message":"Hello, Ada"' in response.text
 
 
 def test_mcp_configuration_fails_closed_without_transport_and_jwt_policy(tmp_path):

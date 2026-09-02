@@ -4,12 +4,94 @@ from __future__ import annotations
 
 import inspect
 import json
+import math
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _MODULE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*\.py$")
+
+
+def _environment_bool(environment: Mapping[str, str], name: str, default: bool) -> bool:
+    value = environment.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeError(f"{name} must be a boolean")
+
+
+def _environment_float(
+    environment: Mapping[str, str],
+    name: str,
+    default: float,
+    *,
+    allow_zero: bool = False,
+) -> float:
+    try:
+        value = float(environment.get(name, str(default)))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"{name} must be numeric") from exc
+    if not math.isfinite(value) or value < 0 or (not allow_zero and value == 0):
+        qualifier = "non-negative" if allow_zero else "positive"
+        raise RuntimeError(f"{name} must be finite and {qualifier}")
+    return value
+
+
+def _finite_numeric_claim(claims: Mapping[str, Any], name: str) -> float | None:
+    value = claims.get(name)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        numeric = float(value)
+    except OverflowError:
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def jwt_temporal_claims_are_valid(
+    claims: Mapping[str, Any],
+    *,
+    now: float,
+    allow_legacy_timeless: bool,
+    clock_skew_seconds: float,
+    max_token_age_seconds: float,
+    max_token_lifetime_seconds: float,
+) -> bool:
+    """Validate the framework's bounded MCP bearer-token lifetime policy."""
+    exp = _finite_numeric_claim(claims, "exp")
+    issued_at = _finite_numeric_claim(claims, "iat")
+    not_before = (
+        _finite_numeric_claim(claims, "nbf") if "nbf" in claims else None
+    )
+    if not allow_legacy_timeless and (exp is None or issued_at is None):
+        return False
+    if "exp" in claims and exp is None:
+        return False
+    if "iat" in claims and issued_at is None:
+        return False
+    if "nbf" in claims and not_before is None:
+        return False
+    if exp is not None and exp <= now - clock_skew_seconds:
+        return False
+    if not_before is not None and not_before > now + clock_skew_seconds:
+        return False
+    if issued_at is not None:
+        if issued_at > now + clock_skew_seconds:
+            return False
+        if now - issued_at > max_token_age_seconds + clock_skew_seconds:
+            return False
+    if exp is not None and issued_at is not None:
+        if exp <= issued_at:
+            return False
+        if exp - issued_at > max_token_lifetime_seconds:
+            return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -108,7 +190,50 @@ def build_jwt_verifier(environment: Mapping[str, str]):
         raise RuntimeError("MCP requires MCP_JWT_ISSUER and MCP_JWT_AUDIENCE")
     if jwks_uri and not jwks_uri.lower().startswith("https://"):
         raise RuntimeError("MCP_JWT_JWKS_URI must use HTTPS")
-    return JWTVerifier(
+    allow_legacy_timeless = _environment_bool(
+        environment,
+        "MCP_ALLOW_LEGACY_TIMELESS_TOKENS",
+        False,
+    )
+    clock_skew_seconds = _environment_float(
+        environment,
+        "MCP_JWT_CLOCK_SKEW_SECONDS",
+        60.0,
+        allow_zero=True,
+    )
+    max_token_age_seconds = _environment_float(
+        environment,
+        "MCP_JWT_MAX_TOKEN_AGE_SECONDS",
+        86400.0,
+    )
+    max_token_lifetime_seconds = _environment_float(
+        environment,
+        "MCP_JWT_MAX_TOKEN_LIFETIME_SECONDS",
+        86400.0,
+    )
+
+    class PytinctureJWTVerifier(JWTVerifier):
+        async def load_access_token(self, token: str):
+            try:
+                access_token = await super().load_access_token(token)
+            except OverflowError:
+                self.logger.debug("Bearer token rejected: nonfinite time claim")
+                return None
+            if access_token is None:
+                return None
+            if not jwt_temporal_claims_are_valid(
+                access_token.claims,
+                now=time.time(),
+                allow_legacy_timeless=allow_legacy_timeless,
+                clock_skew_seconds=clock_skew_seconds,
+                max_token_age_seconds=max_token_age_seconds,
+                max_token_lifetime_seconds=max_token_lifetime_seconds,
+            ):
+                self.logger.info("Bearer token rejected: invalid temporal policy")
+                return None
+            return access_token
+
+    return PytinctureJWTVerifier(
         public_key=public_key,
         jwks_uri=jwks_uri,
         issuer=issuer,
