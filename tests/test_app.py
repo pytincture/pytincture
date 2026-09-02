@@ -16,6 +16,7 @@ import httpx
 import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
+from fastapi.responses import RedirectResponse
 from itsdangerous import TimestampSigner
 from urllib.parse import parse_qs, urlencode, urlsplit
 from pytincture import __version__
@@ -4407,6 +4408,7 @@ def test_dead_certificate_xml_helpers_are_not_exposed(dead_helper):
 def test_microsoft_login_stores_only_compact_stateless_claims(
     fresh_client,
     monkeypatch,
+    tmp_path,
 ):
     import pytincture.backend.app as backend_app
 
@@ -4433,6 +4435,8 @@ def test_microsoft_login_stores_only_compact_stateless_claims(
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {"sentinel": True})
     monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
     monkeypatch.setenv("MICROSOFT_TENANT_ID", "tenant-123")
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    (tmp_path / "demoapp.py").write_text("# demo app\n", encoding="utf-8")
 
     response = fresh_client.get(
         "/demoapp/auth/microsoft/callback",
@@ -4611,7 +4615,9 @@ def test_disabled_google_routes_return_404(fresh_client, monkeypatch):
     assert fresh_client.get("/demoapp/auth/google/callback").status_code == 404
 
 
-def test_google_callback_requires_verified_immutable_identity(fresh_client, monkeypatch):
+def test_google_callback_requires_verified_immutable_identity(
+    fresh_client, monkeypatch, tmp_path
+):
     import pytincture.backend.app as backend_app
 
     class FakeGoogle:
@@ -4627,6 +4633,8 @@ def test_google_callback_requires_verified_immutable_identity(fresh_client, monk
             }}
 
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    (tmp_path / "demoapp.py").write_text("# demo app\n", encoding="utf-8")
     monkeypatch.setattr(backend_app, "oauth", type("OAuth", (), {"google": FakeGoogle(False)})())
     assert fresh_client.get(
         "/demoapp/auth/google/callback", follow_redirects=False
@@ -4637,6 +4645,131 @@ def test_google_callback_requires_verified_immutable_identity(fresh_client, monk
     session = _decode_session_cookie(fresh_client, backend_app.SAML_SECRET_KEY)
     assert session["user"]["issuer"] == "https://accounts.google.com"
     assert session["user"]["subject"] == "google-subject"
+
+
+def test_oauth_initiation_rejects_missing_app_before_provider_redirect(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    calls = []
+
+    class FakeGoogle:
+        async def authorize_redirect(self, request, redirect_uri):
+            calls.append(redirect_uri)
+            return RedirectResponse(redirect_uri)
+
+    class AllowingLimiter:
+        def allow(self, _key):
+            return True, 0
+
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
+    monkeypatch.setattr(
+        backend_app, "oauth", type("OAuth", (), {"google": FakeGoogle()})()
+    )
+    monkeypatch.setattr(
+        backend_app, "OAUTH_INITIATION_RATE_LIMITER", AllowingLimiter()
+    )
+
+    response = fresh_client.get("/missing/auth/google", follow_redirects=False)
+
+    assert response.status_code == 404
+    assert calls == []
+
+
+def test_oauth_callback_rate_limit_runs_before_provider_exchange(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    calls = []
+
+    class FakeGoogle:
+        async def authorize_access_token(self, request):
+            calls.append(request)
+            return {}
+
+    class RejectingLimiter:
+        def allow(self, _key):
+            return False, 7
+
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    (tmp_path / "demoapp.py").write_text("# demo app\n", encoding="utf-8")
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
+    monkeypatch.setattr(
+        backend_app, "oauth", type("OAuth", (), {"google": FakeGoogle()})()
+    )
+    monkeypatch.setattr(
+        backend_app, "OAUTH_CALLBACK_RATE_LIMITER", RejectingLimiter()
+    )
+
+    response = fresh_client.get(
+        "/demoapp/auth/google/callback", follow_redirects=False
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "7"
+    assert calls == []
+
+
+def test_oauth_exchange_timeout_releases_admission(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    class FakeGoogle:
+        async def authorize_access_token(self, request):
+            await asyncio.Event().wait()
+
+    class AllowingLimiter:
+        def allow(self, _key):
+            return True, 0
+
+    class RecordingGate:
+        def __init__(self):
+            self.acquired = 0
+            self.released = 0
+
+        async def acquire(self):
+            self.acquired += 1
+
+        def release(self):
+            self.released += 1
+
+    gate = RecordingGate()
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    (tmp_path / "demoapp.py").write_text("# demo app\n", encoding="utf-8")
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
+    monkeypatch.setattr(
+        backend_app, "oauth", type("OAuth", (), {"google": FakeGoogle()})()
+    )
+    monkeypatch.setattr(
+        backend_app, "OAUTH_CALLBACK_RATE_LIMITER", AllowingLimiter()
+    )
+    monkeypatch.setattr(backend_app, "OAUTH_EXCHANGE_GATE", gate)
+    monkeypatch.setattr(backend_app, "OAUTH_EXCHANGE_TIMEOUT_SECONDS", 0.01)
+
+    response = fresh_client.get(
+        "/demoapp/auth/google/callback", follow_redirects=False
+    )
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    assert gate.acquired == 1
+    assert gate.released == 1
+
+
+def test_oauth_http_client_has_explicit_phase_deadlines():
+    import pytincture.backend.app as backend_app
+
+    kwargs = backend_app._oauth_client_kwargs("openid")
+    timeout = kwargs["timeout"]
+    assert kwargs["scope"] == "openid"
+    assert timeout.connect == backend_app.OAUTH_CONNECT_TIMEOUT_SECONDS
+    assert timeout.read == backend_app.OAUTH_READ_TIMEOUT_SECONDS
+    assert timeout.write == backend_app.OAUTH_WRITE_TIMEOUT_SECONDS
+    assert timeout.pool == backend_app.OAUTH_POOL_TIMEOUT_SECONDS
 
 def test_main_app_route_logged_in(fresh_client, monkeypatch, tmp_path):
     """

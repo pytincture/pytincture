@@ -54,6 +54,17 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "MCP_ALLOWED_ORIGINS": '["https://mcp.example.test"]',
             "PYTINCTURE_ALLOWED_HOSTS": "app.example.test,api.example.test",
             "PYTINCTURE_CANONICAL_ORIGIN": "https://app.example.test/",
+            "OAUTH_INITIATION_RATE_LIMIT_ATTEMPTS": "333",
+            "OAUTH_CALLBACK_RATE_LIMIT_ATTEMPTS": "222",
+            "OAUTH_RATE_LIMIT_WINDOW_SECONDS": "45",
+            "OAUTH_EXCHANGE_MAX_CONCURRENCY": "6",
+            "OAUTH_EXCHANGE_MAX_QUEUE": "10",
+            "OAUTH_EXCHANGE_QUEUE_TIMEOUT_SECONDS": "0.6",
+            "OAUTH_EXCHANGE_TIMEOUT_SECONDS": "12",
+            "OAUTH_CONNECT_TIMEOUT_SECONDS": "2",
+            "OAUTH_READ_TIMEOUT_SECONDS": "7",
+            "OAUTH_WRITE_TIMEOUT_SECONDS": "4",
+            "OAUTH_POOL_TIMEOUT_SECONDS": "1",
             "PYTINCTURE_DEV_WHEEL_VERSION": "42.0.dev1",
             "PYTINCTURE_WIDGET_WHEEL_MAX_BYTES": "33554432",
             "PYTINCTURE_WIDGET_WHEEL_DIGEST_CACHE_ENTRIES": "9",
@@ -130,6 +141,17 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.mcp_allowed_origins == ("https://mcp.example.test",)
     assert config.allowed_hosts == ("app.example.test", "api.example.test")
     assert config.canonical_origin == "https://app.example.test"
+    assert config.oauth_initiation_rate_limit_attempts == 333
+    assert config.oauth_callback_rate_limit_attempts == 222
+    assert config.oauth_rate_limit_window_seconds == 45
+    assert config.oauth_exchange_max_concurrency == 6
+    assert config.oauth_exchange_max_queue == 10
+    assert config.oauth_exchange_queue_timeout_seconds == 0.6
+    assert config.oauth_exchange_timeout_seconds == 12
+    assert config.oauth_connect_timeout_seconds == 2
+    assert config.oauth_read_timeout_seconds == 7
+    assert config.oauth_write_timeout_seconds == 4
+    assert config.oauth_pool_timeout_seconds == 1
     assert config.dev_wheel_version == "42.0.dev1"
     assert config.public_widget_wheel_max_bytes == 33554432
     assert config.public_widget_wheel_digest_cache_entries == 9

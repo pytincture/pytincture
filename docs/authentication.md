@@ -73,6 +73,22 @@ When a trusted proxy terminates TLS, enable forwarded headers only if that
 proxy replaces client values. A callback generated with `http://` or an
 internal host indicates proxy configuration, not an identity-provider issue.
 
+OAuth initiation and callback traffic is rate-limited per network peer,
+application, and provider. Provider token exchanges also have a small bounded
+per-worker admission gate plus explicit connection, read, write, pool, and
+overall deadlines. The defaults are deliberately generous for interactive
+login and can be adjusted with the `OAUTH_*` settings documented in
+[configuration](configuration.md). Unknown applications are rejected before
+provider discovery or token exchange work begins.
+
+These controls are disposable and process-local: normal OAuth remains
+stateless across load-balanced workers and requires neither Redis nor sticky
+routing. A caller that restores an old valid browser state cookie can retry a
+callback until that state expires, but the request and provider work are now
+bounded. Deployments that require globally single-use OAuth transactions may
+add an atomic shared transaction provider as a separate strict mode; it is not
+part of the default framework contract.
+
 ## Per-application identity admission
 
 The global provider checks establish who the user is. A shared multi-app
