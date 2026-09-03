@@ -106,6 +106,13 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "SAML_VALIDATION_MAX_QUEUE": "7",
             "SAML_VALIDATION_QUEUE_TIMEOUT_SECONDS": "0.75",
             "SAML_VALIDATION_TIMEOUT_SECONDS": "8.5",
+            "SAML_PUBLIC_RATE_LIMIT_ATTEMPTS": "80",
+            "SAML_PUBLIC_RATE_LIMIT_WINDOW_SECONDS": "40",
+            "SAML_PUBLIC_MAX_CONCURRENCY": "5",
+            "SAML_PUBLIC_MAX_QUEUE": "9",
+            "SAML_PUBLIC_QUEUE_TIMEOUT_SECONDS": "0.8",
+            "SAML_PUBLIC_TIMEOUT_SECONDS": "6.5",
+            "SAML_METADATA_CACHE_ENTRIES": "24",
             "BFF_REPLAY_ISSUE_SESSION_LIMIT": "11",
             "BFF_REPLAY_ISSUE_PEER_LIMIT": "22",
             "BFF_REPLAY_ISSUE_WORKER_LIMIT": "33",
@@ -220,6 +227,13 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.saml_validation_max_queue == 7
     assert config.saml_validation_queue_timeout_seconds == 0.75
     assert config.saml_validation_timeout_seconds == 8.5
+    assert config.saml_public_rate_limit_attempts == 80
+    assert config.saml_public_rate_limit_window_seconds == 40
+    assert config.saml_public_max_concurrency == 5
+    assert config.saml_public_max_queue == 9
+    assert config.saml_public_queue_timeout_seconds == 0.8
+    assert config.saml_public_timeout_seconds == 6.5
+    assert config.saml_metadata_cache_entries == 24
     assert config.bff_replay_issue_session_limit == 11
     assert config.bff_replay_issue_peer_limit == 22
     assert config.bff_replay_issue_worker_limit == 33
@@ -941,6 +955,9 @@ def test_microsoft_auth_requires_explicit_tenant(tmp_path):
         ({"saml_response_max_bytes": 0}, "saml_response_max_bytes"),
         ({"saml_transaction_ttl_seconds": 0}, "saml_transaction_ttl_seconds"),
         ({"saml_acs_rate_limit_attempts": 0}, "rate-limit"),
+        ({"saml_public_rate_limit_attempts": 0}, "rate-limit"),
+        ({"saml_public_max_concurrency": 0}, "resource limits"),
+        ({"saml_public_max_queue": -1}, "saml_public_max_queue"),
         (
             {
                 "enable_saml_auth": True,

@@ -5505,6 +5505,25 @@ SAML_VALIDATION_QUEUE_TIMEOUT_SECONDS = float(
 SAML_VALIDATION_TIMEOUT_SECONDS = float(
     os.getenv("SAML_VALIDATION_TIMEOUT_SECONDS", "10")
 )
+SAML_PUBLIC_RATE_LIMIT_ATTEMPTS = int(
+    os.getenv("SAML_PUBLIC_RATE_LIMIT_ATTEMPTS", "120")
+)
+SAML_PUBLIC_RATE_LIMIT_WINDOW_SECONDS = int(
+    os.getenv("SAML_PUBLIC_RATE_LIMIT_WINDOW_SECONDS", "60")
+)
+SAML_PUBLIC_MAX_CONCURRENCY = int(
+    os.getenv("SAML_PUBLIC_MAX_CONCURRENCY", "4")
+)
+SAML_PUBLIC_MAX_QUEUE = int(os.getenv("SAML_PUBLIC_MAX_QUEUE", "16"))
+SAML_PUBLIC_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("SAML_PUBLIC_QUEUE_TIMEOUT_SECONDS", "1")
+)
+SAML_PUBLIC_TIMEOUT_SECONDS = float(
+    os.getenv("SAML_PUBLIC_TIMEOUT_SECONDS", "10")
+)
+SAML_METADATA_CACHE_ENTRIES = int(
+    os.getenv("SAML_METADATA_CACHE_ENTRIES", "32")
+)
 if SAML_RESPONSE_MAX_BYTES <= 0:
     raise RuntimeError("SAML_RESPONSE_MAX_BYTES must be greater than zero")
 if ENABLE_SAML_AUTH and SAML_RESPONSE_MAX_BYTES > MAX_REQUEST_BODY_BYTES:
@@ -5512,11 +5531,31 @@ if ENABLE_SAML_AUTH and SAML_RESPONSE_MAX_BYTES > MAX_REQUEST_BODY_BYTES:
 if min(SAML_ACS_RATE_LIMIT_ATTEMPTS, SAML_ACS_RATE_LIMIT_WINDOW_SECONDS) <= 0:
     raise RuntimeError("SAML ACS rate-limit values must be greater than zero")
 if min(
+    SAML_PUBLIC_RATE_LIMIT_ATTEMPTS,
+    SAML_PUBLIC_RATE_LIMIT_WINDOW_SECONDS,
+) <= 0:
+    raise RuntimeError("SAML public rate-limit values must be greater than zero")
+if min(
     SAML_VALIDATION_MAX_CONCURRENCY,
     SAML_VALIDATION_QUEUE_TIMEOUT_SECONDS,
     SAML_VALIDATION_TIMEOUT_SECONDS,
 ) <= 0 or SAML_VALIDATION_MAX_QUEUE < 0:
     raise RuntimeError("SAML validation limits must be valid and positive")
+if min(
+    SAML_PUBLIC_MAX_CONCURRENCY,
+    SAML_PUBLIC_QUEUE_TIMEOUT_SECONDS,
+    SAML_PUBLIC_TIMEOUT_SECONDS,
+    SAML_METADATA_CACHE_ENTRIES,
+) <= 0 or SAML_PUBLIC_MAX_QUEUE < 0:
+    raise RuntimeError("SAML public endpoint limits must be valid and positive")
+if not all(
+    math.isfinite(value)
+    for value in (
+        SAML_PUBLIC_QUEUE_TIMEOUT_SECONDS,
+        SAML_PUBLIC_TIMEOUT_SECONDS,
+    )
+):
+    raise RuntimeError("SAML public endpoint timeouts must be finite")
 SAML_ACS_RATE_LIMITER = SlidingWindowRateLimiter(
     SAML_ACS_RATE_LIMIT_ATTEMPTS,
     SAML_ACS_RATE_LIMIT_WINDOW_SECONDS,
@@ -5526,6 +5565,17 @@ SAML_VALIDATION_GATE = AsyncAdmissionGate(
     SAML_VALIDATION_MAX_QUEUE,
     SAML_VALIDATION_QUEUE_TIMEOUT_SECONDS,
 )
+SAML_PUBLIC_RATE_LIMITER = SlidingWindowRateLimiter(
+    SAML_PUBLIC_RATE_LIMIT_ATTEMPTS,
+    SAML_PUBLIC_RATE_LIMIT_WINDOW_SECONDS,
+)
+SAML_PUBLIC_GATE = AsyncAdmissionGate(
+    SAML_PUBLIC_MAX_CONCURRENCY,
+    SAML_PUBLIC_MAX_QUEUE,
+    SAML_PUBLIC_QUEUE_TIMEOUT_SECONDS,
+)
+_SAML_METADATA_CACHE: OrderedDict[str, str] = OrderedDict()
+_SAML_METADATA_CACHE_LOCK = threading.Lock()
 
 
 def _split_csv(value: Any) -> List[str]:
@@ -5956,6 +6006,66 @@ def _init_saml_auth(request: Request, application: str, provider: Optional[Dict[
     return OneLogin_Saml2_Auth(request_data, old_settings=settings)
 
 
+def _build_saml_login_redirect(
+    request_data: Dict[str, Any],
+    settings: Dict[str, Any],
+    transaction_id: str,
+) -> tuple[str, str]:
+    """Build and sign an IdP redirect entirely inside a bounded worker."""
+
+    saml_auth = OneLogin_Saml2_Auth(request_data, old_settings=settings)
+    auth_url = saml_auth.login(return_to="pytincture-relay-state")
+    request_id = saml_auth.get_last_request_id()
+    if not request_id:
+        raise RuntimeError("SAML login did not generate a request ID")
+    relay_token = _sign_saml_relay_state(
+        {"version": 2, "transaction_id": transaction_id}
+    )
+    return _replace_saml_relay_state(saml_auth, auth_url, relay_token), request_id
+
+
+def _saml_metadata_fingerprint(settings: Dict[str, Any]) -> str:
+    canonical = json.dumps(
+        {"framework_version": __version__, "settings": settings},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _generate_saml_metadata(settings: Dict[str, Any]) -> str:
+    """Generate and validate SP metadata inside a bounded worker."""
+
+    saml_settings = OneLogin_Saml2_Settings(
+        settings=settings,
+        sp_validation_only=True,
+    )
+    metadata_xml = saml_settings.get_sp_metadata()
+    errors = saml_settings.validate_metadata(metadata_xml)
+    if errors:
+        allowed_errors = {"sp_acs_url_invalid", "sp_entity_id_invalid"}
+        if any(error not in allowed_errors for error in errors):
+            raise RuntimeError("SAML metadata validation failed")
+    return metadata_xml
+
+
+def _cached_saml_metadata(fingerprint: str) -> Optional[str]:
+    with _SAML_METADATA_CACHE_LOCK:
+        metadata_xml = _SAML_METADATA_CACHE.get(fingerprint)
+        if metadata_xml is not None:
+            _SAML_METADATA_CACHE.move_to_end(fingerprint)
+        return metadata_xml
+
+
+def _cache_saml_metadata(fingerprint: str, metadata_xml: str) -> None:
+    with _SAML_METADATA_CACHE_LOCK:
+        _SAML_METADATA_CACHE[fingerprint] = metadata_xml
+        _SAML_METADATA_CACHE.move_to_end(fingerprint)
+        while len(_SAML_METADATA_CACHE) > SAML_METADATA_CACHE_ENTRIES:
+            _SAML_METADATA_CACHE.popitem(last=False)
+
+
 def _get_saml_default_redirect(application: str, request: Request, provider: Optional[Dict[str, Any]] = None) -> str:
     """
     Produce the default redirect target using optional templates.
@@ -6088,6 +6198,25 @@ app.add_middleware(RequestBodyLimitMiddleware, max_bytes=MAX_REQUEST_BODY_BYTES)
 # SAML SSO SETUP
 # ================
 
+
+async def _admit_saml_public_request(
+    request: Request,
+    application: str,
+) -> None:
+    """Rate-limit public SAML work and prove the application exists first."""
+
+    allowed, retry_after = SAML_PUBLIC_RATE_LIMITER.allow(
+        _saml_acs_peer_key(request)
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many SAML setup requests",
+            headers={"Retry-After": str(retry_after)},
+        )
+    await _require_auth_application(application)
+
+
 @app.get(
     "/{application}/auth/saml/login",
     operation_id="initiateSamlAuth",
@@ -6123,6 +6252,7 @@ async def _saml_login(request: Request, application: str, provider_id: Optional[
     if not ENABLE_SAML_AUTH:
         raise HTTPException(status_code=404, detail="SAML authentication not enabled")
 
+    await _admit_saml_public_request(request, application)
     provider = _get_saml_provider(provider_id)
 
     _debug_session_state("saml_login:entry", request)
@@ -6131,8 +6261,21 @@ async def _saml_login(request: Request, application: str, provider_id: Optional[
     if safe_return_to:
         request.session["return_to"] = safe_return_to
 
+    transaction_id = secrets.token_urlsafe(32)
     try:
-        saml_auth = _init_saml_auth(request, application, provider=provider)
+        request_data = _build_saml_request_data(request)
+        settings = _build_saml_settings(request, application, provider=provider)
+        auth_url, request_id = await _run_bounded_thread_stage(
+            SAML_PUBLIC_GATE,
+            _build_saml_login_redirect,
+            request_data,
+            settings,
+            transaction_id,
+            timeout_seconds=SAML_PUBLIC_TIMEOUT_SECONDS,
+            unavailable_detail="SAML setup capacity is temporarily unavailable",
+        )
+    except HTTPException:
+        raise
     except RuntimeError as config_error:
         raise HTTPException(status_code=500, detail="SAML configuration error") from config_error
     except Exception as exc:  # noqa: BLE001
@@ -6140,12 +6283,7 @@ async def _saml_login(request: Request, application: str, provider_id: Optional[
 
     session_return_to = _sanitize_return_to(request.session.pop("return_to", None))
     fallback_return = safe_return_to or session_return_to
-    auth_url = saml_auth.login(return_to="pytincture-relay-state")
-    request_id = saml_auth.get_last_request_id()
-    if not request_id:
-        raise HTTPException(status_code=500, detail="SAML login did not generate a request ID")
 
-    transaction_id = secrets.token_urlsafe(32)
     transaction_record = {
         "version": 1,
         "transaction_id": transaction_id,
@@ -6155,10 +6293,6 @@ async def _saml_login(request: Request, application: str, provider_id: Optional[
         "return_to": fallback_return,
     }
 
-    relay_token = _sign_saml_relay_state(
-        {"version": 2, "transaction_id": transaction_id}
-    )
-    auth_url = _replace_saml_relay_state(saml_auth, auth_url, relay_token)
     request.session.pop("saml_request_id", None)
     request.session.pop("saml_provider_id", None)
     response = RedirectResponse(url=auth_url)
@@ -6533,16 +6667,23 @@ async def _saml_metadata(request: Request, application: str, provider_id: Option
     if not ENABLE_SAML_AUTH:
         raise HTTPException(status_code=404, detail="SAML authentication not enabled")
 
+    await _admit_saml_public_request(request, application)
     try:
         provider = _get_saml_provider(provider_id)
-        settings = OneLogin_Saml2_Settings(settings=_build_saml_settings(request, application, provider=provider), sp_validation_only=True)
-        metadata_xml = settings.get_sp_metadata()
-        errors = settings.validate_metadata(metadata_xml)
-        if errors:
-            allowed_errors = {"sp_acs_url_invalid", "sp_entity_id_invalid"}
-            remaining_errors = [err for err in errors if err not in allowed_errors]
-            if remaining_errors:
-                raise HTTPException(status_code=500, detail="SAML metadata validation failed")
+        settings = _build_saml_settings(request, application, provider=provider)
+        fingerprint = _saml_metadata_fingerprint(settings)
+        metadata_xml = _cached_saml_metadata(fingerprint)
+        if metadata_xml is None:
+            metadata_xml = await _run_bounded_thread_stage(
+                SAML_PUBLIC_GATE,
+                _generate_saml_metadata,
+                settings,
+                timeout_seconds=SAML_PUBLIC_TIMEOUT_SECONDS,
+                unavailable_detail="SAML setup capacity is temporarily unavailable",
+            )
+            _cache_saml_metadata(fingerprint, metadata_xml)
+    except HTTPException:
+        raise
     except RuntimeError as config_error:
         raise HTTPException(status_code=500, detail="SAML configuration error") from config_error
     except Exception as exc:  # noqa: BLE001

@@ -98,11 +98,18 @@
     {
       "id": "SR-06",
       "severity": "medium",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/323",
-      "disposition": "Validate SAML applications first, bound anonymous work, offload blocking toolkit work, and cache metadata.",
+      "disposition": "Public SAML login and metadata routes apply bounded per-peer rate controls, validate the application before provider work, run toolkit and crypto work off-loop behind dedicated bounded admission, and cache metadata by a bounded effective-settings fingerprint.",
       "potential_user_breakage": false,
-      "compatibility_note": "SAML behavior remains stateless and provider-compatible."
+      "compatibility_note": "SAML endpoint URLs, browser flow, and signed stateless handshake remain provider-compatible and require no shared state or Redis.",
+      "regression_tests": [
+        "tests/test_app.py::test_saml_public_routes_reject_missing_application_before_provider_work",
+        "tests/test_app.py::test_saml_metadata_is_offloaded_bounded_and_releases_capacity",
+        "tests/test_app.py::test_saml_public_routes_share_a_per_peer_rate_limit",
+        "tests/test_app.py::test_saml_login_toolkit_work_runs_off_the_event_loop",
+        "tests/test_app.py::test_saml_metadata_cache_is_bounded_and_settings_fingerprinted"
+      ]
     },
     {
       "id": "SR-07",

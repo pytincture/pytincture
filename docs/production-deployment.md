@@ -47,6 +47,12 @@ browser-carried sessions and optional Redis, are recorded in
   gate. Tune `SAML_VALIDATION_MAX_CONCURRENCY`, `SAML_VALIDATION_MAX_QUEUE`,
   and the queue/runtime deadlines for the worker's CPU budget. A timed-out
   validation retains its slot until the underlying thread exits.
+- Public SAML login and metadata routes first apply a per-peer rate limit and
+  verify the application entrypoint. Toolkit and signing work then runs
+  off-loop behind the independent `SAML_PUBLIC_*` concurrency, queue, and
+  runtime limits. Metadata is retained only in a bounded per-worker cache keyed
+  by a SHA-256 digest of the complete effective settings, so configuration
+  changes invalidate it automatically.
 - SAML logins use an HttpOnly browser-binding cookie and a one-time transaction
   with exact `InResponseTo`, response-ID, and assertion-ID correlation. Keep
   `AUTH_SESSION_HTTPS_ONLY=true` so cross-site POST binding uses a Secure,

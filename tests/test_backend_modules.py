@@ -1716,6 +1716,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-09-02-SR-03",
         "REVIEW-2026-09-02-SR-04",
         "REVIEW-2026-09-02-SR-05",
+        "REVIEW-2026-09-02-SR-06",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1825,6 +1826,15 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert revocation_controls["remote_revocation_lookup_admission_bound"] is True
     assert revocation_controls["timed_out_remote_slot_retained"] is True
     assert revocation_controls["redis_required"] is False
+    saml_public_controls = dispositions["REVIEW-2026-09-02-SR-06"]["controls"]
+    assert saml_public_controls["application_validated_before_provider_work"] is True
+    assert saml_public_controls["per_peer_public_saml_rate_limit"] is True
+    assert saml_public_controls["public_saml_concurrency_bound"] is True
+    assert saml_public_controls["login_toolkit_off_event_loop"] is True
+    assert saml_public_controls["metadata_toolkit_off_event_loop"] is True
+    assert saml_public_controls["metadata_configuration_change_invalidates"] is True
+    assert saml_public_controls["browser_handshake_stateless"] is True
+    assert saml_public_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True

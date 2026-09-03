@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Bound anonymous SAML login and metadata setup with configurable per-peer
+  limits, dedicated toolkit concurrency/queue/runtime admission, and off-loop
+  execution after application validation. Cache metadata in a bounded
+  per-worker LRU keyed by the effective settings digest; SAML remains stateless.
 - Keep default signed-cookie authentication fully stateless and local while
   routing every explicitly enabled shared session-revocation read through
   bounded asynchronous admission, off-loop execution, a short deadline, and
