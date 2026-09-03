@@ -37,6 +37,9 @@ browser-carried sessions and optional Redis, are recorded in
   inside `SubjectConfirmationData`. Tune `SAML_ACS_RATE_LIMIT_ATTEMPTS` and
   `SAML_ACS_RATE_LIMIT_WINDOW_SECONDS` alongside an edge rate limit; do not
   disable or bypass the built-in response guard.
+- Keep the bounded authentication-upload admission enabled. Its total and idle
+  deadlines cover request upload only, not password verification, IdP work, or
+  assertion validation time.
 - SAML XML/signature validation is offloaded under a per-worker concurrency
   gate. Tune `SAML_VALIDATION_MAX_CONCURRENCY`, `SAML_VALIDATION_MAX_QUEUE`,
   and the queue/runtime deadlines for the worker's CPU budget. A timed-out

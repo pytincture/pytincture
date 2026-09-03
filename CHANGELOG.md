@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Bound password-form, password-JSON, and SAML ACS uploads with configurable
+  per-peer/per-worker admission plus independent idle and total deadlines.
+  Disabled features, unsupported content types, missing applications, and
+  unknown SAML providers are rejected before body parsing. These limits cover
+  upload only and add no session store or Redis requirement.
 - Prevent application cache headers from making authenticated/session-bearing
   or BFF responses public. Protected responses are always private/no-store,
   intentionally public responses cannot carry cookies, and immutable public

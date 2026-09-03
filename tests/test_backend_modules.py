@@ -1711,6 +1711,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-09-01-PT-15",
         "REVIEW-2026-09-01-PT-16",
         "REVIEW-2026-09-02-SR-01",
+        "REVIEW-2026-09-02-SR-02",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1789,6 +1790,14 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert cache_controls["exact_cache_directive_parsing"] is True
     assert cache_controls["public_framework_assets_cacheable"] is True
     assert cache_controls["redis_required"] is False
+    auth_ingress_controls = dispositions["REVIEW-2026-09-02-SR-02"]["controls"]
+    assert auth_ingress_controls["password_form_ingress_bounded"] is True
+    assert auth_ingress_controls["password_json_ingress_bounded"] is True
+    assert auth_ingress_controls["saml_acs_ingress_bounded"] is True
+    assert auth_ingress_controls["idle_receive_deadline"] is True
+    assert auth_ingress_controls["total_receive_deadline"] is True
+    assert auth_ingress_controls["authentication_runtime_shortened"] is False
+    assert auth_ingress_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True

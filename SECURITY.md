@@ -66,7 +66,7 @@ completed controls from accepted architecture and remaining work:
 | Finding | Tracking | Compatibility boundary |
 |---|---|---|
 | SR-01 authenticated response caching | Remediated in [#318](https://github.com/pytincture/pytincture/issues/318). Protected responses cannot opt into public caching, responses carrying cookies are private/no-store, and intentionally public responses cannot carry cookies. | Versioned public framework assets remain cacheable and do not rotate sessions. |
-| SR-02 login/SAML slow body | Tracked in [#319](https://github.com/pytincture/pytincture/issues/319). | Configurable ingress limits reject stalled uploads, not long backend work. |
+| SR-02 login/SAML slow body | Remediated in [#319](https://github.com/pytincture/pytincture/issues/319) with cheap feature/application/content-type rejection, bounded per-peer/per-worker admission, and independent idle/total upload deadlines. | Configurable ingress limits reject stalled uploads, not password verification, SAML validation, sessions, or long backend work. |
 | SR-03 BFF pre-admission buffering | Tracked in [#320](https://github.com/pytincture/pytincture/issues/320). | Upload admission remains separate from execution timeout and async capacity. |
 | SR-04 appcode download lifetime | Tracked in [#321](https://github.com/pytincture/pytincture/issues/321), including optional prebuilt production `appcode.pyt`. | Dynamic development remains supported and backend code remains installed separately. |
 | SR-05 optional revocation-store reads | Tracked in [#322](https://github.com/pytincture/pytincture/issues/322). | Remote state remains optional; Redis is not required. |
