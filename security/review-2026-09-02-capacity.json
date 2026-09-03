@@ -2,8 +2,8 @@
   "schema_version": 1,
   "recorded_on": "2026-09-02",
   "tracking_baseline_commit": "9cc2392aa9ae7c1d65d35d183db786f23b6932c2",
-  "status": "in_progress",
-  "summary": "Twelve response-caching, ingress, download, optional-store, SAML, browser cancellation, service-worker, appcode-cache, replay-refill, and isolated-process findings are tracked to completion without introducing Redis or server-side session state.",
+  "status": "remediated",
+  "summary": "All twelve response-caching, ingress, download, optional-store, SAML, browser cancellation, service-worker, appcode-cache, replay-refill, and isolated-process findings are remediated without introducing Redis or server-side session state.",
   "compatibility_constraints": {
     "class_level_bff_export_preserved": true,
     "synchronous_bff_preserved": true,
@@ -183,11 +183,16 @@
     {
       "id": "SR-12",
       "severity": "low",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/329",
-      "disposition": "Release isolated-process admission on every setup failure and double default capacity to eight per worker and four per stable user.",
-      "potential_user_breakage": false,
-      "compatibility_note": "Optional isolated execution gains capacity; synchronous/async trusted mode and stateless load balancing are unchanged."
+      "disposition": "Every post-admission isolated-process setup stage has exactly-once cleanup, partial pipe/process resources close or terminate/reap safely, and default capacity is eight per worker and four per stable identity.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Only optional isolated execution changes. Increased defaults can raise peak process resources; operators can explicitly retain the prior 4/2 limits. Synchronous/async trusted mode and stateless load balancing are unchanged.",
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_optional_process_executor_releases_setup_failures",
+        "tests/test_backend_modules.py::test_optional_process_executor_kills_cpu_work_and_recovers",
+        "tests/test_configuration.py::test_trusted_bff_execution_remains_the_simple_default"
+      ]
     }
   ]
 }

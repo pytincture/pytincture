@@ -156,6 +156,9 @@ objects deliberately bound to the ASGI loop, or construct those objects inside
 the worker-thread call. For a harder
 boundary around non-streaming BFFs, select `BFF_EXECUTION_MODE=isolated-process`
 and size its process/per-identity, CPU, memory, wall-time, and result limits.
+The defaults permit eight child processes per worker and four per stable
+identity. Deployments sized around the earlier `4`/`2` defaults should set
+those values explicitly before upgrading.
 Multiple sessions for the same signed identity share the configured process
 allowance; this does not rate-limit request volume or ordinary async BFF calls.
 Excess isolated-process calls fail fast with `Retry-After` rather than holding a
@@ -163,7 +166,8 @@ worker thread; the ordinary bounded BFF admission queue still applies.
 Child processes are terminated at wall time. CPU enforcement requires POSIX
 and the address-space limit is enforced on Linux; use container/cgroup limits
 as the fleet boundary on other platforms. Isolated mode does not support
-streaming BFF methods.
+streaming BFF methods. Admission is released after every setup failure,
+including pipe creation, process construction, and partial child start.
 
 Keep `MODULES_PATH` writable only by the deployment principal. Pytincture
 canonicalizes the root, rejects symlink components and cross-platform traversal

@@ -337,6 +337,100 @@ class Worker:
         )
 
 
+@pytest.mark.parametrize("failure_stage", ("pipe", "process", "start"))
+def test_optional_process_executor_releases_setup_failures(
+    tmp_path, failure_stage
+):
+    module_path = tmp_path / "isolated_setup.py"
+    module_path.write_text("VALUE = 1\n", encoding="utf-8")
+    executor = ProcessIsolatedBFFExecutor(
+        max_concurrency=1,
+        max_per_user=1,
+        cpu_seconds=2,
+        memory_bytes=64 * 1024 * 1024 * 1024,
+        result_max_bytes=1024,
+        result_max_depth=8,
+        result_max_items=100,
+    )
+
+    class FakeConnection:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class PartialProcess:
+        def __init__(self):
+            self.pid = None
+            self.alive = False
+            self.terminated = False
+            self.killed = False
+            self.joined = 0
+            self.closed = False
+
+        def start(self):
+            self.pid = 4321
+            self.alive = True
+            raise RuntimeError("process start failed")
+
+        def is_alive(self):
+            return self.alive
+
+        def terminate(self):
+            self.terminated = True
+            self.alive = False
+
+        def kill(self):
+            self.killed = True
+            self.alive = False
+
+        def join(self, timeout=None):
+            self.joined += 1
+
+        def close(self):
+            self.closed = True
+
+    class FailingContext:
+        def __init__(self):
+            self.connections = []
+            self.process = None
+
+        def Pipe(self, *, duplex):
+            assert duplex is False
+            if failure_stage == "pipe":
+                raise RuntimeError("pipe creation failed")
+            self.connections = [FakeConnection(), FakeConnection()]
+            return tuple(self.connections)
+
+        def Process(self, **kwargs):
+            assert kwargs["daemon"] is True
+            if failure_stage == "process":
+                raise RuntimeError("process construction failed")
+            self.process = PartialProcess()
+            return self.process
+
+    context = FailingContext()
+    executor._context = context
+    invocation = _isolated_test_invocation(
+        module_path,
+        {},
+        "unused",
+    )
+
+    with pytest.raises(RuntimeError, match=failure_stage):
+        executor.execute(invocation)
+
+    assert executor.active_users == {}
+    assert all(connection.closed for connection in context.connections)
+    if context.process is not None:
+        assert context.process.terminated is True
+        assert context.process.joined == 1
+        assert context.process.closed is True
+    executor._acquire("next-user")
+    executor._release("next-user")
+
+
 def test_isolated_process_never_unpickles_child_controlled_messages(tmp_path):
     marker_path = tmp_path / "parent-unpickle-proof"
     module_path = tmp_path / "isolated_pickle_attack.py"
@@ -1598,8 +1692,11 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     capacity_review = json.loads(
         (root / evidence["latest_capacity_review"]).read_text()
     )
-    assert capacity_review["status"] == "in_progress"
+    assert capacity_review["status"] == "remediated"
     assert len(capacity_review["findings"]) == 12
+    assert {item["status"] for item in capacity_review["findings"]} == {
+        "remediated"
+    }
     assert capacity_review["compatibility_constraints"]["redis_required"] is False
     followup = json.loads(
         (root / evidence["latest_followup_review"]).read_text()
@@ -1722,6 +1819,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-09-02-SR-09",
         "REVIEW-2026-09-02-SR-10",
         "REVIEW-2026-09-02-SR-11",
+        "REVIEW-2026-09-02-SR-12",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1885,6 +1983,16 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert replay_refill_controls["empty_refill_index_error"] is False
     assert replay_refill_controls["new_caller_quota_added"] is False
     assert replay_refill_controls["redis_required"] is False
+    isolated_setup_controls = dispositions["REVIEW-2026-09-02-SR-12"]["controls"]
+    assert isolated_setup_controls["pipe_failure_releases_admission"] is True
+    assert isolated_setup_controls["process_construction_failure_releases_admission"] is True
+    assert isolated_setup_controls["partial_start_failure_releases_admission"] is True
+    assert isolated_setup_controls["partial_connections_closed"] is True
+    assert isolated_setup_controls["partial_children_terminated_and_reaped"] is True
+    assert isolated_setup_controls["default_worker_capacity"] == 8
+    assert isolated_setup_controls["default_stable_identity_capacity"] == 4
+    assert isolated_setup_controls["trusted_execution_changed"] is False
+    assert isolated_setup_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True
