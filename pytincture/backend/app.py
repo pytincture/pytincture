@@ -2237,7 +2237,9 @@ def _set_authenticated_user(
     return session_user
 
 
-def require_auth(request: Request):
+def _locally_validated_auth_session(request: Request):
+    """Validate browser-carried session claims without touching shared state."""
+
     if (
         ENABLE_GOOGLE_AUTH
         or ENABLE_MICROSOFT_AUTH
@@ -2263,7 +2265,7 @@ def require_auth(request: Request):
             return None
 
         session_id = request.session.get("session_id")
-        if not isinstance(session_id, str) or not session_id or _session_is_revoked(session_id):
+        if not isinstance(session_id, str) or not session_id:
             _clear_auth_session(request)
             return None
         issued_at = request.session.get("auth_issued_at")
@@ -2284,7 +2286,17 @@ def require_auth(request: Request):
             return None
 
         return user_session
-    else:
+
+
+async def require_auth(request: Request):
+    """Authenticate locally, consulting optional shared revocation state safely."""
+
+    if not (
+        ENABLE_GOOGLE_AUTH
+        or ENABLE_MICROSOFT_AUTH
+        or ENABLE_USER_LOGIN
+        or ENABLE_SAML_AUTH
+    ):
         return {
             "email": "",
             "password": "",
@@ -2294,9 +2306,38 @@ def require_auth(request: Request):
             "is_authenticated": False,
         }
 
+    user = _locally_validated_auth_session(request)
+    if user is None:
+        return None
 
-def require_authenticated_user(request: Request):
+    # Signed browser sessions are the default and remain fully stateless. Only
+    # a deliberately enabled shared revocation provider incurs a thread or gate.
+    if USE_REDIS_INSTANCE == "true":
+        session_id = request.session["session_id"]
+        revoked = await _run_bounded_thread_stage(
+            REMOTE_STORE_GATE,
+            _session_is_revoked,
+            session_id,
+            timeout_seconds=REMOTE_STORE_TIMEOUT_SECONDS,
+            unavailable_detail="Session revocation store is temporarily unavailable",
+        )
+        if revoked:
+            _clear_auth_session(request)
+            return None
+    return user
+
+
+async def _resolve_auth(request: Request):
+    """Resolve the authentication hook, including synchronous test/app overrides."""
+
     user = require_auth(request)
+    if inspect.isawaitable(user):
+        user = await user
+    return user
+
+
+async def require_authenticated_user(request: Request):
+    user = await _resolve_auth(request)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
     return user
@@ -4151,7 +4192,7 @@ async def class_call(
         user = "noauth"
     else:
         # Perform authentication check for calls not whitelisted for no-auth.
-        user = await _run_bff_thread_stage(request, require_auth, request)
+        user = await _resolve_auth(request)
 
     if not user:
         raise HTTPException(status_code=401, detail="Call not authorized")
@@ -4642,13 +4683,7 @@ async def logs_endpoint(request: Request):
             detail="Browser log rate limit exceeded",
             headers={"Retry-After": str(retry_after)},
         )
-    user = await _run_bounded_thread_stage(
-        REMOTE_STORE_GATE,
-        require_authenticated_user,
-        request,
-        timeout_seconds=REMOTE_STORE_TIMEOUT_SECONDS,
-        unavailable_detail="Session revocation store is temporarily unavailable",
-    )
+    user = await require_authenticated_user(request)
     _validate_csrf(request, user)
     content_length = request.headers.get("content-length")
     if content_length:
@@ -6726,11 +6761,11 @@ async def auth_microsoft_callback(request: Request, application: str):
     return RedirectResponse(url=return_to)
 
 @app.post("/{application}/auth/logout", operation_id="logoutUser", response_class=RedirectResponse, responses={302: {"description": "RedirectResponse (to login page)"}})
-def logout(request: Request,  application: str):
+async def logout(request: Request,  application: str):
     """
     Logs the user out of *your app only*.
     """
-    user = require_authenticated_user(request)
+    user = await require_authenticated_user(request)
     _validate_csrf(request, user)
     revoke_session(str(request.session.get("session_id") or ""))
     _clear_auth_session(request)
@@ -7064,13 +7099,7 @@ async def main_app_route(response: Response, application: str, request: Request)
 
     # Check session
     try:
-        user_session = await _run_bounded_thread_stage(
-            REMOTE_STORE_GATE,
-            require_auth,
-            request,
-            timeout_seconds=REMOTE_STORE_TIMEOUT_SECONDS,
-            unavailable_detail="Session revocation store is temporarily unavailable",
-        )
+        user_session = await _resolve_auth(request)
     except HTTPException as auth_error:
         if auth_error.status_code != 401:
             raise
@@ -7510,13 +7539,7 @@ async def configured_favicon_asset(
 
 
 async def _authorize_api_documentation(request: Request) -> None:
-    user = await _run_bounded_thread_stage(
-        REMOTE_STORE_GATE,
-        require_authenticated_user,
-        request,
-        timeout_seconds=REMOTE_STORE_TIMEOUT_SECONDS,
-        unavailable_detail="Session revocation store is temporarily unavailable",
-    )
+    user = await require_authenticated_user(request)
     if not isinstance(user, dict) or user.get("is_authenticated") is not True:
         raise HTTPException(status_code=401, detail="Authentication required")
 

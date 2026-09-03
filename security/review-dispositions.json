@@ -667,7 +667,7 @@
       "status": "remediated",
       "title": "Blocking SAML and optional shared-store work is bounded and off-loop",
       "intentional_contract": "Normal sessions, SAML browser handshakes, and load balancing remain stateless and browser-carried. Redis is an optional adapter only for deployments that explicitly select shared revocation or strict fleet-wide replay consumption.",
-      "security_boundary": "SAML XML prevalidation and toolkit signature/correlation processing execute in worker threads behind a dedicated concurrency and queue gate with a runtime deadline; a timed-out thread retains its slot until exit. Async readiness, direct page-session revocation checks, and replay issuance offload optional store work behind a separate bounded gate and network deadline. FastAPI sync authentication dependencies and logout already execute in its worker pool. Readiness refreshes are coalesced for a short TTL. RedisDict disables read caching by default; explicit caching stores only positive values, expires them by TTL, enforces LRU entry capacity, and invalidates local mutations. Remote calls retain transport deadlines and a failure circuit breaker.",
+      "security_boundary": "SAML XML prevalidation and toolkit signature/correlation processing execute in worker threads behind a dedicated concurrency and queue gate with a runtime deadline; a timed-out thread retains its slot until exit. Async readiness, every enabled shared session-revocation read, and replay issuance offload optional store work behind a separate bounded gate and network deadline. Signed-cookie validation without a shared provider remains local and stateless. Readiness refreshes are coalesced for a short TTL. RedisDict disables read caching by default; explicit caching stores only positive values, expires them by TTL, enforces LRU entry capacity, and invalidates local mutations. Remote calls retain transport deadlines and a failure circuit breaker.",
       "controls": {
         "saml_xml_off_event_loop": true,
         "saml_signature_off_event_loop": true,
@@ -677,6 +677,8 @@
         "timed_out_saml_slot_retained": true,
         "remote_readiness_off_event_loop": true,
         "remote_revocation_lookup_off_event_loop": true,
+        "remote_revocation_lookup_admission_bound": true,
+        "stateless_session_uses_remote_gate": false,
         "remote_replay_issuance_off_event_loop": true,
         "remote_operation_admission_bound": true,
         "remote_transport_deadline": true,
@@ -1229,6 +1231,40 @@
         "tests/test_app.py::test_required_prebuilt_appcode_does_not_fall_back_to_dynamic",
         "tests/test_app.py::test_required_prebuilt_appcode_rejects_stale_source",
         "tests/test_backend_modules.py::test_build_prebuilt_appcode_writes_browser_archive_atomically"
+      ]
+    },
+    {
+      "id": "REVIEW-2026-09-02-SR-05",
+      "status": "remediated",
+      "title": "Optional shared session-revocation reads have bounded async admission",
+      "intentional_contract": "Browser-carried signed sessions remain the default stateless, load-balancer-friendly path. A shared revocation provider is optional, and Redis is never required.",
+      "security_boundary": "Local signed-cookie structure, identity, audience, and lifetime checks run without shared state, admission, or thread-pool work. When shared revocation is explicitly enabled, every HTTP authentication path performs the lookup off the event loop behind one bounded per-worker gate with queue and operation deadlines. Saturation and provider failures fail closed; timed-out work retains its gate slot until its worker thread actually exits.",
+      "controls": {
+        "signed_cookie_validation_local": true,
+        "stateless_session_uses_remote_gate": false,
+        "remote_revocation_lookup_off_event_loop": true,
+        "remote_revocation_lookup_admission_bound": true,
+        "remote_revocation_queue_bound": true,
+        "remote_revocation_operation_deadline": true,
+        "timed_out_remote_slot_retained": true,
+        "remote_provider_failure_circuit": true,
+        "state_route_covered": true,
+        "appcode_route_covered": true,
+        "bff_routes_covered": true,
+        "auth_and_logout_routes_covered": true,
+        "documentation_and_log_routes_covered": true,
+        "redis_required": false,
+        "sticky_routing_required": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "docs/configuration.md",
+        "docs/production-deployment.md"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_stateless_session_validation_does_not_use_remote_gate",
+        "tests/test_app.py::test_remote_revocation_reads_have_bounded_async_admission",
+        "tests/test_app.py::test_main_page_revocation_lookup_runs_off_the_event_loop"
       ]
     }
   ]
