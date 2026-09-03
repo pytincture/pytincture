@@ -6,10 +6,13 @@ import hashlib
 import importlib.metadata as importlib_metadata
 import io
 import json
+import math
 import os
 import re
+import stat
 import sys
 import threading
+import time
 import zipfile
 from collections import OrderedDict
 from collections.abc import Callable
@@ -84,20 +87,70 @@ class _AppcodeArchiveCacheEntry:
     directory_fingerprint: tuple[tuple[Any, ...], ...]
 
 
-def _directory_fingerprint(modules_root: str) -> tuple[tuple[Any, ...], ...]:
-    """Record relevant directory identities without opening file contents."""
-    root = canonical_root(modules_root)
-    fingerprint: list[tuple[Any, ...]] = []
-    for current, directories, _files in os.walk(root, followlinks=False):
-        directories[:] = sorted(
-            directory
-            for directory in directories
-            if not directory.startswith(".")
-            and directory not in _EXCLUDED_DIRECTORIES
-            and not os.path.islink(os.path.join(current, directory))
+def _validation_deadline(timeout_seconds: float) -> float:
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("appcode cache validation timeout must be greater than zero")
+    return time.monotonic() + timeout_seconds
+
+
+def _check_validation_deadline(deadline: float) -> None:
+    if time.monotonic() >= deadline:
+        raise HTTPException(
+            status_code=503,
+            detail="Appcode cache validation deadline exceeded",
         )
-        metadata = os.stat(current, follow_symlinks=False)
-        relative = os.path.relpath(current, root).replace(os.sep, "/")
+
+
+def _relevant_directories(
+    modules_root: str,
+    selected_files: list[str],
+    scanned_directories: set[str],
+    *,
+    max_directories: int,
+) -> tuple[str, ...]:
+    """Return bounded canonical directories whose entries affect discovery."""
+    root = canonical_root(modules_root)
+    relevant = {root}
+    candidates = set(scanned_directories)
+    candidates.update(os.path.dirname(path) for path in selected_files)
+    for candidate in candidates:
+        current = os.path.abspath(candidate)
+        while os.path.commonpath((root, current)) == root:
+            if os.path.islink(current):
+                raise UnsafePath("Appcode discovery directory cannot be a symlink")
+            relevant.add(current)
+            if len(relevant) > max_directories:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Appcode directory limit exceeded",
+                )
+            if current == root:
+                break
+            current = os.path.dirname(current)
+    return tuple(sorted(relevant))
+
+
+def _directory_fingerprint(
+    modules_root: str,
+    directories: tuple[str, ...],
+    *,
+    max_directories: int,
+    deadline: float,
+) -> tuple[tuple[Any, ...], ...]:
+    """Record only the bounded directories relevant to archive discovery."""
+    root = canonical_root(modules_root)
+    if len(directories) > max_directories:
+        raise HTTPException(status_code=413, detail="Appcode directory limit exceeded")
+    fingerprint: list[tuple[Any, ...]] = []
+    for current in directories:
+        _check_validation_deadline(deadline)
+        absolute = os.path.abspath(current)
+        if os.path.commonpath((root, absolute)) != root or os.path.islink(absolute):
+            raise UnsafePath("Appcode discovery directory is unsafe")
+        metadata = os.stat(absolute, follow_symlinks=False)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise UnsafePath("Appcode discovery directory is not a directory")
+        relative = os.path.relpath(absolute, root).replace(os.sep, "/")
         fingerprint.append(
             (
                 "" if relative == "." else relative,
@@ -113,7 +166,12 @@ def _directory_fingerprint(modules_root: str) -> tuple[tuple[Any, ...], ...]:
 def _source_fingerprint_is_current(
     modules_root: str,
     fingerprint: tuple[tuple[Any, ...], ...],
+    *,
+    max_files: int,
+    deadline: float,
 ) -> bool:
+    if len(fingerprint) > max_files:
+        raise HTTPException(status_code=413, detail="Appcode file-count limit exceeded")
     for (
         relative_path,
         device,
@@ -123,11 +181,44 @@ def _source_fingerprint_is_current(
         changed_ns,
         _digest,
     ) in fingerprint:
+        _check_validation_deadline(deadline)
         try:
             current = stat_contained_file(modules_root, relative_path)
         except (OSError, UnsafePath):
             return False
         if current.identity != (device, inode, size, modified_ns, changed_ns):
+            return False
+    return True
+
+
+def _directory_fingerprint_is_current(
+    modules_root: str,
+    fingerprint: tuple[tuple[Any, ...], ...],
+    *,
+    max_directories: int,
+    deadline: float,
+) -> bool:
+    if len(fingerprint) > max_directories:
+        raise HTTPException(status_code=413, detail="Appcode directory limit exceeded")
+    root = canonical_root(modules_root)
+    for relative, device, inode, modified_ns, changed_ns in fingerprint:
+        _check_validation_deadline(deadline)
+        try:
+            normalized = normalize_relative_path(relative) if relative else ""
+            current = root if not normalized else os.path.join(root, *normalized.split("/"))
+            if os.path.commonpath((root, current)) != root or os.path.islink(current):
+                return False
+            metadata = os.stat(current, follow_symlinks=False)
+        except (OSError, UnsafePath):
+            return False
+        if not stat.S_ISDIR(metadata.st_mode):
+            return False
+        if (
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_mtime_ns,
+            metadata.st_ctime_ns,
+        ) != (device, inode, modified_ns, changed_ns):
             return False
     return True
 
@@ -158,21 +249,42 @@ class AppcodeArchiveCache:
         if removed is not None:
             self._current_bytes -= len(removed.value)
 
-    def get(self, key: tuple[Any, ...], modules_root: str) -> bytes | None:
+    def get(
+        self,
+        key: tuple[Any, ...],
+        modules_root: str,
+        *,
+        max_files: int,
+        max_directories: int,
+        validation_timeout_seconds: float,
+    ) -> bytes | None:
         with self._lock:
             entry = self._entries.get(key)
         if entry is None:
             return None
+        deadline = _validation_deadline(validation_timeout_seconds)
         try:
             current = (
                 _source_fingerprint_is_current(
-                    modules_root, entry.source_fingerprint
+                    modules_root,
+                    entry.source_fingerprint,
+                    max_files=max_files,
+                    deadline=deadline,
                 )
-                and _directory_fingerprint(modules_root)
-                == entry.directory_fingerprint
+                and _directory_fingerprint_is_current(
+                    modules_root,
+                    entry.directory_fingerprint,
+                    max_directories=max_directories,
+                    deadline=deadline,
+                )
             )
         except (OSError, UnsafePath):
             current = False
+        except HTTPException:
+            with self._lock:
+                if self._entries.get(key) is entry:
+                    self._remove_locked(key)
+            raise
         with self._lock:
             if self._entries.get(key) is not entry:
                 return None
@@ -189,15 +301,31 @@ class AppcodeArchiveCache:
         *,
         modules_root: str,
         source_fingerprint: tuple[tuple[Any, ...], ...],
+        directory_fingerprint: tuple[tuple[Any, ...], ...],
+        max_files: int,
+        max_directories: int,
+        validation_timeout_seconds: float,
     ) -> None:
         if len(value) > self.max_bytes:
             with self._lock:
                 self._remove_locked(key)
             return
+        deadline = _validation_deadline(validation_timeout_seconds)
         try:
-            if not _source_fingerprint_is_current(modules_root, source_fingerprint):
+            if not _source_fingerprint_is_current(
+                modules_root,
+                source_fingerprint,
+                max_files=max_files,
+                deadline=deadline,
+            ):
                 return
-            directory_fingerprint = _directory_fingerprint(modules_root)
+            if not _directory_fingerprint_is_current(
+                modules_root,
+                directory_fingerprint,
+                max_directories=max_directories,
+                deadline=deadline,
+            ):
+                return
         except (OSError, UnsafePath):
             return
         entry = _AppcodeArchiveCacheEntry(
@@ -720,6 +848,9 @@ def create_appcode_archive(
     max_files: int = 512,
     max_file_bytes: int = 4 * 1024 * 1024,
     max_total_bytes: int = 32 * 1024 * 1024,
+    max_directories: int = 2048,
+    max_scanned_files: int = 51200,
+    cache_validation_timeout_seconds: float = 2.0,
     cache: AppcodeArchiveCache | None = None,
     manifest_out: dict[str, Any] | None = None,
 ) -> io.BytesIO:
@@ -737,9 +868,17 @@ def create_appcode_archive(
         max_files,
         max_file_bytes,
         max_total_bytes,
+        max_directories,
+        max_scanned_files,
     )
     if cache is not None and replay_client is None:
-        cached = cache.get(cache_key, root)
+        cached = cache.get(
+            cache_key,
+            root,
+            max_files=max_files,
+            max_directories=max_directories,
+            validation_timeout_seconds=cache_validation_timeout_seconds,
+        )
         if cached is not None:
             return io.BytesIO(cached)
 
@@ -753,9 +892,25 @@ def create_appcode_archive(
             max_files=max_files,
             _secure_files=discovered_secure_files,
             _max_file_bytes=max_file_bytes,
+            _max_directories=max_directories,
+            _max_scanned_files=max_scanned_files,
             _scanned_directories=scanned_directories,
         )
     )
+    directory_fingerprint: tuple[tuple[Any, ...], ...] = ()
+    if cache is not None and replay_client is None:
+        relevant_directories = _relevant_directories(
+            root,
+            selected,
+            scanned_directories,
+            max_directories=max_directories,
+        )
+        directory_fingerprint = _directory_fingerprint(
+            root,
+            relevant_directories,
+            max_directories=max_directories,
+            deadline=float("inf"),
+        )
     fingerprint: list[tuple[Any, ...]] = []
     secure_files = []
     aggregate_bytes = 0
@@ -848,5 +1003,9 @@ def create_appcode_archive(
             in_memory_zip.getvalue(),
             modules_root=root,
             source_fingerprint=tuple(fingerprint),
+            directory_fingerprint=directory_fingerprint,
+            max_files=max_files,
+            max_directories=max_directories,
+            validation_timeout_seconds=cache_validation_timeout_seconds,
         )
     return in_memory_zip

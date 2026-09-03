@@ -1720,6 +1720,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-09-02-SR-07",
         "REVIEW-2026-09-02-SR-08",
         "REVIEW-2026-09-02-SR-09",
+        "REVIEW-2026-09-02-SR-10",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1866,6 +1867,15 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert service_worker_controls["foreign_caches_deleted"] is False
     assert service_worker_controls["clean_navigation_url_preserved"] is True
     assert service_worker_controls["redis_required"] is False
+    appcode_cache_controls = dispositions["REVIEW-2026-09-02-SR-10"]["controls"]
+    assert appcode_cache_controls["warm_modules_root_walk"] is False
+    assert appcode_cache_controls["relevant_source_fingerprint_bounded"] is True
+    assert appcode_cache_controls["relevant_directory_fingerprint_bounded"] is True
+    assert appcode_cache_controls["validation_deadline"] is True
+    assert appcode_cache_controls["same_name_edits_invalidate"] is True
+    assert appcode_cache_controls["new_glob_matches_invalidate"] is True
+    assert appcode_cache_controls["prebuilt_production_supported"] is True
+    assert appcode_cache_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True
@@ -2668,6 +2678,13 @@ def test_appcode_warm_cache_uses_metadata_without_rereading_sources(
 
     cold = create_appcode_archive("", "", "demo", str(tmp_path), parser, cache=cache)
     cold_reads = len(reads)
+    monkeypatch.setattr(
+        browser_packages.os,
+        "walk",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("a warm cache hit must not walk the modules root")
+        ),
+    )
     warm = create_appcode_archive("", "", "demo", str(tmp_path), parser, cache=cache)
 
     assert cold.getvalue() == warm.getvalue()
@@ -2679,6 +2696,109 @@ def test_appcode_warm_cache_uses_metadata_without_rereading_sources(
     changed = create_appcode_archive("", "", "demo", str(tmp_path), parser, cache=cache)
     assert changed.getvalue() != warm.getvalue()
     assert len(reads) > cold_reads
+
+
+def test_appcode_cache_tracks_new_files_in_declared_browser_directories(tmp_path):
+    (tmp_path / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "first.txt").write_text("first\n", encoding="utf-8")
+    parse_calls = []
+
+    def parser(path, host, protocol, *, source_code, **kwargs):
+        parse_calls.append(path)
+        return source_code
+
+    cache = AppcodeArchiveCache(4, 1024 * 1024)
+    first = create_appcode_archive(
+        "",
+        "",
+        "demo",
+        str(tmp_path),
+        parser,
+        raw_patterns='["assets/*.txt"]',
+        cache=cache,
+    )
+    with zipfile.ZipFile(io.BytesIO(first.getvalue())) as archive:
+        assert set(archive.namelist()) == {"assets/first.txt", "demo.py"}
+
+    (assets / "second.txt").write_text("second\n", encoding="utf-8")
+    changed = create_appcode_archive(
+        "",
+        "",
+        "demo",
+        str(tmp_path),
+        parser,
+        raw_patterns='["assets/*.txt"]',
+        cache=cache,
+    )
+    with zipfile.ZipFile(io.BytesIO(changed.getvalue())) as archive:
+        assert set(archive.namelist()) == {
+            "assets/first.txt",
+            "assets/second.txt",
+            "demo.py",
+        }
+    assert len(parse_calls) == 2
+
+
+def test_appcode_archive_applies_directory_and_scan_limits(tmp_path):
+    (tmp_path / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "one.txt").write_text("one\n", encoding="utf-8")
+
+    def parser(path, host, protocol, *, source_code, **kwargs):
+        return source_code
+
+    with pytest.raises(HTTPException, match="directory scan limit"):
+        create_appcode_archive(
+            "",
+            "",
+            "demo",
+            str(tmp_path),
+            parser,
+            raw_patterns='["assets/*.txt"]',
+            max_directories=1,
+        )
+    with pytest.raises(HTTPException, match="configured-file scan limit"):
+        create_appcode_archive(
+            "",
+            "",
+            "demo",
+            str(tmp_path),
+            parser,
+            raw_patterns='["assets/*.txt"]',
+            max_scanned_files=1,
+        )
+
+
+def test_appcode_cache_validation_deadline_fails_closed(tmp_path, monkeypatch):
+    import pytincture.backend.browser_packages as browser_packages
+
+    (tmp_path / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+    parse_calls = []
+
+    def parser(path, host, protocol, *, source_code, **kwargs):
+        parse_calls.append(path)
+        return source_code
+
+    cache = AppcodeArchiveCache(4, 1024 * 1024)
+    create_appcode_archive("", "", "demo", str(tmp_path), parser, cache=cache)
+
+    clock = iter((0.0, 2.0))
+    monkeypatch.setattr(browser_packages.time, "monotonic", lambda: next(clock))
+    with pytest.raises(HTTPException, match="validation deadline exceeded") as exc:
+        create_appcode_archive(
+            "",
+            "",
+            "demo",
+            str(tmp_path),
+            parser,
+            cache=cache,
+            cache_validation_timeout_seconds=1.0,
+        )
+    assert exc.value.status_code == 503
+    assert len(parse_calls) == 1
 
 
 def test_appcode_cache_enforces_aggregate_byte_budget(tmp_path):

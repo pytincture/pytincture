@@ -672,6 +672,11 @@ class PytinctureConfig:
         "APPCODE_CACHE_MAX_BYTES",
         "Aggregate byte limit for the per-worker browser archive cache.",
     )
+    appcode_cache_validation_timeout_seconds: float = _setting(
+        2.0,
+        "APPCODE_CACHE_VALIDATION_TIMEOUT_SECONDS",
+        "Maximum warm archive cache validation time.",
+    )
     bff_application_graph_cache_entries: int = _setting(
         128,
         "BFF_APPLICATION_GRAPH_CACHE_ENTRIES",
@@ -1140,6 +1145,7 @@ class PytinctureConfig:
             self.appcode_max_total_bytes,
             self.appcode_cache_entries,
             self.appcode_cache_max_bytes,
+            self.appcode_cache_validation_timeout_seconds,
             self.bff_application_graph_cache_entries,
             self.bff_application_graph_max_directories,
             self.bff_application_graph_max_scanned_files,
@@ -1205,6 +1211,7 @@ class PytinctureConfig:
             self.bff_stream_max_seconds,
             self.bff_stream_idle_timeout_seconds,
             self.bff_stream_write_timeout_seconds,
+            self.appcode_cache_validation_timeout_seconds,
             self.appcode_build_queue_timeout_seconds,
             self.appcode_download_queue_timeout_seconds,
             self.appcode_download_max_seconds,
@@ -1654,6 +1661,7 @@ class PytinctureConfig:
             "appcode_download_queue_timeout_seconds",
             "appcode_download_max_seconds",
             "appcode_download_write_timeout_seconds",
+            "appcode_cache_validation_timeout_seconds",
             "public_asset_queue_timeout_seconds", "public_asset_max_seconds",
             "public_asset_write_timeout_seconds",
             "public_widget_wheel_queue_timeout_seconds",

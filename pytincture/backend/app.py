@@ -548,6 +548,9 @@ def create_appcode_pkg_in_memory(host, protocol, application, replay_client=None
         max_files=APPCODE_MAX_FILES,
         max_file_bytes=APPCODE_MAX_FILE_BYTES,
         max_total_bytes=APPCODE_MAX_TOTAL_BYTES,
+        max_directories=BFF_APPLICATION_GRAPH_MAX_DIRECTORIES,
+        max_scanned_files=BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES,
+        cache_validation_timeout_seconds=APPCODE_CACHE_VALIDATION_TIMEOUT_SECONDS,
         cache=APPCODE_ARCHIVE_CACHE,
     )
 
@@ -5120,6 +5123,9 @@ APPCODE_CACHE_ENTRIES = int(os.getenv("APPCODE_CACHE_ENTRIES", "16"))
 APPCODE_CACHE_MAX_BYTES = int(
     os.getenv("APPCODE_CACHE_MAX_BYTES", str(128 * 1024 * 1024))
 )
+APPCODE_CACHE_VALIDATION_TIMEOUT_SECONDS = float(
+    os.getenv("APPCODE_CACHE_VALIDATION_TIMEOUT_SECONDS", "2")
+)
 BFF_APPLICATION_GRAPH_CACHE_ENTRIES = int(
     os.getenv("BFF_APPLICATION_GRAPH_CACHE_ENTRIES", "128")
 )
@@ -5236,6 +5242,7 @@ if min(
     APPCODE_MAX_TOTAL_BYTES,
     APPCODE_CACHE_ENTRIES,
     APPCODE_CACHE_MAX_BYTES,
+    APPCODE_CACHE_VALIDATION_TIMEOUT_SECONDS,
     BFF_APPLICATION_GRAPH_CACHE_ENTRIES,
     BFF_APPLICATION_GRAPH_MAX_DIRECTORIES,
     BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES,
@@ -5263,6 +5270,8 @@ if min(
     PUBLIC_WIDGET_WHEEL_RATE_LIMIT_WINDOW_SECONDS,
 ) <= 0:
     raise RuntimeError("BFF timeout and stream limits must be greater than zero")
+if not math.isfinite(APPCODE_CACHE_VALIDATION_TIMEOUT_SECONDS):
+    raise RuntimeError("APPCODE_CACHE_VALIDATION_TIMEOUT_SECONDS must be finite")
 if BFF_MAX_QUEUE < 0:
     raise RuntimeError("BFF_MAX_QUEUE cannot be negative")
 if BFF_REQUEST_INGRESS_MAX_QUEUE < 0:
