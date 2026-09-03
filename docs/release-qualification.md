@@ -5,22 +5,21 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## Current decision: NO-GO pending rc6, observation, and edge evidence
+## Current decision: NO-GO pending observation and edge evidence
 
-Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc5`, and rc4 and
-rc5 are published on PyPI. Rc5 is the latest recorded candidate. Rc6 packages
-the completed self-hosted Material Design Icons asset chain on `main`; it
-remains pending until its tag, release, complete acceptance matrix, retained
-hashes, and protected PyPI publication succeed. PyPI deliberately uses a
-project-scoped API token, while npm uses OIDC.
+Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc6`, and rc4
+through rc6 are published on PyPI. Rc6 is the latest recorded candidate. Its
+self-hosted icon asset, browser, BFF, authentication, streaming, cache, and
+capacity coverage passed the complete acceptance matrix. PyPI deliberately
+uses a project-scoped API token, while npm uses OIDC.
 
 The release manager approved the successful `pytincture_example` run, so the
 formal 30-day observation period began at `2026-08-29T02:08:06Z` and cannot
 complete before `2026-09-28T02:08:06Z`. RC2 has complete historical
 standalone, authenticated BFF, federated SAML, upgrade/rollback, performance,
-security/defect, and repository-policy evidence. Rc3, rc4, and rc5 each
-repeated and passed that complete matrix after publication; rc6 must repeat it.
-The release remains NO-GO until the time gate completes, a production-edge
+security/defect, and repository-policy evidence. Rc3 through rc6 each repeated
+and passed that complete matrix after publication. The release remains NO-GO
+until the time gate completes, a production-edge
 review records the deployed HTTPS
 redirect, HSTS, canonical-origin, and trusted-proxy controls, protected
 registry approvals complete, and the release manager approves the final
@@ -154,10 +153,29 @@ Rc5 includes the two later 12-item remediation tranches recorded in
 compatibility constraints remain explicit, and the exact public PyPI wheel was
 installed independently and reported `1.0.0rc5`.
 
-Rc6 preparation completes the vendored Material Design Icons CSS dependency by
-shipping and integrity-recording its source map. It does not change the runtime
-API or restore the removed third-party CDN dependency, and rc6 is not recorded
-as passed until its release evidence exists.
+Published and retained rc6 evidence:
+
+- signed tag and GitHub prerelease:
+  <https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc6>;
+- green release/attestation run and all latest-candidate representative-app
+  evidence:
+  <https://github.com/pytincture/pytincture/actions/runs/33775966072>;
+- wheel SHA-256:
+  `fd2a5e922fa9c1d1e3df8b287cfab4a1384b9d190f9ed029ca77caeb51fee287`;
+- source-distribution SHA-256:
+  `284c0bca61a2468eb06d1e160262b47aea5a788a4cab34466c1bfac8f9bd8140`;
+- retained npm tarball SHA-256:
+  `3f134ef03208b6be3c5c6d4354b6903a19fd3cfa921a00c8d81186dc71c055cb`;
+- security, defect, and live repository-policy audit:
+  <https://github.com/pytincture/pytincture/issues/143#issuecomment-5528559518>;
+  and
+- successful protected PyPI token publisher:
+  <https://github.com/pytincture/pytincture/actions/runs/33776593822>.
+
+Rc6 completes the self-hosted Material Design Icons CSS, source-map, and font
+asset chain without restoring a third-party CDN dependency. The complete
+acceptance matrix passed, and the exact public PyPI wheel was installed
+independently and reported `1.0.0rc6`.
 
 ## Evidence required after each RC
 
@@ -230,8 +248,8 @@ its tracking issue is accidentally closed.
 5. Resolve discovered blockers, publish/record the next release candidate, and
    repeat every latest-RC exercise. Rc4 records the initial 2026-09-01 review
    remediations; rc5 records the follow-up and capacity hardening, and rc6
-   records the self-hosted icon asset-completeness fix. Each must pass the
-   complete latest-candidate matrix.
+   records the self-hosted icon asset-completeness fix and passed the complete
+   latest-candidate matrix.
 6. After at least 30 days from the approved observation start, complete
    security/defect audits, execute rollback, and record an explicit `go` or
    `no-go` decision with approvers.

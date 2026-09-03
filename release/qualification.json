@@ -69,6 +69,19 @@
       },
       "status": "passed",
       "notes": "The signed GitHub prerelease, exact retained and attested artifacts, complete acceptance matrix, and protected PyPI API-token publication all passed. The exact public wheel installs as 1.0.0rc5. The retained npm tarball remains the qualified npm artifact; npm registry publication is a separate distribution task. Rc5 qualifies the follow-up and capacity hardening while preserving the approved stateless, Redis-free observation scope."
+    },
+    {
+      "version": "1.0.0rc6",
+      "published_at": "2026-09-03T15:59:59Z",
+      "commit_sha": "8db4ad2c9380979519646bff171b53e579fa8371",
+      "ci_url": "https://github.com/pytincture/pytincture/actions/runs/33775966072",
+      "artifacts": {
+        "wheel": "fd2a5e922fa9c1d1e3df8b287cfab4a1384b9d190f9ed029ca77caeb51fee287",
+        "sdist": "284c0bca61a2468eb06d1e160262b47aea5a788a4cab34466c1bfac8f9bd8140",
+        "npm": "3f134ef03208b6be3c5c6d4354b6903a19fd3cfa921a00c8d81186dc71c055cb"
+      },
+      "status": "passed",
+      "notes": "The signed GitHub prerelease, exact retained and attested artifacts, complete acceptance matrix, and protected PyPI API-token publication all passed. The exact public wheel installs as 1.0.0rc6. The retained npm tarball remains the qualified npm artifact; npm registry publication is a separate distribution task. Rc6 completes the self-hosted Material Design Icons CSS, source-map, and font asset chain without restoring a third-party CDN dependency."
     }
   ],
   "representative_applications": {
@@ -119,6 +132,19 @@
         "status": "passed",
         "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33758760808",
         "commit_sha": "9463366620afe275c6604dd000a76bf41afe7514",
+        "browser": "chromium",
+        "widgetset": "dhxpyt==0.9.18+backend",
+        "console_errors": 0,
+        "visible_url_clean": true,
+        "findings": []
+      },
+      {
+        "application": "wheel-only standalone fixture",
+        "version": "1.0.0rc6",
+        "tested_at": "2026-09-03T16:03:15Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33775966072",
+        "commit_sha": "8db4ad2c9380979519646bff171b53e579fa8371",
         "browser": "chromium",
         "widgetset": "dhxpyt==0.9.18+backend",
         "console_errors": 0,
@@ -196,6 +222,21 @@
           "webkit": 18.0
         },
         "findings": []
+      },
+      {
+        "application": "authenticated BFF fixture",
+        "version": "1.0.0rc6",
+        "tested_at": "2026-09-03T16:04:58Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33775966072",
+        "commit_sha": "8db4ad2c9380979519646bff171b53e579fa8371",
+        "browsers": ["chromium", "firefox", "webkit"],
+        "authenticated_bff_p95_ms": {
+          "chromium": 13.3,
+          "firefox": 15.0,
+          "webkit": 8.0
+        },
+        "findings": []
       }
     ],
     "federated_auth": [
@@ -261,6 +302,22 @@
         "saml_replay_mitigation": "passed",
         "redis_required": false,
         "findings": []
+      },
+      {
+        "application": "Keycloak SAML fixture",
+        "version": "1.0.0rc6",
+        "tested_at": "2026-09-03T16:03:58Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33775966072",
+        "commit_sha": "8db4ad2c9380979519646bff171b53e579fa8371",
+        "provider": "Keycloak 26.7.2",
+        "browser": "chromium",
+        "requested_authn_context": false,
+        "console_errors": 0,
+        "saml_transform_mitigation": "passed",
+        "saml_replay_mitigation": "passed",
+        "redis_required": false,
+        "findings": []
       }
     ]
   },
@@ -299,6 +356,15 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33758760808",
       "commit_sha": "9463366620afe275c6604dd000a76bf41afe7514",
+      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "server-secret exclusion"]
+    },
+    {
+      "from_version": "0.10.7",
+      "version": "1.0.0rc6",
+      "tested_at": "2026-09-03T16:03:08Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33775966072",
+      "commit_sha": "8db4ad2c9380979519646bff171b53e579fa8371",
       "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "server-secret exclusion"]
     }
   ],
@@ -341,6 +407,16 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33758760808",
       "commit_sha": "9463366620afe275c6604dd000a76bf41afe7514",
+      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "baseline equivalence"]
+    },
+    {
+      "from_version": "1.0.0rc6",
+      "version": "1.0.0rc6",
+      "to_version": "0.10.7",
+      "tested_at": "2026-09-03T16:03:08Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33775966072",
+      "commit_sha": "8db4ad2c9380979519646bff171b53e579fa8371",
       "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "baseline equivalence"]
     }
   ],
@@ -443,6 +519,27 @@
         "firefox": 16.0,
         "webkit": 18.0
       }
+    },
+    {
+      "application": "release service and browser fixtures",
+      "version": "1.0.0rc6",
+      "tested_at": "2026-09-03T16:04:58Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33775966072",
+      "commit_sha": "8db4ad2c9380979519646bff171b53e579fa8371",
+      "service": {
+        "health_p95_ms": 26.069,
+        "bff_p95_ms": 68.862,
+        "appcode_p95_ms": 43.888,
+        "failures": 0,
+        "saturation_rejections": 18,
+        "recovered": true
+      },
+      "browser_authenticated_bff_p95_ms": {
+        "chromium": 13.3,
+        "firefox": 15.0,
+        "webkit": 8.0
+      }
     }
   ],
   "repository_policy_reviews": [
@@ -489,6 +586,17 @@
       "require_code_owner_reviews": true,
       "required_approving_review_count": 1,
       "require_last_push_approval": true
+    },
+    {
+      "version": "1.0.0rc6",
+      "tested_at": "2026-09-03T16:09:01Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5528559518",
+      "required_checks": 20,
+      "enforce_admins": true,
+      "require_code_owner_reviews": true,
+      "required_approving_review_count": 1,
+      "require_last_push_approval": true
     }
   ],
   "production_edge_reviews": [],
@@ -528,6 +636,15 @@
       "open_critical": 0,
       "open_high": 0,
       "scope": "Daybreak follow-up and capacity findings recorded in the 2026-09-01 and 2026-09-02 scan-facing dispositions, dependency and history secret audits, SAML mitigation evidence, exact reproducible artifact attestations, and the complete release acceptance matrix"
+    },
+    {
+      "version": "1.0.0rc6",
+      "tested_at": "2026-09-03T16:09:01Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5528559518",
+      "open_critical": 0,
+      "open_high": 0,
+      "scope": "Material Design Icons self-hosting completion, dependency and history secret audits, SAML mitigation evidence, exact reproducible artifact attestations, and the complete release acceptance matrix"
     }
   ],
   "defect_audits": [
@@ -566,12 +683,21 @@
       "open_p0": 0,
       "open_p1": 0,
       "open_release_blockers": 0
+    },
+    {
+      "version": "1.0.0rc6",
+      "tested_at": "2026-09-03T16:09:01Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/issues/143#issuecomment-5528559518",
+      "open_p0": 0,
+      "open_p1": 0,
+      "open_release_blockers": 0
     }
   ],
   "final_decision": {
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1 through RC5 evidence is recorded and passing, and rc4 and rc5 are published on PyPI. Rc6 packages the completed self-hosted Material Design Icons asset chain while preserving the approved stateless, Redis-free observation scope, so it does not reset the clock. Rc6 remains pending until its signed release, complete acceptance matrix, retained hashes, and protected PyPI publication succeed. The final release remains NO-GO until the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS/canonical-origin/trusted-proxy evidence is recorded, remaining protected registry distribution tasks complete, and the release manager makes the final decision."
+    "notes": "RC1 through RC6 evidence is recorded and passing, and rc4 through rc6 are published on PyPI. Rc6 completes the self-hosted Material Design Icons asset chain while preserving the approved stateless, Redis-free observation scope, so it does not reset the clock. The final release remains NO-GO until the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS/canonical-origin/trusted-proxy evidence is recorded, remaining protected registry distribution tasks complete, and the release manager makes the final decision."
   }
 }
