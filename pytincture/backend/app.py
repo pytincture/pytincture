@@ -7344,6 +7344,9 @@ async def main_app_route(response: Response, application: str, request: Request)
     index_html = index_html.replace("***FAVICON_LINK***", favicon_markup)
     index_html = index_html.replace("***REQUEST_UUID***", request_uuid)
     index_html = index_html.replace(
+        "***CSRF_COOKIE_NAME_JSON***", _html_script_json(_CSRF_COOKIE)
+    )
+    index_html = index_html.replace(
         "***DEV_WHEEL_VERSION***", _html_script_json(DEVELOPMENT_WIDGET_VERSION_TEXT)
     )
     index_html = index_html.replace(

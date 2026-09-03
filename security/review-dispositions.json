@@ -1301,6 +1301,36 @@
         "tests/test_app.py::test_saml_login_toolkit_work_runs_off_the_event_loop",
         "tests/test_app.py::test_saml_metadata_cache_is_bounded_and_settings_fingerprinted"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-02-SR-07",
+      "status": "remediated",
+      "title": "Browser clients use one exact deployment-selected CSRF cookie",
+      "intentional_contract": "Secure production cookies, local HTTP development cookies, generated sync/async/streaming BFF APIs, and deployment-portable prebuilt appcode remain supported.",
+      "security_boundary": "The hosted page supplies the backend-selected cookie name as JSON-safe runtime metadata. The runtime validates it against the two framework-owned names and both browser logging and generated Python clients read only that exact cookie, independent of browser cookie ordering.",
+      "controls": {
+        "server_selected_cookie_mode": true,
+        "production_development_alias_accepted": false,
+        "exact_cookie_name_comparison": true,
+        "generated_bff_clients_covered": true,
+        "browser_logging_covered": true,
+        "local_http_development_preserved": true,
+        "prebuilt_appcode_portable": true,
+        "redis_required": false,
+        "server_session_state_added": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/frontend/index.html",
+        "pytincture/frontend/pytincture.js",
+        "pytincture/dataclass.py",
+        "docs/authentication.md"
+      ],
+      "regression_tests": [
+        "pytincture/frontend/tests/lifecycle.test.mjs::CSRF cookie selection uses one explicit runtime mode",
+        "tests/test_dataclass.py::test_generated_stub_uses_only_the_runtime_selected_csrf_cookie",
+        "tests/test_app.py::test_main_app_frontend_files_share_one_instance_uuid"
+      ]
     }
   ]
 }

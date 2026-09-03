@@ -39,6 +39,7 @@ var DEFAULT_CONFIG = {
   backendWidgetSources: null,
   allowPublicWidgetIndex: null,
   requestUuid: null,
+  csrfCookieName: null,
   mode: "auto",
   // 'package', 'inline', or 'auto'
   pyodideBaseUrl: "./frontend/pyodide/0.29.3/full/",
@@ -339,6 +340,30 @@ function alignDefaultMaterialIconsUrl(config) {
   }
   return `${config.pyodideBaseUrl.slice(0, marker)}vendor/materialdesignicons/materialdesignicons.css`;
 }
+function defaultCsrfCookieName() {
+  var _a;
+  if (typeof window !== "undefined" && ((_a = window.location) == null ? void 0 : _a.protocol) === "https:") {
+    return "__Host-pytincture-csrf";
+  }
+  return "pytincture-dev-csrf";
+}
+function normalizeCsrfCookieName(cookieName) {
+  const selected = cookieName || defaultCsrfCookieName();
+  if (!CSRF_COOKIE_NAMES.includes(selected)) {
+    throw new Error("Unsupported Pytincture CSRF cookie name.");
+  }
+  return selected;
+}
+function readCookieValue(cookieText, cookieName) {
+  const selected = normalizeCsrfCookieName(cookieName);
+  for (const cookie of String(cookieText || "").split(";")) {
+    const [name, ...value] = cookie.trim().split("=");
+    if (name === selected) {
+      return value.join("=");
+    }
+  }
+  return "";
+}
 function normalizeConfig(arg1, widgetlib, entrypoint) {
   const resolveDevWidgetHost = (host) => {
     if (host) {
@@ -356,6 +381,7 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
     const merged = { ...DEFAULT_CONFIG, ...arg1 };
     merged.pyodideBaseUrl = ensureTrailingSlash(merged.pyodideBaseUrl);
     merged.requestUuid = merged.requestUuid || makeRequestId();
+    merged.csrfCookieName = normalizeCsrfCookieName(merged.csrfCookieName);
     merged.entrypoint = merged.entrypoint || merged.application;
     merged.devWidgetHost = resolveDevWidgetHost(merged.devWidgetHost);
     if (merged.allowPublicWidgetIndex === null) {
@@ -391,6 +417,7 @@ function normalizeConfig(arg1, widgetlib, entrypoint) {
   };
   config.pyodideBaseUrl = ensureTrailingSlash(config.pyodideBaseUrl);
   config.requestUuid = config.requestUuid || makeRequestId();
+  config.csrfCookieName = normalizeCsrfCookieName(config.csrfCookieName);
   config.devWidgetHost = resolveDevWidgetHost(config.devWidgetHost);
   config.allowPublicWidgetIndex = !config.application;
   if (config.application) {
@@ -542,7 +569,7 @@ function ensureMaterialIcons(url, requestUuid, integrity = null) {
     document.head.appendChild(link);
   });
 }
-function enableBackendLogging(endpoint) {
+function enableBackendLogging(endpoint, csrfCookieName) {
   if (loggingInstalled) {
     return;
   }
@@ -554,8 +581,7 @@ function enableBackendLogging(endpoint) {
     }
   });
   function sendToBackend(level, message) {
-    var _a;
-    const csrfToken = ((_a = String(document.cookie || "").split(";").map((cookie) => cookie.trim().split("=")).find(([name]) => CSRF_COOKIE_NAMES.includes(name))) == null ? void 0 : _a.slice(1).join("=")) || "";
+    const csrfToken = readCookieValue(document.cookie, csrfCookieName);
     const headers = { "Content-Type": "application/json" };
     if (csrfToken) {
       headers["X-CSRF-Token"] = csrfToken;
@@ -1452,9 +1478,10 @@ async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_O
 }
 async function runTinctureApp(arg1, widgetlib, entrypoint) {
   const config = normalizeConfig(arg1, widgetlib, entrypoint);
+  globalThis.__pytinctureCsrfCookieName = config.csrfCookieName;
   const loadingOverlay = ensureLoadingOverlay(config);
   if (config.enableBackendLogging) {
-    enableBackendLogging(config.logEndpoint);
+    enableBackendLogging(config.logEndpoint, config.csrfCookieName);
   }
   try {
     const pyodide = await runStartup(config, loadingOverlay);
@@ -1517,6 +1544,8 @@ globalThis.__pytinctureTesting = Object.freeze({
   frameworkAssetUrls,
   frameworkCacheName,
   normalizeConfig,
+  normalizeCsrfCookieName,
+  readCookieValue,
   isExternalAssetUrl,
   isValidSubresourceIntegrity,
   responseIsPublicImmutable,

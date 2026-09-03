@@ -114,11 +114,16 @@
     {
       "id": "SR-07",
       "severity": "medium",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/324",
-      "disposition": "Production browser clients accept only the __Host- CSRF cookie and never prefer a development alias.",
+      "disposition": "The hosted page supplies one validated CSRF cookie name. Production JavaScript and generated BFF clients accept only __Host-pytincture-csrf; local HTTP clients accept only pytincture-dev-csrf.",
       "potential_user_breakage": false,
-      "compatibility_note": "Local HTTP development keeps its separate development cookie name."
+      "compatibility_note": "Local HTTP development keeps its separate development cookie name, and runtime metadata keeps prebuilt appcode independent of deployment mode.",
+      "regression_tests": [
+        "pytincture/frontend/tests/lifecycle.test.mjs: CSRF cookie selection uses one explicit runtime mode",
+        "tests/test_dataclass.py::test_generated_stub_uses_only_the_runtime_selected_csrf_cookie",
+        "tests/test_app.py::test_main_app_frontend_files_share_one_instance_uuid"
+      ]
     },
     {
       "id": "SR-08",

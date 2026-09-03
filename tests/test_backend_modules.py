@@ -1717,6 +1717,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-09-02-SR-04",
         "REVIEW-2026-09-02-SR-05",
         "REVIEW-2026-09-02-SR-06",
+        "REVIEW-2026-09-02-SR-07",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1835,6 +1836,14 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert saml_public_controls["metadata_configuration_change_invalidates"] is True
     assert saml_public_controls["browser_handshake_stateless"] is True
     assert saml_public_controls["redis_required"] is False
+    csrf_cookie_controls = dispositions["REVIEW-2026-09-02-SR-07"]["controls"]
+    assert csrf_cookie_controls["server_selected_cookie_mode"] is True
+    assert csrf_cookie_controls["production_development_alias_accepted"] is False
+    assert csrf_cookie_controls["generated_bff_clients_covered"] is True
+    assert csrf_cookie_controls["browser_logging_covered"] is True
+    assert csrf_cookie_controls["local_http_development_preserved"] is True
+    assert csrf_cookie_controls["prebuilt_appcode_portable"] is True
+    assert csrf_cookie_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True

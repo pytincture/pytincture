@@ -4212,7 +4212,8 @@ def test_frontend_runtime_resolves_versioned_wheels_and_sends_log_csrf(fresh_cli
     assert "No trusted backend wheel is available" in response.text
     assert "x-pytincture-sha256" in response.text
     assert "throw lastInstallError" in response.text
-    assert 'CSRF_COOKIE_NAMES.includes(name)' in response.text
+    assert "readCookieValue(document.cookie, csrfCookieName)" in response.text
+    assert "globalThis.__pytinctureCsrfCookieName = config.csrfCookieName" in response.text
     assert 'headers["X-CSRF-Token"] = csrfToken' in response.text
 
 def test_service_worker_only_caches_manifested_framework_assets(fresh_client):
@@ -5846,6 +5847,8 @@ def test_main_app_frontend_files_share_one_instance_uuid(fresh_client, monkeypat
     assert "***REQUEST_UUID***" not in first_response.text
     assert "***REQUEST_UUID***" not in second_response.text
     assert "enableBackendLogging: false" in first_response.text
+    assert f'csrfCookieName: "{_CSRF_COOKIE}"' in first_response.text
+    assert "***CSRF_COOKIE_NAME_JSON***" not in first_response.text
     assert first_response.headers["cache-control"] == "no-store, max-age=0"
     assert first_response.headers["pragma"] == "no-cache"
 
