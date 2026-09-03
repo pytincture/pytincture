@@ -12,6 +12,8 @@ const {
     frameworkAssetUrls,
     frameworkCacheName,
     normalizeConfig,
+    normalizeCsrfCookieName,
+    readCookieValue,
     responseIsPublicImmutable,
     runStartup,
     sanitizeConsoleMessage,
@@ -143,6 +145,27 @@ test("public widget index defaults to standalone-only", () => {
         application: "sample",
         widgetlib: "custom==1.0.0",
     }).allowPublicWidgetIndex, false);
+});
+
+test("CSRF cookie selection uses one explicit runtime mode", () => {
+    const cookies = [
+        "pytincture-dev-csrf=sibling-value",
+        "__Host-pytincture-csrf=production-value",
+    ].join("; ");
+
+    assert.equal(
+        readCookieValue(cookies, "__Host-pytincture-csrf"),
+        "production-value",
+    );
+    assert.equal(
+        readCookieValue(cookies, "pytincture-dev-csrf"),
+        "sibling-value",
+    );
+    assert.equal(normalizeCsrfCookieName("__Host-pytincture-csrf"), "__Host-pytincture-csrf");
+    assert.throws(
+        () => normalizeCsrfCookieName("attacker-selected-cookie"),
+        /Unsupported Pytincture CSRF cookie name/,
+    );
 });
 
 test("the built-in dhxpyt release verifies the complete PyPI wheel", async () => {

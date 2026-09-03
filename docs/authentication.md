@@ -15,6 +15,9 @@ HttpOnly session, `__Host-pytincture-csrf` for the readable CSRF token, and an
 application-specific `__Host-pytincture-saml-handshake-*` cookie during SAML
 login. Each uses `Path=/` with no `Domain` attribute so a sibling hostname
 cannot inject it. An explicit `AUTH_SESSION_HTTPS_ONLY=false` is rejected.
+The hosted page passes the exact CSRF cookie name to the browser runtime;
+generated BFF clients and optional browser logging read only that name, never
+whichever production/development alias appears first in browser cookie order.
 
 Local HTTP auth testing can explicitly set
 `PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN=true` and

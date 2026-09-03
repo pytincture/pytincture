@@ -1065,7 +1065,49 @@ def test_generated_stub_sends_csrf_and_declared_http_method(tmp_path, monkeypatc
     assert "X-CSRF-Token" in stub
     assert "__Host-pytincture-csrf" in stub
     assert "pytincture-dev-csrf" in stub
+    assert "name == cookie_name" in stub
+    assert "name in {'__Host-pytincture-csrf', 'pytincture-dev-csrf'}" not in stub
     assert "response = self.fetch_sync(url, payload, 'GET')" in stub
+
+
+def test_generated_stub_uses_only_the_runtime_selected_csrf_cookie(
+    tmp_path, monkeypatch
+):
+    file_path = tmp_path / "status.py"
+    file_path.write_text(textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class Status:
+            def mutate(self):
+                return True
+    """))
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    stub = generate_stub_classes(
+        str(file_path), "example.com", "https", application="demoapp"
+    )
+
+    js_module = types.ModuleType("js")
+    js_module.XMLHttpRequest = types.SimpleNamespace(new=lambda: None)
+    js_module.document = types.SimpleNamespace(
+        cookie=(
+            "pytincture-dev-csrf=sibling-value; "
+            "__Host-pytincture-csrf=production-value"
+        )
+    )
+    js_module.window = types.SimpleNamespace(
+        __pytinctureCsrfCookieName="__Host-pytincture-csrf",
+        location=types.SimpleNamespace(href="https://example.com/demoapp"),
+    )
+    monkeypatch.setitem(sys.modules, "js", js_module)
+
+    namespace = {}
+    exec(compile(stub, str(file_path), "exec"), namespace)
+    service = namespace["Status"]()
+    assert service._csrf_token() == "production-value"
+
+    js_module.window.__pytinctureCsrfCookieName = "pytincture-dev-csrf"
+    assert service._csrf_token() == "sibling-value"
 
 
 def test_generated_stub_injects_opaque_replay_state_client(tmp_path, monkeypatch):

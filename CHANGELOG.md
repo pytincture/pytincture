@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Select one exact CSRF cookie mode in the hosted runtime and use it for both
+  browser logging and generated BFF clients. Production no longer considers a
+  development-cookie alias, while local HTTP development and portable prebuilt
+  appcode remain supported.
 - Bound anonymous SAML login and metadata setup with configurable per-peer
   limits, dedicated toolkit concurrency/queue/runtime admission, and off-loop
   execution after application validation. Cache metadata in a bounded
