@@ -44,7 +44,9 @@ from pytincture.backend.execution import (
     IsolatedExecutionTimeout,
     ProcessIsolatedBFFExecutor,
 )
+from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate, CircuitOpen
 from pytincture.backend.mcp import parse_tool_specs
+from pytincture.backend.middleware import RotatingSessionMiddleware
 from pytincture.backend.pages import (
     EntryPointDiscoveryError,
     find_app_string_setting,
@@ -90,12 +92,59 @@ from pytincture.backend.streaming import (
     limited_sync_stream,
     limited_thread_stream,
 )
-from pytincture.backend.limits import AdmissionRejected, AsyncAdmissionGate, CircuitOpen
 from pytincture.backend.widget_trust import (
     WidgetTrustPolicyError,
     canonical_widget_trust_policy,
     trusted_widget_manifest,
 )
+
+
+def test_session_middleware_protects_cookie_responses_and_strips_public_state():
+    from fastapi import FastAPI, Request
+    from fastapi.responses import Response
+    from fastapi.testclient import TestClient
+
+    mini_app = FastAPI()
+
+    @mini_app.get("/private")
+    async def private_response(request: Request):
+        request.session["user"] = {"is_authenticated": True}
+        return Response(
+            content="private",
+            headers={
+                "Cache-Control": "not-public, max-age=3600",
+                "Vary": "Accept-Encoding",
+            },
+        )
+
+    @mini_app.get("/public")
+    async def public_response():
+        return Response(
+            content="public",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Set-Cookie": "unsafe=value; Path=/",
+            },
+        )
+
+    mini_app.add_middleware(
+        RotatingSessionMiddleware,
+        secret_key="session-secret-with-32-distinct-ish-characters-1234",
+    )
+    with TestClient(mini_app) as client:
+        protected = client.get("/private")
+        public = client.get("/public")
+
+    assert protected.headers["cache-control"] == "private, no-store, max-age=0"
+    assert protected.headers["pragma"] == "no-cache"
+    assert set(protected.headers["vary"].split(", ")) == {
+        "Accept-Encoding",
+        "Cookie",
+        "Authorization",
+    }
+    assert "set-cookie" in protected.headers
+    assert public.headers["cache-control"] == "public, max-age=3600"
+    assert "set-cookie" not in public.headers
 
 
 def test_bff_result_encoder_stops_at_byte_depth_and_item_limits():
@@ -1542,6 +1591,15 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert evidence["latest_followup_review"] == (
         "security/review-2026-09-01-followup.json"
     )
+    assert evidence["latest_capacity_review"] == (
+        "security/review-2026-09-02-capacity.json"
+    )
+    capacity_review = json.loads(
+        (root / evidence["latest_capacity_review"]).read_text()
+    )
+    assert capacity_review["status"] == "in_progress"
+    assert len(capacity_review["findings"]) == 12
+    assert capacity_review["compatibility_constraints"]["redis_required"] is False
     followup = json.loads(
         (root / evidence["latest_followup_review"]).read_text()
     )
@@ -1652,6 +1710,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-09-01-PT-14",
         "REVIEW-2026-09-01-PT-15",
         "REVIEW-2026-09-01-PT-16",
+        "REVIEW-2026-09-02-SR-01",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1723,6 +1782,13 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert diagnostic_controls["operator_token_strong_and_redacted"] is True
     assert diagnostic_controls["development_default_changed"] is False
     assert diagnostic_controls["redis_required"] is False
+    cache_controls = dispositions["REVIEW-2026-09-02-SR-01"]["controls"]
+    assert cache_controls["protected_public_cache_override_allowed"] is False
+    assert cache_controls["authenticated_responses_private_no_store"] is True
+    assert cache_controls["public_responses_set_cookie_allowed"] is False
+    assert cache_controls["exact_cache_directive_parsing"] is True
+    assert cache_controls["public_framework_assets_cacheable"] is True
+    assert cache_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True

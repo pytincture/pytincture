@@ -861,20 +861,16 @@ async def correlation_id_middleware(request: Request, call_next):
         SERVICE_CONTENT_SECURITY_POLICY,
     )
     if _private_response_required(request):
-        cache_control = response.headers.get("cache-control", "")
-        if "public" not in cache_control.casefold():
-            normalized_cache_control = cache_control.casefold()
-            if not (
-                "private" in normalized_cache_control
-                and "no-store" in normalized_cache_control
-            ):
-                response.headers["Cache-Control"] = "private, no-store, max-age=0"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Vary"] = _merge_vary_header(
-                response.headers.get("vary", ""),
-                "Cookie",
-                "Authorization",
-            )
+        # Route and authenticated-session classification is authoritative.
+        # Application-provided cache directives cannot make protected data
+        # public, including through malformed values containing that word.
+        response.headers["Cache-Control"] = "private, no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Vary"] = _merge_vary_header(
+            response.headers.get("vary", ""),
+            "Cookie",
+            "Authorization",
+        )
     csrf_token = request.session.get("csrf_token") if hasattr(request, "session") else None
     if csrf_token:
         response.set_cookie(

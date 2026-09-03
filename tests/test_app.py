@@ -694,6 +694,47 @@ def test_state_changing_bff_call_requires_csrf(
     }
 
 
+def test_bff_cannot_override_private_cache_policy(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "cache_service.py").write_text(textwrap.dedent("""
+        from fastapi import Response
+        from pytincture.dataclass import backend_for_frontend
+
+        @backend_for_frontend
+        class CacheService:
+            def read(self):
+                return Response(
+                    content=b"private account data",
+                    media_type="text/plain",
+                    headers={
+                        "Cache-Control": "no-cache, public, max-age=3600",
+                        "Vary": "Accept-Encoding",
+                    },
+                )
+    """), encoding="utf-8")
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "require_auth", lambda _request: "noauth")
+    backend_app.reload_bff_registry(str(tmp_path))
+
+    response = fresh_client.post(
+        "/cache_service/classcall/cache_service.py/CacheService/read",
+        json={"args": [], "kwargs": {}},
+    )
+
+    assert response.status_code == 200
+    assert response.text == "private account data"
+    assert response.headers["cache-control"] == "private, no-store, max-age=0"
+    assert response.headers["pragma"] == "no-cache"
+    assert set(response.headers["vary"].split(", ")) == {
+        "Accept-Encoding",
+        "Cookie",
+        "Authorization",
+    }
+
+
 def test_bff_replay_token_is_opaque_session_bound_and_single_use(
     fresh_client, monkeypatch, dummy_module
 ):
@@ -3511,7 +3552,7 @@ def test_download_appcode(fresh_client, monkeypatch, tmp_path):
     assert response.headers.get("content-type") == "application/zip"
     cd = response.headers.get("content-disposition", "")
     assert "filename=appcode.pyt" in cd
-    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["cache-control"] == "private, no-store, max-age=0"
     assert response.headers["vary"] == "Cookie, Authorization"
     # Check that the content appears to be a zip archive (starts with PK).
     assert response.content.startswith(b"PK")
