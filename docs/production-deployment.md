@@ -110,6 +110,17 @@ settings per worker, then apply a
 gateway-wide request-rate and connection limit across the deployment. Local
 password login has independent peer/account limits per worker, so the gateway
 should provide the coordinated outer limit when multiple workers are exposed.
+Appcode responses additionally hold configurable per-peer and per-worker
+download admission through completion or disconnect, with total and
+blocked-write deadlines. For immutable production releases, build
+`<application>.pyt` files with `pytincture-build-appcode`, point
+`PYTINCTURE_APPCODE_PREBUILT_DIRECTORY` at that read-only artifact directory,
+and optionally enable `PYTINCTURE_REQUIRE_PREBUILT_APPCODE`. Backend source
+under `MODULES_PATH` remains installed and authoritative; development keeps
+dynamic packaging by default. Required prebuilt archives cannot be combined
+with session-specific BFF replay clients. Keep the generated `.pyt` and
+`.pyt.json` together: Pytincture verifies the archive hash, exact source
+manifest, browser-file declaration, and transformer version before serving it.
 Optional Upstash operations use short deadlines and a per-worker circuit
 breaker; Redis remains optional and is not used by the default signed-cookie
 session path. Async readiness, direct page-session revocation checks, and replay

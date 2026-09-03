@@ -122,6 +122,16 @@ class BoundedStreamingResponse(StreamingResponse):
                     await close()
             else:
                 await self.close_unstarted_source()
+        except BaseException:
+            # Disconnects and transport failures must release the same scarce
+            # response-lifetime admission as explicit write timeouts.
+            if body_iterator_started:
+                close = getattr(self.body_iterator, "aclose", None)
+                if callable(close):
+                    await close()
+            else:
+                await self.close_unstarted_source()
+            raise
 
 
 def _next_sync_item(iterator):

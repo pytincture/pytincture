@@ -184,6 +184,7 @@ from pytincture.backend.safe_paths import (
     SecureFileDigestCache,
     SecureFileHandle,
     UnsafePath,
+    canonical_root,
     decode_python_source,
     hash_open_file,
     normalize_relative_path,
@@ -2966,14 +2967,51 @@ async def issue_bff_replay_tokens(
         headers={"Cache-Control": "no-store"},
     )
 
-@app.get("/{application}/appcode/appcode.pyt", operation_id="downloadAppcodePackage", responses={200: {"description": "StreamingResponse (ZIP file stream, media_type=\"application/zip\")"}, 401: {"description": "HTTPException (if authentication fails when required)"}})
-def download_appcode(request: Request, application: str, user=Depends(require_authenticated_user)):
+async def _admit_appcode_download(
+    request: Request,
+    application: str,
+) -> Callable[[], None]:
+    """Hold appcode capacity until the response completes or disconnects."""
+    peer = request.client.host if request.client is not None else "unknown"
+    peer_key = f"{peer}:{application}"
+    if not APPCODE_DOWNLOAD_PEER_GATE.try_acquire(peer_key):
+        raise HTTPException(
+            status_code=429,
+            detail="Appcode per-peer concurrency exceeded",
+            headers={"Retry-After": "1"},
+        )
     try:
-        validate_application_name(application)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Application not found")
-    _assert_application_audience(user, application)
-    replay_client = _register_bff_replay_client(request, user)
+        await APPCODE_DOWNLOAD_GATE.acquire()
+    except AdmissionRejected as exc:
+        APPCODE_DOWNLOAD_PEER_GATE.release(peer_key)
+        raise HTTPException(
+            status_code=503,
+            detail="Appcode download capacity is temporarily exhausted",
+            headers={"Retry-After": "1"},
+        ) from exc
+    except BaseException:
+        APPCODE_DOWNLOAD_PEER_GATE.release(peer_key)
+        raise
+
+    released = False
+
+    def release_once() -> None:
+        nonlocal released
+        if released:
+            return
+        released = True
+        try:
+            APPCODE_DOWNLOAD_GATE.release()
+        finally:
+            APPCODE_DOWNLOAD_PEER_GATE.release(peer_key)
+
+    return release_once
+
+
+def _build_appcode_with_admission(
+    application: str,
+    replay_client: Optional[Dict[str, Any]],
+) -> io.BytesIO:
     if not APPCODE_BUILD_GATE.acquire(timeout=APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS):
         raise HTTPException(
             status_code=503,
@@ -2981,7 +3019,7 @@ def download_appcode(request: Request, application: str, user=Depends(require_au
             headers={"Retry-After": "1"},
         )
     try:
-        file_like = create_appcode_pkg_in_memory(
+        return create_appcode_pkg_in_memory(
             "",
             "",
             application,
@@ -2989,15 +3027,387 @@ def download_appcode(request: Request, application: str, user=Depends(require_au
         )
     finally:
         APPCODE_BUILD_GATE.release()
-    return StreamingResponse(
-        file_like,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": "attachment; filename=appcode.pyt",
-            "Cache-Control": "private, no-store",
-            "Vary": "Cookie, Authorization",
-        },
+
+
+async def _stream_appcode_buffer(
+    file_like: io.BytesIO,
+    on_finish: Callable[[], None],
+):
+    try:
+        while True:
+            chunk = file_like.read(64 * 1024)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        file_like.close()
+        on_finish()
+
+
+@dataclass(frozen=True, slots=True)
+class _PrebuiltAppcodeVerification:
+    archive_metadata: Any
+    manifest_identity: tuple[int, int, int, int, int]
+    source_identities: tuple[tuple[str, tuple[int, int, int, int, int]], ...]
+    directory_identities: tuple[tuple[str, tuple[int, int, int, int]], ...]
+
+
+class _PrebuiltAppcodeVerificationCache:
+    """Cache verified immutable bundles while watching every relevant input."""
+
+    def __init__(self, max_entries: int):
+        self.max_entries = max_entries
+        self._entries: OrderedDict[str, _PrebuiltAppcodeVerification] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(
+        self,
+        application: str,
+        modules_root: str,
+        prebuilt_root: str,
+    ) -> Any | None:
+        with self._lock:
+            entry = self._entries.get(application)
+        if entry is None:
+            return None
+        try:
+            archive = stat_contained_file(
+                prebuilt_root,
+                f"{application}.pyt",
+                max_bytes=APPCODE_CACHE_MAX_BYTES,
+            )
+            manifest = stat_contained_file(
+                prebuilt_root,
+                f"{application}.pyt.json",
+                max_bytes=1024 * 1024,
+            )
+            current = (
+                archive.identity == entry.archive_metadata.identity
+                and manifest.identity == entry.manifest_identity
+            )
+            if current:
+                current = all(
+                    stat_contained_file(modules_root, path).identity == identity
+                    for path, identity in entry.source_identities
+                )
+            if current:
+                current = all(
+                    _contained_directory_identity(modules_root, path) == identity
+                    for path, identity in entry.directory_identities
+                )
+        except (OSError, UnsafePath):
+            current = False
+        with self._lock:
+            if self._entries.get(application) is not entry:
+                return None
+            if not current:
+                self._entries.pop(application, None)
+                return None
+            self._entries.move_to_end(application)
+        return archive
+
+    def put(self, application: str, entry: _PrebuiltAppcodeVerification) -> None:
+        with self._lock:
+            self._entries[application] = entry
+            self._entries.move_to_end(application)
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
+
+
+def _contained_directory_identity(
+    modules_root: str,
+    relative_path: str,
+) -> tuple[int, int, int, int]:
+    root = canonical_root(modules_root)
+    path = (
+        root
+        if not relative_path
+        else resolve_contained_path(root, relative_path, require_file=False)
     )
+    metadata = _stdlib_os.stat(path, follow_symlinks=False)
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _verify_prebuilt_appcode(application: str) -> Any:
+    modules_root = canonical_root(get_modules_path())
+    cached = APPCODE_PREBUILT_VERIFICATION_CACHE.get(
+        application, modules_root, APPCODE_PREBUILT_DIRECTORY
+    )
+    if cached is not None:
+        return cached
+
+    manifest_file = read_contained_file(
+        APPCODE_PREBUILT_DIRECTORY,
+        f"{application}.pyt.json",
+        max_bytes=1024 * 1024,
+    )
+    try:
+        manifest = json.loads(manifest_file.content)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise UnsafePath("invalid prebuilt appcode manifest") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema") != 1:
+        raise UnsafePath("invalid prebuilt appcode manifest")
+    if manifest.get("application") != application:
+        raise UnsafePath("prebuilt appcode application mismatch")
+    if manifest.get("pytincture_version") != __version__:
+        raise UnsafePath("prebuilt appcode framework version mismatch")
+    raw_patterns = os.getenv("PYTINCTURE_BROWSER_FILES", "")
+    if manifest.get("browser_files") != raw_patterns:
+        raise UnsafePath("prebuilt appcode browser manifest is stale")
+
+    source_files = manifest.get("source_files")
+    if (
+        not isinstance(source_files, list)
+        or not source_files
+        or len(source_files) > APPCODE_MAX_FILES
+    ):
+        raise UnsafePath("invalid prebuilt appcode source manifest")
+    canonical_sources = json.dumps(
+        source_files, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    if not hmac.compare_digest(
+        str(manifest.get("source_manifest_sha256") or ""),
+        hashlib.sha256(canonical_sources).hexdigest(),
+    ):
+        raise UnsafePath("prebuilt appcode source manifest digest mismatch")
+
+    secure_files: dict[str, Any] = {}
+    scanned_directories: set[str] = set()
+    selected = browser_package_files(
+        application,
+        modules_root,
+        raw_patterns,
+        max_files=APPCODE_MAX_FILES,
+        _secure_files=secure_files,
+        _max_file_bytes=APPCODE_MAX_FILE_BYTES,
+        _max_directories=BFF_APPLICATION_GRAPH_MAX_DIRECTORIES,
+        _max_scanned_files=BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES,
+        _scanned_directories=scanned_directories,
+    )
+    expected_paths: list[str] = []
+    expected_hashes: dict[str, tuple[str, int]] = {}
+    for item in source_files:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256", "size"}:
+            raise UnsafePath("invalid prebuilt appcode source entry")
+        if not isinstance(item["path"], str):
+            raise UnsafePath("invalid prebuilt appcode source entry")
+        path = normalize_relative_path(item["path"])
+        digest = item["sha256"]
+        size = item["size"]
+        if (
+            path in expected_hashes
+            or not isinstance(digest, str)
+            or not re.fullmatch(r"[a-f0-9]{64}", digest)
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size < 0
+            or size > APPCODE_MAX_FILE_BYTES
+        ):
+            raise UnsafePath("invalid prebuilt appcode source entry")
+        expected_paths.append(path)
+        expected_hashes[path] = (digest, size)
+    selected_paths = {
+        _stdlib_os.path.relpath(path, modules_root).replace(_stdlib_os.sep, "/")
+        for path in selected
+    }
+    if selected_paths != set(expected_paths):
+        raise UnsafePath("prebuilt appcode source set is stale")
+
+    source_identities = []
+    aggregate_bytes = 0
+    for path in sorted(expected_paths):
+        absolute = resolve_contained_path(modules_root, path)
+        secure_file = secure_files.get(absolute)
+        if secure_file is None:
+            secure_file = read_contained_file(
+                modules_root, path, max_bytes=APPCODE_MAX_FILE_BYTES
+            )
+        expected_digest, expected_size = expected_hashes[path]
+        if (
+            secure_file.size != expected_size
+            or not hmac.compare_digest(secure_file.digest, expected_digest)
+        ):
+            raise UnsafePath("prebuilt appcode source digest mismatch")
+        aggregate_bytes += secure_file.size
+        if aggregate_bytes > APPCODE_MAX_TOTAL_BYTES:
+            raise UnsafePath("prebuilt appcode source size limit exceeded")
+        source_identities.append((path, secure_file.identity))
+
+    archive_metadata = stat_contained_file(
+        APPCODE_PREBUILT_DIRECTORY,
+        f"{application}.pyt",
+        max_bytes=APPCODE_CACHE_MAX_BYTES,
+    )
+    archive_handle = open_contained_file(
+        APPCODE_PREBUILT_DIRECTORY,
+        f"{application}.pyt",
+        expected=archive_metadata,
+        max_bytes=APPCODE_CACHE_MAX_BYTES,
+    )
+    try:
+        archive_digest = hash_open_file(archive_handle)
+    finally:
+        archive_handle.close()
+    if not hmac.compare_digest(
+        str(manifest.get("archive_sha256") or ""), archive_digest
+    ):
+        raise UnsafePath("prebuilt appcode archive digest mismatch")
+
+    directory_identities = []
+    for directory in sorted(scanned_directories):
+        relative = _stdlib_os.path.relpath(directory, modules_root).replace(
+            _stdlib_os.sep, "/"
+        )
+        normalized = "" if relative == "." else normalize_relative_path(relative)
+        directory_identities.append(
+            (normalized, _contained_directory_identity(modules_root, normalized))
+        )
+    APPCODE_PREBUILT_VERIFICATION_CACHE.put(
+        application,
+        _PrebuiltAppcodeVerification(
+            archive_metadata=archive_metadata,
+            manifest_identity=manifest_file.identity,
+            source_identities=tuple(source_identities),
+            directory_identities=tuple(directory_identities),
+        ),
+    )
+    return archive_metadata
+
+
+def _verify_prebuilt_appcode_with_admission(application: str) -> Any:
+    if not APPCODE_BUILD_GATE.acquire(timeout=APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS):
+        raise HTTPException(
+            status_code=503,
+            detail="Appcode verification capacity is temporarily exhausted",
+            headers={"Retry-After": "1"},
+        )
+    try:
+        return _verify_prebuilt_appcode(application)
+    finally:
+        APPCODE_BUILD_GATE.release()
+
+
+def _appcode_response_headers(content_length: int) -> Dict[str, str]:
+    return {
+        "Content-Disposition": "attachment; filename=appcode.pyt",
+        "Content-Length": str(content_length),
+        "Cache-Control": "private, no-store",
+        "Vary": "Cookie, Authorization",
+    }
+
+
+async def _prebuilt_appcode_response(
+    application: str,
+    release_download: Callable[[], None],
+) -> BoundedStreamingResponse:
+    relative_path = f"{application}.pyt"
+    try:
+        metadata = await run_in_threadpool(
+            _verify_prebuilt_appcode_with_admission,
+            application,
+        )
+        handle = await run_in_threadpool(
+            open_contained_file,
+            APPCODE_PREBUILT_DIRECTORY,
+            relative_path,
+            expected=metadata,
+            max_bytes=APPCODE_CACHE_MAX_BYTES,
+        )
+    except (OSError, UnsafePath):
+        raise HTTPException(
+            status_code=503,
+            detail="Required prebuilt appcode archive is unavailable",
+        ) from None
+
+    content = _stream_public_asset(handle, on_finish=release_download)
+
+    async def close_unstarted_source() -> None:
+        await _finish_public_asset_worker(handle, None, release_download)
+
+    return BoundedStreamingResponse(
+        content,
+        media_type="application/zip",
+        headers=_appcode_response_headers(metadata.size),
+        max_seconds=APPCODE_DOWNLOAD_MAX_SECONDS,
+        write_timeout_seconds=APPCODE_DOWNLOAD_WRITE_TIMEOUT_SECONDS,
+        on_send_timeout=lambda _reason, _sent_bytes: release_download(),
+        close_unstarted_source=close_unstarted_source,
+    )
+
+
+@app.get("/{application}/appcode/appcode.pyt", operation_id="downloadAppcodePackage", responses={200: {"description": "StreamingResponse (ZIP file stream, media_type=\"application/zip\")"}, 401: {"description": "HTTPException (if authentication fails when required)"}})
+async def download_appcode(request: Request, application: str, user=Depends(require_authenticated_user)):
+    try:
+        validate_application_name(application)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Application not found")
+    _assert_application_audience(user, application)
+    replay_client = _register_bff_replay_client(request, user)
+    release_download = await _admit_appcode_download(request, application)
+    release_on_return = True
+    try:
+        # The deployment-built browser archive does not replace the backend
+        # source. A real application entrypoint remains mandatory.
+        await run_in_threadpool(
+            stat_contained_file,
+            get_modules_path(),
+            f"{application}.py",
+            max_bytes=APPCODE_MAX_FILE_BYTES,
+        )
+        if APPCODE_PREBUILT_DIRECTORY and replay_client is None:
+            try:
+                response = await _prebuilt_appcode_response(
+                    application, release_download
+                )
+            except HTTPException:
+                if REQUIRE_PREBUILT_APPCODE:
+                    raise
+            else:
+                release_on_return = False
+                return response
+        elif REQUIRE_PREBUILT_APPCODE:
+            raise HTTPException(
+                status_code=503,
+                detail="Required prebuilt appcode archive cannot carry session-specific replay state",
+            )
+
+        file_like = await run_in_threadpool(
+            _build_appcode_with_admission,
+            application,
+            replay_client,
+        )
+        release_on_return = False
+        return BoundedStreamingResponse(
+            _stream_appcode_buffer(file_like, release_download),
+            media_type="application/zip",
+            headers=_appcode_response_headers(file_like.getbuffer().nbytes),
+            max_seconds=APPCODE_DOWNLOAD_MAX_SECONDS,
+            write_timeout_seconds=APPCODE_DOWNLOAD_WRITE_TIMEOUT_SECONDS,
+            on_send_timeout=lambda _reason, _sent_bytes: release_download(),
+            close_unstarted_source=lambda: _finish_appcode_buffer(
+                file_like, release_download
+            ),
+        )
+    except (OSError, UnsafePath):
+        raise HTTPException(status_code=404, detail="Application not found") from None
+    finally:
+        if release_on_return:
+            release_download()
+
+
+async def _finish_appcode_buffer(
+    file_like: io.BytesIO,
+    on_finish: Callable[[], None],
+) -> None:
+    try:
+        file_like.close()
+    finally:
+        on_finish()
 
 
 # Browser Python and approved widget assets intentionally have same-origin
@@ -4688,6 +5098,30 @@ APPCODE_BUILD_MAX_CONCURRENCY = int(os.getenv("APPCODE_BUILD_MAX_CONCURRENCY", "
 APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS = float(
     os.getenv("APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS", "1")
 )
+APPCODE_DOWNLOAD_MAX_CONCURRENCY = int(
+    os.getenv("APPCODE_DOWNLOAD_MAX_CONCURRENCY", "32")
+)
+APPCODE_DOWNLOAD_MAX_CONCURRENCY_PER_PEER = int(
+    os.getenv("APPCODE_DOWNLOAD_MAX_CONCURRENCY_PER_PEER", "8")
+)
+APPCODE_DOWNLOAD_MAX_QUEUE = int(
+    os.getenv("APPCODE_DOWNLOAD_MAX_QUEUE", "64")
+)
+APPCODE_DOWNLOAD_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("APPCODE_DOWNLOAD_QUEUE_TIMEOUT_SECONDS", "1")
+)
+APPCODE_DOWNLOAD_MAX_SECONDS = float(
+    os.getenv("APPCODE_DOWNLOAD_MAX_SECONDS", "300")
+)
+APPCODE_DOWNLOAD_WRITE_TIMEOUT_SECONDS = float(
+    os.getenv("APPCODE_DOWNLOAD_WRITE_TIMEOUT_SECONDS", "30")
+)
+APPCODE_PREBUILT_DIRECTORY = os.getenv(
+    "PYTINCTURE_APPCODE_PREBUILT_DIRECTORY", ""
+).strip()
+REQUIRE_PREBUILT_APPCODE = (
+    os.getenv("PYTINCTURE_REQUIRE_PREBUILT_APPCODE", "false").lower() == "true"
+)
 PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES = int(
     os.getenv("PYTINCTURE_PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES", "128")
 )
@@ -4772,6 +5206,11 @@ if min(
     BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES,
     APPCODE_BUILD_MAX_CONCURRENCY,
     APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS,
+    APPCODE_DOWNLOAD_MAX_CONCURRENCY,
+    APPCODE_DOWNLOAD_MAX_CONCURRENCY_PER_PEER,
+    APPCODE_DOWNLOAD_QUEUE_TIMEOUT_SECONDS,
+    APPCODE_DOWNLOAD_MAX_SECONDS,
+    APPCODE_DOWNLOAD_WRITE_TIMEOUT_SECONDS,
     PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES,
     PUBLIC_ASSET_MAX_BYTES,
     PUBLIC_ASSET_MAX_CONCURRENCY,
@@ -4793,6 +5232,16 @@ if BFF_MAX_QUEUE < 0:
     raise RuntimeError("BFF_MAX_QUEUE cannot be negative")
 if BFF_REQUEST_INGRESS_MAX_QUEUE < 0:
     raise RuntimeError("BFF_REQUEST_INGRESS_MAX_QUEUE cannot be negative")
+if APPCODE_DOWNLOAD_MAX_QUEUE < 0:
+    raise RuntimeError("APPCODE_DOWNLOAD_MAX_QUEUE cannot be negative")
+if (
+    APPCODE_DOWNLOAD_MAX_CONCURRENCY_PER_PEER
+    > APPCODE_DOWNLOAD_MAX_CONCURRENCY
+):
+    raise RuntimeError(
+        "APPCODE_DOWNLOAD_MAX_CONCURRENCY_PER_PEER cannot exceed "
+        "APPCODE_DOWNLOAD_MAX_CONCURRENCY"
+    )
 if (
     BFF_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER
     > BFF_REQUEST_INGRESS_MAX_CONCURRENCY
@@ -4827,10 +5276,22 @@ APPCODE_ARCHIVE_CACHE = AppcodeArchiveCache(
     APPCODE_CACHE_ENTRIES,
     APPCODE_CACHE_MAX_BYTES,
 )
+APPCODE_PREBUILT_VERIFICATION_CACHE = _PrebuiltAppcodeVerificationCache(
+    APPCODE_CACHE_ENTRIES
+)
 APPLICATION_GRAPH_CACHE = _ApplicationGraphCache(
     BFF_APPLICATION_GRAPH_CACHE_ENTRIES
 )
 APPCODE_BUILD_GATE = threading.BoundedSemaphore(APPCODE_BUILD_MAX_CONCURRENCY)
+APPCODE_DOWNLOAD_GATE = AsyncAdmissionGate(
+    APPCODE_DOWNLOAD_MAX_CONCURRENCY,
+    APPCODE_DOWNLOAD_MAX_QUEUE,
+    APPCODE_DOWNLOAD_QUEUE_TIMEOUT_SECONDS,
+)
+APPCODE_DOWNLOAD_PEER_GATE = KeyedConcurrencyGate(
+    APPCODE_DOWNLOAD_MAX_CONCURRENCY_PER_PEER,
+    APPCODE_DOWNLOAD_MAX_CONCURRENCY + APPCODE_DOWNLOAD_MAX_QUEUE,
+)
 PUBLIC_ASSET_AUTHORIZATION_CACHE = _PublicAssetAuthorizationCache(
     PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES
 )
@@ -4915,6 +5376,16 @@ if BFF_REPLAY_LOCAL_MAX_TOKENS_PER_SESSION > BFF_REPLAY_LOCAL_MAX_TOKENS:
 if BFF_REPLAY_REQUIRE_SHARED_STORE and not ENABLE_BFF_REPLAY_TOKENS:
     raise RuntimeError(
         "BFF_REPLAY_REQUIRE_SHARED_STORE requires ENABLE_BFF_REPLAY_TOKENS"
+    )
+if REQUIRE_PREBUILT_APPCODE and not APPCODE_PREBUILT_DIRECTORY:
+    raise RuntimeError(
+        "PYTINCTURE_REQUIRE_PREBUILT_APPCODE requires "
+        "PYTINCTURE_APPCODE_PREBUILT_DIRECTORY"
+    )
+if REQUIRE_PREBUILT_APPCODE and ENABLE_BFF_REPLAY_TOKENS:
+    raise RuntimeError(
+        "Required prebuilt appcode is incompatible with session-specific "
+        "BFF replay clients"
     )
 BFF_REPLAY_SESSION_ISSUE_LIMITER = SlidingWindowRateLimiter(
     BFF_REPLAY_ISSUE_SESSION_LIMIT,

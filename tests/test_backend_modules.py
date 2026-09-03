@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import re
 import sys
 import threading
 import time
@@ -1713,6 +1714,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-09-02-SR-01",
         "REVIEW-2026-09-02-SR-02",
         "REVIEW-2026-09-02-SR-03",
+        "REVIEW-2026-09-02-SR-04",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1806,6 +1808,15 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert bff_ingress_controls["queued_bodies_buffered"] is False
     assert bff_ingress_controls["execution_capacity_reduced"] is False
     assert bff_ingress_controls["redis_required"] is False
+    appcode_download_controls = dispositions["REVIEW-2026-09-02-SR-04"]["controls"]
+    assert appcode_download_controls["response_lifetime_admission_bounded"] is True
+    assert appcode_download_controls["blocked_write_deadline"] is True
+    assert appcode_download_controls["atomic_prebuilt_archive_command"] is True
+    assert appcode_download_controls["prebuilt_archive_digest_verified"] is True
+    assert appcode_download_controls["stale_prebuilt_source_rejected"] is True
+    assert appcode_download_controls["backend_entrypoint_still_required"] is True
+    assert appcode_download_controls["dynamic_development_packaging_preserved"] is True
+    assert appcode_download_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True
@@ -2651,6 +2662,33 @@ def test_appcode_cache_enforces_aggregate_byte_budget(tmp_path):
     create_appcode_archive("", "", "alpha", str(tmp_path), parser, cache=too_small)
     assert too_small.current_bytes == 0
     assert len(parse_calls) == 2
+
+
+def test_build_prebuilt_appcode_writes_browser_archive_atomically(tmp_path):
+    from pytincture.prebuild import build_prebuilt_appcode
+
+    modules = tmp_path / "modules"
+    output = tmp_path / "output"
+    modules.mkdir()
+    (modules / "demo.py").write_text("value = 1\n", encoding="utf-8")
+
+    target = build_prebuilt_appcode("demo", output, modules_path=modules)
+
+    assert target == output / "demo.pyt"
+    assert not list(output.glob("*.tmp"))
+    with zipfile.ZipFile(target) as archive:
+        assert "demo.py" in archive.namelist()
+    manifest = json.loads((output / "demo.pyt.json").read_text(encoding="utf-8"))
+    assert manifest["schema"] == 1
+    assert manifest["application"] == "demo"
+    assert re.fullmatch(r"[a-f0-9]{64}", manifest["archive_sha256"])
+    assert manifest["source_files"] == [
+        {
+            "path": "demo.py",
+            "sha256": hashlib.sha256(b"value = 1\n").hexdigest(),
+            "size": len(b"value = 1\n"),
+        }
+    ]
 
 
 def test_remote_store_circuit_opens_and_recovers():

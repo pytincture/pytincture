@@ -2,6 +2,7 @@
 
 import ast
 import fnmatch
+import hashlib
 import importlib.metadata as importlib_metadata
 import io
 import json
@@ -720,6 +721,7 @@ def create_appcode_archive(
     max_file_bytes: int = 4 * 1024 * 1024,
     max_total_bytes: int = 32 * 1024 * 1024,
     cache: AppcodeArchiveCache | None = None,
+    manifest_out: dict[str, Any] | None = None,
 ) -> io.BytesIO:
     """Build an explicit browser-safe application archive in memory."""
     try:
@@ -742,6 +744,7 @@ def create_appcode_archive(
             return io.BytesIO(cached)
 
     discovered_secure_files: dict[str, Any] = {}
+    scanned_directories: set[str] = set()
     selected = sorted(
         browser_package_files(
             application,
@@ -750,6 +753,7 @@ def create_appcode_archive(
             max_files=max_files,
             _secure_files=discovered_secure_files,
             _max_file_bytes=max_file_bytes,
+            _scanned_directories=scanned_directories,
         )
     )
     fingerprint: list[tuple[Any, ...]] = []
@@ -810,6 +814,34 @@ def create_appcode_archive(
                 raise HTTPException(status_code=413, detail="Appcode generated-size limit exceeded")
             zip_file.writestr(arcname, payload)
     in_memory_zip.seek(0)
+    if manifest_out is not None:
+        source_files = [
+            {
+                "path": secure_file.relative_path,
+                "sha256": secure_file.digest,
+                "size": secure_file.size,
+            }
+            for secure_file in secure_files
+        ]
+        source_manifest = json.dumps(
+            source_files,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        manifest_out.update(
+            {
+                "schema": 1,
+                "application": application,
+                "browser_files": raw_patterns or "",
+                "archive_sha256": hashlib.sha256(
+                    in_memory_zip.getbuffer()
+                ).hexdigest(),
+                "source_manifest_sha256": hashlib.sha256(
+                    source_manifest
+                ).hexdigest(),
+                "source_files": source_files,
+            }
+        )
     if cache is not None and replay_client is None:
         cache.put(
             cache_key,

@@ -258,6 +258,14 @@ The contract test checks every row in this table against the dataclass model.
 | `bff_application_graph_max_scanned_files` | `BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES` | Maximum files examined by browser-file globs for one BFF graph. |
 | `appcode_build_max_concurrency` | `APPCODE_BUILD_MAX_CONCURRENCY` | Concurrent archive builds per worker. |
 | `appcode_build_queue_timeout_seconds` | `APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS` | Maximum archive build admission wait. |
+| `appcode_download_max_concurrency` | `APPCODE_DOWNLOAD_MAX_CONCURRENCY` | Concurrent appcode responses per worker. |
+| `appcode_download_max_concurrency_per_peer` | `APPCODE_DOWNLOAD_MAX_CONCURRENCY_PER_PEER` | Concurrent appcode responses per peer/application and worker. |
+| `appcode_download_max_queue` | `APPCODE_DOWNLOAD_MAX_QUEUE` | Maximum queued appcode responses per worker. |
+| `appcode_download_queue_timeout_seconds` | `APPCODE_DOWNLOAD_QUEUE_TIMEOUT_SECONDS` | Maximum appcode response admission wait. |
+| `appcode_download_max_seconds` | `APPCODE_DOWNLOAD_MAX_SECONDS` | Maximum total duration of one appcode response. |
+| `appcode_download_write_timeout_seconds` | `APPCODE_DOWNLOAD_WRITE_TIMEOUT_SECONDS` | Maximum blocked write time for each appcode response frame. |
+| `appcode_prebuilt_directory` | `PYTINCTURE_APPCODE_PREBUILT_DIRECTORY` | Optional directory containing deployment-built <application>.pyt archives. |
+| `require_prebuilt_appcode` | `PYTINCTURE_REQUIRE_PREBUILT_APPCODE` | Require a deployment-built archive instead of dynamic browser packaging. |
 | `public_asset_authorization_cache_entries` | `PYTINCTURE_PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES` | Per-worker public-asset authorization cache entries. |
 | `public_asset_max_bytes` | `PYTINCTURE_PUBLIC_ASSET_MAX_BYTES` | Maximum bytes in one directly served public asset. |
 | `public_asset_max_concurrency` | `PYTINCTURE_PUBLIC_ASSET_MAX_CONCURRENCY` | Concurrent public-asset responses per worker. |

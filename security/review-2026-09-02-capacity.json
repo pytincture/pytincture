@@ -68,11 +68,18 @@
     {
       "id": "SR-04",
       "severity": "medium",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/321",
-      "disposition": "Hold bounded appcode download admission for the response lifetime and support deployment-prebuilt production appcode.pyt archives while backend source remains installed separately.",
+      "disposition": "Appcode responses hold bounded process-local per-peer and per-worker admission until completion, disconnect, or cleanup, with independent absolute and blocked-write deadlines. Deployment-built archives are written atomically, bound to complete archive/source manifests and the framework transformer version, and can be preferred or required in production while the backend entrypoint remains installed separately.",
       "potential_user_breakage": false,
-      "compatibility_note": "Dynamic development packaging remains available; production can opt into prebuilt immutable archives."
+      "compatibility_note": "Dynamic development packaging remains the default. Production can opt into immutable prebuilt archives; session-specific BFF replay clients continue using dynamic archives and cannot be combined with required prebuilt mode.",
+      "regression_tests": [
+        "tests/test_app.py::test_appcode_download_slot_is_held_until_blocked_write_times_out",
+        "tests/test_app.py::test_download_appcode_uses_prebuilt_archive_and_keeps_backend_required",
+        "tests/test_app.py::test_required_prebuilt_appcode_does_not_fall_back_to_dynamic",
+        "tests/test_app.py::test_required_prebuilt_appcode_rejects_stale_source",
+        "tests/test_backend_modules.py::test_build_prebuilt_appcode_writes_browser_archive_atomically"
+      ]
     },
     {
       "id": "SR-05",
