@@ -533,6 +533,26 @@ class PytinctureConfig:
         "BFF_REQUEST_INGRESS_TIMEOUT_SECONDS",
         "Maximum time to upload one BFF request body before execution admission.",
     )
+    bff_request_ingress_max_concurrency: int = _setting(
+        64,
+        "BFF_REQUEST_INGRESS_MAX_CONCURRENCY",
+        "Concurrent BFF request-body uploads per worker.",
+    )
+    bff_request_ingress_max_concurrency_per_peer: int = _setting(
+        16,
+        "BFF_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER",
+        "Concurrent BFF request-body uploads per peer.",
+    )
+    bff_request_ingress_max_queue: int = _setting(
+        128,
+        "BFF_REQUEST_INGRESS_MAX_QUEUE",
+        "Maximum queued BFF request-body uploads per worker.",
+    )
+    bff_request_ingress_queue_timeout_seconds: float = _setting(
+        1.0,
+        "BFF_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS",
+        "Maximum BFF request-body upload admission wait.",
+    )
     bff_request_max_bytes: int = _setting(
         1024 * 1024, "BFF_REQUEST_MAX_BYTES", "Maximum canonical BFF JSON body size."
     )
@@ -994,6 +1014,9 @@ class PytinctureConfig:
             self.bff_max_concurrency,
             self.bff_queue_timeout_seconds,
             self.bff_request_ingress_timeout_seconds,
+            self.bff_request_ingress_max_concurrency,
+            self.bff_request_ingress_max_concurrency_per_peer,
+            self.bff_request_ingress_queue_timeout_seconds,
             self.bff_request_max_bytes,
             self.bff_request_max_depth,
             self.bff_request_max_items,
@@ -1063,6 +1086,7 @@ class PytinctureConfig:
             self.bff_call_timeout_seconds,
             self.bff_queue_timeout_seconds,
             self.bff_request_ingress_timeout_seconds,
+            self.bff_request_ingress_queue_timeout_seconds,
             self.bff_isolated_cpu_seconds,
             self.bff_stream_max_seconds,
             self.bff_stream_idle_timeout_seconds,
@@ -1086,6 +1110,16 @@ class PytinctureConfig:
             raise ValueError("resource limits must be greater than zero")
         if self.bff_max_queue < 0:
             raise ValueError("bff_max_queue cannot be negative")
+        if self.bff_request_ingress_max_queue < 0:
+            raise ValueError("bff_request_ingress_max_queue cannot be negative")
+        if (
+            self.bff_request_ingress_max_concurrency_per_peer
+            > self.bff_request_ingress_max_concurrency
+        ):
+            raise ValueError(
+                "bff_request_ingress_max_concurrency_per_peer cannot exceed "
+                "bff_request_ingress_max_concurrency"
+            )
         if self.auth_request_ingress_max_queue < 0:
             raise ValueError("auth_request_ingress_max_queue cannot be negative")
         if (
@@ -1435,6 +1469,9 @@ class PytinctureConfig:
             "oauth_callback_rate_limit_attempts", "oauth_rate_limit_window_seconds",
             "oauth_exchange_max_concurrency", "oauth_exchange_max_queue",
             "password_hash_max_concurrency", "bff_max_concurrency", "bff_max_queue",
+            "bff_request_ingress_max_concurrency",
+            "bff_request_ingress_max_concurrency_per_peer",
+            "bff_request_ingress_max_queue",
             "bff_request_max_bytes", "bff_request_max_depth", "bff_request_max_items",
             "bff_result_max_bytes", "bff_result_max_depth", "bff_result_max_items",
             "bff_isolated_max_concurrency", "bff_isolated_max_per_user",
@@ -1470,6 +1507,7 @@ class PytinctureConfig:
             "oauth_connect_timeout_seconds", "oauth_read_timeout_seconds",
             "oauth_write_timeout_seconds", "oauth_pool_timeout_seconds",
             "bff_queue_timeout_seconds", "bff_request_ingress_timeout_seconds",
+            "bff_request_ingress_queue_timeout_seconds",
             "bff_stream_max_seconds",
             "bff_isolated_cpu_seconds",
             "bff_stream_idle_timeout_seconds", "bff_stream_write_timeout_seconds",
