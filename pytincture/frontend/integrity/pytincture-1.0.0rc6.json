@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "framework_version": "1.0.0rc5",
-  "npm_version": "1.0.0-rc.5",
+  "framework_version": "1.0.0rc6",
+  "npm_version": "1.0.0-rc.6",
   "pyodide_version": "0.29.3",
   "material_design_icons_version": "7.4.47",
   "material_design_icons_source": {
@@ -13,8 +13,8 @@
   "assets": [
     {
       "path": "pytincture.js",
-      "sha256": "85e4969194e3ce5f775e32be736a299c64016a1c76c0661ed1f80b557e219dd0",
-      "sri": "sha384-joQOQ3B3BC00RHCy2V8txhdHJ5vCIJVJ28HY0pd99/2vA6/32oKDx1mIyhw10IJ/"
+      "sha256": "1d5d35525428eeeea59752a62df11c85f3c39e9466df62b937b3f7c519908d6f",
+      "sri": "sha384-6H6eGQnFqLe+if64BY0fZXY02e9oRGMeLUJEDoYmURKHoA6nHurxuYzDoURIZZnR"
     },
     {
       "path": "sw.js",
@@ -23,33 +23,33 @@
     },
     {
       "path": "dist/pytincture.js",
-      "sha256": "3ffd7175cb844df0b0e1a49344ce24ab282f69286f30d0abb8bb5ca451c2ecb3",
-      "sri": "sha384-K67eiFlrDkHzKQ0EAIHJtQkH6i5dLTlg1Qzy9/05fsFD8a3EK5Wgfo3wF1FhBbca"
+      "sha256": "bcc7a5353ce463878ff36ee577a899b790c5a04338eb5dc66c561ecafb8bc6b7",
+      "sri": "sha384-j5M6hTgLNQALlR6YMPkfSkfmsGKVEICBzE+3gWajCFrQsMCifc4mOjYRS1kzlaDL"
     },
     {
       "path": "dist/pytincture.js.map",
-      "sha256": "8f4bac94b1be4f3c93c833f22f41332a2af3dc8a811fbee9775481976bf4d10b",
-      "sri": "sha384-cjH7tiDl4Ny7PcREwf9M/f7vSWhImMyeF0JCn6eBKNR1TSsmYXa3tFAytzqslUAa"
+      "sha256": "3f47dbf2f4dd001885cb3ef6615c9338acdaa291268a956b93f40e7b67a0804a",
+      "sri": "sha384-I0eMia94NZNctwpDQKH8ohhG9LbulbkpeZY/wrwqU4o1p/k72e3mW0KUHEteO/mI"
     },
     {
       "path": "dist/pytincture.esm.js",
-      "sha256": "92b078287a83e940a6b16c6670d3afbdfa896aa4196df9d051dc733e1b7e88f9",
-      "sri": "sha384-RywgYxDHJ9zok78q8DLxDtdTeq0ZC97yx4Ik2t7m3d9o4jvATJS20HxEnyqNc+eg"
+      "sha256": "3a5fbe2ad30d16c9f175b953572c3e1085030aa83c1ba32a969a9432b2ee0712",
+      "sri": "sha384-81tfAWcIMv0LqanXL6EJINDH/ZqtkYwQylI0w+QhO/2ekhgalaCRXh4aDuFFiHWp"
     },
     {
       "path": "dist/pytincture.esm.js.map",
-      "sha256": "efe6c35ffaa246182a1fc2cc2adda7a320674556388eb72ca06f8cfed1e0a92f",
-      "sri": "sha384-u8xiuvdmeDT0/tjKONuuYoUrrm/3UK2Vg3yxOyaEYYtvvy112zs8l8m+8naOhnQp"
+      "sha256": "4d067b52a4f3a1fe2bf4e2a3e98d61884374500e0cd33fa04316112f942e7726",
+      "sri": "sha384-O1JegchqDhdmOamgv2eSTlf4q818hwj41L2QSMZZ+CKxMvzkLhcBh/nA8Gp+1Cut"
     },
     {
       "path": "dist/pytincture.min.js",
-      "sha256": "553e741ca0d86fc25064e2c4f15a6b6d45ecd21747253d4b76767635cc3b62fe",
-      "sri": "sha384-3jTuOyx9o462KDbjkBI3udxDZeiLJQb2T7bTwAHsukkPy2upBKCHI2wNEeTP331h"
+      "sha256": "2b720d94ae2338cb830066e0b716b763d3231ad1cf4543a77353366732f2a643",
+      "sri": "sha384-4xHxkbxTPU5VL7C2Gki4ld7VCZkRnRf6mWhEV7/RVKcCJW8bPPCP0ESwUemMpEQ9"
     },
     {
       "path": "dist/pytincture.min.js.map",
-      "sha256": "be1a07a9ff04c2358acca87568c53b5d46ae41f1835f1ba20486682c29aa07fd",
-      "sri": "sha384-G3STSTWsO0uu0Cv5z4kyNgrODX87wmoGavb2sdoKLu+wq+LKF5h518ogovx94ifh"
+      "sha256": "19cec283200e9ed9c0310046c382875bf11c270f7d90d2ca926ff23be9ccb913",
+      "sri": "sha384-mRYxK30hcda4z7BgHJMw05UgZOXGur9eWAwlX8dZ3CpHN7h7Ks9qM9DhEtIxMWSL"
     },
     {
       "path": "vendor/materialdesignicons/LICENSE",

@@ -1,5 +1,5 @@
 const FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
-const PYTINCTURE_RUNTIME_VERSION = "1.0.0rc5";
+const PYTINCTURE_RUNTIME_VERSION = "1.0.0rc6";
 
 // Complete-wheel locks for compatibility releases maintained by Pytincture.
 // These remain PyPI installs (and therefore never receive the backend instance

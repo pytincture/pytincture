@@ -297,7 +297,7 @@ release artifacts described below.
 An exact npm release may be used for controlled demos only when its SRI is
 copied from the trusted release integrity manifest, for example:
 ```
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.5/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.6/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
 ```
 
 ### Using pytincture.js standalone

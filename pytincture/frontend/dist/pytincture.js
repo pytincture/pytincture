@@ -2,7 +2,7 @@
 var PytinctureRuntime = (() => {
   // pytincture.js
   var FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
-  var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc5";
+  var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc6";
   var BUILTIN_WIDGET_WHEEL_LOCKS = Object.freeze({
     "dhxpyt==0.9.18": "https://files.pythonhosted.org/packages/0c/e7/b48e045156c7b4bf20778597991d7dfe591fd46ada5267b747e2d5977244/dhxpyt-0.9.18-py3-none-any.whl#sha256=acd8db34547c6b61c83a01958e9545ee724564859e5bcb53713ae3c872234fbe"
   });
