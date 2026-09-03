@@ -13,6 +13,7 @@ const CACHE_NAME = `${OWNED_CACHE_PREFIX}${RELEASE}:${REQUEST_UUID}`;
 const FRAMEWORK_ASSET_PATHS = new Set([
     "pytincture.js",
     "vendor/materialdesignicons/materialdesignicons.css",
+    "vendor/materialdesignicons/materialdesignicons.css.map",
     "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
     "pyodide/0.29.3/full/pyodide.js",
     "pyodide/0.29.3/full/pyodide.asm.js",

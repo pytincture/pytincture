@@ -5621,6 +5621,9 @@ def test_security_headers_and_static_manifest(fresh_client):
         "/frontend/vendor/materialdesignicons/materialdesignicons.css"
     ).status_code == 200
     assert fresh_client.get(
+        "/frontend/vendor/materialdesignicons/materialdesignicons.css.map"
+    ).status_code == 200
+    assert fresh_client.get(
         "/frontend/vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2"
     ).status_code == 200
     assert fresh_client.get(

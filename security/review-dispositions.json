@@ -423,6 +423,7 @@
         "pytincture/frontend/pytincture.js",
         "pytincture/frontend/generate-integrity-manifest.mjs",
         "pytincture/frontend/vendor/materialdesignicons/materialdesignicons.css",
+        "pytincture/frontend/vendor/materialdesignicons/materialdesignicons.css.map",
         "docs/standalone-mode.md",
         "examples/quickstart/standalone/index.html"
       ],

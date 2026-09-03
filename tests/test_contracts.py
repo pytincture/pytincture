@@ -113,6 +113,7 @@ def test_browser_asset_integrity_manifest_covers_runtime_dependencies():
         "dist/pytincture.min.js.map",
         "vendor/materialdesignicons/LICENSE",
         "vendor/materialdesignicons/materialdesignicons.css",
+        "vendor/materialdesignicons/materialdesignicons.css.map",
         "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
         "pyodide/0.29.3/sbom.json",
         "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl",
