@@ -3934,6 +3934,149 @@ def test_appcode_build_saturation_rejects_then_recovers(
     recovered = fresh_client.get("/demoapp/appcode/appcode.pyt")
     assert recovered.status_code == 200
 
+
+def test_appcode_download_slot_is_held_until_blocked_write_times_out(
+    monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    class TrackingGate:
+        def __init__(self):
+            self.acquired = 0
+            self.released = 0
+
+        async def acquire(self):
+            self.acquired += 1
+
+        def release(self):
+            self.released += 1
+
+    class TrackingPeerGate:
+        def __init__(self):
+            self.released = []
+
+        def try_acquire(self, _key):
+            return True
+
+        def release(self, key):
+            self.released.append(key)
+
+    (tmp_path / "demo.py").write_text("value = 1\n", encoding="utf-8")
+    worker_gate = TrackingGate()
+    peer_gate = TrackingPeerGate()
+    monkeypatch.setattr(backend_app, "APPCODE_DOWNLOAD_GATE", worker_gate)
+    monkeypatch.setattr(backend_app, "APPCODE_DOWNLOAD_PEER_GATE", peer_gate)
+    monkeypatch.setattr(backend_app, "APPCODE_DOWNLOAD_WRITE_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(backend_app, "APPCODE_DOWNLOAD_MAX_SECONDS", 1)
+    monkeypatch.setattr(backend_app, "APPCODE_PREBUILT_DIRECTORY", "")
+    monkeypatch.setattr(backend_app, "ENABLE_BFF_REPLAY_TOKENS", False)
+    monkeypatch.setattr(backend_app, "get_modules_path", lambda: str(tmp_path))
+
+    async def exercise():
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "https",
+                "path": "/demo/appcode/appcode.pyt",
+                "raw_path": b"/demo/appcode/appcode.pyt",
+                "query_string": b"",
+                "headers": [],
+                "client": ("127.0.0.1", 50000),
+                "server": ("127.0.0.1", 443),
+            }
+        )
+        response = await backend_app.download_appcode(
+            request, "demo", user="noauth"
+        )
+        assert worker_gate.acquired == 1
+        assert worker_gate.released == 0
+
+        async def send(message):
+            if message["type"] == "http.response.body":
+                await asyncio.sleep(1)
+
+        await response.stream_response(send)
+        assert worker_gate.released == 1
+        assert peer_gate.released == ["127.0.0.1:demo"]
+
+    asyncio.run(exercise())
+
+
+def test_download_appcode_uses_prebuilt_archive_and_keeps_backend_required(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+    from pytincture.prebuild import build_prebuilt_appcode
+
+    modules = tmp_path / "modules"
+    prebuilt = tmp_path / "prebuilt"
+    modules.mkdir()
+    prebuilt.mkdir()
+    (modules / "demo.py").write_text("prebuilt_marker = True\n", encoding="utf-8")
+    build_prebuilt_appcode("demo", prebuilt, modules_path=modules)
+
+    monkeypatch.setattr(backend_app, "get_modules_path", lambda: str(modules))
+    monkeypatch.setattr(backend_app, "APPCODE_PREBUILT_DIRECTORY", str(prebuilt))
+    monkeypatch.setattr(backend_app, "REQUIRE_PREBUILT_APPCODE", True)
+    monkeypatch.setattr(backend_app, "ENABLE_BFF_REPLAY_TOKENS", False)
+    monkeypatch.setattr(backend_app, "require_auth", lambda _request: "noauth")
+    monkeypatch.setattr(
+        backend_app,
+        "create_appcode_pkg_in_memory",
+        lambda *_args, **_kwargs: pytest.fail("dynamic packaging was used"),
+    )
+
+    response = fresh_client.get("/demo/appcode/appcode.pyt")
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert archive.read("demo.py") == b"prebuilt_marker = True\n"
+
+    (modules / "demo.py").unlink()
+    missing_backend = fresh_client.get("/demo/appcode/appcode.pyt")
+    assert missing_backend.status_code == 404
+
+
+def test_required_prebuilt_appcode_does_not_fall_back_to_dynamic(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    (tmp_path / "demo.py").write_text("value = 1\n", encoding="utf-8")
+    prebuilt = tmp_path / "prebuilt"
+    prebuilt.mkdir()
+    monkeypatch.setattr(backend_app, "get_modules_path", lambda: str(tmp_path))
+    monkeypatch.setattr(backend_app, "APPCODE_PREBUILT_DIRECTORY", str(prebuilt))
+    monkeypatch.setattr(backend_app, "REQUIRE_PREBUILT_APPCODE", True)
+    monkeypatch.setattr(backend_app, "ENABLE_BFF_REPLAY_TOKENS", False)
+    monkeypatch.setattr(backend_app, "require_auth", lambda _request: "noauth")
+
+    response = fresh_client.get("/demo/appcode/appcode.pyt")
+    assert response.status_code == 503
+
+
+def test_required_prebuilt_appcode_rejects_stale_source(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+    from pytincture.prebuild import build_prebuilt_appcode
+
+    modules = tmp_path / "modules"
+    prebuilt = tmp_path / "prebuilt"
+    modules.mkdir()
+    (modules / "demo.py").write_text("value = 1\n", encoding="utf-8")
+    build_prebuilt_appcode("demo", prebuilt, modules_path=modules)
+    (modules / "demo.py").write_text("value = 2\n", encoding="utf-8")
+    monkeypatch.setattr(backend_app, "get_modules_path", lambda: str(modules))
+    monkeypatch.setattr(backend_app, "APPCODE_PREBUILT_DIRECTORY", str(prebuilt))
+    monkeypatch.setattr(backend_app, "REQUIRE_PREBUILT_APPCODE", True)
+    monkeypatch.setattr(backend_app, "ENABLE_BFF_REPLAY_TOKENS", False)
+    monkeypatch.setattr(backend_app, "require_auth", lambda _request: "noauth")
+
+    response = fresh_client.get("/demo/appcode/appcode.pyt")
+    assert response.status_code == 503
+
 def test_frontend_runtime_cache_busts_packaged_app_fetch(fresh_client):
     """
     The packaged app fetch should include the server instance uuid query parameter.

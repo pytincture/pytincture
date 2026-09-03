@@ -47,6 +47,30 @@ sources. The LRU has independent entry-count and aggregate-byte limits. Limit
 failures return `413`; temporary build saturation returns `503` with
 `Retry-After`.
 
+The response lifetime is separately bounded by configurable per-worker and
+per-peer download admission, an absolute response duration, and a blocked-write
+deadline. Admission is released only after completion, disconnect, or cleanup;
+these limits do not alter archive contents.
+
+Production deployments may build immutable archives ahead of time:
+
+```text
+pytincture-build-appcode demo --modules-path ./modules --output-directory ./appcode
+```
+
+Set `PYTINCTURE_APPCODE_PREBUILT_DIRECTORY=./appcode` to prefer
+`./appcode/demo.pyt`, and optionally set
+`PYTINCTURE_REQUIRE_PREBUILT_APPCODE=true` to fail closed when it is absent.
+The command also writes `demo.pyt.json`, binding the complete archive digest,
+the Pytincture transformer version, the browser-file declaration, and the exact
+source file set and hashes. The service verifies this manifest and rejects a
+missing, modified, or stale required archive before sending it; warm checks use
+secure file and relevant-directory identities rather than rebuilding the ZIP.
+The normal backend entrypoint at `MODULES_PATH/demo.py` remains required and is
+not served from the archive. Dynamic packaging remains the default for
+development. Session-specific BFF replay clients require dynamic archives and
+cannot be combined with required prebuilt appcode.
+
 ## Security boundary
 
 The archive is delivered under the application's authentication policy. Its

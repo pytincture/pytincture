@@ -658,6 +658,46 @@ class PytinctureConfig:
     appcode_build_queue_timeout_seconds: float = _setting(
         1.0, "APPCODE_BUILD_QUEUE_TIMEOUT_SECONDS", "Maximum archive build admission wait."
     )
+    appcode_download_max_concurrency: int = _setting(
+        32,
+        "APPCODE_DOWNLOAD_MAX_CONCURRENCY",
+        "Concurrent appcode responses per worker.",
+    )
+    appcode_download_max_concurrency_per_peer: int = _setting(
+        8,
+        "APPCODE_DOWNLOAD_MAX_CONCURRENCY_PER_PEER",
+        "Concurrent appcode responses per peer/application and worker.",
+    )
+    appcode_download_max_queue: int = _setting(
+        64,
+        "APPCODE_DOWNLOAD_MAX_QUEUE",
+        "Maximum queued appcode responses per worker.",
+    )
+    appcode_download_queue_timeout_seconds: float = _setting(
+        1.0,
+        "APPCODE_DOWNLOAD_QUEUE_TIMEOUT_SECONDS",
+        "Maximum appcode response admission wait.",
+    )
+    appcode_download_max_seconds: float = _setting(
+        300.0,
+        "APPCODE_DOWNLOAD_MAX_SECONDS",
+        "Maximum total duration of one appcode response.",
+    )
+    appcode_download_write_timeout_seconds: float = _setting(
+        30.0,
+        "APPCODE_DOWNLOAD_WRITE_TIMEOUT_SECONDS",
+        "Maximum blocked write time for each appcode response frame.",
+    )
+    appcode_prebuilt_directory: Optional[str] = _setting(
+        None,
+        "PYTINCTURE_APPCODE_PREBUILT_DIRECTORY",
+        "Optional directory containing deployment-built <application>.pyt archives.",
+    )
+    require_prebuilt_appcode: bool = _setting(
+        False,
+        "PYTINCTURE_REQUIRE_PREBUILT_APPCODE",
+        "Require a deployment-built archive instead of dynamic browser packaging.",
+    )
     public_asset_authorization_cache_entries: int = _setting(
         128,
         "PYTINCTURE_PUBLIC_ASSET_AUTHORIZATION_CACHE_ENTRIES",
@@ -958,6 +998,29 @@ class PytinctureConfig:
                 raise ValueError(f"favicon_folder does not exist: {favicon_path}")
             object.__setattr__(self, "favicon_folder", str(favicon_path))
 
+        if self.appcode_prebuilt_directory is not None:
+            prebuilt_path = Path(self.appcode_prebuilt_directory).expanduser()
+            if not prebuilt_path.is_absolute():
+                prebuilt_path = Path(modules_path) / prebuilt_path
+            prebuilt_path = prebuilt_path.resolve()
+            if not prebuilt_path.is_dir():
+                raise ValueError(
+                    "appcode_prebuilt_directory is not a directory: "
+                    f"{prebuilt_path}"
+                )
+            object.__setattr__(
+                self, "appcode_prebuilt_directory", str(prebuilt_path)
+            )
+        if self.require_prebuilt_appcode and not self.appcode_prebuilt_directory:
+            raise ValueError(
+                "require_prebuilt_appcode requires appcode_prebuilt_directory"
+            )
+        if self.require_prebuilt_appcode and self.enable_bff_replay_tokens:
+            raise ValueError(
+                "required prebuilt appcode is incompatible with session-specific "
+                "BFF replay clients"
+            )
+
         if self.session_max_age_seconds <= 0 or self.session_absolute_max_age_seconds <= 0:
             raise ValueError("session lifetime values must be greater than zero")
         if self.session_absolute_max_age_seconds < self.session_max_age_seconds:
@@ -1042,6 +1105,11 @@ class PytinctureConfig:
             self.bff_application_graph_max_scanned_files,
             self.appcode_build_max_concurrency,
             self.appcode_build_queue_timeout_seconds,
+            self.appcode_download_max_concurrency,
+            self.appcode_download_max_concurrency_per_peer,
+            self.appcode_download_queue_timeout_seconds,
+            self.appcode_download_max_seconds,
+            self.appcode_download_write_timeout_seconds,
             self.public_asset_authorization_cache_entries,
             self.public_asset_max_bytes,
             self.public_asset_max_concurrency,
@@ -1092,6 +1160,9 @@ class PytinctureConfig:
             self.bff_stream_idle_timeout_seconds,
             self.bff_stream_write_timeout_seconds,
             self.appcode_build_queue_timeout_seconds,
+            self.appcode_download_queue_timeout_seconds,
+            self.appcode_download_max_seconds,
+            self.appcode_download_write_timeout_seconds,
             self.public_asset_queue_timeout_seconds,
             self.public_asset_max_seconds,
             self.public_asset_write_timeout_seconds,
@@ -1112,6 +1183,16 @@ class PytinctureConfig:
             raise ValueError("bff_max_queue cannot be negative")
         if self.bff_request_ingress_max_queue < 0:
             raise ValueError("bff_request_ingress_max_queue cannot be negative")
+        if self.appcode_download_max_queue < 0:
+            raise ValueError("appcode_download_max_queue cannot be negative")
+        if (
+            self.appcode_download_max_concurrency_per_peer
+            > self.appcode_download_max_concurrency
+        ):
+            raise ValueError(
+                "appcode_download_max_concurrency_per_peer cannot exceed "
+                "appcode_download_max_concurrency"
+            )
         if (
             self.bff_request_ingress_max_concurrency_per_peer
             > self.bff_request_ingress_max_concurrency
@@ -1438,6 +1519,7 @@ class PytinctureConfig:
             "require_readonly_modules_path",
             "enable_user_login", "enable_dev_email_login", "enable_google_auth",
             "enable_microsoft_auth", "enable_saml_auth", "enable_bff_replay_tokens",
+            "require_prebuilt_appcode",
             "bff_replay_require_shared_store",
             "use_redis_instance", "enable_mcp", "trusted_proxy_headers",
             "mcp_allow_legacy_timeless_tokens",
@@ -1483,6 +1565,9 @@ class PytinctureConfig:
             "bff_application_graph_max_directories",
             "bff_application_graph_max_scanned_files",
             "appcode_build_max_concurrency",
+            "appcode_download_max_concurrency",
+            "appcode_download_max_concurrency_per_peer",
+            "appcode_download_max_queue",
             "public_asset_authorization_cache_entries",
             "public_asset_max_bytes", "public_asset_max_concurrency",
             "public_asset_max_concurrency_per_peer",
@@ -1515,6 +1600,9 @@ class PytinctureConfig:
             "remote_store_cooldown_seconds", "remote_store_queue_timeout_seconds",
             "readiness_cache_ttl_seconds", "saml_validation_queue_timeout_seconds",
             "saml_validation_timeout_seconds", "appcode_build_queue_timeout_seconds",
+            "appcode_download_queue_timeout_seconds",
+            "appcode_download_max_seconds",
+            "appcode_download_write_timeout_seconds",
             "public_asset_queue_timeout_seconds", "public_asset_max_seconds",
             "public_asset_write_timeout_seconds",
             "public_widget_wheel_queue_timeout_seconds",

@@ -74,6 +74,9 @@ Documentation = "https://github.com/pytincture/pytincture/tree/main/docs"
 Issues = "https://github.com/pytincture/pytincture/issues"
 Source = "https://github.com/pytincture/pytincture"
 
+[project.scripts]
+pytincture-build-appcode = "pytincture.prebuild:main"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

@@ -1195,6 +1195,41 @@
         "tests/test_app.py::test_bff_ingress_per_peer_limit_rejects_before_worker_admission",
         "tests/test_app.py::test_bff_ingress_is_cached_and_does_not_spend_execution_time"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-02-SR-04",
+      "status": "remediated",
+      "title": "Appcode downloads retain bounded admission for the response lifetime",
+      "intentional_contract": "Dynamic browser packaging remains the development default, and production may opt into deployment-built immutable archives without replacing installed backend source.",
+      "security_boundary": "Every appcode response holds bounded process-local per-peer and per-worker admission until completion, disconnect, timeout, or cleanup. Total and blocked-write deadlines bound slow clients; required prebuilt archives fail closed when absent.",
+      "controls": {
+        "response_lifetime_admission_bounded": true,
+        "per_peer_download_concurrency_bounded": true,
+        "per_worker_download_concurrency_bounded": true,
+        "blocked_write_deadline": true,
+        "absolute_response_deadline": true,
+        "atomic_prebuilt_archive_command": true,
+        "prebuilt_archive_digest_verified": true,
+        "prebuilt_source_manifest_digest_verified": true,
+        "stale_prebuilt_source_rejected": true,
+        "backend_entrypoint_still_required": true,
+        "dynamic_development_packaging_preserved": true,
+        "redis_required": false,
+        "sticky_routing_required": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "pytincture/prebuild.py",
+        "docs/contracts/appcode-v1.md"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_appcode_download_slot_is_held_until_blocked_write_times_out",
+        "tests/test_app.py::test_download_appcode_uses_prebuilt_archive_and_keeps_backend_required",
+        "tests/test_app.py::test_required_prebuilt_appcode_does_not_fall_back_to_dynamic",
+        "tests/test_app.py::test_required_prebuilt_appcode_rejects_stale_source",
+        "tests/test_backend_modules.py::test_build_prebuilt_appcode_writes_browser_archive_atomically"
+      ]
     }
   ]
 }

@@ -49,6 +49,12 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "BFF_STREAM_WRITE_TIMEOUT_SECONDS": "5.5",
             "APPCODE_MAX_FILES": "80",
             "APPCODE_CACHE_MAX_BYTES": "67108864",
+            "APPCODE_DOWNLOAD_MAX_CONCURRENCY": "20",
+            "APPCODE_DOWNLOAD_MAX_CONCURRENCY_PER_PEER": "5",
+            "APPCODE_DOWNLOAD_MAX_QUEUE": "40",
+            "APPCODE_DOWNLOAD_QUEUE_TIMEOUT_SECONDS": "0.35",
+            "APPCODE_DOWNLOAD_MAX_SECONDS": "120",
+            "APPCODE_DOWNLOAD_WRITE_TIMEOUT_SECONDS": "9",
             "BFF_APPLICATION_GRAPH_CACHE_ENTRIES": "19",
             "BFF_APPLICATION_GRAPH_MAX_DIRECTORIES": "321",
             "BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES": "4321",
@@ -157,6 +163,12 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.bff_stream_write_timeout_seconds == 5.5
     assert config.appcode_max_files == 80
     assert config.appcode_cache_max_bytes == 67108864
+    assert config.appcode_download_max_concurrency == 20
+    assert config.appcode_download_max_concurrency_per_peer == 5
+    assert config.appcode_download_max_queue == 40
+    assert config.appcode_download_queue_timeout_seconds == 0.35
+    assert config.appcode_download_max_seconds == 120
+    assert config.appcode_download_write_timeout_seconds == 9
     assert config.bff_application_graph_cache_entries == 19
     assert config.bff_application_graph_max_directories == 321
     assert config.bff_application_graph_max_scanned_files == 4321
@@ -245,6 +257,32 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert json.loads(
         config.to_environ()["PYTINCTURE_WIDGET_PUBLIC_INDEX_ALLOWLIST"]
     ) == ["corp-widget==1.2.3"]
+
+
+def test_prebuilt_appcode_configuration_is_opt_in_and_validated(tmp_path):
+    prebuilt = tmp_path / "appcode"
+    prebuilt.mkdir()
+
+    config = PytinctureConfig(
+        modules_path=str(tmp_path),
+        appcode_prebuilt_directory="appcode",
+        require_prebuilt_appcode=True,
+    )
+    assert config.appcode_prebuilt_directory == str(prebuilt.resolve())
+    assert config.require_prebuilt_appcode is True
+
+    with pytest.raises(ValueError, match="requires appcode_prebuilt_directory"):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            require_prebuilt_appcode=True,
+        )
+    with pytest.raises(ValueError, match="session-specific BFF replay"):
+        PytinctureConfig(
+            modules_path=str(tmp_path),
+            appcode_prebuilt_directory=str(prebuilt),
+            require_prebuilt_appcode=True,
+            enable_bff_replay_tokens=True,
+        )
 
 
 def test_replay_proofs_remain_optional_and_do_not_require_redis(tmp_path):

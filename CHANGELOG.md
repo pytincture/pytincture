@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Bound appcode responses for their full download lifetime with configurable
+  per-peer/per-worker admission and write/total deadlines. Add optional atomic
+  production prebuilds through `pytincture-build-appcode`, with exact archive,
+  source-manifest, and transformer-version verification; dynamic development
+  packaging stays the default and backend source remains required.
 - Bound BFF request-body buffering with separate configurable per-peer and
   per-worker upload admission before the first receive. Queued calls do not
   buffer bodies, upload slots are released before execution admission, and
