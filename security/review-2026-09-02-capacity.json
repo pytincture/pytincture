@@ -128,11 +128,16 @@
     {
       "id": "SR-08",
       "severity": "medium",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/325",
-      "disposition": "Abort fetches and cancel stream readers when generated BFF calls time out or consumers stop.",
+      "disposition": "Every generated asynchronous BFF and replay-state fetch carries an AbortController signal and aborts on timeout, cancellation, error, or completion. Streaming readers are cancelled in a bounded finally path.",
       "potential_user_breakage": false,
-      "compatibility_note": "Sync, async, and streaming APIs remain; the browser releases abandoned network work sooner."
+      "compatibility_note": "Sync, async, streaming, moving chunks, and yield APIs remain; the browser releases abandoned network work sooner.",
+      "regression_tests": [
+        "tests/test_dataclass.py::test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_flight",
+        "tests/test_dataclass.py::test_generated_stream_keeps_moving_and_cleans_up_on_completion_and_early_exit",
+        "tests/test_backend_modules.py::test_async_stream_disconnect_closes_source"
+      ]
     },
     {
       "id": "SR-09",

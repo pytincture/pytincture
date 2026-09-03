@@ -1331,6 +1331,38 @@
         "tests/test_dataclass.py::test_generated_stub_uses_only_the_runtime_selected_csrf_cookie",
         "tests/test_app.py::test_main_app_frontend_files_share_one_instance_uuid"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-02-SR-08",
+      "status": "remediated",
+      "title": "Cancelled browser BFF work aborts its network request",
+      "intentional_contract": "Generated synchronous and asynchronous methods, streaming chunk delivery, explicit yield, and async multitasking remain supported without Redis or server session state.",
+      "security_boundary": "Generated async BFF and replay-state fetches attach one AbortController signal and abort the browser request in a finally path after success, error, timeout, or task cancellation. Generated streaming transport additionally cancels its reader with a bounded cleanup wait whenever the stream completes or closes, allowing the server's existing disconnect cleanup to release admission.",
+      "controls": {
+        "async_fetch_uses_abort_controller": true,
+        "timeout_aborts_browser_request": true,
+        "task_cancellation_aborts_browser_request": true,
+        "replay_state_fetch_covered": true,
+        "stream_reader_cancelled_in_finally": true,
+        "stream_reader_cleanup_bounded": true,
+        "moving_stream_chunks_preserved": true,
+        "synchronous_api_preserved": true,
+        "asynchronous_api_preserved": true,
+        "streaming_yield_preserved": true,
+        "redis_required": false,
+        "server_session_state_added": false
+      },
+      "implementation": [
+        "pytincture/dataclass.py",
+        "docs/public-api.md",
+        "docs/migrations/0.10-to-1.0.md",
+        "contracts/public-api-v1.json"
+      ],
+      "regression_tests": [
+        "tests/test_dataclass.py::test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_flight",
+        "tests/test_dataclass.py::test_generated_stream_keeps_moving_and_cleans_up_on_completion_and_early_exit",
+        "tests/test_backend_modules.py::test_async_stream_disconnect_closes_source"
+      ]
     }
   ]
 }

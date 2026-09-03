@@ -126,7 +126,10 @@
     "default_stream_media_type": "text/event-stream",
     "default_stream_framing": "newline-delimited-json",
     "stream_write_timeout_env": "BFF_STREAM_WRITE_TIMEOUT_SECONDS",
-    "stream_write_timeout_scope": "per-frame"
+    "stream_write_timeout_scope": "per-frame",
+    "async_browser_fetch_abort_on_cancel": true,
+    "async_browser_fetch_abort_on_timeout": true,
+    "browser_stream_reader_cleanup": true
   },
   "appcode": {
     "contract_version": 1,

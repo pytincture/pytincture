@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Abort asynchronous browser BFF fetches when their Python task times out or
+  is cancelled, and cancel streaming readers on normal completion, timeout,
+  cancellation, or explicit iterator close. Existing synchronous, async,
+  streaming, and `yield` APIs are unchanged.
 - Select one exact CSRF cookie mode in the hosted runtime and use it for both
   browser logging and generated BFF clients. Production no longer considers a
   development-cookie alias, while local HTTP development and portable prebuilt
