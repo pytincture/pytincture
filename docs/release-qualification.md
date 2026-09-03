@@ -5,23 +5,21 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## Current decision: NO-GO pending rc5, observation, and edge evidence
+## Current decision: NO-GO pending observation and edge evidence
 
-Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc4`, and rc4 is
-published on PyPI. Rc4 is the latest recorded candidate. Rc5 packages the
-subsequent browser, BFF, authentication, streaming, cache, and capacity
-hardening on `main`; it remains pending until its signed tag, release, complete
-acceptance matrix, retained hashes, and registry publication succeed. PyPI
-deliberately uses a project-scoped API token, while npm uses OIDC.
+Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc5`, and rc4 and
+rc5 are published on PyPI. Rc5 is the latest recorded candidate. Its browser,
+BFF, authentication, streaming, cache, and capacity hardening passed the
+complete acceptance matrix. PyPI deliberately uses a project-scoped API token,
+while npm uses OIDC.
 
 The release manager approved the successful `pytincture_example` run, so the
 formal 30-day observation period began at `2026-08-29T02:08:06Z` and cannot
 complete before `2026-09-28T02:08:06Z`. RC2 has complete historical
 standalone, authenticated BFF, federated SAML, upgrade/rollback, performance,
-security/defect, and repository-policy evidence. Rc3 and rc4 each repeated and
-passed that complete matrix after publication; rc5 must repeat it. The release
-remains NO-GO until rc5 qualification passes, the time gate completes, a
-production-edge review records the deployed HTTPS
+security/defect, and repository-policy evidence. Rc3, rc4, and rc5 each
+repeated and passed that complete matrix after publication. The release remains
+NO-GO until the time gate completes, a production-edge review records the deployed HTTPS
 redirect, HSTS, canonical-origin, and trusted-proxy controls, protected
 registry approvals complete, and the release manager approves the final
 decision. The rc5 hardening preserves the approved observation scope, so it
@@ -116,8 +114,8 @@ Published and retained rc4 evidence:
   `e2acda3a62eb56009130b47191fdcf8a96dab852fc4cb07ce6f95e0242b9f8d6`;
 - security, defect, and live repository-policy audit:
   <https://github.com/pytincture/pytincture/issues/143#issuecomment-5499998408>;
-- protected PyPI publisher:
-  <https://github.com/pytincture/pytincture/actions/runs/33555394353>; and
+- successful protected PyPI token publisher:
+  <https://github.com/pytincture/pytincture/actions/runs/33756840836>; and
 - protected npm publisher:
   <https://github.com/pytincture/pytincture/actions/runs/33555394373>.
 
@@ -127,11 +125,32 @@ record explicitly preserves class-level BFF export, synchronous generated BFF
 methods, pluggable widgetsets, signed browser-carried sessions, Redis-free load
 balancing, and operation without sticky sessions.
 
-Rc5 preparation includes the two later 12-item remediation tranches recorded
-in `security/review-2026-09-01-followup.json` and
+Published and retained rc5 evidence:
+
+- signed tag and GitHub prerelease:
+  <https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc5>;
+- green tag qualification run:
+  <https://github.com/pytincture/pytincture/actions/runs/33758016348>;
+- green release/attestation run and all latest-candidate representative-app
+  evidence:
+  <https://github.com/pytincture/pytincture/actions/runs/33758760808>;
+- wheel SHA-256:
+  `37652d89ee7906dd447bfd78f1ee6b25e514a13d598f4739f4d706039af4b0c1`;
+- source-distribution SHA-256:
+  `faab819a6447c4a58b4b086234776fc17704a69712c2181afda50b07b41ccbf0`;
+- retained npm tarball SHA-256:
+  `ef73523b6e0fd84b1fd35350ba5f50a2597dad5691bcc79cea3b5596a2c89f2a`;
+- security, defect, and live repository-policy audit:
+  <https://github.com/pytincture/pytincture/issues/143#issuecomment-5526305217>;
+  and
+- successful protected PyPI token publisher:
+  <https://github.com/pytincture/pytincture/actions/runs/33759082873>.
+
+Rc5 includes the two later 12-item remediation tranches recorded in
+`security/review-2026-09-01-followup.json` and
 `security/review-2026-09-02-capacity.json`. All findings are closed, all
-compatibility constraints remain explicit, and rc5 is not recorded as passed
-until its release evidence exists.
+compatibility constraints remain explicit, and the exact public PyPI wheel was
+installed independently and reported `1.0.0rc5`.
 
 ## Evidence required after each RC
 
@@ -203,8 +222,8 @@ its tracking issue is accidentally closed.
 4. Run representative applications and begin the observation log.
 5. Resolve discovered blockers, publish/record the next release candidate, and
    repeat every latest-RC exercise. Rc4 records the initial 2026-09-01 review
-   remediations; rc5 contains the follow-up and capacity hardening and must
-   repeat the complete latest-candidate matrix.
+   remediations; rc5 records the follow-up and capacity hardening and passed
+   the complete latest-candidate matrix.
 6. After at least 30 days from the approved observation start, complete
    security/defect audits, execute rollback, and record an explicit `go` or
    `no-go` decision with approvers.
