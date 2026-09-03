@@ -84,11 +84,16 @@
     {
       "id": "SR-05",
       "severity": "medium",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/322",
-      "disposition": "Route optional remote revocation reads through bounded asynchronous admission.",
+      "disposition": "Signed-cookie claims are validated locally. Every explicitly enabled shared revocation read is offloaded through bounded asynchronous admission with an operation deadline and the provider circuit breaker.",
       "potential_user_breakage": false,
-      "compatibility_note": "The remote revocation provider remains optional; normal stateless sessions require neither Redis nor another store."
+      "compatibility_note": "The remote revocation provider remains optional; normal stateless sessions require neither Redis nor another store and incur no gate or thread-pool work.",
+      "regression_tests": [
+        "tests/test_app.py::test_stateless_session_validation_does_not_use_remote_gate",
+        "tests/test_app.py::test_remote_revocation_reads_have_bounded_async_admission",
+        "tests/test_app.py::test_main_page_revocation_lookup_runs_off_the_event_loop"
+      ]
     },
     {
       "id": "SR-06",

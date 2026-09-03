@@ -1715,6 +1715,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-09-02-SR-02",
         "REVIEW-2026-09-02-SR-03",
         "REVIEW-2026-09-02-SR-04",
+        "REVIEW-2026-09-02-SR-05",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1817,6 +1818,13 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert appcode_download_controls["backend_entrypoint_still_required"] is True
     assert appcode_download_controls["dynamic_development_packaging_preserved"] is True
     assert appcode_download_controls["redis_required"] is False
+    revocation_controls = dispositions["REVIEW-2026-09-02-SR-05"]["controls"]
+    assert revocation_controls["signed_cookie_validation_local"] is True
+    assert revocation_controls["stateless_session_uses_remote_gate"] is False
+    assert revocation_controls["remote_revocation_lookup_off_event_loop"] is True
+    assert revocation_controls["remote_revocation_lookup_admission_bound"] is True
+    assert revocation_controls["timed_out_remote_slot_retained"] is True
+    assert revocation_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True

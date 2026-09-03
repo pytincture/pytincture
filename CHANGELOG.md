@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Keep default signed-cookie authentication fully stateless and local while
+  routing every explicitly enabled shared session-revocation read through
+  bounded asynchronous admission, off-loop execution, a short deadline, and
+  the existing provider circuit breaker. Redis remains optional.
 - Bound appcode responses for their full download lifetime with configurable
   per-peer/per-worker admission and write/total deadlines. Add optional atomic
   production prebuilds through `pytincture-build-appcode`, with exact archive,

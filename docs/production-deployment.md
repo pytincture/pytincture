@@ -123,8 +123,11 @@ with session-specific BFF replay clients. Keep the generated `.pyt` and
 manifest, browser-file declaration, and transformer version before serving it.
 Optional Upstash operations use short deadlines and a per-worker circuit
 breaker; Redis remains optional and is not used by the default signed-cookie
-session path. Async readiness, direct page-session revocation checks, and replay
-issuance offload those calls under a bounded per-worker gate. Readiness
+session path. Every explicitly enabled shared session-revocation read—whether
+for a page, appcode, BFF, state, logout, logs, or API documentation
+request—runs off the event loop under the bounded remote-store gate. Saturation
+or timeout fails closed without filling the shared worker pool. Async readiness
+and replay issuance use the same bounded remote-store capacity. Readiness
 refreshes are coalesced and cached only for `READINESS_CACHE_TTL_SECONDS`.
 Redis reads are uncached by default; an explicit read cache is positive-only,
 bounded by entries and TTL, and invalidated by local writes/deletes. When that

@@ -1034,7 +1034,81 @@ def test_revocation_is_stateless_by_default_and_shared_failures_fail_closed(monk
     monkeypatch.setattr(backend_app, "USE_REDIS_INSTANCE", "true")
     monkeypatch.setattr(backend_app, "AUTH_SESSION_REVOCATIONS", BrokenSharedStore())
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
-    assert backend_app.require_auth(request) is None
+    assert asyncio.run(backend_app.require_auth(request)) is None
+
+
+def test_stateless_session_validation_does_not_use_remote_gate(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    class UnexpectedRemoteGate:
+        async def acquire(self):
+            raise AssertionError("stateless sessions must not use remote admission")
+
+        def release(self):
+            raise AssertionError("stateless sessions must not use remote admission")
+
+    user = backend_app._build_auth_session_user({"email": "user@example.com"})
+    request = type("Request", (), {"session": {
+        "user": user,
+        "session_id": "session-id",
+        "auth_issued_at": time.time(),
+    }})()
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "USE_REDIS_INSTANCE", "false")
+    monkeypatch.setattr(backend_app, "REMOTE_STORE_GATE", UnexpectedRemoteGate())
+
+    assert asyncio.run(backend_app.require_auth(request)) == user
+
+
+def test_remote_revocation_reads_have_bounded_async_admission(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    entered = threading.Event()
+    release = threading.Event()
+    store_threads = []
+
+    class SlowRevocationStore:
+        def get(self, _key):
+            store_threads.append(threading.get_ident())
+            entered.set()
+            assert release.wait(1.0)
+            return None
+
+    user = backend_app._build_auth_session_user({"email": "user@example.com"})
+
+    def request_for(session_id):
+        return type("Request", (), {"session": {
+            "user": user,
+            "session_id": session_id,
+            "auth_issued_at": time.time(),
+        }})()
+
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "USE_REDIS_INSTANCE", "true")
+    monkeypatch.setattr(
+        backend_app, "AUTH_SESSION_REVOCATIONS", SlowRevocationStore()
+    )
+    monkeypatch.setattr(
+        backend_app,
+        "REMOTE_STORE_GATE",
+        backend_app.AsyncAdmissionGate(1, 0, 0.05),
+    )
+
+    async def exercise():
+        event_loop_thread = threading.get_ident()
+        first = asyncio.create_task(backend_app.require_auth(request_for("first")))
+        while not entered.is_set():
+            await asyncio.sleep(0)
+        with pytest.raises(HTTPException) as rejected:
+            await backend_app.require_auth(request_for("second"))
+        assert rejected.value.status_code == 503
+        release.set()
+        return event_loop_thread, await first
+
+    event_loop_thread, authenticated = asyncio.run(exercise())
+    assert authenticated == user
+    assert len(store_threads) == 1
+    assert store_threads[0] != event_loop_thread
 
 
 def test_main_page_revocation_lookup_runs_off_the_event_loop(
@@ -4515,7 +4589,7 @@ def test_require_auth_does_not_print_debug_output(monkeypatch, capsys):
     monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", True)
     monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", False)
     monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", False)
-    assert backend_app.require_auth(request) == user
+    assert asyncio.run(backend_app.require_auth(request)) == user
     assert capsys.readouterr().out == ""
 
 

@@ -323,6 +323,11 @@ The contract test checks every row in this table against the dataclass model.
 | `trusted_proxy_headers` | `PYTINCTURE_TRUST_PROXY_HEADERS` | Trust forwarded host/protocol headers. |
 | `log_level` | `PYTINCTURE_LOG_LEVEL` | Structured application log level. |
 
+The remote-store gate covers every shared session-revocation read when that
+optional feature is enabled. Queue saturation and deadlines fail closed.
+Ordinary signed-cookie validation remains local and does not use this gate, a
+thread pool, Redis, or another server-side session store.
+
 ## Pass-through and compatibility settings
 
 These settings remain supported by the backend and can be supplied through
