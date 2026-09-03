@@ -5,6 +5,14 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+## 1.0.0rc6 — 2026-09-03
+
+- Complete the self-hosted Material Design Icons asset chain by shipping the
+  stylesheet source map with its CSS and font, including it in the framework
+  integrity manifest, release inventories, service-worker manifest, and
+  browser acceptance coverage. This removes the missing-map request without
+  restoring a third-party CDN dependency.
+
 ## 1.0.0rc5 — 2026-09-03
 
 - Publish Python releases through the protected PyPI environment with the
