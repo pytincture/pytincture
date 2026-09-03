@@ -20,6 +20,23 @@ from pytincture.dataclass import (
     bff_routes,
 )
 
+
+def _install_abort_controller(js_module):
+    controllers = []
+
+    class Controller:
+        def __init__(self):
+            self.signal = object()
+            self.abort_calls = 0
+
+        def abort(self):
+            self.abort_calls += 1
+
+    js_module.AbortController = types.SimpleNamespace(
+        new=lambda: controllers.append(Controller()) or controllers[-1]
+    )
+    return controllers
+
 # --------------------------------------------
 # Tests for backend_for_frontend decorator
 # --------------------------------------------
@@ -607,6 +624,7 @@ def test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_fl
 
     warnings_sent = []
     js_module = types.ModuleType("js")
+    controllers = _install_abort_controller(js_module)
     js_module.XMLHttpRequest = types.SimpleNamespace(new=lambda: None)
     js_module.document = types.SimpleNamespace(
         cookie="__Host-pytincture-csrf=test"
@@ -668,6 +686,21 @@ def test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_fl
         js_module.fetch = never_returns
         with pytest.raises(TimeoutError):
             await service.mutate_async()
+        assert controllers[-1].abort_calls == 1
+
+        cancellation_started = asyncio.Event()
+
+        async def cancelled_fetch(url, options=None):
+            cancellation_started.set()
+            await asyncio.Event().wait()
+
+        js_module.fetch = cancelled_fetch
+        task = asyncio.create_task(service.mutate_async())
+        await cancellation_started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert controllers[-1].abort_calls == 1
 
     asyncio.run(exercise())
 
@@ -761,6 +794,7 @@ def test_generated_bff_proxies_raise_safe_typed_errors_for_non_2xx(
         location=types.SimpleNamespace(href="https://example.test/demoapp")
     )
     js_module = types.ModuleType("js")
+    _install_abort_controller(js_module)
     js_module.XMLHttpRequest = XMLHttpRequest
     js_module.TextDecoder = object()
     js_module.document = types.SimpleNamespace(
@@ -817,6 +851,120 @@ def test_generated_bff_proxies_raise_safe_typed_errors_for_non_2xx(
             assert "server-secret" not in str(error)
 
 
+def test_generated_stream_keeps_moving_and_cleans_up_on_completion_and_early_exit(
+    tmp_path,
+    monkeypatch,
+):
+    source = textwrap.dedent("""
+        from pytincture.dataclass import backend_for_frontend, bff_stream
+
+        @backend_for_frontend
+        class Service:
+            @bff_stream(raw=True)
+            async def events(self):
+                yield "one"
+    """)
+    file_path = tmp_path / "service.py"
+    file_path.write_text(source)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    stub = generate_stub_classes(
+        str(file_path), "example.com", "https", application="demoapp"
+    )
+
+    class Headers:
+        @staticmethod
+        def get(name):
+            return None
+
+    class Decoder:
+        @staticmethod
+        def new():
+            return Decoder()
+
+        def decode(self, value=None, options=None):
+            return "" if value is None else bytes(value).decode("utf-8")
+
+    class Reader:
+        def __init__(self, chunks, *, block_after=False):
+            self.chunks = list(chunks)
+            self.block_after = block_after
+            self.cancel_calls = 0
+
+        async def read(self):
+            assert controllers[-1].abort_calls == 0
+            await asyncio.sleep(0)
+            if self.chunks:
+                return types.SimpleNamespace(done=False, value=self.chunks.pop(0))
+            if self.block_after:
+                await asyncio.Event().wait()
+            return types.SimpleNamespace(done=True, value=None)
+
+        async def cancel(self):
+            self.cancel_calls += 1
+
+    class Response:
+        status = 200
+        headers = Headers()
+
+        def __init__(self, reader):
+            self.body = types.SimpleNamespace(getReader=lambda: reader)
+
+    readers = [
+        Reader([b"one", b"two"]),
+        Reader([b"first"], block_after=True),
+    ]
+    fetch_options = []
+
+    async def fetch(url, options=None):
+        fetch_options.append(options)
+        return Response(readers[len(fetch_options) - 1])
+
+    js_module = types.ModuleType("js")
+    controllers = _install_abort_controller(js_module)
+    js_module.XMLHttpRequest = types.SimpleNamespace(new=lambda: None)
+    js_module.TextDecoder = Decoder
+    js_module.document = types.SimpleNamespace(cookie="")
+    js_module.fetch = fetch
+    js_module.window = types.SimpleNamespace(
+        location=types.SimpleNamespace(href="https://example.test/demoapp")
+    )
+    pyodide_module = types.ModuleType("pyodide")
+    pyodide_ffi_module = types.ModuleType("pyodide.ffi")
+    pyodide_ffi_module.to_js = lambda value: value
+    monkeypatch.setitem(sys.modules, "js", js_module)
+    monkeypatch.setitem(sys.modules, "pyodide", pyodide_module)
+    monkeypatch.setitem(sys.modules, "pyodide.ffi", pyodide_ffi_module)
+
+    namespace = {}
+    exec(compile(stub, str(file_path), "exec"), namespace)
+    service = namespace["Service"]()
+
+    async def exercise():
+        moving = [
+            chunk
+            async for chunk in service.fetch_stream(
+                "/demoapp/classcall/service.py/Service/events",
+                method="GET",
+            )
+        ]
+        assert moving == ["one", "two"]
+        assert readers[0].cancel_calls == 1
+        assert controllers[0].abort_calls == 1
+        assert fetch_options[0]["signal"] is controllers[0].signal
+
+        early = service.fetch_stream(
+            "/demoapp/classcall/service.py/Service/events",
+            method="GET",
+        )
+        assert await anext(early) == "first"
+        await early.aclose()
+        assert readers[1].cancel_calls == 1
+        assert controllers[1].abort_calls == 1
+        assert fetch_options[1]["signal"] is controllers[1].signal
+
+    asyncio.run(exercise())
+
+
 def test_generated_bff_proxies_preserve_401_login_redirect(tmp_path, monkeypatch):
     source = textwrap.dedent("""
         from pytincture.dataclass import backend_for_frontend, bff_stream
@@ -866,6 +1014,7 @@ def test_generated_bff_proxies_preserve_401_login_redirect(tmp_path, monkeypatch
         location=types.SimpleNamespace(href="https://example.test/demoapp")
     )
     js_module = types.ModuleType("js")
+    _install_abort_controller(js_module)
     js_module.XMLHttpRequest = types.SimpleNamespace(new=lambda: Unauthorized())
     js_module.TextDecoder = object()
     js_module.document = types.SimpleNamespace(cookie="")

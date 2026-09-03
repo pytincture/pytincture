@@ -1718,6 +1718,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-09-02-SR-05",
         "REVIEW-2026-09-02-SR-06",
         "REVIEW-2026-09-02-SR-07",
+        "REVIEW-2026-09-02-SR-08",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1844,6 +1845,16 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert csrf_cookie_controls["local_http_development_preserved"] is True
     assert csrf_cookie_controls["prebuilt_appcode_portable"] is True
     assert csrf_cookie_controls["redis_required"] is False
+    browser_cancel_controls = dispositions["REVIEW-2026-09-02-SR-08"]["controls"]
+    assert browser_cancel_controls["async_fetch_uses_abort_controller"] is True
+    assert browser_cancel_controls["timeout_aborts_browser_request"] is True
+    assert browser_cancel_controls["task_cancellation_aborts_browser_request"] is True
+    assert browser_cancel_controls["stream_reader_cancelled_in_finally"] is True
+    assert browser_cancel_controls["stream_reader_cleanup_bounded"] is True
+    assert browser_cancel_controls["moving_stream_chunks_preserved"] is True
+    assert browser_cancel_controls["synchronous_api_preserved"] is True
+    assert browser_cancel_controls["streaming_yield_preserved"] is True
+    assert browser_cancel_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True

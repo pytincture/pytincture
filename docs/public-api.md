@@ -68,6 +68,11 @@ login redirect. Its stable public fields are `status_code`, `status`,
 `operation`, and `correlation_id`; response bodies are never copied into the
 error.
 
+Generated asynchronous calls attach browser cancellation to their bounded
+wait. A timeout or Python task cancellation aborts the underlying fetch, and a
+stream reader is cancelled when iteration completes or its iterator is closed.
+This cleanup does not change chunk framing, `yield`, or the synchronous API.
+
 ### Runtime hooks
 
 The following hooks currently live in `pytincture.backend.app` and remain
@@ -134,6 +139,7 @@ Two pre-load globals are public:
 | `backendWidgetSources` | service metadata | Existing deployment-owned backend wheel URLs. Generated service pages supply this; standalone owners normally leave it unset. |
 | `allowPublicWidgetIndex` | standalone: `true`; service: backend policy | Permit an exact custom widget package pin to use PyPI only after backend-wheel resolution. Hosted pages enable it only for specs in `PYTINCTURE_WIDGET_PUBLIC_INDEX_ALLOWLIST`. |
 | `requestUuid` | generated | Cache namespace; service mode supplies one per server process. |
+| `csrfCookieName` | page protocol | Exact framework CSRF cookie selected by hosted runtime metadata. |
 | `mode` | `"auto"` | `"package"`, `"inline"`, or automatic selection. |
 | `onLifecycleEvent` | `null` | Callback for stage, compatibility, fallback, error, and ready events. |
 | `pyodideBaseUrl` | bundled path | Trailing-slash base for Pyodide assets. |
