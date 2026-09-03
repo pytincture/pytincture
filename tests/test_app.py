@@ -123,12 +123,17 @@ def _mcp_password_login(
 
 
 @pytest.fixture(autouse=True)
-def override_env(monkeypatch):
+def override_env(monkeypatch, tmp_path_factory):
     """
     Override environment variables and module-level globals.
     Since app.py reads env vars at import time, update its globals in the module.
     """
-    monkeypatch.setenv("MODULES_PATH", "/tmp")
+    default_modules = tmp_path_factory.mktemp("default_modules")
+    (default_modules / "demoapp.py").write_text(
+        "# default test application\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODULES_PATH", str(default_modules))
     monkeypatch.setenv("USE_REDIS_INSTANCE", "false")
     monkeypatch.setenv("ALLOWED_NOAUTH_CLASSCALLS", json.dumps([]))
     monkeypatch.delenv("PYTINCTURE_DEFAULT_APPLICATION", raising=False)
@@ -1622,7 +1627,10 @@ def test_mcp_tool_mapping_requires_exact_scopes():
         }]))
 
 
-def test_validation_error_does_not_echo_request_body(fresh_client):
+def test_validation_error_does_not_echo_request_body(fresh_client, monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
     response = fresh_client.post(
         "/demoapp/auth/mcp",
         json={"email": "person@example.com", "secret": "must-not-echo"},
@@ -1649,6 +1657,10 @@ def test_mcp_password_login_requires_one_time_application_transaction(
 
     initiation = fresh_client.get("/demoapp/auth/mcp")
     token = initiation.json()["login_csrf_token"]
+    (Path(os.environ["MODULES_PATH"]) / "other.py").write_text(
+        "# second test application\n",
+        encoding="utf-8",
+    )
     wrong_application = fresh_client.post(
         "/other/auth/mcp",
         json={
@@ -3164,6 +3176,191 @@ def test_bff_ingress_is_cached_and_does_not_spend_execution_time(monkeypatch):
         finally:
             await admission.aclose()
         assert gate.release_calls == 1
+
+    asyncio.run(exercise())
+
+
+def test_auth_ingress_idle_timeout_releases_worker_and_peer_slots(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    class TrackingGate:
+        def __init__(self):
+            self.acquire_calls = 0
+            self.release_calls = 0
+
+        async def acquire(self):
+            self.acquire_calls += 1
+
+        def release(self):
+            self.release_calls += 1
+
+    class TrackingPeerGate:
+        def __init__(self):
+            self.keys = []
+            self.released = []
+
+        def try_acquire(self, key):
+            self.keys.append(key)
+            return True
+
+        def release(self, key):
+            self.released.append(key)
+
+    async def exercise():
+        gate = TrackingGate()
+        peer_gate = TrackingPeerGate()
+        blocked = asyncio.Event()
+        receive_calls = 0
+
+        async def receive():
+            nonlocal receive_calls
+            receive_calls += 1
+            if receive_calls == 1:
+                return {
+                    "type": "http.request",
+                    "body": b"email=person%40example.com&",
+                    "more_body": True,
+                }
+            await blocked.wait()
+            raise AssertionError("unreachable")
+
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "POST",
+                "scheme": "https",
+                "path": "/demoapp/auth/user",
+                "raw_path": b"/demoapp/auth/user",
+                "query_string": b"",
+                "headers": [
+                    (b"content-type", b"application/x-www-form-urlencoded")
+                ],
+                "client": ("127.0.0.1", 50000),
+                "server": ("127.0.0.1", 443),
+            },
+            receive,
+        )
+        monkeypatch.setattr(backend_app, "AUTH_REQUEST_INGRESS_GATE", gate)
+        monkeypatch.setattr(
+            backend_app,
+            "AUTH_REQUEST_INGRESS_PEER_GATE",
+            peer_gate,
+        )
+        monkeypatch.setattr(
+            backend_app,
+            "AUTH_REQUEST_INGRESS_TOTAL_TIMEOUT_SECONDS",
+            1.0,
+        )
+        monkeypatch.setattr(
+            backend_app,
+            "AUTH_REQUEST_INGRESS_IDLE_TIMEOUT_SECONDS",
+            0.01,
+        )
+
+        with pytest.raises(HTTPException) as timed_out:
+            await backend_app._buffer_auth_request_body(
+                request,
+                "demoapp",
+                expected_content_types={"application/x-www-form-urlencoded"},
+            )
+        assert timed_out.value.status_code == 408
+        assert receive_calls == 2
+        assert gate.acquire_calls == 1
+        assert gate.release_calls == 1
+        assert peer_gate.keys == ["127.0.0.1"]
+        assert peer_gate.released == ["127.0.0.1"]
+
+    asyncio.run(exercise())
+
+
+def test_auth_ingress_total_timeout_applies_while_chunks_keep_moving(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    async def exercise():
+        async def receive():
+            await asyncio.sleep(0.008)
+            return {
+                "type": "http.request",
+                "body": b"x",
+                "more_body": True,
+            }
+
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "POST",
+                "scheme": "https",
+                "path": "/demoapp/auth/saml/acs",
+                "raw_path": b"/demoapp/auth/saml/acs",
+                "query_string": b"",
+                "headers": [
+                    (b"content-type", b"application/x-www-form-urlencoded")
+                ],
+                "client": ("127.0.0.1", 50000),
+                "server": ("127.0.0.1", 443),
+            },
+            receive,
+        )
+        monkeypatch.setattr(
+            backend_app,
+            "AUTH_REQUEST_INGRESS_TOTAL_TIMEOUT_SECONDS",
+            0.02,
+        )
+        monkeypatch.setattr(
+            backend_app,
+            "AUTH_REQUEST_INGRESS_IDLE_TIMEOUT_SECONDS",
+            0.1,
+        )
+
+        with pytest.raises(HTTPException) as timed_out:
+            await backend_app._buffer_auth_request_body(
+                request,
+                "demoapp",
+                expected_content_types={"application/x-www-form-urlencoded"},
+            )
+        assert timed_out.value.status_code == 408
+
+    asyncio.run(exercise())
+
+
+def test_auth_ingress_rejects_unknown_application_before_receiving_body(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    async def exercise():
+        receive_calls = 0
+
+        async def receive():
+            nonlocal receive_calls
+            receive_calls += 1
+            raise AssertionError("unknown application body must not be read")
+
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "POST",
+                "scheme": "https",
+                "path": "/missing/auth/user",
+                "raw_path": b"/missing/auth/user",
+                "query_string": b"",
+                "headers": [
+                    (b"content-type", b"application/x-www-form-urlencoded")
+                ],
+                "client": ("127.0.0.1", 50000),
+                "server": ("127.0.0.1", 443),
+            },
+            receive,
+        )
+        with pytest.raises(HTTPException) as missing:
+            await backend_app._buffer_auth_request_body(
+                request,
+                "missing",
+                expected_content_types={"application/x-www-form-urlencoded"},
+            )
+        assert missing.value.status_code == 404
+        assert receive_calls == 0
 
     asyncio.run(exercise())
 

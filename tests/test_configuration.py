@@ -29,6 +29,12 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
         {
             "MODULES_PATH": str(tmp_path),
             "ENABLE_USER_LOGIN": "true",
+            "AUTH_REQUEST_INGRESS_MAX_CONCURRENCY": "40",
+            "AUTH_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER": "5",
+            "AUTH_REQUEST_INGRESS_MAX_QUEUE": "80",
+            "AUTH_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS": "0.75",
+            "AUTH_REQUEST_INGRESS_TOTAL_TIMEOUT_SECONDS": "25",
+            "AUTH_REQUEST_INGRESS_IDLE_TIMEOUT_SECONDS": "7",
             "BFF_CALL_TIMEOUT_SECONDS": "12.5",
             "BFF_MAX_CONCURRENCY": "9",
             "BFF_REQUEST_INGRESS_TIMEOUT_SECONDS": "6.5",
@@ -127,6 +133,12 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
 
     assert config.modules_path == str(tmp_path.resolve())
     assert config.enable_user_login is True
+    assert config.auth_request_ingress_max_concurrency == 40
+    assert config.auth_request_ingress_max_concurrency_per_peer == 5
+    assert config.auth_request_ingress_max_queue == 80
+    assert config.auth_request_ingress_queue_timeout_seconds == 0.75
+    assert config.auth_request_ingress_total_timeout_seconds == 25
+    assert config.auth_request_ingress_idle_timeout_seconds == 7
     assert config.bff_call_timeout_seconds == 8.0
     assert config.bff_max_concurrency == 9
     assert config.bff_request_ingress_timeout_seconds == 6.5
@@ -860,6 +872,14 @@ def test_microsoft_auth_requires_explicit_tenant(tmp_path):
         ({"default_application": "bad-name"}, "Python identifier"),
         ({"default_application": "classcall"}, "Python identifier"),
         ({"bff_max_queue": -1}, "bff_max_queue"),
+        ({"auth_request_ingress_max_queue": -1}, "auth_request_ingress_max_queue"),
+        (
+            {
+                "auth_request_ingress_max_concurrency": 4,
+                "auth_request_ingress_max_concurrency_per_peer": 5,
+            },
+            "cannot exceed",
+        ),
         ({"bff_request_max_depth": 0}, "resource limits"),
         ({"password_hash_max_concurrency": 0}, "resource limits"),
         ({"mcp_jwt_clock_skew_seconds": -1}, "clock_skew"),

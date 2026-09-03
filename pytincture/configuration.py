@@ -414,6 +414,36 @@ class PytinctureConfig:
     max_request_body_bytes: int = _setting(
         2 * 1024 * 1024, "MAX_REQUEST_BODY_BYTES", "Maximum request body size."
     )
+    auth_request_ingress_max_concurrency: int = _setting(
+        64,
+        "AUTH_REQUEST_INGRESS_MAX_CONCURRENCY",
+        "Concurrent authentication request-body uploads per worker.",
+    )
+    auth_request_ingress_max_concurrency_per_peer: int = _setting(
+        8,
+        "AUTH_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER",
+        "Concurrent authentication request-body uploads per peer.",
+    )
+    auth_request_ingress_max_queue: int = _setting(
+        128,
+        "AUTH_REQUEST_INGRESS_MAX_QUEUE",
+        "Maximum queued authentication request-body uploads per worker.",
+    )
+    auth_request_ingress_queue_timeout_seconds: float = _setting(
+        1.0,
+        "AUTH_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS",
+        "Maximum authentication request-body admission wait.",
+    )
+    auth_request_ingress_total_timeout_seconds: float = _setting(
+        30.0,
+        "AUTH_REQUEST_INGRESS_TOTAL_TIMEOUT_SECONDS",
+        "Maximum total time to upload an authentication request body.",
+    )
+    auth_request_ingress_idle_timeout_seconds: float = _setting(
+        10.0,
+        "AUTH_REQUEST_INGRESS_IDLE_TIMEOUT_SECONDS",
+        "Maximum pause between authentication request-body chunks.",
+    )
     enable_browser_logs: bool = _setting(
         True,
         "ENABLE_BROWSER_LOGS",
@@ -934,6 +964,11 @@ class PytinctureConfig:
             self.session_max_claim_count,
             self.session_max_identity_bytes,
             self.session_max_cookie_bytes,
+            self.auth_request_ingress_max_concurrency,
+            self.auth_request_ingress_max_concurrency_per_peer,
+            self.auth_request_ingress_queue_timeout_seconds,
+            self.auth_request_ingress_total_timeout_seconds,
+            self.auth_request_ingress_idle_timeout_seconds,
             self.browser_log_max_bytes,
             self.browser_log_rate_limit_attempts,
             self.browser_log_rate_limit_window_seconds,
@@ -1014,6 +1049,9 @@ class PytinctureConfig:
         floating_limits = (
             self.saml_validation_queue_timeout_seconds,
             self.saml_validation_timeout_seconds,
+            self.auth_request_ingress_queue_timeout_seconds,
+            self.auth_request_ingress_total_timeout_seconds,
+            self.auth_request_ingress_idle_timeout_seconds,
             self.password_hash_queue_timeout_seconds,
             self.password_hash_timeout_seconds,
             self.oauth_exchange_queue_timeout_seconds,
@@ -1048,6 +1086,16 @@ class PytinctureConfig:
             raise ValueError("resource limits must be greater than zero")
         if self.bff_max_queue < 0:
             raise ValueError("bff_max_queue cannot be negative")
+        if self.auth_request_ingress_max_queue < 0:
+            raise ValueError("auth_request_ingress_max_queue cannot be negative")
+        if (
+            self.auth_request_ingress_max_concurrency_per_peer
+            > self.auth_request_ingress_max_concurrency
+        ):
+            raise ValueError(
+                "auth_request_ingress_max_concurrency_per_peer cannot exceed "
+                "auth_request_ingress_max_concurrency"
+            )
         if self.oauth_exchange_max_queue < 0:
             raise ValueError("oauth_exchange_max_queue cannot be negative")
         if self.public_asset_max_queue < 0:
@@ -1366,6 +1414,9 @@ class PytinctureConfig:
             "session_max_age_seconds", "session_absolute_max_age_seconds",
             "session_max_claim_count", "session_max_identity_bytes",
             "session_max_cookie_bytes",
+            "auth_request_ingress_max_concurrency",
+            "auth_request_ingress_max_concurrency_per_peer",
+            "auth_request_ingress_max_queue",
             "max_request_body_bytes", "browser_log_max_bytes",
             "browser_log_rate_limit_attempts", "browser_log_rate_limit_window_seconds",
             "bff_stream_max_bytes",
@@ -1412,6 +1463,9 @@ class PytinctureConfig:
         float_fields = {
             "password_hash_queue_timeout_seconds", "bff_call_timeout_seconds",
             "password_hash_timeout_seconds",
+            "auth_request_ingress_queue_timeout_seconds",
+            "auth_request_ingress_total_timeout_seconds",
+            "auth_request_ingress_idle_timeout_seconds",
             "oauth_exchange_queue_timeout_seconds", "oauth_exchange_timeout_seconds",
             "oauth_connect_timeout_seconds", "oauth_read_timeout_seconds",
             "oauth_write_timeout_seconds", "oauth_pool_timeout_seconds",

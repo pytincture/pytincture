@@ -35,7 +35,7 @@ from typing import (
 from urllib.parse import parse_qsl, quote, urlparse, urlsplit, urlunsplit
 
 # FastAPI / Starlette
-from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
@@ -2489,6 +2489,133 @@ async def _buffer_bff_request_body(request: Request) -> bytes:
     return buffered
 
 
+async def _receive_bounded_request_body(
+    request: Request,
+    *,
+    max_bytes: int,
+    total_timeout_seconds: float,
+    idle_timeout_seconds: float,
+    state_attribute: str,
+    label: str,
+) -> bytes:
+    """Buffer one request under independent total and between-chunk deadlines."""
+
+    buffered = getattr(request.state, state_attribute, None)
+    if buffered is not None:
+        return buffered
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            declared_length = int(content_length)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length") from exc
+        if declared_length < 0:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length")
+        if declared_length > max_bytes:
+            raise HTTPException(status_code=413, detail=f"{label} is too large")
+
+    deadline = time.monotonic() + total_timeout_seconds
+    body = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise HTTPException(status_code=408, detail=f"{label} timed out")
+        try:
+            message = await asyncio.wait_for(
+                request.receive(),
+                timeout=min(remaining, idle_timeout_seconds),
+            )
+        except asyncio.TimeoutError as exc:
+            raise HTTPException(status_code=408, detail=f"{label} timed out") from exc
+        message_type = message.get("type")
+        if message_type == "http.disconnect":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Client disconnected while sending {label.lower()}",
+            )
+        if message_type != "http.request":
+            continue
+        chunk = message.get("body", b"")
+        if len(body) + len(chunk) > max_bytes:
+            raise HTTPException(status_code=413, detail=f"{label} is too large")
+        body.extend(chunk)
+        if not message.get("more_body", False):
+            break
+
+    buffered = bytes(body)
+    setattr(request.state, state_attribute, buffered)
+    request._body = buffered
+    request._stream_consumed = True
+    return buffered
+
+
+async def _require_auth_application(application: str) -> None:
+    try:
+        validate_application_name(application)
+        await run_in_threadpool(
+            stat_contained_file,
+            get_modules_path(),
+            f"{application}.py",
+            max_bytes=APPCODE_MAX_FILE_BYTES,
+        )
+    except (OSError, UnsafePath, ValueError):
+        raise HTTPException(status_code=404, detail="Application not found") from None
+
+
+async def _buffer_auth_request_body(
+    request: Request,
+    application: str,
+    *,
+    expected_content_types: Set[str],
+) -> bytes:
+    """Validate and bound an unauthenticated login/ACS upload."""
+
+    content_type = request.headers.get("content-type", "").partition(";")[0]
+    if content_type.strip().casefold() not in expected_content_types:
+        raise HTTPException(
+            status_code=415,
+            detail="Authentication request has an unsupported content type",
+        )
+    await _require_auth_application(application)
+
+    peer = request.client.host if request.client is not None else "unknown"
+    peer_key = str(peer)[:255]
+    if not AUTH_REQUEST_INGRESS_PEER_GATE.try_acquire(peer_key):
+        raise HTTPException(
+            status_code=429,
+            detail="Authentication upload concurrency exceeded",
+            headers={"Retry-After": "1"},
+        )
+    try:
+        await AUTH_REQUEST_INGRESS_GATE.acquire()
+    except AdmissionRejected as exc:
+        AUTH_REQUEST_INGRESS_PEER_GATE.release(peer_key)
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication upload capacity is temporarily exhausted",
+            headers={"Retry-After": "1"},
+        ) from exc
+    except BaseException:
+        AUTH_REQUEST_INGRESS_PEER_GATE.release(peer_key)
+        raise
+
+    try:
+        return await _receive_bounded_request_body(
+            request,
+            max_bytes=MAX_REQUEST_BODY_BYTES,
+            total_timeout_seconds=AUTH_REQUEST_INGRESS_TOTAL_TIMEOUT_SECONDS,
+            idle_timeout_seconds=AUTH_REQUEST_INGRESS_IDLE_TIMEOUT_SECONDS,
+            state_attribute="auth_request_body",
+            label="Authentication request body",
+        )
+    finally:
+        try:
+            AUTH_REQUEST_INGRESS_GATE.release()
+        finally:
+            AUTH_REQUEST_INGRESS_PEER_GATE.release(peer_key)
+
+
 def _release_bff_slot(request: Request) -> None:
     if getattr(request.state, "bff_slot_held", False):
         request.state.bff_slot_held = False
@@ -4319,6 +4446,24 @@ AUTH_SESSION_MAX_COOKIE_BYTES = int(
 MAX_REQUEST_BODY_BYTES = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(2 * 1024 * 1024)))
 if MAX_REQUEST_BODY_BYTES <= 0:
     raise RuntimeError("MAX_REQUEST_BODY_BYTES must be greater than zero")
+AUTH_REQUEST_INGRESS_MAX_CONCURRENCY = int(
+    os.getenv("AUTH_REQUEST_INGRESS_MAX_CONCURRENCY", "64")
+)
+AUTH_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER = int(
+    os.getenv("AUTH_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER", "8")
+)
+AUTH_REQUEST_INGRESS_MAX_QUEUE = int(
+    os.getenv("AUTH_REQUEST_INGRESS_MAX_QUEUE", "128")
+)
+AUTH_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("AUTH_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS", "1")
+)
+AUTH_REQUEST_INGRESS_TOTAL_TIMEOUT_SECONDS = float(
+    os.getenv("AUTH_REQUEST_INGRESS_TOTAL_TIMEOUT_SECONDS", "30")
+)
+AUTH_REQUEST_INGRESS_IDLE_TIMEOUT_SECONDS = float(
+    os.getenv("AUTH_REQUEST_INGRESS_IDLE_TIMEOUT_SECONDS", "10")
+)
 AUTH_LOGIN_RATE_LIMIT_ATTEMPTS = int(os.getenv("AUTH_LOGIN_RATE_LIMIT_ATTEMPTS", "20"))
 AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS", "60"))
 AUTH_LOGIN_EMAIL_MAX_CHARS = int(os.getenv("AUTH_LOGIN_EMAIL_MAX_CHARS", "320"))
@@ -4340,11 +4485,33 @@ if min(
     AUTH_SESSION_MAX_CLAIM_COUNT,
     AUTH_SESSION_MAX_IDENTITY_BYTES,
     AUTH_SESSION_MAX_COOKIE_BYTES,
+    AUTH_REQUEST_INGRESS_MAX_CONCURRENCY,
+    AUTH_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER,
+    AUTH_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS,
+    AUTH_REQUEST_INGRESS_TOTAL_TIMEOUT_SECONDS,
+    AUTH_REQUEST_INGRESS_IDLE_TIMEOUT_SECONDS,
     AUTH_PASSWORD_HASH_MAX_CONCURRENCY,
     AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS,
     AUTH_PASSWORD_HASH_TIMEOUT_SECONDS,
 ) <= 0:
     raise RuntimeError("authentication resource limits must be greater than zero")
+if AUTH_REQUEST_INGRESS_MAX_QUEUE < 0 or not all(
+    math.isfinite(value)
+    for value in (
+        AUTH_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS,
+        AUTH_REQUEST_INGRESS_TOTAL_TIMEOUT_SECONDS,
+        AUTH_REQUEST_INGRESS_IDLE_TIMEOUT_SECONDS,
+    )
+):
+    raise RuntimeError("authentication ingress limits must be finite and valid")
+if (
+    AUTH_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER
+    > AUTH_REQUEST_INGRESS_MAX_CONCURRENCY
+):
+    raise RuntimeError(
+        "AUTH_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER cannot exceed "
+        "AUTH_REQUEST_INGRESS_MAX_CONCURRENCY"
+    )
 AUTH_LOGIN_RATE_LIMITER = SlidingWindowRateLimiter(
     AUTH_LOGIN_RATE_LIMIT_ATTEMPTS,
     AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS,
@@ -4353,6 +4520,15 @@ PASSWORD_HASH_GATE = AsyncAdmissionGate(
     AUTH_PASSWORD_HASH_MAX_CONCURRENCY,
     max(1, AUTH_PASSWORD_HASH_MAX_CONCURRENCY * 4),
     AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS,
+)
+AUTH_REQUEST_INGRESS_GATE = AsyncAdmissionGate(
+    AUTH_REQUEST_INGRESS_MAX_CONCURRENCY,
+    AUTH_REQUEST_INGRESS_MAX_QUEUE,
+    AUTH_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS,
+)
+AUTH_REQUEST_INGRESS_PEER_GATE = KeyedConcurrencyGate(
+    AUTH_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER,
+    AUTH_REQUEST_INGRESS_MAX_CONCURRENCY + AUTH_REQUEST_INGRESS_MAX_QUEUE,
 )
 OAUTH_INITIATION_RATE_LIMIT_ATTEMPTS = int(
     os.getenv("OAUTH_INITIATION_RATE_LIMIT_ATTEMPTS", "1200")
@@ -5568,6 +5744,9 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
     if not ENABLE_SAML_AUTH:
         raise HTTPException(status_code=404, detail="SAML authentication not enabled")
 
+    # Reject unknown providers before admitting or reading an anonymous body.
+    _get_saml_provider(provider_id)
+
     allowed, retry_after = SAML_ACS_RATE_LIMITER.allow(_saml_acs_peer_key(request))
     if not allowed:
         raise HTTPException(
@@ -5576,6 +5755,14 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
             headers={"Retry-After": str(retry_after)},
         )
 
+    await _buffer_auth_request_body(
+        request,
+        application,
+        expected_content_types={
+            "application/x-www-form-urlencoded",
+            "multipart/form-data",
+        },
+    )
     _debug_session_state("saml_acs:entry", request)
     form_data = await request.form()
     post_data = dict(form_data.multi_items())
@@ -6223,6 +6410,16 @@ async def auth_user_callback(request: Request, application: str):
     User logs in via Email/Password.
     """
 
+    if not ENABLE_USER_LOGIN:
+        raise HTTPException(status_code=403, detail="User login not enabled")
+    await _buffer_auth_request_body(
+        request,
+        application,
+        expected_content_types={
+            "application/x-www-form-urlencoded",
+            "multipart/form-data",
+        },
+    )
     form = await request.form()
     _validate_preauthentication_request(
         request, str(form.get("login_csrf_token") or ""), application
@@ -6273,10 +6470,24 @@ async def initiate_mcp_auth(request: Request, application: str):
     }
 
 @app.post("/{application}/auth/mcp", operation_id="mcpAuth", responses={200: {"description": "JSONResponse with status and session cookie"}, 401: {"description": "HTTPException if not authorized"}, 403: {"description": "HTTPException if user login not enabled"}})
-async def mcp_auth(request: Request, application: str, auth_input: MCPAuthInput = Body(...)):
+async def mcp_auth(request: Request, application: str):
     """
     MCP-specific authentication endpoint. Authenticates with email and password via JSON, sets session, and returns status. The response includes Set-Cookie header for session, which can be used in subsequent calls.
     """
+    if not ENABLE_USER_LOGIN:
+        raise HTTPException(status_code=403, detail="User login not enabled")
+    await _buffer_auth_request_body(
+        request,
+        application,
+        expected_content_types={"application/json"},
+    )
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("request must be an object")
+        auth_input = MCPAuthInput.model_validate(payload)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValidationError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid authentication request") from exc
     _validate_preauthentication_request(
         request, auth_input.login_csrf_token, application
     )

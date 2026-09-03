@@ -199,6 +199,12 @@ The contract test checks every row in this table against the dataclass model.
 | `session_max_identity_bytes` | `AUTH_SESSION_MAX_IDENTITY_BYTES` | Maximum canonical JSON bytes retained for an authenticated identity. |
 | `session_max_cookie_bytes` | `AUTH_SESSION_MAX_COOKIE_BYTES` | Maximum signed browser-session cookie value bytes. |
 | `max_request_body_bytes` | `MAX_REQUEST_BODY_BYTES` | Maximum request body size. |
+| `auth_request_ingress_max_concurrency` | `AUTH_REQUEST_INGRESS_MAX_CONCURRENCY` | Concurrent authentication request-body uploads per worker. |
+| `auth_request_ingress_max_concurrency_per_peer` | `AUTH_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER` | Concurrent authentication request-body uploads per peer. |
+| `auth_request_ingress_max_queue` | `AUTH_REQUEST_INGRESS_MAX_QUEUE` | Maximum queued authentication request-body uploads per worker. |
+| `auth_request_ingress_queue_timeout_seconds` | `AUTH_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS` | Maximum authentication request-body admission wait. |
+| `auth_request_ingress_total_timeout_seconds` | `AUTH_REQUEST_INGRESS_TOTAL_TIMEOUT_SECONDS` | Maximum total time to upload an authentication request body. |
+| `auth_request_ingress_idle_timeout_seconds` | `AUTH_REQUEST_INGRESS_IDLE_TIMEOUT_SECONDS` | Maximum pause between authentication request-body chunks. |
 | `enable_browser_logs` | `ENABLE_BROWSER_LOGS` | Accept bounded browser diagnostics for authenticated services. |
 | `allow_noauth_browser_logs` | `ALLOW_NOAUTH_BROWSER_LOGS` | Explicitly expose bounded browser diagnostics in no-auth services. |
 | `browser_log_max_bytes` | `BROWSER_LOG_MAX_BYTES` | Maximum browser diagnostic request bytes. |

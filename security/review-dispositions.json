@@ -1131,6 +1131,39 @@
         "tests/test_backend_modules.py::test_session_middleware_protects_cookie_responses_and_strips_public_state",
         "tests/test_app.py::test_authenticated_frontend_assets_are_public_and_do_not_rotate_session"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-02-SR-02",
+      "status": "remediated",
+      "title": "Authentication request uploads are bounded before parsing",
+      "intentional_contract": "Password and SAML authentication remain stateless and load-balancer friendly. Upload deadlines are separate from authentication, assertion-validation, session, and BFF execution time.",
+      "security_boundary": "Password-form, password-JSON, and SAML ACS routes perform cheap feature, content-type, application, and provider checks before parsing. Request bodies use bounded per-peer and per-worker admission and independent idle and total receive deadlines.",
+      "controls": {
+        "password_form_ingress_bounded": true,
+        "password_json_ingress_bounded": true,
+        "saml_acs_ingress_bounded": true,
+        "per_peer_concurrency_bounded": true,
+        "per_worker_concurrency_and_queue_bounded": true,
+        "idle_receive_deadline": true,
+        "total_receive_deadline": true,
+        "application_checked_before_body": true,
+        "authentication_runtime_shortened": false,
+        "redis_required": false,
+        "server_session_state_added": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "docs/configuration.md",
+        "docs/production-deployment.md",
+        "docs/migrations/0.10-to-1.0.md"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_auth_ingress_idle_timeout_releases_worker_and_peer_slots",
+        "tests/test_app.py::test_auth_ingress_total_timeout_applies_while_chunks_keep_moving",
+        "tests/test_app.py::test_auth_ingress_rejects_unknown_application_before_receiving_body",
+        "tests/test_app.py::test_mcp_password_login_requires_one_time_application_transaction"
+      ]
     }
   ]
 }

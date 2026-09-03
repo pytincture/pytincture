@@ -38,11 +38,17 @@
     {
       "id": "SR-02",
       "severity": "high",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/319",
-      "disposition": "Bound local-login and SAML ACS request ingress before parsing or expensive work.",
+      "disposition": "Password form, password JSON, and SAML ACS routes reject disabled features, unsupported content types, missing applications, and unknown SAML providers before body parsing; uploads then use bounded per-peer/per-worker admission plus independent idle and total deadlines.",
       "potential_user_breakage": true,
-      "compatibility_note": "Only stalled or over-limit uploads are rejected; limits remain configurable."
+      "compatibility_note": "Only missing-application, unsupported-content-type, stalled, over-limit, or capacity-exhausted uploads are rejected. Generous defaults are configurable and cover upload only, not authentication, SAML validation, session duration, or BFF execution.",
+      "regression_tests": [
+        "tests/test_app.py::test_auth_ingress_idle_timeout_releases_worker_and_peer_slots",
+        "tests/test_app.py::test_auth_ingress_total_timeout_applies_while_chunks_keep_moving",
+        "tests/test_app.py::test_auth_ingress_rejects_unknown_application_before_receiving_body",
+        "tests/test_app.py::test_mcp_password_login_requires_one_time_application_transaction"
+      ]
     },
     {
       "id": "SR-03",
