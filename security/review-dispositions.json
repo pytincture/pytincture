@@ -6,6 +6,7 @@
   "followup_reviewed_report": "Daybreak follow-up findings received 2026-08-31",
   "active_review_tracking_document": "security/review-2026-09-01.json",
   "latest_followup_review": "security/review-2026-09-01-followup.json",
+  "latest_capacity_review": "security/review-2026-09-02-capacity.json",
   "external_controls_document": "security/external-controls.json",
   "active_review_status": "remediated",
   "accepted_architecture_document": "security/accepted-architecture.md",
@@ -1102,6 +1103,33 @@
         "tests/test_app.py::test_diagnostic_details_can_be_minimal_or_operator_only",
         "tests/test_configuration.py::test_bff_documentation_can_require_authentication_or_be_disabled",
         "tests/test_configuration.py::test_browser_diagnostic_and_documentation_controls_fail_closed"
+      ]
+    },
+    {
+      "id": "REVIEW-2026-09-02-SR-01",
+      "status": "remediated",
+      "title": "Protected responses cannot opt into public caching",
+      "intentional_contract": "Versioned framework assets remain public and immutable; application, authentication, session, and BFF data remain private.",
+      "security_boundary": "Protected-route classification is authoritative over application Cache-Control headers. Every protected or session-bearing response is private/no-store with Cookie and Authorization variance, while an intentionally public response has all Set-Cookie headers removed.",
+      "controls": {
+        "protected_public_cache_override_allowed": false,
+        "authenticated_responses_private_no_store": true,
+        "session_bearing_responses_private_no_store": true,
+        "public_responses_set_cookie_allowed": false,
+        "exact_cache_directive_parsing": true,
+        "public_framework_assets_cacheable": true,
+        "redis_required": false,
+        "server_session_state_added": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/backend/middleware.py",
+        "SECURITY.md"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_bff_cannot_override_private_cache_policy",
+        "tests/test_backend_modules.py::test_session_middleware_protects_cookie_responses_and_strips_public_state",
+        "tests/test_app.py::test_authenticated_frontend_assets_are_public_and_do_not_rotate_session"
       ]
     }
   ]

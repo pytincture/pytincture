@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Prevent application cache headers from making authenticated/session-bearing
+  or BFF responses public. Protected responses are always private/no-store,
+  intentionally public responses cannot carry cookies, and immutable public
+  framework assets retain their existing cache behavior.
 - Add opt-in minimal and operator-only health/readiness detail modes while
   preserving public probe status, existing detailed development responses,
   and the existing public/authenticated/disabled API-documentation controls.

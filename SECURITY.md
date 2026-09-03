@@ -57,6 +57,40 @@ anonymity is requested. No guaranteed response SLA is currently offered.
   tag. Registry publication uses protected GitHub environments and OIDC trusted
   publishing; long-lived registry credentials are not an accepted fallback.
 
+## 2026-09-02 capacity and caching review disposition
+
+The latest review reported twelve findings, primarily around slow-client
+availability. They are tracked individually so future scans can distinguish
+completed controls from accepted architecture and remaining work:
+
+| Finding | Tracking | Compatibility boundary |
+|---|---|---|
+| SR-01 authenticated response caching | Remediated in [#318](https://github.com/pytincture/pytincture/issues/318). Protected responses cannot opt into public caching, responses carrying cookies are private/no-store, and intentionally public responses cannot carry cookies. | Versioned public framework assets remain cacheable and do not rotate sessions. |
+| SR-02 login/SAML slow body | Tracked in [#319](https://github.com/pytincture/pytincture/issues/319). | Configurable ingress limits reject stalled uploads, not long backend work. |
+| SR-03 BFF pre-admission buffering | Tracked in [#320](https://github.com/pytincture/pytincture/issues/320). | Upload admission remains separate from execution timeout and async capacity. |
+| SR-04 appcode download lifetime | Tracked in [#321](https://github.com/pytincture/pytincture/issues/321), including optional prebuilt production `appcode.pyt`. | Dynamic development remains supported and backend code remains installed separately. |
+| SR-05 optional revocation-store reads | Tracked in [#322](https://github.com/pytincture/pytincture/issues/322). | Remote state remains optional; Redis is not required. |
+| SR-06 SAML initiation/metadata work | Tracked in [#323](https://github.com/pytincture/pytincture/issues/323). | SAML remains stateless and load-balancer friendly. |
+| SR-07 CSRF cookie alias shadowing | Tracked in [#324](https://github.com/pytincture/pytincture/issues/324). | Local HTTP development keeps a separate development cookie. |
+| SR-08 browser request cancellation | Tracked in [#325](https://github.com/pytincture/pytincture/issues/325). | Sync, async, streaming, and `yield` APIs remain available. |
+| SR-09 service-worker cache amplification | Tracked in [#326](https://github.com/pytincture/pytincture/issues/326). | Supported instance UUID/version cache busting remains; unrelated query parameters do not create copies. |
+| SR-10 warm appcode validation scan | Tracked in [#327](https://github.com/pytincture/pytincture/issues/327). | Relevant development changes still invalidate disposable per-worker caches. |
+| SR-11 replay-refill waiter overflow | Tracked in [#328](https://github.com/pytincture/pytincture/issues/328). | Async concurrency remains supported; extra waiters refill safely. |
+| SR-12 isolated-process setup cleanup | Tracked in [#329](https://github.com/pytincture/pytincture/issues/329), with defaults doubled to eight per worker and four per stable user. | This affects only optional isolated execution and adds no shared state. |
+
+Two limits remain explicit architecture rather than hidden requirements:
+
+- Stateless SAML cannot guarantee global single consumption of a captured raw
+  exchange across workers without optional shared atomic state. Redis, process
+  memory, and sticky routing remain unnecessary for normal operation.
+- In-process timeouts cannot forcibly stop a non-yielding trusted coroutine or
+  a blocked Python thread. Optional isolated-process execution is the killable
+  non-streaming boundary; it is not a sandbox for hostile BFF code.
+
+The machine-readable tracking record is
+[`security/review-2026-09-02-capacity.json`](security/review-2026-09-02-capacity.json)
+and will be updated as each linked issue is completed.
+
 ## 2026-09-01 follow-up review disposition
 
 The follow-up review found no confirmed critical/high vulnerability and no

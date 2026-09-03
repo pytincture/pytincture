@@ -13,6 +13,38 @@ from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
 
+def _cache_control_has_directive(value: str, directive: str) -> bool:
+    """Match one Cache-Control directive rather than an arbitrary substring."""
+
+    expected = directive.casefold()
+    return any(
+        item.partition("=")[0].strip().casefold() == expected
+        for item in str(value or "").split(",")
+    )
+
+
+def _merge_vary_header(current: str, *values: str) -> str:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in (*str(current or "").split(","), *values):
+        normalized = value.strip()
+        key = normalized.casefold()
+        if normalized and key not in seen:
+            seen.add(key)
+            merged.append(normalized)
+    return ", ".join(merged)
+
+
+def _force_private_session_headers(headers: MutableHeaders) -> None:
+    headers["Cache-Control"] = "private, no-store, max-age=0"
+    headers["Pragma"] = "no-cache"
+    headers["Vary"] = _merge_vary_header(
+        headers.get("vary", ""),
+        "Cookie",
+        "Authorization",
+    )
+
+
 class RotatingSessionMiddleware(SessionMiddleware):
     """Accept old session signing keys and re-sign with the current key."""
 
@@ -111,12 +143,21 @@ class RotatingSessionMiddleware(SessionMiddleware):
                 return
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
+                explicitly_public = _cache_control_has_directive(
+                    headers.get("cache-control", ""), "public"
+                )
                 if is_frontend_asset and message.get("status") == 200:
                     if "set-cookie" in headers:
                         del headers["set-cookie"]
                     if "cache-control" not in headers:
                         headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                elif explicitly_public:
+                    if "set-cookie" in headers:
+                        # A public response must never carry state from any
+                        # inner application or middleware.
+                        del headers["set-cookie"]
                 elif scope["session"]:
+                    _force_private_session_headers(headers)
                     data = base64.b64encode(
                         json.dumps(
                             scope["session"],
@@ -167,11 +208,14 @@ class RotatingSessionMiddleware(SessionMiddleware):
                         f"{max_age}{self.security_flags}",
                     )
                 elif not initial_session_was_empty:
+                    _force_private_session_headers(headers)
                     headers.append(
                         "Set-Cookie",
                         f"{self.session_cookie}=null; path={self.path}; "
                         f"expires=Thu, 01 Jan 1970 00:00:00 GMT; {self.security_flags}",
                     )
+                elif "set-cookie" in headers:
+                    _force_private_session_headers(headers)
             await send(message)
 
         await self.app(scope, receive, send_wrapper)

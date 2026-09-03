@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "recorded_on": "2026-09-02",
+  "tracking_baseline_commit": "9cc2392aa9ae7c1d65d35d183db786f23b6932c2",
+  "status": "in_progress",
+  "summary": "Twelve response-caching, ingress, download, optional-store, SAML, browser cancellation, service-worker, appcode-cache, replay-refill, and isolated-process findings are tracked to completion without introducing Redis or server-side session state.",
+  "compatibility_constraints": {
+    "class_level_bff_export_preserved": true,
+    "synchronous_bff_preserved": true,
+    "asynchronous_bff_preserved": true,
+    "explicit_streaming_yield_preserved": true,
+    "long_running_bff_operations_preserved": true,
+    "pluggable_widgetsets_preserved": true,
+    "stateless_browser_sessions_preserved": true,
+    "redis_required": false,
+    "sticky_routing_required": false
+  },
+  "accepted_residual_risks": [
+    {
+      "id": "STATELESS-SAML-GLOBAL-SINGLE-CONSUMPTION",
+      "disposition": "A complete captured SAML exchange cannot be guaranteed globally single-use across workers without optional shared atomic state. Signed browser binding, short expiry, rate controls, and normal-browser replay rejection remain mandatory; Redis is not required."
+    },
+    {
+      "id": "TRUSTED-BFF-COOPERATIVE-CANCELLATION",
+      "disposition": "A non-yielding trusted coroutine or blocked Python thread cannot be forcibly stopped by an in-process timeout. Optional isolated-process execution remains the killable non-streaming boundary and is not a hostile-code sandbox."
+    }
+  ],
+  "findings": [
+    {
+      "id": "SR-01",
+      "severity": "high",
+      "status": "remediated",
+      "issue": "https://github.com/pytincture/pytincture/issues/318",
+      "disposition": "Protected routes and any response carrying session state are always private/no-store; an application Cache-Control public directive cannot override the framework boundary, and intentionally public responses cannot carry Set-Cookie.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Authenticated or BFF responses intentionally marked public become private. Versioned public framework assets remain cacheable and do not rotate sessions."
+    },
+    {
+      "id": "SR-02",
+      "severity": "high",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/319",
+      "disposition": "Bound local-login and SAML ACS request ingress before parsing or expensive work.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Only stalled or over-limit uploads are rejected; limits remain configurable."
+    },
+    {
+      "id": "SR-03",
+      "severity": "high",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/320",
+      "disposition": "Add a separate bounded BFF body-ingress gate before request buffering while retaining the execution gate after authentication and upload.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Backend execution timeouts and normal async concurrency remain separate from upload admission."
+    },
+    {
+      "id": "SR-04",
+      "severity": "medium",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/321",
+      "disposition": "Hold bounded appcode download admission for the response lifetime and support deployment-prebuilt production appcode.pyt archives while backend source remains installed separately.",
+      "potential_user_breakage": false,
+      "compatibility_note": "Dynamic development packaging remains available; production can opt into prebuilt immutable archives."
+    },
+    {
+      "id": "SR-05",
+      "severity": "medium",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/322",
+      "disposition": "Route optional remote revocation reads through bounded asynchronous admission.",
+      "potential_user_breakage": false,
+      "compatibility_note": "The remote revocation provider remains optional; normal stateless sessions require neither Redis nor another store."
+    },
+    {
+      "id": "SR-06",
+      "severity": "medium",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/323",
+      "disposition": "Validate SAML applications first, bound anonymous work, offload blocking toolkit work, and cache metadata.",
+      "potential_user_breakage": false,
+      "compatibility_note": "SAML behavior remains stateless and provider-compatible."
+    },
+    {
+      "id": "SR-07",
+      "severity": "medium",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/324",
+      "disposition": "Production browser clients accept only the __Host- CSRF cookie and never prefer a development alias.",
+      "potential_user_breakage": false,
+      "compatibility_note": "Local HTTP development keeps its separate development cookie name."
+    },
+    {
+      "id": "SR-08",
+      "severity": "medium",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/325",
+      "disposition": "Abort fetches and cancel stream readers when generated BFF calls time out or consumers stop.",
+      "potential_user_breakage": false,
+      "compatibility_note": "Sync, async, and streaming APIs remain; the browser releases abandoned network work sooner."
+    },
+    {
+      "id": "SR-09",
+      "severity": "medium",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/326",
+      "disposition": "Canonicalize service-worker cache keys to the expected asset version identity and bound/prune cache entries.",
+      "potential_user_breakage": true,
+      "compatibility_note": "Unknown cache-busting query parameters no longer create distinct stored copies; the supported instance UUID/version key remains."
+    },
+    {
+      "id": "SR-10",
+      "severity": "medium",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/327",
+      "disposition": "Validate warm appcode entries from bounded relevant fingerprints instead of unbounded module-root traversal.",
+      "potential_user_breakage": false,
+      "compatibility_note": "Relevant same-name development changes still invalidate the cache; production prebuilds avoid dynamic scans."
+    },
+    {
+      "id": "SR-11",
+      "severity": "low",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/328",
+      "disposition": "Let replay-token waiters trigger another bounded refill rather than indexing beyond one batch.",
+      "potential_user_breakage": false,
+      "compatibility_note": "Concurrency is preserved; accepted callers receive tokens without IndexError."
+    },
+    {
+      "id": "SR-12",
+      "severity": "low",
+      "status": "tracked",
+      "issue": "https://github.com/pytincture/pytincture/issues/329",
+      "disposition": "Release isolated-process admission on every setup failure and double default capacity to eight per worker and four per stable user.",
+      "potential_user_breakage": false,
+      "compatibility_note": "Optional isolated execution gains capacity; synchronous/async trusted mode and stateless load balancing are unchanged."
+    }
+  ]
+}
