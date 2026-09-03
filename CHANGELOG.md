@@ -5,6 +5,12 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+## 1.0.0rc5 — 2026-09-03
+
+- Publish Python releases through the protected PyPI environment with the
+  project-scoped API token, after exact tag, ancestry, release-run, hash, and
+  GitHub-attestation verification. The token is unavailable to build and test
+  jobs.
 - Release optional isolated-process admission and close partial IPC/process
   resources after pipe creation, process construction, or child-start failure.
   Double its defaults to eight children per worker and four per stable identity;

@@ -5,29 +5,26 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## Current decision: NO-GO pending observation and edge evidence
+## Current decision: NO-GO pending rc5, observation, and edge evidence
 
-Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc4`. Rc4 is the
-latest qualified candidate. Its exact retained wheel, source distribution, and
-npm tarball are reproducible, attested, integrity-recorded, and covered by the
-complete release acceptance matrix. It includes the 12 remediations from the
-2026-09-01 external review, with scan-facing controls and compatibility effects
-recorded in `security/review-2026-09-01.json`. The protected PyPI and npm
-publishers independently verify the rc4 bytes before registry publication;
-registry publication is a distribution task and does not invalidate candidate
-evidence or reset the approved observation track. PyPI deliberately uses a
-project-scoped API token, while npm uses OIDC.
+Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc4`, and rc4 is
+published on PyPI. Rc4 is the latest recorded candidate. Rc5 packages the
+subsequent browser, BFF, authentication, streaming, cache, and capacity
+hardening on `main`; it remains pending until its signed tag, release, complete
+acceptance matrix, retained hashes, and registry publication succeed. PyPI
+deliberately uses a project-scoped API token, while npm uses OIDC.
 
 The release manager approved the successful `pytincture_example` run, so the
 formal 30-day observation period began at `2026-08-29T02:08:06Z` and cannot
 complete before `2026-09-28T02:08:06Z`. RC2 has complete historical
 standalone, authenticated BFF, federated SAML, upgrade/rollback, performance,
 security/defect, and repository-policy evidence. Rc3 and rc4 each repeated and
-passed that complete matrix after publication. The release remains NO-GO until
-the time gate completes, a production-edge review records the deployed HTTPS
+passed that complete matrix after publication; rc5 must repeat it. The release
+remains NO-GO until rc5 qualification passes, the time gate completes, a
+production-edge review records the deployed HTTPS
 redirect, HSTS, canonical-origin, and trusted-proxy controls, protected
 registry approvals complete, and the release manager approves the final
-decision. The rc4 hardening preserves the approved observation scope, so it
+decision. The rc5 hardening preserves the approved observation scope, so it
 does not reset the clock. The Starlette security blocker remains resolved by
 requiring the patched 1.6 release line and allowing no dependency-audit
 exceptions.
@@ -130,6 +127,12 @@ record explicitly preserves class-level BFF export, synchronous generated BFF
 methods, pluggable widgetsets, signed browser-carried sessions, Redis-free load
 balancing, and operation without sticky sessions.
 
+Rc5 preparation includes the two later 12-item remediation tranches recorded
+in `security/review-2026-09-01-followup.json` and
+`security/review-2026-09-02-capacity.json`. All findings are closed, all
+compatibility constraints remain explicit, and rc5 is not recorded as passed
+until its release evidence exists.
+
 ## Evidence required after each RC
 
 For every release candidate, record:
@@ -199,9 +202,9 @@ its tracking issue is accidentally closed.
    hashes and CI evidence into the qualification record in a follow-up PR.
 4. Run representative applications and begin the observation log.
 5. Resolve discovered blockers, publish/record the next release candidate, and
-   repeat every latest-RC exercise. Rc3 records the post-rc2 hardening; rc4 is
-   the target for the 2026-09-01 review remediations and must repeat the complete
-   latest-candidate matrix.
+   repeat every latest-RC exercise. Rc4 records the initial 2026-09-01 review
+   remediations; rc5 contains the follow-up and capacity hardening and must
+   repeat the complete latest-candidate matrix.
 6. After at least 30 days from the approved observation start, complete
    security/defect audits, execute rollback, and record an explicit `go` or
    `no-go` decision with approvers.

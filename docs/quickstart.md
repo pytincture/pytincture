@@ -32,7 +32,7 @@ Requirements: Pytincture installed while preparing the static site. The
 deployed host itself only needs a static HTTP server.
 
 ```bash
-python -m pip install 'pytincture==1.0.0rc4'
+python -m pip install 'pytincture==1.0.0rc5'
 cd pytincture/examples/quickstart/standalone
 python -m pytincture.assets ./frontend
 python3 -m http.server 8000

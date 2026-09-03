@@ -446,6 +446,6 @@
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1 through RC4 evidence is recorded and passing. Rc4 qualifies the complete 2026-09-01 hardening tranche while preserving the approved stateless, Redis-free observation scope, so it does not reset the clock. The release remains NO-GO until the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS/canonical-origin/trusted-proxy evidence is recorded, protected registry distribution tasks complete, and the release manager makes the final decision."
+    "notes": "RC1 through RC4 evidence is recorded and passing, and rc4 is published on PyPI. Rc5 packages the subsequent follow-up and capacity remediations while preserving the approved stateless, Redis-free observation scope, so it does not reset the clock. Rc5 remains pending until its signed release, complete acceptance matrix, retained hashes, and registry publication succeed. The final release remains NO-GO until the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS/canonical-origin/trusted-proxy evidence is recorded, protected registry distribution tasks complete, and the release manager makes the final decision."
   }
 }

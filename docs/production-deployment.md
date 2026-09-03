@@ -292,7 +292,7 @@ python scripts/audit_production_edge.py \
   --http-origin http://service.example.com \
   --canonical-probe-path /myapp/auth/saml/metadata \
   --proxy-config /etc/nginx/conf.d/service.conf \
-  --version 1.0.0rc4 \
+  --version 1.0.0rc5 \
   --commit-sha FULL_DEPLOYED_COMMIT_SHA \
   --evidence-url https://github.com/OWNER/REPOSITORY/actions/runs/RUN_ID \
   --output production-edge-evidence.json
