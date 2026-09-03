@@ -180,7 +180,7 @@ jobs:
           fi
 
   publish-python:
-    name: Publish attested Python release artifacts with OIDC
+    name: Publish attested Python release artifacts with API token
     needs: verify-python-release
     if: needs.verify-python-release.outputs.already_published != 'true'
     runs-on: ubuntu-latest
@@ -189,7 +189,6 @@ jobs:
       actions: read
       attestations: read
       contents: read
-      id-token: write
 
     steps:
       - name: Download exact retained Python artifacts
@@ -222,9 +221,11 @@ jobs:
           done
           [[ "$artifact_count" -eq 2 ]]
 
-      - name: Publish exact artifacts through PyPI Trusted Publishing
+      - name: Publish exact artifacts with the protected PyPI token
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
+          user: __token__
+          password: ${{ secrets.PYPI_PASSWORD }}
           packages-dir: python-dist
-          attestations: true
+          attestations: false
           print-hash: true

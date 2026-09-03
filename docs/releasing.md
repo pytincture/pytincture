@@ -26,9 +26,10 @@ Only a maintained release commit with green required CI is publishable.
    `pypi-publish.yml` and `npm-publish.yml` independently verify the published
    tag, exact commit, protected-default-branch ancestry, CI workflow identity,
    attestation, package identity, filename, and version. They publish only the
-   exact retained wheel/sdist and npm tarball through registry trusted-publisher
-   OIDC. Both workflows support idempotent retries by published release tag and
-   resolve the trusted release run themselves.
+   exact retained wheel/sdist and npm tarball. Python publication uses the
+   protected `PYPI_PASSWORD` API token; npm uses trusted-publisher OIDC. Both
+   workflows support idempotent retries by published release tag and resolve
+   the trusted release run themselves.
 7. Verify PyPI/npm metadata and install each artifact from the public index in
    a new environment. Attach the generated `SHA256SUMS.json` to the release.
 
@@ -43,19 +44,22 @@ container pull or run guidance until a protected tagged-release workflow
 publishes immutable version and digest references, generates an SBOM, and
 signs or attests the image. Mutable tags are not production pins.
 
-The publishers use protected `pypi` and `npm` GitHub environments. Keep
-non-self required reviewers enabled and restrict deployments to the protected
-default branch. Protect creation, update, and deletion of `v*` release tags.
+The publishers use protected `pypi` and `npm` GitHub environments. The PyPI
+environment is owner-approved; keep its API token scoped to the `pytincture`
+project and rotate it after suspected exposure. Restrict deployments to the
+protected default branch. Protect creation, update, and deletion of `v*`
+release tags.
 Publication actions are pinned to full commit SHAs, and values derived from
 release or artifact metadata are passed to shell steps through environment
 variables. Run manual tag-based retries from the protected default branch; the
 tag is an input, not the workflow execution ref.
 
-Configure the PyPI trusted publisher for project `pytincture` with owner and
-repository `pytincture/pytincture`, workflow `pypi-publish.yml`, and environment
-`pypi`. Do not configure `PYPI_PASSWORD`, `TWINE_PASSWORD`, or another fallback
-credential. Until that PyPI-side publisher exists, publication fails closed
-after repository verification rather than falling back to a long-lived token.
+Configure the project-scoped PyPI API token as the protected `PYPI_PASSWORD`
+Actions secret. The token is passed only to the pinned publishing action after
+the published tag, protected-default-branch ancestry, successful release run,
+artifact identity, hashes, and attestations have all been verified. It is not
+made available to build or test jobs and no packaging tool is installed while
+the token is present.
 
 ## Failed publication
 
