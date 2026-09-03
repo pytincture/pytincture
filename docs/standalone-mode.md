@@ -18,13 +18,13 @@ Install the exact Pytincture release, then export its verified browser assets
 into the static site's `frontend/` directory:
 
 ```bash
-python -m pip install 'pytincture==1.0.0rc4'
+python -m pip install 'pytincture==1.0.0rc5'
 python -m pytincture.assets ./public/frontend
 ```
 
 The export command verifies every runtime, Pyodide, WASM, standard-library,
 and icon asset against the versioned
-`frontend/integrity/pytincture-1.0.0rc4.json` manifest before copying it. This
+`frontend/integrity/pytincture-1.0.0rc5.json` manifest before copying it. This
 self-hosted layout is the production default. Set configuration before loading
 the runtime:
 
@@ -93,7 +93,7 @@ from the release integrity manifest into trusted HTML/configuration:
   };
 </script>
 <script
-  src="https://cdn.example/pytincture/1.0.0rc4/pytincture.min.js"
+  src="https://cdn.example/pytincture/1.0.0rc5/pytincture.min.js"
   integrity="sha384-<trusted-manifest-value>"
   crossorigin="anonymous"></script>
 ```
