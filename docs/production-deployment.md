@@ -40,6 +40,9 @@ browser-carried sessions and optional Redis, are recorded in
 - Keep the bounded authentication-upload admission enabled. Its total and idle
   deadlines cover request upload only, not password verification, IdP work, or
   assertion validation time.
+- Keep BFF upload admission bounded independently from BFF execution. The
+  process-local `BFF_REQUEST_INGRESS_*` limits cap bodies buffered per worker
+  and peer without reducing cooperative async execution or stream capacity.
 - SAML XML/signature validation is offloaded under a per-worker concurrency
   gate. Tune `SAML_VALIDATION_MAX_CONCURRENCY`, `SAML_VALIDATION_MAX_QUEUE`,
   and the queue/runtime deadlines for the worker's CPU budget. A timed-out

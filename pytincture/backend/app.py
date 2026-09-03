@@ -2452,33 +2452,63 @@ async def _buffer_bff_request_body(request: Request) -> bytes:
         if declared_length > BFF_REQUEST_MAX_BYTES:
             raise HTTPException(status_code=413, detail="BFF request body is too large")
 
-    deadline = time.monotonic() + BFF_REQUEST_INGRESS_TIMEOUT_SECONDS
-    body = bytearray()
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise HTTPException(status_code=408, detail="BFF request body timed out")
+    peer = request.client.host if request.client is not None else "unknown"
+    peer_key = str(peer)[:255]
+    if not BFF_REQUEST_INGRESS_PEER_GATE.try_acquire(peer_key):
+        raise HTTPException(
+            status_code=429,
+            detail="BFF upload concurrency exceeded",
+            headers={"Retry-After": "1"},
+        )
+    try:
+        await BFF_REQUEST_INGRESS_GATE.acquire()
+    except AdmissionRejected as exc:
+        BFF_REQUEST_INGRESS_PEER_GATE.release(peer_key)
+        raise HTTPException(
+            status_code=503,
+            detail="BFF upload capacity is temporarily exhausted",
+            headers={"Retry-After": "1"},
+        ) from exc
+    except BaseException:
+        BFF_REQUEST_INGRESS_PEER_GATE.release(peer_key)
+        raise
+
+    try:
+        deadline = time.monotonic() + BFF_REQUEST_INGRESS_TIMEOUT_SECONDS
+        body = bytearray()
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise HTTPException(status_code=408, detail="BFF request body timed out")
+            try:
+                message = await asyncio.wait_for(request.receive(), timeout=remaining)
+            except asyncio.TimeoutError as exc:
+                raise HTTPException(
+                    status_code=408,
+                    detail="BFF request body timed out",
+                ) from exc
+            message_type = message.get("type")
+            if message_type == "http.disconnect":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Client disconnected while sending BFF request body",
+                )
+            if message_type != "http.request":
+                continue
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > BFF_REQUEST_MAX_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail="BFF request body is too large",
+                )
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+    finally:
         try:
-            message = await asyncio.wait_for(request.receive(), timeout=remaining)
-        except asyncio.TimeoutError as exc:
-            raise HTTPException(
-                status_code=408,
-                detail="BFF request body timed out",
-            ) from exc
-        message_type = message.get("type")
-        if message_type == "http.disconnect":
-            raise HTTPException(
-                status_code=400,
-                detail="Client disconnected while sending BFF request body",
-            )
-        if message_type != "http.request":
-            continue
-        chunk = message.get("body", b"")
-        if len(body) + len(chunk) > BFF_REQUEST_MAX_BYTES:
-            raise HTTPException(status_code=413, detail="BFF request body is too large")
-        body.extend(chunk)
-        if not message.get("more_body", False):
-            break
+            BFF_REQUEST_INGRESS_GATE.release()
+        finally:
+            BFF_REQUEST_INGRESS_PEER_GATE.release(peer_key)
 
     buffered = bytes(body)
     request.state.bff_request_body = buffered
@@ -4600,6 +4630,18 @@ BFF_QUEUE_TIMEOUT_SECONDS = float(os.getenv("BFF_QUEUE_TIMEOUT_SECONDS", "2"))
 BFF_REQUEST_INGRESS_TIMEOUT_SECONDS = float(
     os.getenv("BFF_REQUEST_INGRESS_TIMEOUT_SECONDS", "10")
 )
+BFF_REQUEST_INGRESS_MAX_CONCURRENCY = int(
+    os.getenv("BFF_REQUEST_INGRESS_MAX_CONCURRENCY", "64")
+)
+BFF_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER = int(
+    os.getenv("BFF_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER", "16")
+)
+BFF_REQUEST_INGRESS_MAX_QUEUE = int(
+    os.getenv("BFF_REQUEST_INGRESS_MAX_QUEUE", "128")
+)
+BFF_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("BFF_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS", "1")
+)
 BFF_REQUEST_MAX_BYTES = int(os.getenv("BFF_REQUEST_MAX_BYTES", str(1024 * 1024)))
 BFF_REQUEST_MAX_DEPTH = int(os.getenv("BFF_REQUEST_MAX_DEPTH", "32"))
 BFF_REQUEST_MAX_ITEMS = int(os.getenv("BFF_REQUEST_MAX_ITEMS", "10000"))
@@ -4702,6 +4744,9 @@ if min(
     BFF_MAX_CONCURRENCY,
     BFF_QUEUE_TIMEOUT_SECONDS,
     BFF_REQUEST_INGRESS_TIMEOUT_SECONDS,
+    BFF_REQUEST_INGRESS_MAX_CONCURRENCY,
+    BFF_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER,
+    BFF_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS,
     BFF_REQUEST_MAX_BYTES,
     BFF_REQUEST_MAX_DEPTH,
     BFF_REQUEST_MAX_ITEMS,
@@ -4746,6 +4791,16 @@ if min(
     raise RuntimeError("BFF timeout and stream limits must be greater than zero")
 if BFF_MAX_QUEUE < 0:
     raise RuntimeError("BFF_MAX_QUEUE cannot be negative")
+if BFF_REQUEST_INGRESS_MAX_QUEUE < 0:
+    raise RuntimeError("BFF_REQUEST_INGRESS_MAX_QUEUE cannot be negative")
+if (
+    BFF_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER
+    > BFF_REQUEST_INGRESS_MAX_CONCURRENCY
+):
+    raise RuntimeError(
+        "BFF_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER cannot exceed "
+        "BFF_REQUEST_INGRESS_MAX_CONCURRENCY"
+    )
 if PUBLIC_ASSET_MAX_QUEUE < 0:
     raise RuntimeError("PYTINCTURE_PUBLIC_ASSET_MAX_QUEUE cannot be negative")
 if PUBLIC_WIDGET_WHEEL_MAX_QUEUE < 0:
@@ -4758,6 +4813,15 @@ BFF_ADMISSION_GATE = AsyncAdmissionGate(
     BFF_MAX_CONCURRENCY,
     BFF_MAX_QUEUE,
     BFF_QUEUE_TIMEOUT_SECONDS,
+)
+BFF_REQUEST_INGRESS_GATE = AsyncAdmissionGate(
+    BFF_REQUEST_INGRESS_MAX_CONCURRENCY,
+    BFF_REQUEST_INGRESS_MAX_QUEUE,
+    BFF_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS,
+)
+BFF_REQUEST_INGRESS_PEER_GATE = KeyedConcurrencyGate(
+    BFF_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER,
+    BFF_REQUEST_INGRESS_MAX_CONCURRENCY + BFF_REQUEST_INGRESS_MAX_QUEUE,
 )
 APPCODE_ARCHIVE_CACHE = AppcodeArchiveCache(
     APPCODE_CACHE_ENTRIES,

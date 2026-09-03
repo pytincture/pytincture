@@ -1164,6 +1164,37 @@
         "tests/test_app.py::test_auth_ingress_rejects_unknown_application_before_receiving_body",
         "tests/test_app.py::test_mcp_password_login_requires_one_time_application_transaction"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-02-SR-03",
+      "status": "remediated",
+      "title": "BFF bodies are admitted before buffering",
+      "intentional_contract": "BFF upload admission is independent of sync, async, isolated-process, and streaming execution capacity and timeouts.",
+      "security_boundary": "Every uncached BFF body must acquire bounded process-local per-peer and per-worker upload admission before the first ASGI receive. Queue overflow and peer saturation occur before buffering, and admission is released on success, timeout, disconnect, cancellation, or size rejection.",
+      "controls": {
+        "admission_before_first_receive": true,
+        "per_peer_upload_concurrency_bounded": true,
+        "per_worker_upload_concurrency_bounded": true,
+        "upload_queue_bounded": true,
+        "queued_bodies_buffered": false,
+        "upload_slot_released_before_execution_admission": true,
+        "execution_capacity_reduced": false,
+        "redis_required": false,
+        "sticky_routing_required": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "docs/configuration.md",
+        "docs/production-deployment.md",
+        "docs/migrations/0.10-to-1.0.md"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_slow_bff_body_times_out_before_execution_admission",
+        "tests/test_app.py::test_bff_ingress_queue_overflow_rejects_before_receiving_body",
+        "tests/test_app.py::test_bff_ingress_per_peer_limit_rejects_before_worker_admission",
+        "tests/test_app.py::test_bff_ingress_is_cached_and_does_not_spend_execution_time"
+      ]
     }
   ]
 }

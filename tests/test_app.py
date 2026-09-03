@@ -3062,15 +3062,30 @@ def test_slow_bff_body_times_out_before_execution_admission(monkeypatch):
     class TrackingGate:
         def __init__(self):
             self.acquire_calls = 0
+            self.release_calls = 0
 
         async def acquire(self):
             self.acquire_calls += 1
 
         def release(self):
-            pass
+            self.release_calls += 1
+
+    class TrackingPeerGate:
+        def __init__(self):
+            self.acquired = []
+            self.released = []
+
+        def try_acquire(self, key):
+            self.acquired.append(key)
+            return True
+
+        def release(self, key):
+            self.released.append(key)
 
     async def exercise():
-        gate = TrackingGate()
+        execution_gate = TrackingGate()
+        ingress_gate = TrackingGate()
+        peer_gate = TrackingPeerGate()
         waiting = asyncio.Event()
         receive_calls = 0
 
@@ -3101,7 +3116,17 @@ def test_slow_bff_body_times_out_before_execution_admission(monkeypatch):
             },
             receive,
         )
-        monkeypatch.setattr(backend_app, "BFF_ADMISSION_GATE", gate)
+        monkeypatch.setattr(backend_app, "BFF_ADMISSION_GATE", execution_gate)
+        monkeypatch.setattr(
+            backend_app,
+            "BFF_REQUEST_INGRESS_GATE",
+            ingress_gate,
+        )
+        monkeypatch.setattr(
+            backend_app,
+            "BFF_REQUEST_INGRESS_PEER_GATE",
+            peer_gate,
+        )
         monkeypatch.setattr(
             backend_app,
             "BFF_REQUEST_INGRESS_TIMEOUT_SECONDS",
@@ -3112,7 +3137,135 @@ def test_slow_bff_body_times_out_before_execution_admission(monkeypatch):
             await admission.__anext__()
         assert timed_out.value.status_code == 408
         assert timed_out.value.detail == "BFF request body timed out"
-        assert gate.acquire_calls == 0
+        assert execution_gate.acquire_calls == 0
+        assert ingress_gate.acquire_calls == 1
+        assert ingress_gate.release_calls == 1
+        assert peer_gate.acquired == ["127.0.0.1"]
+        assert peer_gate.released == ["127.0.0.1"]
+
+    asyncio.run(exercise())
+
+
+def test_bff_ingress_queue_overflow_rejects_before_receiving_body(monkeypatch):
+    import pytincture.backend.app as backend_app
+    from pytincture.backend.limits import AdmissionRejected
+
+    class SaturatedGate:
+        async def acquire(self):
+            raise AdmissionRejected("queue full")
+
+        def release(self):
+            raise AssertionError("an unacquired worker slot must not be released")
+
+    class TrackingPeerGate:
+        def __init__(self):
+            self.released = []
+
+        def try_acquire(self, _key):
+            return True
+
+        def release(self, key):
+            self.released.append(key)
+
+    async def exercise():
+        receive_calls = 0
+        peer_gate = TrackingPeerGate()
+
+        async def receive():
+            nonlocal receive_calls
+            receive_calls += 1
+            raise AssertionError("a queued upload body must not be read")
+
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "POST",
+                "scheme": "https",
+                "path": "/demo/classcall/demo.py/Demo/run",
+                "raw_path": b"/demo/classcall/demo.py/Demo/run",
+                "query_string": b"",
+                "headers": [(b"content-type", b"application/json")],
+                "client": ("127.0.0.1", 50000),
+                "server": ("127.0.0.1", 443),
+            },
+            receive,
+        )
+        monkeypatch.setattr(
+            backend_app,
+            "BFF_REQUEST_INGRESS_GATE",
+            SaturatedGate(),
+        )
+        monkeypatch.setattr(
+            backend_app,
+            "BFF_REQUEST_INGRESS_PEER_GATE",
+            peer_gate,
+        )
+
+        with pytest.raises(HTTPException) as saturated:
+            await backend_app._buffer_bff_request_body(request)
+        assert saturated.value.status_code == 503
+        assert receive_calls == 0
+        assert peer_gate.released == ["127.0.0.1"]
+
+    asyncio.run(exercise())
+
+
+def test_bff_ingress_per_peer_limit_rejects_before_worker_admission(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    class UnusedGate:
+        async def acquire(self):
+            raise AssertionError("per-peer rejection must happen first")
+
+        def release(self):
+            raise AssertionError("no slot was acquired")
+
+    class SaturatedPeerGate:
+        def try_acquire(self, _key):
+            return False
+
+        def release(self, _key):
+            raise AssertionError("no peer slot was acquired")
+
+    async def exercise():
+        receive_calls = 0
+
+        async def receive():
+            nonlocal receive_calls
+            receive_calls += 1
+            raise AssertionError("a rejected peer body must not be read")
+
+        request = Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "POST",
+                "scheme": "https",
+                "path": "/demo/classcall/demo.py/Demo/run",
+                "raw_path": b"/demo/classcall/demo.py/Demo/run",
+                "query_string": b"",
+                "headers": [(b"content-type", b"application/json")],
+                "client": ("127.0.0.1", 50000),
+                "server": ("127.0.0.1", 443),
+            },
+            receive,
+        )
+        monkeypatch.setattr(
+            backend_app,
+            "BFF_REQUEST_INGRESS_GATE",
+            UnusedGate(),
+        )
+        monkeypatch.setattr(
+            backend_app,
+            "BFF_REQUEST_INGRESS_PEER_GATE",
+            SaturatedPeerGate(),
+        )
+
+        with pytest.raises(HTTPException) as saturated:
+            await backend_app._buffer_bff_request_body(request)
+        assert saturated.value.status_code == 429
+        assert receive_calls == 0
 
     asyncio.run(exercise())
 

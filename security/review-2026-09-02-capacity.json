@@ -53,11 +53,17 @@
     {
       "id": "SR-03",
       "severity": "high",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/320",
-      "disposition": "Add a separate bounded BFF body-ingress gate before request buffering while retaining the execution gate after authentication and upload.",
+      "disposition": "Every uncached BFF request body acquires process-local per-peer and per-worker upload admission before the first receive. Queued requests do not buffer bodies, and upload admission is released before the existing execution gate is acquired.",
       "potential_user_breakage": true,
-      "compatibility_note": "Backend execution timeouts and normal async concurrency remain separate from upload admission."
+      "compatibility_note": "Only upload saturation is rejected. Upload capacity and queue limits are configurable and separate from backend execution timeouts, normal async concurrency, sync calls, and streaming.",
+      "regression_tests": [
+        "tests/test_app.py::test_slow_bff_body_times_out_before_execution_admission",
+        "tests/test_app.py::test_bff_ingress_queue_overflow_rejects_before_receiving_body",
+        "tests/test_app.py::test_bff_ingress_per_peer_limit_rejects_before_worker_admission",
+        "tests/test_app.py::test_bff_ingress_is_cached_and_does_not_spend_execution_time"
+      ]
     },
     {
       "id": "SR-04",

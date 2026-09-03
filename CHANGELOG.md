@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Bound BFF request-body buffering with separate configurable per-peer and
+  per-worker upload admission before the first receive. Queued calls do not
+  buffer bodies, upload slots are released before execution admission, and
+  existing sync, async, long-running, and streaming behavior is unchanged.
 - Bound password-form, password-JSON, and SAML ACS uploads with configurable
   per-peer/per-worker admission plus independent idle and total deadlines.
   Disabled features, unsupported content types, missing applications, and

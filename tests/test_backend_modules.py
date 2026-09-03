@@ -1712,6 +1712,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-09-01-PT-16",
         "REVIEW-2026-09-02-SR-01",
         "REVIEW-2026-09-02-SR-02",
+        "REVIEW-2026-09-02-SR-03",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1798,6 +1799,13 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert auth_ingress_controls["total_receive_deadline"] is True
     assert auth_ingress_controls["authentication_runtime_shortened"] is False
     assert auth_ingress_controls["redis_required"] is False
+    bff_ingress_controls = dispositions["REVIEW-2026-09-02-SR-03"]["controls"]
+    assert bff_ingress_controls["admission_before_first_receive"] is True
+    assert bff_ingress_controls["per_peer_upload_concurrency_bounded"] is True
+    assert bff_ingress_controls["per_worker_upload_concurrency_bounded"] is True
+    assert bff_ingress_controls["queued_bodies_buffered"] is False
+    assert bff_ingress_controls["execution_capacity_reduced"] is False
+    assert bff_ingress_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True

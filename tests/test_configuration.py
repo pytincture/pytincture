@@ -38,6 +38,10 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
             "BFF_CALL_TIMEOUT_SECONDS": "12.5",
             "BFF_MAX_CONCURRENCY": "9",
             "BFF_REQUEST_INGRESS_TIMEOUT_SECONDS": "6.5",
+            "BFF_REQUEST_INGRESS_MAX_CONCURRENCY": "48",
+            "BFF_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER": "12",
+            "BFF_REQUEST_INGRESS_MAX_QUEUE": "96",
+            "BFF_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS": "0.45",
             "BFF_REQUEST_MAX_BYTES": "524288",
             "BFF_REQUEST_MAX_DEPTH": "24",
             "BFF_REQUEST_MAX_ITEMS": "5000",
@@ -142,6 +146,10 @@ def test_from_env_applies_defaults_environment_then_explicit_overrides(tmp_path)
     assert config.bff_call_timeout_seconds == 8.0
     assert config.bff_max_concurrency == 9
     assert config.bff_request_ingress_timeout_seconds == 6.5
+    assert config.bff_request_ingress_max_concurrency == 48
+    assert config.bff_request_ingress_max_concurrency_per_peer == 12
+    assert config.bff_request_ingress_max_queue == 96
+    assert config.bff_request_ingress_queue_timeout_seconds == 0.45
     assert config.bff_request_max_bytes == 524288
     assert config.bff_request_max_depth == 24
     assert config.bff_request_max_items == 5000
@@ -872,6 +880,14 @@ def test_microsoft_auth_requires_explicit_tenant(tmp_path):
         ({"default_application": "bad-name"}, "Python identifier"),
         ({"default_application": "classcall"}, "Python identifier"),
         ({"bff_max_queue": -1}, "bff_max_queue"),
+        ({"bff_request_ingress_max_queue": -1}, "bff_request_ingress_max_queue"),
+        (
+            {
+                "bff_request_ingress_max_concurrency": 8,
+                "bff_request_ingress_max_concurrency_per_peer": 9,
+            },
+            "cannot exceed",
+        ),
         ({"auth_request_ingress_max_queue": -1}, "auth_request_ingress_max_queue"),
         (
             {
