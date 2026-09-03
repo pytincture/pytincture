@@ -392,6 +392,8 @@ def test_trusted_bff_execution_remains_the_simple_default(tmp_path):
 
     assert config.bff_execution_mode == "trusted-thread"
     assert config.bff_async_execution_mode == "event-loop"
+    assert config.bff_isolated_max_concurrency == 8
+    assert config.bff_isolated_max_per_user == 4
 
 
 @pytest.mark.parametrize(

@@ -619,12 +619,12 @@ class PytinctureConfig:
         "Trusted async BFF stage mode: event-loop or worker-thread.",
     )
     bff_isolated_max_concurrency: int = _setting(
-        4,
+        8,
         "BFF_ISOLATED_MAX_CONCURRENCY",
         "Concurrent optional isolated BFF child processes per worker.",
     )
     bff_isolated_max_per_user: int = _setting(
-        2,
+        4,
         "BFF_ISOLATED_MAX_PER_USER",
         "Concurrent optional isolated BFF child processes per stable authenticated identity. Multiple sessions share this allowance.",
     )

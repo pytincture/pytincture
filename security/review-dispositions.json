@@ -1452,6 +1452,40 @@
       "regression_tests": [
         "tests/test_dataclass.py::test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_flight"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-02-SR-12",
+      "status": "remediated",
+      "title": "Isolated-process setup releases admission exactly once",
+      "intentional_contract": "Isolated-process execution remains optional, non-streaming, and a killable boundary for deployment-trusted BFF code rather than a hostile-code sandbox. Trusted thread/async execution, stateless signed sessions, load balancing, and Redis-free operation are unchanged.",
+      "security_boundary": "After isolated-process admission succeeds, pipe creation, process construction, process start, execution, and response handling all remain inside one exactly-once cleanup boundary. Partial connections close and a partially started child terminates and is reaped before worker and stable-identity admission are released. Defaults are eight children per worker and four per stable identity.",
+      "controls": {
+        "pipe_failure_releases_admission": true,
+        "process_construction_failure_releases_admission": true,
+        "partial_start_failure_releases_admission": true,
+        "partial_connections_closed": true,
+        "partial_children_terminated_and_reaped": true,
+        "admission_release_exactly_once": true,
+        "default_worker_capacity": 8,
+        "default_stable_identity_capacity": 4,
+        "prior_limits_explicitly_configurable": true,
+        "trusted_execution_changed": false,
+        "isolated_mode_required": false,
+        "hostile_code_sandbox_claimed": false,
+        "redis_required": false,
+        "server_session_state_added": false
+      },
+      "implementation": [
+        "pytincture/backend/execution.py",
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "docs/production-deployment.md"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_optional_process_executor_releases_setup_failures",
+        "tests/test_backend_modules.py::test_optional_process_executor_kills_cpu_work_and_recovers",
+        "tests/test_configuration.py::test_trusted_bff_execution_remains_the_simple_default"
+      ]
     }
   ]
 }

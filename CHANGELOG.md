@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Release optional isolated-process admission and close partial IPC/process
+  resources after pipe creation, process construction, or child-start failure.
+  Double its defaults to eight children per worker and four per stable identity;
+  trusted thread/async execution is unchanged and operators can retain `4`/`2`.
 - Let concurrent replay-token callers safely span any number of server batches:
   waiters share one shielded refill, recheck the pool, and refill again only
   when needed. One cancelled or failed waiter no longer disrupts later callers,

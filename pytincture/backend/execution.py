@@ -194,6 +194,56 @@ def _isolated_worker(
         connection.close()
 
 
+def _close_isolated_connection(connection: Connection | None) -> None:
+    if connection is None:
+        return
+    try:
+        connection.close()
+    except (OSError, ValueError):
+        pass
+
+
+def _terminate_and_reap_process(process: multiprocessing.Process | None) -> None:
+    """Best-effort cleanup for fully or partially started child processes."""
+    if process is None:
+        return
+    try:
+        pid = process.pid
+    except (AssertionError, OSError, ValueError):
+        pid = None
+    if pid is not None:
+        try:
+            alive = process.is_alive()
+        except (AssertionError, OSError, ValueError):
+            alive = True
+        if alive:
+            try:
+                process.terminate()
+            except (AttributeError, OSError, ValueError):
+                pass
+        try:
+            process.join(timeout=0.5)
+        except (AssertionError, OSError, ValueError):
+            pass
+        try:
+            alive = process.is_alive()
+        except (AssertionError, OSError, ValueError):
+            alive = False
+        if alive:
+            try:
+                process.kill()
+            except (AttributeError, OSError, ValueError):
+                pass
+            try:
+                process.join(timeout=0.5)
+            except (AssertionError, OSError, ValueError):
+                pass
+    try:
+        process.close()
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
 class ProcessIsolatedBFFExecutor:
     """Spawn one resource-limited child per call and terminate it on timeout."""
 
@@ -252,21 +302,24 @@ class ProcessIsolatedBFFExecutor:
 
     def execute(self, invocation: IsolatedBFFInvocation) -> bytes:
         self._acquire(invocation.subject)
-        receiving, sending = self._context.Pipe(duplex=False)
-        process = self._context.Process(
-            target=_isolated_worker,
-            args=(sending, invocation),
-            kwargs={
-                "cpu_seconds": self.cpu_seconds,
-                "memory_bytes": self.memory_bytes,
-                "result_max_bytes": self.result_max_bytes,
-                "result_max_depth": self.result_max_depth,
-                "result_max_items": self.result_max_items,
-            },
-            daemon=True,
-        )
-        deadline = time.monotonic() + invocation.wall_time_seconds
+        receiving: Connection | None = None
+        sending: Connection | None = None
+        process: multiprocessing.Process | None = None
         try:
+            receiving, sending = self._context.Pipe(duplex=False)
+            process = self._context.Process(
+                target=_isolated_worker,
+                args=(sending, invocation),
+                kwargs={
+                    "cpu_seconds": self.cpu_seconds,
+                    "memory_bytes": self.memory_bytes,
+                    "result_max_bytes": self.result_max_bytes,
+                    "result_max_depth": self.result_max_depth,
+                    "result_max_items": self.result_max_items,
+                },
+                daemon=True,
+            )
+            deadline = time.monotonic() + invocation.wall_time_seconds
             process.start()
             sending.close()
             while True:
@@ -297,15 +350,12 @@ class ProcessIsolatedBFFExecutor:
                 if not process.is_alive():
                     raise IsolatedExecutionFailed("isolated BFF process exited")
         finally:
-            receiving.close()
-            sending.close()
-            if process.pid is not None and process.is_alive():
-                process.terminate()
-                process.join(timeout=0.5)
-                if process.is_alive():
-                    process.kill()
-                    process.join(timeout=0.5)
-            self._release(invocation.subject)
+            try:
+                _close_isolated_connection(receiving)
+                _close_isolated_connection(sending)
+                _terminate_and_reap_process(process)
+            finally:
+                self._release(invocation.subject)
 
     @property
     def active_users(self) -> dict[str, int]:
