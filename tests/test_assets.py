@@ -23,6 +23,12 @@ def test_browser_asset_export_is_verified_and_self_contained(tmp_path):
         / "fonts"
         / "materialdesignicons-webfont.woff2"
     ).is_file()
+    assert (
+        target
+        / "vendor"
+        / "materialdesignicons"
+        / "materialdesignicons.css.map"
+    ).is_file()
 
 
 def test_browser_asset_export_rejects_tampered_installed_bytes(tmp_path, monkeypatch):

@@ -32,6 +32,10 @@ await writeFile(
     `${vendoredCss.trim()}\n`,
 );
 await copyFile(
+    path.join(packageDirectory, "css", "materialdesignicons.min.css.map"),
+    path.join(vendorDirectory, "materialdesignicons.css.map"),
+);
+await copyFile(
     path.join(packageDirectory, "fonts", "materialdesignicons-webfont.woff2"),
     path.join(fontDirectory, "materialdesignicons-webfont.woff2"),
 );

@@ -18,8 +18,8 @@
     },
     {
       "path": "sw.js",
-      "sha256": "7400b09d6650838f8a568539c170746ce47b4d25fc5b8700cbba0b5530d0ef41",
-      "sri": "sha384-VLgPxDIkQGtmhyGga9Hko+w3hSWHitAVH9DidA2m24Q0ysIgxXT6Eo/vC7dO727c"
+      "sha256": "978f86af2427166192c7bd426765a29ddb461f9ec7c4d6fd30bdb34385ac08f9",
+      "sri": "sha384-1/r+gqhi1M7UQ/T1wkkSoxIE8vZpPzl91zTGVhdtiU5AptVwr5/Umc2BCgH8R99e"
     },
     {
       "path": "dist/pytincture.js",
@@ -60,6 +60,11 @@
       "path": "vendor/materialdesignicons/materialdesignicons.css",
       "sha256": "16aa2084b73b9360ab28f98c2677a83ff4a96c72a3a5a5b558405e3dd5a39e66",
       "sri": "sha384-M/06JV0AuFnpqSYgpWFnIFAJ+mS+6+BFkR+j/r1yftwL9jk0vPnDujoi4Us7RXu4"
+    },
+    {
+      "path": "vendor/materialdesignicons/materialdesignicons.css.map",
+      "sha256": "21f5ac75da129c964a9dd430b85651219727c15b327a3014c9fe08401448e47b",
+      "sri": "sha384-srq1tj/c5dUXMIx7v3d0CjUXS/k2qCbujOBC1GdyipAl4+KmFXMfWWUavJVQffO2"
     },
     {
       "path": "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",

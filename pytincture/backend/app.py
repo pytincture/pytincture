@@ -1092,6 +1092,7 @@ _PUBLIC_FRAMEWORK_FILES = frozenset({
     "vendor/swagger-ui/swagger-ui-bundle.js",
     "vendor/swagger-ui/swagger-ui.css",
     "vendor/materialdesignicons/materialdesignicons.css",
+    "vendor/materialdesignicons/materialdesignicons.css.map",
     "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
     f"integrity/pytincture-{__version__}.json",
     "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl",

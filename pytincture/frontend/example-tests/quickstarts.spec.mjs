@@ -49,6 +49,24 @@ async function expectCleanRun(page, diagnostics) {
     return lifecycle;
 }
 
+async function expectMaterialIcons(page) {
+    const result = await page.evaluate(async () => {
+        const icon = document.createElement("span");
+        icon.className = "mdi mdi-home";
+        document.body.appendChild(icon);
+        await document.fonts.load('24px "Material Design Icons"');
+        const value = {
+            content: getComputedStyle(icon, "::before").content,
+            fontLoaded: document.fonts.check('24px "Material Design Icons"'),
+        };
+        icon.remove();
+        return value;
+    });
+    expect(result.fontLoaded).toBe(true);
+    expect(result.content).not.toBe("none");
+    expect(result.content).not.toBe("normal");
+}
+
 test("service quickstart runs the packaged example", async ({ page, request }) => {
     const diagnostics = collectDiagnostics(page);
     await installLifecycleCollector(page);
@@ -58,10 +76,16 @@ test("service quickstart runs the packaged example", async ({ page, request }) =
     await expect(page).toHaveURL(`${SERVICE_URL}/hello`);
     await expect(page.getByRole("heading", { name: "Hello from Pytincture" })).toBeVisible();
     await expect(page.getByText("Python is running in your browser.")).toBeVisible();
+    await expectMaterialIcons(page);
     expect(new URL(page.url()).search).toBe("");
 
     const health = await (await request.get(`${SERVICE_URL}/healthz`)).json();
     expect(health.status).toBe("ok");
+    const iconMap = await request.get(
+        `${SERVICE_URL}/hello/frontend/vendor/materialdesignicons/materialdesignicons.css.map`,
+    );
+    expect(iconMap.ok()).toBe(true);
+    expect((await iconMap.json()).file).toBe("materialdesignicons.css");
     const lifecycle = await expectCleanRun(page, diagnostics);
     const compatibility = lifecycle.find(event => event.type === "compatibility")?.compatibility;
     expect(compatibility.runtimeVersion).toBe(health.version);
@@ -74,13 +98,14 @@ test("service quickstart runs the packaged example", async ({ page, request }) =
     expect(diagnostics.requests.some(url => /(?:cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com)/.test(url))).toBe(false);
 });
 
-test("standalone quickstart runs with its bundled runtime", async ({ page }) => {
+test("standalone quickstart runs with its bundled runtime", async ({ page, request }) => {
     const diagnostics = collectDiagnostics(page);
     await installLifecycleCollector(page);
 
     const response = await page.goto(`${STANDALONE_URL}/`);
     expect(response?.ok()).toBe(true);
     await expect(page.getByRole("heading", { name: "Hello from standalone Pytincture" })).toBeVisible();
+    await expectMaterialIcons(page);
     expect(page.url()).toBe(`${STANDALONE_URL}/`);
 
     const lifecycle = await expectCleanRun(page, diagnostics);
@@ -92,6 +117,11 @@ test("standalone quickstart runs with its bundled runtime", async ({ page }) => 
     ));
     expect(runtimeRequest).toBeTruthy();
     expect(new URL(runtimeRequest).origin).toBe(STANDALONE_URL);
+    const iconMap = await request.get(
+        `${STANDALONE_URL}/frontend/vendor/materialdesignicons/materialdesignicons.css.map`,
+    );
+    expect(iconMap.ok()).toBe(true);
+    expect((await iconMap.json()).file).toBe("materialdesignicons.css");
     const selfHostedAssets = diagnostics.requests.filter(url => (
         new URL(url).pathname.startsWith("/frontend/pyodide/")
         || new URL(url).pathname.startsWith("/frontend/vendor/materialdesignicons/")

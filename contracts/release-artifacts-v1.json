@@ -57,6 +57,7 @@
       "pytincture/frontend/vendor/materialdesignicons/LICENSE",
       "pytincture/frontend/vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
       "pytincture/frontend/vendor/materialdesignicons/materialdesignicons.css",
+      "pytincture/frontend/vendor/materialdesignicons/materialdesignicons.css.map",
       "pytincture/frontend/vendor/swagger-ui/LICENSE",
       "pytincture/frontend/vendor/swagger-ui/swagger-ui-bundle.js",
       "pytincture/frontend/vendor/swagger-ui/swagger-ui.css"
@@ -122,6 +123,7 @@
       "pytincture/frontend/vendor/materialdesignicons/LICENSE",
       "pytincture/frontend/vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
       "pytincture/frontend/vendor/materialdesignicons/materialdesignicons.css",
+      "pytincture/frontend/vendor/materialdesignicons/materialdesignicons.css.map",
       "pytincture/frontend/vendor/swagger-ui/LICENSE",
       "pytincture/frontend/vendor/swagger-ui/swagger-ui-bundle.js",
       "pytincture/frontend/vendor/swagger-ui/swagger-ui.css",
@@ -159,7 +161,8 @@
       "package.json",
       "vendor/materialdesignicons/LICENSE",
       "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
-      "vendor/materialdesignicons/materialdesignicons.css"
+      "vendor/materialdesignicons/materialdesignicons.css",
+      "vendor/materialdesignicons/materialdesignicons.css.map"
     ]
   }
 }
