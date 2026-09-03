@@ -156,11 +156,17 @@
     {
       "id": "SR-10",
       "severity": "medium",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/327",
-      "disposition": "Validate warm appcode entries from bounded relevant fingerprints instead of unbounded module-root traversal.",
+      "disposition": "Warm appcode entries validate a bounded relevant source/directory fingerprint under a configurable deadline instead of walking the module root; cold discovery applies the existing file, byte, directory, and scanned-file limits.",
       "potential_user_breakage": false,
-      "compatibility_note": "Relevant same-name development changes still invalidate the cache; production prebuilds avoid dynamic scans."
+      "compatibility_note": "Relevant same-name edits and newly matching development files still invalidate the cache; production prebuilds avoid dynamic scans.",
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_appcode_warm_cache_uses_metadata_without_rereading_sources",
+        "tests/test_backend_modules.py::test_appcode_cache_tracks_new_files_in_declared_browser_directories",
+        "tests/test_backend_modules.py::test_appcode_archive_applies_directory_and_scan_limits",
+        "tests/test_backend_modules.py::test_appcode_cache_validation_deadline_fails_closed"
+      ]
     },
     {
       "id": "SR-11",

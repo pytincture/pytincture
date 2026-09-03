@@ -1393,6 +1393,38 @@
         "pytincture/frontend/tests/lifecycle.test.mjs::framework caches are namespaced by application, release, and instance uuid",
         "tests/test_app.py::test_service_worker_only_caches_manifested_framework_assets"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-02-SR-10",
+      "status": "remediated",
+      "title": "Warm appcode validation is bounded to relevant fingerprints",
+      "intentional_contract": "Dynamic development packaging continues to detect same-name source edits and newly matching declared browser files. Immutable production appcode can be prebuilt, and caches remain disposable per-worker state requiring neither Redis nor sticky routing.",
+      "security_boundary": "Cold archive discovery applies file-count, per-file byte, aggregate-byte, directory, and scanned-file limits while recording only source files and directories relevant to imports and declared browser globs. Warm hits stat that bounded snapshot under a configurable deadline and never walk the complete modules root. A changed snapshot rebuilds; a limit or deadline failure fails closed.",
+      "controls": {
+        "warm_modules_root_walk": false,
+        "relevant_source_fingerprint_bounded": true,
+        "relevant_directory_fingerprint_bounded": true,
+        "cold_directory_limit": true,
+        "cold_scanned_file_limit": true,
+        "validation_deadline": true,
+        "same_name_edits_invalidate": true,
+        "new_glob_matches_invalidate": true,
+        "prebuilt_production_supported": true,
+        "redis_required": false,
+        "sticky_routing_required": false
+      },
+      "implementation": [
+        "pytincture/backend/browser_packages.py",
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "docs/production-deployment.md"
+      ],
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_appcode_warm_cache_uses_metadata_without_rereading_sources",
+        "tests/test_backend_modules.py::test_appcode_cache_tracks_new_files_in_declared_browser_directories",
+        "tests/test_backend_modules.py::test_appcode_archive_applies_directory_and_scan_limits",
+        "tests/test_backend_modules.py::test_appcode_cache_validation_deadline_fails_closed"
+      ]
     }
   ]
 }

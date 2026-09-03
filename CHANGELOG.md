@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Validate warm appcode cache entries from a bounded fingerprint of only the
+  relevant source files and discovery directories, with the existing graph
+  file/directory scan limits and a configurable two-second deadline. Relevant
+  development changes still rebuild automatically; production prebuilds avoid
+  runtime archive discovery entirely.
 - Canonicalize service-worker cache entries to the approved asset pathname and
   instance UUID, dropping unrelated query parameters. Activation prunes
   polluted entries and stale caches only for the same Pytincture application;
