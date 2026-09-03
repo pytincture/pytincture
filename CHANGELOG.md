@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Let concurrent replay-token callers safely span any number of server batches:
+  waiters share one shielded refill, recheck the pool, and refill again only
+  when needed. One cancelled or failed waiter no longer disrupts later callers,
+  and replay tokens remain optional and stateless by default.
 - Validate warm appcode cache entries from a bounded fingerprint of only the
   relevant source files and discovery directories, with the existing graph
   file/directory scan limits and a configurable two-second deadline. Relevant

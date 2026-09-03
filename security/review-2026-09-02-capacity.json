@@ -171,11 +171,14 @@
     {
       "id": "SR-11",
       "severity": "low",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/328",
-      "disposition": "Let replay-token waiters trigger another bounded refill rather than indexing beyond one batch.",
+      "disposition": "Concurrent callers share one cancellation-shielded refill, recheck the token pool after every batch, and safely trigger another bounded refill when the pool remains empty.",
       "potential_user_breakage": false,
-      "compatibility_note": "Concurrency is preserved; accepted callers receive tokens without IndexError."
+      "compatibility_note": "Concurrency is preserved without a new caller quota; accepted callers may span multiple configured batches without IndexError, and one cancelled caller does not cancel shared refill work.",
+      "regression_tests": [
+        "tests/test_dataclass.py::test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_flight"
+      ]
     },
     {
       "id": "SR-12",

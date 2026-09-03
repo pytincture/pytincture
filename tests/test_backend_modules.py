@@ -1721,6 +1721,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-09-02-SR-08",
         "REVIEW-2026-09-02-SR-09",
         "REVIEW-2026-09-02-SR-10",
+        "REVIEW-2026-09-02-SR-11",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1876,6 +1877,14 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert appcode_cache_controls["new_glob_matches_invalidate"] is True
     assert appcode_cache_controls["prebuilt_production_supported"] is True
     assert appcode_cache_controls["redis_required"] is False
+    replay_refill_controls = dispositions["REVIEW-2026-09-02-SR-11"]["controls"]
+    assert replay_refill_controls["single_flight_preserved"] is True
+    assert replay_refill_controls["multiple_batches_supported"] is True
+    assert replay_refill_controls["pool_rechecked_after_refill"] is True
+    assert replay_refill_controls["waiter_cancellation_cancels_shared_refill"] is False
+    assert replay_refill_controls["empty_refill_index_error"] is False
+    assert replay_refill_controls["new_caller_quota_added"] is False
+    assert replay_refill_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True

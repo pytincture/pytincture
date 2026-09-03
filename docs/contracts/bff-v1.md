@@ -181,9 +181,12 @@ fetch/iteration behavior. Each generated BFF module exposes
 `PytinctureBFFError` for callers that want to catch the typed failure.
 Authentication redirects and optional replay-token refill are runtime concerns
 but may not change existing user method signatures. Replay refill is
-single-flight. A best-effort refill that fails after a completed mutation may
-be reported separately but must not replace the completed mutation result or
-cause it to be sent again.
+single-flight and cancellation-shielded: concurrent callers may consume more
+than one configured batch, rechecking the shared pool and starting the next
+refill only when needed. Cancelling one caller cannot cancel the refill shared
+by other callers. A best-effort refill that fails after a completed mutation
+may be reported separately but must not replace the completed mutation result
+or cause it to be sent again.
 
 ## Evolution
 

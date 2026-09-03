@@ -1425,6 +1425,33 @@
         "tests/test_backend_modules.py::test_appcode_archive_applies_directory_and_scan_limits",
         "tests/test_backend_modules.py::test_appcode_cache_validation_deadline_fails_closed"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-02-SR-11",
+      "status": "remediated",
+      "title": "Replay-token waiters safely span refill batches",
+      "intentional_contract": "Optional browser replay proofs retain single-flight refill and support high asynchronous concurrency without introducing a caller quota, Redis requirement, server-side browser session, or sticky routing.",
+      "security_boundary": "Each generated BFF class keeps one shared refill task. Waiters shield that task from individual cancellation, recheck the shared pool after every completed batch, and join or initiate another refill whenever other callers consumed the batch. Empty responses and failed refills raise controlled errors instead of indexing an empty pool.",
+      "controls": {
+        "single_flight_preserved": true,
+        "multiple_batches_supported": true,
+        "pool_rechecked_after_refill": true,
+        "waiter_cancellation_cancels_shared_refill": false,
+        "failed_refill_retryable": true,
+        "empty_refill_index_error": false,
+        "server_refill_quotas_preserved": true,
+        "new_caller_quota_added": false,
+        "redis_required": false,
+        "server_session_state_added": false
+      },
+      "implementation": [
+        "pytincture/dataclass.py",
+        "docs/contracts/bff-v1.md",
+        "SECURITY.md"
+      ],
+      "regression_tests": [
+        "tests/test_dataclass.py::test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_flight"
+      ]
     }
   ]
 }
