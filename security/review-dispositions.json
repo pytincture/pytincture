@@ -1266,6 +1266,41 @@
         "tests/test_app.py::test_remote_revocation_reads_have_bounded_async_admission",
         "tests/test_app.py::test_main_page_revocation_lookup_runs_off_the_event_loop"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-02-SR-06",
+      "status": "remediated",
+      "title": "Public SAML setup work is validated, rate-limited, bounded, and cached",
+      "intentional_contract": "SAML login URLs, metadata endpoints, provider compatibility, browser-carried handshakes, and load-balanced stateless operation remain unchanged. Redis and sticky routing are not required.",
+      "security_boundary": "Public SAML login and metadata requests consume a bounded per-peer rate budget and prove the application entrypoint exists before provider lookup or toolkit work. Login request generation, signing, metadata generation, and metadata validation execute off the event loop behind a dedicated bounded concurrency and queue gate with a runtime deadline. Metadata cache entries contain public XML only, use a complete effective-settings SHA-256 fingerprint for invalidation, and are capped by an LRU entry limit.",
+      "controls": {
+        "application_validated_before_provider_work": true,
+        "per_peer_public_saml_rate_limit": true,
+        "public_saml_concurrency_bound": true,
+        "public_saml_queue_bound": true,
+        "public_saml_runtime_deadline": true,
+        "login_toolkit_off_event_loop": true,
+        "metadata_toolkit_off_event_loop": true,
+        "metadata_settings_fingerprinted": true,
+        "metadata_cache_entry_bound": true,
+        "metadata_configuration_change_invalidates": true,
+        "browser_handshake_stateless": true,
+        "redis_required": false,
+        "sticky_routing_required": false
+      },
+      "implementation": [
+        "pytincture/backend/app.py",
+        "pytincture/configuration.py",
+        "docs/configuration.md",
+        "docs/production-deployment.md"
+      ],
+      "regression_tests": [
+        "tests/test_app.py::test_saml_public_routes_reject_missing_application_before_provider_work",
+        "tests/test_app.py::test_saml_metadata_is_offloaded_bounded_and_releases_capacity",
+        "tests/test_app.py::test_saml_public_routes_share_a_per_peer_rate_limit",
+        "tests/test_app.py::test_saml_login_toolkit_work_runs_off_the_event_loop",
+        "tests/test_app.py::test_saml_metadata_cache_is_bounded_and_settings_fingerprinted"
+      ]
     }
   ]
 }

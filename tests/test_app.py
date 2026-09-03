@@ -14,6 +14,7 @@ import threading
 import time
 import httpx
 import pytest
+from collections import OrderedDict
 from pathlib import Path
 from fastapi.testclient import TestClient
 from fastapi.responses import RedirectResponse
@@ -152,6 +153,17 @@ def override_env(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(backend_app, "APPLICATION_ADMISSION", {})
     monkeypatch.setattr(backend_app, "USER_SESSION_DICT", {})
     monkeypatch.setattr(backend_app, "AUTH_SESSION_REVOCATIONS", {})
+    monkeypatch.setattr(
+        backend_app,
+        "SAML_PUBLIC_RATE_LIMITER",
+        backend_app.SlidingWindowRateLimiter(10_000, 60),
+    )
+    monkeypatch.setattr(
+        backend_app,
+        "SAML_PUBLIC_GATE",
+        backend_app.AsyncAdmissionGate(4, 16, 1.0),
+    )
+    monkeypatch.setattr(backend_app, "_SAML_METADATA_CACHE", OrderedDict())
     monkeypatch.setattr(
         backend_app,
         "BFF_REPLAY_TOKEN_STORE",
@@ -4848,9 +4860,12 @@ def test_saml_login_embeds_replica_safe_relay_state(fresh_client, monkeypatch):
     monkeypatch.setattr(backend_app, "SAML_PROVIDERS", "")
     monkeypatch.setattr(
         backend_app,
-        "_init_saml_auth",
-        lambda request, application, provider=None, post_data=None: FakeSamlAuth(),
+        "OneLogin_Saml2_Auth",
+        lambda request_data, old_settings=None: FakeSamlAuth(),
     )
+    monkeypatch.setattr(backend_app, "SAML_IDP_ENTITY_ID", "https://idp.test")
+    monkeypatch.setattr(backend_app, "SAML_IDP_SSO_URL", "https://idp.test/sso")
+    monkeypatch.setattr(backend_app, "SAML_IDP_X509_CERT", "test-certificate")
 
     response = fresh_client.get(
         "/demoapp/auth/saml/login?return_to=/demoapp/work",
@@ -6187,6 +6202,9 @@ def test_saml_metadata_route_returns_metadata(fresh_client, monkeypatch, tmp_pat
 
     dummy_modules = tmp_path / "modules"
     dummy_modules.mkdir()
+    (dummy_modules / "demoapp.py").write_text(
+        "# SAML metadata application\n", encoding="utf-8"
+    )
     monkeypatch.setenv("MODULES_PATH", str(dummy_modules))
     monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
 
@@ -6257,6 +6275,9 @@ def test_saml_provider_metadata_route_uses_provider_config(fresh_client, monkeyp
 
     dummy_modules = tmp_path / "modules"
     dummy_modules.mkdir()
+    (dummy_modules / "demoapp.py").write_text(
+        "# SAML provider metadata application\n", encoding="utf-8"
+    )
     monkeypatch.setenv("MODULES_PATH", str(dummy_modules))
     monkeypatch.setattr(backend_app, "STATIC_PATH", str(dummy_frontend))
 
@@ -6291,3 +6312,222 @@ def test_saml_provider_metadata_route_uses_provider_config(fresh_client, monkeyp
     assert "EntityDescriptor" in response.text
     assert "https://service.example.com/demoapp/auth/saml/metadata" in response.text
     assert "https://service.example.com/demoapp/auth/saml/acs" in response.text
+
+
+def test_saml_public_routes_reject_missing_application_before_provider_work(
+    fresh_client, monkeypatch, tmp_path
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+
+    def unexpected_provider_lookup(_provider_id):
+        raise AssertionError("provider work must follow application validation")
+
+    monkeypatch.setattr(
+        backend_app, "_get_saml_provider", unexpected_provider_lookup
+    )
+
+    login = fresh_client.get(
+        "/missing/auth/saml/login",
+        follow_redirects=False,
+    )
+    metadata = fresh_client.get("/missing/auth/saml/metadata")
+    assert login.status_code == 404
+    assert metadata.status_code == 404
+
+
+def test_saml_metadata_is_offloaded_bounded_and_releases_capacity(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    entered = threading.Event()
+    release = threading.Event()
+    worker_threads = []
+
+    async def known_application(_application):
+        return None
+
+    def slow_metadata(_settings):
+        worker_threads.append(threading.get_ident())
+        entered.set()
+        assert release.wait(1.0)
+        return "<EntityDescriptor/>"
+
+    def request():
+        return Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "scheme": "https",
+                "server": ("service.example.com", 443),
+                "client": ("127.0.0.1", 1234),
+                "path": "/demoapp/auth/saml/metadata",
+                "query_string": b"",
+                "headers": [(b"host", b"service.example.com")],
+            }
+        )
+
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_IDP_ENTITY_ID", "https://idp.test")
+    monkeypatch.setattr(backend_app, "SAML_IDP_SSO_URL", "https://idp.test/sso")
+    monkeypatch.setattr(backend_app, "SAML_IDP_X509_CERT", "test-certificate")
+    monkeypatch.setattr(
+        backend_app, "_require_auth_application", known_application
+    )
+    monkeypatch.setattr(backend_app, "_generate_saml_metadata", slow_metadata)
+    monkeypatch.setattr(
+        backend_app,
+        "SAML_PUBLIC_GATE",
+        backend_app.AsyncAdmissionGate(1, 0, 0.05),
+    )
+
+    async def exercise():
+        event_loop_thread = threading.get_ident()
+        first = asyncio.create_task(
+            backend_app._saml_metadata(request(), "demoapp")
+        )
+        while not entered.is_set():
+            await asyncio.sleep(0)
+        with pytest.raises(HTTPException) as rejected:
+            await backend_app._saml_metadata(request(), "demoapp")
+        assert rejected.value.status_code == 503
+        release.set()
+        response = await first
+        return event_loop_thread, response
+
+    event_loop_thread, response = asyncio.run(exercise())
+    assert response.body == b"<EntityDescriptor/>"
+    assert len(worker_threads) == 1
+    assert worker_threads[0] != event_loop_thread
+
+
+def test_saml_public_routes_share_a_per_peer_rate_limit(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    async def known_application(_application):
+        return None
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "scheme": "https",
+            "server": ("service.example.com", 443),
+            "client": ("192.0.2.10", 1234),
+            "path": "/demoapp/auth/saml/login",
+            "query_string": b"",
+            "headers": [(b"host", b"service.example.com")],
+        }
+    )
+    monkeypatch.setattr(
+        backend_app, "_require_auth_application", known_application
+    )
+    monkeypatch.setattr(
+        backend_app,
+        "SAML_PUBLIC_RATE_LIMITER",
+        backend_app.SlidingWindowRateLimiter(1, 60),
+    )
+
+    async def exercise():
+        await backend_app._admit_saml_public_request(request, "demoapp")
+        with pytest.raises(HTTPException) as rejected:
+            await backend_app._admit_saml_public_request(request, "demoapp")
+        return rejected.value
+
+    rejection = asyncio.run(exercise())
+    assert rejection.status_code == 429
+    assert rejection.headers["Retry-After"]
+
+
+def test_saml_login_toolkit_work_runs_off_the_event_loop(
+    fresh_client, monkeypatch
+):
+    import pytincture.backend.app as backend_app
+
+    event_loop_threads = []
+    worker_threads = []
+    original_request_data = backend_app._build_saml_request_data
+
+    def tracked_request_data(request, post_data=None):
+        event_loop_threads.append(threading.get_ident())
+        return original_request_data(request, post_data=post_data)
+
+    def login_redirect(_request_data, _settings, _transaction_id):
+        worker_threads.append(threading.get_ident())
+        return "https://idp.test/sso?request=ready", "request-id"
+
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_IDP_ENTITY_ID", "https://idp.test")
+    monkeypatch.setattr(backend_app, "SAML_IDP_SSO_URL", "https://idp.test/sso")
+    monkeypatch.setattr(backend_app, "SAML_IDP_X509_CERT", "test-certificate")
+    monkeypatch.setattr(
+        backend_app, "_build_saml_request_data", tracked_request_data
+    )
+    monkeypatch.setattr(
+        backend_app, "_build_saml_login_redirect", login_redirect
+    )
+
+    response = fresh_client.get(
+        "/demoapp/auth/saml/login",
+        follow_redirects=False,
+    )
+    assert response.status_code == 307
+    assert response.headers["location"] == "https://idp.test/sso?request=ready"
+    assert len(event_loop_threads) == 1
+    assert len(worker_threads) == 1
+    assert worker_threads[0] != event_loop_threads[0]
+
+
+def test_saml_metadata_cache_is_bounded_and_settings_fingerprinted(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    calls = []
+
+    async def known_application(_application):
+        return None
+
+    def generated_metadata(settings):
+        entity_id = settings["sp"]["entityId"]
+        calls.append(entity_id)
+        return f"<EntityDescriptor entityID=\"{entity_id}\"/>"
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "scheme": "https",
+            "server": ("service.example.com", 443),
+            "client": ("127.0.0.1", 1234),
+            "path": "/demoapp/auth/saml/metadata",
+            "query_string": b"",
+            "headers": [(b"host", b"service.example.com")],
+        }
+    )
+    monkeypatch.setattr(backend_app, "ENABLE_SAML_AUTH", True)
+    monkeypatch.setattr(backend_app, "SAML_IDP_ENTITY_ID", "https://idp.test")
+    monkeypatch.setattr(backend_app, "SAML_IDP_SSO_URL", "https://idp.test/sso")
+    monkeypatch.setattr(backend_app, "SAML_IDP_X509_CERT", "test-certificate")
+    monkeypatch.setattr(
+        backend_app, "_require_auth_application", known_application
+    )
+    monkeypatch.setattr(
+        backend_app, "_generate_saml_metadata", generated_metadata
+    )
+    monkeypatch.setattr(backend_app, "SAML_METADATA_CACHE_ENTRIES", 1)
+
+    async def exercise():
+        first = await backend_app._saml_metadata(request, "demoapp")
+        cached = await backend_app._saml_metadata(request, "demoapp")
+        backend_app.SAML_SP_ENTITY_ID = "https://changed.test/metadata"
+        changed = await backend_app._saml_metadata(request, "demoapp")
+        return first, cached, changed
+
+    first, cached, changed = asyncio.run(exercise())
+    assert first.body == cached.body
+    assert first.body != changed.body
+    assert calls == [
+        "https://service.example.com/demoapp/auth/saml/metadata",
+        "https://changed.test/metadata",
+    ]
+    assert len(backend_app._SAML_METADATA_CACHE) == 1

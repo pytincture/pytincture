@@ -189,6 +189,13 @@ The contract test checks every row in this table against the dataclass model.
 | `saml_validation_max_queue` | `SAML_VALIDATION_MAX_QUEUE` | Maximum queued SAML validations per worker. |
 | `saml_validation_queue_timeout_seconds` | `SAML_VALIDATION_QUEUE_TIMEOUT_SECONDS` | Maximum SAML validation admission wait. |
 | `saml_validation_timeout_seconds` | `SAML_VALIDATION_TIMEOUT_SECONDS` | Maximum wait for one SAML validation stage. |
+| `saml_public_rate_limit_attempts` | `SAML_PUBLIC_RATE_LIMIT_ATTEMPTS` | Maximum SAML login and metadata requests per peer in one window. |
+| `saml_public_rate_limit_window_seconds` | `SAML_PUBLIC_RATE_LIMIT_WINDOW_SECONDS` | SAML login and metadata rate-limit window in seconds. |
+| `saml_public_max_concurrency` | `SAML_PUBLIC_MAX_CONCURRENCY` | Concurrent SAML login and metadata toolkit operations per worker. |
+| `saml_public_max_queue` | `SAML_PUBLIC_MAX_QUEUE` | Maximum queued SAML login and metadata toolkit operations per worker. |
+| `saml_public_queue_timeout_seconds` | `SAML_PUBLIC_QUEUE_TIMEOUT_SECONDS` | Maximum SAML login and metadata toolkit admission wait. |
+| `saml_public_timeout_seconds` | `SAML_PUBLIC_TIMEOUT_SECONDS` | Maximum wait for one SAML login or metadata toolkit operation. |
+| `saml_metadata_cache_entries` | `SAML_METADATA_CACHE_ENTRIES` | Bounded per-worker SAML metadata fingerprints retained. |
 | `session_secret` | `SAML_SECRET_KEY` | Session signing secret. |
 | `previous_session_secrets` | `AUTH_SESSION_PREVIOUS_SECRET_KEYS` | Previous signing keys accepted during rotation. |
 | `session_max_age_seconds` | `AUTH_SESSION_MAX_AGE_SECONDS` | Session idle lifetime. |

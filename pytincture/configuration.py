@@ -380,6 +380,41 @@ class PytinctureConfig:
         "SAML_VALIDATION_TIMEOUT_SECONDS",
         "Maximum wait for one SAML validation stage.",
     )
+    saml_public_rate_limit_attempts: int = _setting(
+        120,
+        "SAML_PUBLIC_RATE_LIMIT_ATTEMPTS",
+        "Maximum SAML login and metadata requests per peer in one window.",
+    )
+    saml_public_rate_limit_window_seconds: int = _setting(
+        60,
+        "SAML_PUBLIC_RATE_LIMIT_WINDOW_SECONDS",
+        "SAML login and metadata rate-limit window in seconds.",
+    )
+    saml_public_max_concurrency: int = _setting(
+        4,
+        "SAML_PUBLIC_MAX_CONCURRENCY",
+        "Concurrent SAML login and metadata toolkit operations per worker.",
+    )
+    saml_public_max_queue: int = _setting(
+        16,
+        "SAML_PUBLIC_MAX_QUEUE",
+        "Maximum queued SAML login and metadata toolkit operations per worker.",
+    )
+    saml_public_queue_timeout_seconds: float = _setting(
+        1.0,
+        "SAML_PUBLIC_QUEUE_TIMEOUT_SECONDS",
+        "Maximum SAML login and metadata toolkit admission wait.",
+    )
+    saml_public_timeout_seconds: float = _setting(
+        10.0,
+        "SAML_PUBLIC_TIMEOUT_SECONDS",
+        "Maximum wait for one SAML login or metadata toolkit operation.",
+    )
+    saml_metadata_cache_entries: int = _setting(
+        32,
+        "SAML_METADATA_CACHE_ENTRIES",
+        "Bounded per-worker SAML metadata fingerprints retained.",
+    )
     session_secret: str = _setting(
         "", "SAML_SECRET_KEY", "Session signing secret.", repr=False
     )
@@ -1043,6 +1078,11 @@ class PytinctureConfig:
             self.saml_acs_rate_limit_window_seconds,
         ) <= 0:
             raise ValueError("SAML ACS rate-limit values must be greater than zero")
+        if min(
+            self.saml_public_rate_limit_attempts,
+            self.saml_public_rate_limit_window_seconds,
+        ) <= 0:
+            raise ValueError("SAML public rate-limit values must be greater than zero")
         positive_limits = (
             self.session_max_claim_count,
             self.session_max_identity_bytes,
@@ -1128,6 +1168,10 @@ class PytinctureConfig:
             self.saml_validation_max_concurrency,
             self.saml_validation_queue_timeout_seconds,
             self.saml_validation_timeout_seconds,
+            self.saml_public_max_concurrency,
+            self.saml_public_queue_timeout_seconds,
+            self.saml_public_timeout_seconds,
+            self.saml_metadata_cache_entries,
             self.remote_store_timeout_seconds,
             self.remote_store_failure_threshold,
             self.remote_store_cooldown_seconds,
@@ -1140,6 +1184,8 @@ class PytinctureConfig:
         floating_limits = (
             self.saml_validation_queue_timeout_seconds,
             self.saml_validation_timeout_seconds,
+            self.saml_public_queue_timeout_seconds,
+            self.saml_public_timeout_seconds,
             self.auth_request_ingress_queue_timeout_seconds,
             self.auth_request_ingress_total_timeout_seconds,
             self.auth_request_ingress_idle_timeout_seconds,
@@ -1219,6 +1265,8 @@ class PytinctureConfig:
             raise ValueError("public_widget_wheel_max_queue cannot be negative")
         if self.saml_validation_max_queue < 0:
             raise ValueError("saml_validation_max_queue cannot be negative")
+        if self.saml_public_max_queue < 0:
+            raise ValueError("saml_public_max_queue cannot be negative")
         if self.remote_store_max_queue < 0:
             raise ValueError("remote_store_max_queue cannot be negative")
         if self.mcp_jwt_clock_skew_seconds < 0:
@@ -1543,7 +1591,9 @@ class PytinctureConfig:
             "bff_replay_local_max_tokens_per_session", "saml_response_max_bytes",
             "saml_acs_rate_limit_attempts", "saml_acs_rate_limit_window_seconds",
             "saml_transaction_ttl_seconds", "saml_validation_max_concurrency",
-            "saml_validation_max_queue",
+            "saml_validation_max_queue", "saml_public_rate_limit_attempts",
+            "saml_public_rate_limit_window_seconds", "saml_public_max_concurrency",
+            "saml_public_max_queue", "saml_metadata_cache_entries",
             "login_rate_limit_attempts", "login_rate_limit_window_seconds",
             "login_email_max_chars", "login_password_max_chars",
             "login_csrf_ttl_seconds",
@@ -1599,7 +1649,8 @@ class PytinctureConfig:
             "remote_store_timeout_seconds",
             "remote_store_cooldown_seconds", "remote_store_queue_timeout_seconds",
             "readiness_cache_ttl_seconds", "saml_validation_queue_timeout_seconds",
-            "saml_validation_timeout_seconds", "appcode_build_queue_timeout_seconds",
+            "saml_validation_timeout_seconds", "saml_public_queue_timeout_seconds",
+            "saml_public_timeout_seconds", "appcode_build_queue_timeout_seconds",
             "appcode_download_queue_timeout_seconds",
             "appcode_download_max_seconds",
             "appcode_download_write_timeout_seconds",
