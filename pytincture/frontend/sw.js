@@ -1,5 +1,7 @@
 const WORKER_URL = new URL(self.location.href);
-const REQUEST_UUID = WORKER_URL.searchParams.get("uuid") || "unversioned";
+const REQUEST_UUID = (WORKER_URL.searchParams.get("uuid") || "unversioned")
+    .replace(/[^A-Za-z0-9_.-]/g, "_")
+    .slice(0, 64);
 const APPLICATION = (WORKER_URL.searchParams.get("application") || "standalone")
     .replace(/[^A-Za-z0-9_]/g, "_")
     .slice(0, 64);
@@ -38,12 +40,34 @@ function isManifestRequest(request, url) {
 }
 
 function canonicalAssetRequest(url) {
-    const canonicalUrl = new URL(url.href);
+    const canonicalUrl = new URL(url.pathname, WORKER_URL.origin);
     canonicalUrl.searchParams.set("uuid", REQUEST_UUID);
     return new Request(canonicalUrl.href, {
         method: "GET",
         credentials: "omit",
     });
+}
+
+const OWNED_ASSET_URLS = new Set(
+    [...FRAMEWORK_ASSET_PATHS].map(relativePath => canonicalAssetRequest(
+        new URL(relativePath, WORKER_URL),
+    ).url),
+);
+
+async function pruneOwnedCaches() {
+    const cacheNames = await caches.keys();
+    await Promise.all(
+        cacheNames
+            .filter(name => name.startsWith(OWNED_CACHE_PREFIX) && name !== CACHE_NAME)
+            .map(name => caches.delete(name)),
+    );
+    const currentCache = await caches.open(CACHE_NAME);
+    const entries = await currentCache.keys();
+    await Promise.all(
+        entries
+            .filter(request => !OWNED_ASSET_URLS.has(request.url))
+            .map(request => currentCache.delete(request)),
+    );
 }
 
 function responseIsPublicImmutable(response) {
@@ -62,7 +86,10 @@ self.addEventListener("install", event => {
 });
 
 self.addEventListener("activate", event => {
-    event.waitUntil(self.clients.claim());
+    event.waitUntil((async () => {
+        await pruneOwnedCaches();
+        await self.clients.claim();
+    })());
 });
 
 async function cacheFirst(request) {

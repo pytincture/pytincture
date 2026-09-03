@@ -1719,6 +1719,7 @@ def test_security_review_dispositions_map_contracts_to_regressions():
         "REVIEW-2026-09-02-SR-06",
         "REVIEW-2026-09-02-SR-07",
         "REVIEW-2026-09-02-SR-08",
+        "REVIEW-2026-09-02-SR-09",
         "SAML-STATELESS-REPLAY-BOUNDARY",
     }
     assert dispositions["F-01"]["controls"]["class_level_export_preserved"] is True
@@ -1855,6 +1856,16 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert browser_cancel_controls["synchronous_api_preserved"] is True
     assert browser_cancel_controls["streaming_yield_preserved"] is True
     assert browser_cancel_controls["redis_required"] is False
+    service_worker_controls = dispositions["REVIEW-2026-09-02-SR-09"]["controls"]
+    assert service_worker_controls["cache_key_query_allowlist_exact"] is True
+    assert service_worker_controls["instance_uuid_preserved"] is True
+    assert service_worker_controls["unrelated_query_parameters_preserved"] is False
+    assert service_worker_controls["entries_bounded_by_manifest"] is True
+    assert service_worker_controls["polluted_current_entries_pruned"] is True
+    assert service_worker_controls["other_application_caches_deleted"] is False
+    assert service_worker_controls["foreign_caches_deleted"] is False
+    assert service_worker_controls["clean_navigation_url_preserved"] is True
+    assert service_worker_controls["redis_required"] is False
     admission_controls = dispositions["REVIEW-2026-08-31-H-05"]["controls"]
     assert admission_controls["configured_applications_fail_closed"] is True
     assert admission_controls["checked_before_session_issuance"] is True

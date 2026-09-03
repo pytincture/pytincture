@@ -142,11 +142,16 @@
     {
       "id": "SR-09",
       "severity": "medium",
-      "status": "tracked",
+      "status": "remediated",
       "issue": "https://github.com/pytincture/pytincture/issues/326",
-      "disposition": "Canonicalize service-worker cache keys to the expected asset version identity and bound/prune cache entries.",
+      "disposition": "Every approved framework request maps to one canonical pathname-plus-instance-UUID cache key. Activation deletes unexpected current-cache entries and stale caches only within the same application-owned namespace.",
       "potential_user_breakage": true,
-      "compatibility_note": "Unknown cache-busting query parameters no longer create distinct stored copies; the supported instance UUID/version key remains."
+      "compatibility_note": "Unknown cache-busting query parameters no longer create distinct stored copies; the supported instance UUID/version key and clean browser address bar remain.",
+      "regression_tests": [
+        "pytincture/frontend/tests/service-worker.test.mjs::service worker canonicalizes asset keys and prunes only its application namespace",
+        "pytincture/frontend/tests/lifecycle.test.mjs::framework caches are namespaced by application, release, and instance uuid",
+        "tests/test_app.py::test_service_worker_only_caches_manifested_framework_assets"
+      ]
     },
     {
       "id": "SR-10",

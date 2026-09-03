@@ -4225,9 +4225,13 @@ def test_service_worker_only_caches_manifested_framework_assets(fresh_client):
     assert '"vendor/materialdesignicons/materialdesignicons.css"' in response.text
     assert '"pyodide/0.29.3/full/pyodide.js"' in response.text
     assert 'canonicalUrl.searchParams.set("uuid", REQUEST_UUID)' in response.text
+    assert "new URL(url.pathname, WORKER_URL.origin)" in response.text
+    assert "await pruneOwnedCaches()" in response.text
+    assert "name.startsWith(OWNED_CACHE_PREFIX)" in response.text
+    assert "!OWNED_ASSET_URLS.has(request.url)" in response.text
     assert 'url.pathname.includes("/appcode/")' not in response.text
     assert "CACHEABLE_EXTENSIONS" not in response.text
-    assert "caches.delete" not in response.text
+    assert "caches.delete(name)" in response.text
     assert 'credentials: "omit"' in response.text
 
 

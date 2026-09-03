@@ -72,7 +72,10 @@ public.
 Micropip/package-index URLs are not modified with the backend cache UUID.
 The optional service worker uses a per-application scope and an exact immutable
 framework-asset manifest. It does not intercept appcode, BFF/auth calls,
-cross-origin requests, or unrelated same-origin resources.
+cross-origin requests, or unrelated same-origin resources. Cache keys contain
+only the approved asset pathname and service-instance UUID; arbitrary query
+parameters cannot create duplicate entries. Worker activation prunes stale or
+unexpected entries only inside that application's Pytincture cache namespace.
 
 ## Production
 
