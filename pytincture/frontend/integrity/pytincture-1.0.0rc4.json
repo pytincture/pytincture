@@ -18,8 +18,8 @@
     },
     {
       "path": "sw.js",
-      "sha256": "1a4fc607cff101ea1fa69bc8899e49f3ea4419e12e2d693aff55ff1ed5467aed",
-      "sri": "sha384-WcceQQqcrOE5hga8TVTSuLrO/m8guxXuRNmWTP2t4gyPfXYNmbAdHd7aHf4usPqH"
+      "sha256": "7400b09d6650838f8a568539c170746ce47b4d25fc5b8700cbba0b5530d0ef41",
+      "sri": "sha384-VLgPxDIkQGtmhyGga9Hko+w3hSWHitAVH9DidA2m24Q0ysIgxXT6Eo/vC7dO727c"
     },
     {
       "path": "dist/pytincture.js",

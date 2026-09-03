@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+- Canonicalize service-worker cache entries to the approved asset pathname and
+  instance UUID, dropping unrelated query parameters. Activation prunes
+  polluted entries and stale caches only for the same Pytincture application;
+  address-bar behavior and required `?uuid` cache busting are unchanged.
 - Abort asynchronous browser BFF fetches when their Python task times out or
   is cancelled, and cancel streaming readers on normal completion, timeout,
   cancellation, or explicit iterator close. Existing synchronous, async,

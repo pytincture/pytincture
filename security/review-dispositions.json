@@ -1363,6 +1363,36 @@
         "tests/test_dataclass.py::test_generated_stream_keeps_moving_and_cleans_up_on_completion_and_early_exit",
         "tests/test_backend_modules.py::test_async_stream_disconnect_closes_source"
       ]
+    },
+    {
+      "id": "REVIEW-2026-09-02-SR-09",
+      "status": "remediated",
+      "title": "Service-worker cache keys are canonical and application-bounded",
+      "intentional_contract": "Every backend frontend asset keeps its instance UUID, cache namespaces remain isolated by application/release/instance, page navigation URLs remain clean, and non-Pytincture caches are never deleted.",
+      "security_boundary": "The worker accepts only exact manifest paths and the active instance UUID, then reconstructs the cache key from origin, pathname, and that UUID alone. This creates at most one key per manifest asset. Activation removes noncanonical entries in the current cache and stale cache names only when they begin with the exact encoded application-owned prefix.",
+      "controls": {
+        "cache_key_query_allowlist_exact": true,
+        "instance_uuid_preserved": true,
+        "unrelated_query_parameters_preserved": false,
+        "entries_bounded_by_manifest": true,
+        "polluted_current_entries_pruned": true,
+        "stale_application_caches_pruned": true,
+        "other_application_caches_deleted": false,
+        "foreign_caches_deleted": false,
+        "clean_navigation_url_preserved": true,
+        "redis_required": false,
+        "server_session_state_added": false
+      },
+      "implementation": [
+        "pytincture/frontend/sw.js",
+        "docs/service-mode.md",
+        "SECURITY.md"
+      ],
+      "regression_tests": [
+        "pytincture/frontend/tests/service-worker.test.mjs::service worker canonicalizes asset keys and prunes only its application namespace",
+        "pytincture/frontend/tests/lifecycle.test.mjs::framework caches are namespaced by application, release, and instance uuid",
+        "tests/test_app.py::test_service_worker_only_caches_manifested_framework_assets"
+      ]
     }
   ]
 }
