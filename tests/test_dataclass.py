@@ -662,6 +662,70 @@ def test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_fl
         assert refill_calls == 1
         assert set(tokens) == {"one", "two"}
 
+        service._pytincture_replay_pool.clear()
+        await asyncio.sleep(0)
+        refill_calls = 0
+
+        async def refill_in_batches():
+            nonlocal refill_calls
+            refill_calls += 1
+            batch = refill_calls
+            await asyncio.sleep(0.01)
+            service._pytincture_replay_pool.extend(
+                [f"{batch}-one", f"{batch}-two"]
+            )
+
+        service._request_pytincture_state = refill_in_batches
+        tokens = await asyncio.gather(
+            *(service._take_pytincture_state() for _ in range(5))
+        )
+        assert refill_calls == 3
+        assert len(tokens) == len(set(tokens)) == 5
+        assert len(service._pytincture_replay_pool) == 1
+
+        service._pytincture_replay_pool.clear()
+        await asyncio.sleep(0)
+        refill_calls = 0
+        refill_started = asyncio.Event()
+        release_refill = asyncio.Event()
+
+        async def cancellable_shared_refill():
+            nonlocal refill_calls
+            refill_calls += 1
+            refill_started.set()
+            await release_refill.wait()
+            service._pytincture_replay_pool.append("shared-after-cancel")
+
+        service._request_pytincture_state = cancellable_shared_refill
+        cancelled_waiter = asyncio.create_task(service._take_pytincture_state())
+        await refill_started.wait()
+        cancelled_waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled_waiter
+        surviving_waiter = asyncio.create_task(service._take_pytincture_state())
+        await asyncio.sleep(0)
+        release_refill.set()
+        assert await surviving_waiter == "shared-after-cancel"
+        assert refill_calls == 1
+
+        service._pytincture_replay_pool.clear()
+        await asyncio.sleep(0)
+        refill_calls = 0
+
+        async def retry_failed_refill():
+            nonlocal refill_calls
+            refill_calls += 1
+            if refill_calls == 1:
+                raise RuntimeError("temporary refill failure")
+            service._pytincture_replay_pool.append("recovered")
+
+        service._request_pytincture_state = retry_failed_refill
+        with pytest.raises(RuntimeError, match="temporary refill failure"):
+            await service._take_pytincture_state()
+        await asyncio.sleep(0)
+        assert await service._take_pytincture_state() == "recovered"
+        assert refill_calls == 2
+
         service._pytincture_replay_pool[:] = ["mutation-token"]
 
         async def failed_prefetch():
