@@ -239,7 +239,7 @@
       ],
       "regression_tests": [
         "tests/test_contracts.py::test_vendored_pyodide_sbom_and_checksums_validate",
-        "tests/test_release_gates.py::test_python_publish_requires_oidc_protected_attested_release_provenance"
+        "tests/test_release_gates.py::test_python_publish_requires_token_protected_attested_release_provenance"
       ]
     },
     {

@@ -1843,7 +1843,13 @@ def test_security_review_dispositions_map_contracts_to_regressions():
     assert logging_controls["redis_required"] is False
     assert dispositions["FOLLOWUP-F-01"]["controls"][
         "long_lived_pypi_credential_used"
+    ] is True
+    assert dispositions["FOLLOWUP-F-01"]["controls"][
+        "trusted_publishing_oidc_required"
     ] is False
+    assert dispositions["FOLLOWUP-F-01"]["controls"][
+        "project_scoped_api_token_required"
+    ] is True
     assert dispositions["FOLLOWUP-F-03"]["controls"]["redis_required"] is False
     assert dispositions["FOLLOWUP-F-04"]["controls"][
         "pre_transmission_redaction"
