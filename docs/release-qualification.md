@@ -12,10 +12,11 @@ latest qualified candidate. Its exact retained wheel, source distribution, and
 npm tarball are reproducible, attested, integrity-recorded, and covered by the
 complete release acceptance matrix. It includes the 12 remediations from the
 2026-09-01 external review, with scan-facing controls and compatibility effects
-recorded in `security/review-2026-09-01.json`. The protected PyPI and npm OIDC
-publishers independently verified the rc4 bytes and are waiting for non-self
-environment approval; registry publication is a distribution task and does
-not invalidate candidate evidence or reset the approved observation track.
+recorded in `security/review-2026-09-01.json`. The protected PyPI and npm
+publishers independently verify the rc4 bytes before registry publication;
+registry publication is a distribution task and does not invalidate candidate
+evidence or reset the approved observation track. PyPI deliberately uses a
+project-scoped API token, while npm uses OIDC.
 
 The release manager approved the successful `pytincture_example` run, so the
 formal 30-day observation period began at `2026-08-29T02:08:06Z` and cannot
@@ -96,10 +97,10 @@ Published and retained rc3 evidence:
 - protected npm publisher:
   <https://github.com/pytincture/pytincture/actions/runs/33463409587>.
 
-The protected publisher jobs are intentionally waiting for required non-self
-environment approval. Their pre-publication stages verified the trusted
-release run, exact retained hashes, package identity, attestation, and version
-immutability. No environment protection was bypassed.
+The protected publisher jobs require environment approval. Their
+pre-publication stages verify the trusted release run, exact retained hashes,
+package identity, attestation, and version immutability before any registry
+credential is available.
 
 Published and retained rc4 evidence:
 

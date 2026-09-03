@@ -123,15 +123,16 @@
     },
     {
       "id": "FOLLOWUP-F-01",
-      "status": "repository_controls_remediated_external_activation_required",
-      "title": "PyPI trusted publication provenance",
-      "security_boundary": "Python publication has no repository secret or arbitrary-run input. It accepts only exact attested wheel and sdist bytes from successful release CI for a published tag whose commit is reachable from the protected default branch, then crosses a protected pypi environment into PyPI OIDC.",
-      "external_activation": "Before the next release, the PyPI project owner must register pytincture/pytincture, workflow pypi-publish.yml, environment pypi as a trusted publisher. The repository workflow fails closed until that external registration exists.",
+      "status": "accepted_risk_with_repository_controls",
+      "title": "PyPI token publication provenance",
+      "security_boundary": "At the repository owner's direction, Python publication uses a project-scoped PyPI API token rather than OIDC. The token is available only inside the protected pypi environment after the workflow accepts exact attested wheel and sdist bytes from successful release CI for a published tag whose commit is reachable from the protected default branch.",
+      "external_activation": "The repository owner must configure and rotate the project-scoped PYPI_PASSWORD Actions secret. This deliberately accepts the persistence risk of a long-lived registry token while retaining release provenance and protected-environment controls.",
       "controls": {
-        "long_lived_pypi_credential_used": false,
-        "trusted_publishing_oidc_required": true,
+        "long_lived_pypi_credential_used": true,
+        "trusted_publishing_oidc_required": false,
+        "project_scoped_api_token_required": true,
         "protected_environment_required": true,
-        "non_self_review_required": true,
+        "owner_approval_required": true,
         "published_release_required": true,
         "protected_default_branch_ancestry_required": true,
         "exact_successful_release_run_required": true,
@@ -147,7 +148,7 @@
       ],
       "regression_tests": [
         "tests/test_python_release_provenance.py::test_python_artifacts_require_exact_identity_version_and_hashes",
-        "tests/test_release_gates.py::test_python_publish_requires_oidc_protected_attested_release_provenance",
+        "tests/test_release_gates.py::test_python_publish_requires_token_protected_attested_release_provenance",
         "tests/test_release_gates.py::test_release_publishers_require_tags_reachable_from_default_branch"
       ]
     },
@@ -238,7 +239,7 @@
       ],
       "regression_tests": [
         "tests/test_contracts.py::test_vendored_pyodide_sbom_and_checksums_validate",
-        "tests/test_release_gates.py::test_python_publish_requires_oidc_protected_attested_release_provenance"
+        "tests/test_release_gates.py::test_python_publish_requires_token_protected_attested_release_provenance"
       ]
     },
     {

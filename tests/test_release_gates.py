@@ -85,14 +85,13 @@ def test_protected_workflow_is_the_only_npm_publish_path():
     assert "npm pack --dry-run" in frontend_readme
 
 
-def test_python_publish_requires_oidc_protected_attested_release_provenance():
+def test_python_publish_requires_token_protected_attested_release_provenance():
     release_workflow = (
         ROOT / ".github" / "workflows" / "pypi-publish.yml"
     ).read_text()
     ci_workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
 
     assert "environment: pypi" in release_workflow
-    assert "id-token: write" in release_workflow
     assert "run-id:" in release_workflow
     assert "release_tag:" in release_workflow
     assert "gh attestation verify" in release_workflow
@@ -104,7 +103,10 @@ def test_python_publish_requires_oidc_protected_attested_release_provenance():
         "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33"
         in release_workflow
     )
-    assert "PYPI_PASSWORD" not in release_workflow
+    assert "password: ${{ secrets.PYPI_PASSWORD }}" in release_workflow
+    assert "user: __token__" in release_workflow
+    assert "attestations: false" in release_workflow
+    assert "id-token: write" not in release_workflow
     assert "TWINE_PASSWORD" not in release_workflow
     assert "TWINE_USERNAME" not in release_workflow
     assert "python-release-artifacts" in ci_workflow
