@@ -5849,8 +5849,9 @@ def test_main_app_frontend_files_share_one_instance_uuid(fresh_client, monkeypat
         r'(?:[?&]uuid=|requestUuid:\s*")([a-f0-9]{32})',
         first_response.text + second_response.text,
     )
-    assert len(uuid_values) >= 12
+    assert len(uuid_values) >= 8
     assert set(uuid_values) == {backend_app.FRONTEND_INSTANCE_UUID}
+    assert 'rel="preload"' not in first_response.text
     assert "***REQUEST_UUID***" not in first_response.text
     assert "***REQUEST_UUID***" not in second_response.text
     assert "enableBackendLogging: false" in first_response.text
