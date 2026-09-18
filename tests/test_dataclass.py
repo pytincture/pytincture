@@ -1421,3 +1421,28 @@ def test_get_parsed_output_returns_stub(tmp_path):
     assert "class PlainService:" in parsed_output2
     # It should not contain any fetch method.
     assert "async def fetch(" not in parsed_output2
+
+
+def test_external_api_decorator_and_include_session_methods_in_docs_are_static_and_provenance_checked():
+    from pytincture.dataclass import get_bff_manifest
+    source = '''from pytincture.dataclass import backend_for_frontend as bff, bff_external as external
+raise RuntimeError("must never execute")
+@bff(include_session_methods_in_docs=True)
+class Catalog:
+    @external
+    def search(self): pass
+    def internal(self): pass
+'''
+    manifest = get_bff_manifest('catalog.py', source=source)
+    assert manifest['Catalog', 'search']['external'] is True
+    assert manifest['Catalog', 'internal']['external'] is False
+    assert all(operation['include_session_methods_in_docs'] for operation in manifest.values())
+    hidden = get_bff_manifest('catalog.py', source=source.replace('@bff(include_session_methods_in_docs=True)', '@bff'))
+    assert not any(operation['include_session_methods_in_docs'] for operation in hidden.values())
+    spoofed = source.replace('raise RuntimeError("must never execute")', 'external = lambda f: f')
+    assert get_bff_manifest('catalog.py', source=spoofed)['Catalog', 'search']['external'] is False
+    for invalid in ('include_session_methods_in_docs="true"', 'include_session_methods_in_docs=execute()', '**options', 'unrecognized=True'):
+        with pytest.raises(ValueError):
+            get_bff_manifest('catalog.py', source=source.replace('include_session_methods_in_docs=True', invalid))
+    with pytest.raises(ValueError, match='does not accept options'):
+        get_bff_manifest('catalog.py', source=source.replace('@external\n', '@external(anonymous=True)\n'))

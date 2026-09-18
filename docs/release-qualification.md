@@ -7,6 +7,14 @@ every gate below has durable evidence.
 
 ## Current decision: NO-GO pending observation and edge evidence
 
+`1.0.0rc7` is in preparation with module-level BFF documentation and optional
+application API credentials. Its release, artifact hashes, and complete CI
+qualification are pending. The new opt-in client registry introduces shared
+local state for machine credentials; existing browser sessions remain
+stateless by default. Release review must assess the observation scope for
+these new authentication features; this preparation does not assert approval
+or reset the recorded observation dates.
+
 Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc6`, and rc4
 through rc6 are published on PyPI. Rc6 is the latest recorded candidate. Its
 self-hosted icon asset, browser, BFF, authentication, streaming, cache, and

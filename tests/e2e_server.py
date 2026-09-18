@@ -1,10 +1,13 @@
 """Authenticated Pytincture service used by Playwright end-to-end tests."""
 
 from pathlib import Path
+import json
+import os
 
 import uvicorn
 
 from pytincture import PytinctureConfig, create_app
+from pytincture.api_clients import create_client
 
 
 ROOT = Path(__file__).resolve().parent / "e2e_apps"
@@ -17,10 +20,21 @@ if not WIDGET_WHEEL.is_file():
         f"and copy the wheel to {WIDGET_WHEEL.name}"
     )
 
+PRIVATE = ROOT.parent / '.e2e-private'
+PRIVATE.mkdir(mode=0o700, exist_ok=True)
+REGISTRY = PRIVATE / 'clients.sqlite3'
+client_credentials = create_client(str(REGISTRY), 'e2e_app', [
+    {'module': 'e2e_data', 'class': 'E2EData', 'methods': ['sync_call']},
+])
+with os.fdopen(os.open(PRIVATE / 'client.json', os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as handle:
+    json.dump(client_credentials, handle)
+
 config = PytinctureConfig(
     modules_path=str(ROOT),
     default_application="e2e_app",
     enable_user_login=True,
+    enable_bff_api_tokens=True,
+    bff_api_client_registry=str(REGISTRY),
     allow_development_auth_origin=True,
     session_secret="pytincture-e2e-session-secret-0123456789abcdef",
     session_https_only=False,

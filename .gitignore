@@ -35,6 +35,7 @@ pytincture/frontend/browser-acceptance-result.json
 pytincture/frontend/saml-acceptance-result.json
 pytincture/frontend/standalone-acceptance-result.json
 tests/e2e-server.log
+tests/.e2e-private/
 tests/federated-saml-server.log
 tests/keycloak-saml.log
 tests/standalone-server.log

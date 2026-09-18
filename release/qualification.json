@@ -698,6 +698,6 @@
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1 through RC6 evidence is recorded and passing, and rc4 through rc6 are published on PyPI. Rc6 completes the self-hosted Material Design Icons asset chain while preserving the approved stateless, Redis-free observation scope, so it does not reset the clock. The final release remains NO-GO until the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS/canonical-origin/trusted-proxy evidence is recorded, remaining protected registry distribution tasks complete, and the release manager makes the final decision."
+    "notes": "RC1 through RC6 evidence is recorded and passing, and rc4 through rc6 are published on PyPI. Rc6 completes the self-hosted Material Design Icons asset chain while preserving the approved stateless, Redis-free observation scope, so it does not reset the clock. The final release remains NO-GO until the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS/canonical-origin/trusted-proxy evidence is recorded, remaining protected registry distribution tasks complete, and the release manager makes the final decision. Rc7 is in preparation with optional application API credentials and module-level Swagger; publication and complete qualification evidence remain pending, and release review must assess the observation scope of the new authentication features."
   }
 }
