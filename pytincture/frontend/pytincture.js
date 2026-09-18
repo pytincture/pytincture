@@ -41,6 +41,8 @@ const CSRF_COOKIE_NAMES = Object.freeze([
 ]);
 
 const DEFAULT_CONFIG = {
+    runtime: "pyodide",
+    runtimeManifestUrl: null,
     application: null,
     entrypoint: null,
     widgetlib: "dhxpyt==0.9.18",
@@ -1463,6 +1465,18 @@ const DEFAULT_RUNTIME_OPERATIONS = Object.freeze({
 });
 
 async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_OPERATIONS) {
+    if (config.runtimeManifestUrl || (config.runtime && config.runtime !== "pyodide")) {
+        const handle = await runLifecycleStage(
+            config, LIFECYCLE_STAGES.ENTRYPOINT_EXECUTION,
+            config.runtimeManifestUrl,
+            async () => {
+                const { runBrowserApplication } = await import("./browser-runtimes.js");
+                return runBrowserApplication(config, message => updateLoadingStatus(loadingOverlay, message));
+            },
+        );
+        emitLifecycleEvent(config, "ready", LIFECYCLE_STAGES.READY, { runtime: handle.engine });
+        return handle;
+    }
     updateLoadingStatus(loadingOverlay, "Checking compatibility…");
     const configReport = await runLifecycleStage(
         config,

@@ -64,6 +64,8 @@
       "pyodideBaseUrl",
       "pyodideScriptIntegrity",
       "requestUuid",
+      "runtime",
+      "runtimeManifestUrl",
       "serviceWorkerScope",
       "serviceWorkerUrl",
       "showLoadingOverlay",

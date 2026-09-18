@@ -226,6 +226,14 @@ class PytinctureConfig:
     default_application: Optional[str] = _setting(
         None, "PYTINCTURE_DEFAULT_APPLICATION", "Optional application for the root redirect."
     )
+    browser_runtime: str = _setting(
+        "pyodide", "PYTINCTURE_BROWSER_RUNTIME",
+        "Default browser engine: pyodide, micropython, or transcrypt; alternatives require an app runtime manifest.",
+    )
+    allow_runtime_selection: bool = _setting(
+        False, "PYTINCTURE_ALLOW_RUNTIME_SELECTION",
+        "Allow the runtime query parameter to choose an engine declared by the application.",
+    )
     favicon_folder: Optional[str] = _setting(
         None, "PYTINCTURE_FAVICON_FOLDER", "Optional favicon file/directory."
     )
@@ -1006,7 +1014,10 @@ class PytinctureConfig:
     environment: Mapping[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self):
+        if not isinstance(self.browser_runtime, str) or self.browser_runtime not in {"pyodide", "micropython", "transcrypt"}:
+            raise ValueError("browser_runtime must be pyodide, micropython, or transcrypt")
         for name in (
+            "allow_runtime_selection",
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
         ):
             if not isinstance(getattr(self, name), bool):
@@ -1629,6 +1640,7 @@ class PytinctureConfig:
         source = dict(os.environ if environ is None else environ)
         values = {}
         boolean_fields = {
+            "allow_runtime_selection",
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
             "require_readonly_modules_path",
             "enable_user_login", "enable_dev_email_login", "enable_google_auth",
