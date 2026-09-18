@@ -168,3 +168,30 @@ def test_literal_validation_accepts_each_exact_option_in_a_mixed_literal(value):
         },
     )
     validate_bff_arguments(BFFArguments((value,), {}), parameters)
+
+
+def test_named_bff_bodies_keep_limits_and_do_not_weaken_legacy_parser():
+    from pytincture.backend.bff_requests import parse_bff_body
+    def named(body, **limits):
+        return parse_bff_body(body.encode(), parameters=(), max_bytes=limits.get('max_bytes', 4096), max_depth=limits.get('max_depth', 8), max_items=limits.get('max_items', 100))
+    assert named('{"page":1}') == BFFArguments((), {'page': 1})
+    assert named('{"args":[],"kwargs":{"page":1}}') == BFFArguments((), {'page': 1})
+    assert named('{}') == BFFArguments((), {})
+    for body in ('{"page":1,"page":2}', '{"page":NaN}', '{"page":1e9999}', '[]', '"{}"'):
+        with pytest.raises(BFFRequestValidationError):
+            named(body)
+    for limits in ({'max_bytes': 1}, {'max_depth': 2}, {'max_items': 2}):
+        with pytest.raises(BFFRequestValidationError):
+            named('{"page":1}', **limits)
+
+
+def test_named_positional_inputs_fill_only_statically_known_defaults():
+    from pytincture.backend.bff_requests import parse_bff_body
+    parameters = (
+        {'name': 'first', 'kind': 'positional_only', 'required': False, 'annotation': 'int', 'default': 1},
+        {'name': 'second', 'kind': 'positional_only', 'required': False, 'annotation': 'int', 'default_supported': False},
+    )
+    kwargs = dict(parameters=parameters, max_bytes=4096, max_depth=8, max_items=100)
+    assert parse_bff_body(b'{"second":2}', **kwargs) == BFFArguments((1, 2), {})
+    assert parse_bff_body(b'{"first":3}', **kwargs) == BFFArguments((3,), {})
+    assert parse_bff_body(b'{}', **kwargs) == BFFArguments((), {})

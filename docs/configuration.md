@@ -218,6 +218,10 @@ The contract test checks every row in this table against the dataclass model.
 | `browser_log_rate_limit_attempts` | `BROWSER_LOG_RATE_LIMIT_ATTEMPTS` | Browser diagnostic requests allowed per peer and window. |
 | `browser_log_rate_limit_window_seconds` | `BROWSER_LOG_RATE_LIMIT_WINDOW_SECONDS` | Browser diagnostic rate-limit window in seconds. |
 | `api_docs_mode` | `PYTINCTURE_API_DOCS_MODE` | API documentation mode: public, authenticated, or disabled. |
+| `api_docs_scope` | `PYTINCTURE_API_DOCS_SCOPE` | Honor class documentation visibility or restrict to external/public methods (all or public). |
+| `enable_bff_api_tokens` | `ENABLE_BFF_API_TOKENS` | Allow signed-in users to issue short-lived application-scoped BFF bearer tokens. |
+| `bff_api_client_registry` | `BFF_API_CLIENT_REGISTRY` | Private SQLite client registry outside modules_path; enables application credentials when BFF API tokens are enabled. |
+| `require_public_bff_token` | `REQUIRE_PUBLIC_BFF_TOKEN` | Require a BFF bearer token or authenticated browser session for public BFF methods. |
 | `diagnostic_details_mode` | `PYTINCTURE_DIAGNOSTIC_DETAILS_MODE` | Health/readiness detail mode: public, minimal, or operator. |
 | `diagnostic_operator_token` | `PYTINCTURE_DIAGNOSTIC_OPERATOR_TOKEN` | Bearer token for operator-only health/readiness details. |
 | `uvicorn_access_log` | `PYTINCTURE_UVICORN_ACCESS_LOG` | Enable sanitized path-only Uvicorn access logs. |
@@ -351,8 +355,8 @@ come from the deployment secret manager rather than committed files.
 | `AUTH_USER_AUTHENTICATOR` | Dotted sync/async local credential verifier. |
 | `AUTH_USER_CLAIMS` | Verified local-user profile claims. |
 | `DEFAULT_APP_USERS` | Compatibility fallback profile source after password verification; prefer `AUTH_USER_CLAIMS`. |
-| `BFF_DOCS_PATH` | Route path for generated BFF API documentation. The interactive UI uses exact, hash-locked Swagger assets packaged in the Python wheel; it makes no CDN request. |
-| `BFF_DOCS_TITLE` | Title for generated BFF API documentation. |
+| `BFF_DOCS_PATH` | Module documentation suffix, default `/bff-docs`: `/{application}/{module}/bff-docs` and the adjacent `/openapi.json`. Module paths are extensionless and may include folders. Only that module's visible methods appear; Swagger uses the module's class-call base URL and short class/method paths. Aggregate docs URLs return 404. Packaged Swagger assets require no CDN. |
+| `BFF_DOCS_TITLE` | Optional complete documentation title override. By default application docs use the entrypoint `APP_TITLE` / `APP_CONFIG` title plus `API`, falling back to the application name. |
 | `BFF_POLICY_HOOK_PATH` | Dotted sync/async BFF authorization policy callable. |
 | `LOGIN_HELP_TEXT` | Escaped plain-text login guidance. |
 | `PYTINCTURE_BROWSER_FILES` | JSON list or comma-separated globs added to `appcode.pyt`. |
@@ -377,3 +381,19 @@ come from the deployment secret manager rather than committed files.
 Boolean strings accept `true/false`, `1/0`, `yes/no`, and `on/off` for typed
 configuration. Direct legacy backend settings generally use lowercase
 `"true"`; use the documented spelling to avoid ambiguity.
+
+For app titles, public-only BFF documentation, login inside Swagger, API token
+issuance and production examples, see [BFF documentation and API access](public-api.md#bff-documentation).
+`api_docs_mode="disabled"` disables all Swagger/OpenAPI URLs without disabling BFF
+calls or separately enabled API tokens. `api_docs_scope="public"` filters the
+external decorators and legacy public-method allowlists; it overrides a class’s `include_session_methods_in_docs=True`.
+Docs always require a module-specific URL.
+
+An omitted `@backend_for_frontend` documentation option inherits the service's
+explicit development setting: `allow_development_auth_origin=True` or
+`enable_dev_email_login=True` includes session methods in Swagger by default.
+Outside those modes they are hidden. Set `include_session_methods_in_docs=True`
+or `False` on the class to override; `None` restores inheritance. The stricter
+`api_docs_scope="public"` and `api_docs_mode="disabled"` settings still win.
+This only changes documentation visibility; calling methods still requires the
+same session or scoped token permissions.

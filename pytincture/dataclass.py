@@ -1,4 +1,5 @@
 import ast
+from copy import deepcopy
 from decimal import Subnormal
 import hashlib
 from html import escape
@@ -7,14 +8,15 @@ import sys
 from typing import Optional
 from urllib.parse import quote
 import uuid
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 import inspect
 import textwrap
 from typing import Dict, Any, Mapping
 from pytincture import get_modules_path
 from pytincture.configuration import get_runtime_env
+from pytincture.bff_docs import AnnotationSchemas, operation_spec
 
 # Global set to track BFF endpoints
 bff_routes: Dict[str, Dict] = {}
@@ -29,6 +31,7 @@ _PYTINCTURE_DECORATORS = frozenset({
     "bff_http_methods",
     "bff_policy",
     "bff_stream",
+    "bff_external",
 })
 
 
@@ -382,6 +385,18 @@ def bff_stream(func=None, *, raw: bool = False, media_type: str = "text/event-st
     return _apply(func)
 
 
+def bff_external(func=None):
+    """Expose a method in external API docs and allow scoped API tokens.
+
+    External access requires a token. Authenticated app sessions still work;
+    this decorator never grants anonymous access.
+    """
+    def apply(target):
+        setattr(target, "_bff_external", True)
+        return target
+    return apply if func is None else apply(func)
+
+
 def bff_policy(**metadata):
     """
     Attach arbitrary policy metadata to a backend_for_frontend method.
@@ -590,6 +605,7 @@ def get_bff_manifest(
     module = ast.parse(source, filename=file_path)
 
     module_bindings = _binding_snapshots(module.body)
+    annotation_schemas = AnnotationSchemas(module)
     manifest: Dict[tuple[str, str], Dict[str, Any]] = {}
 
     for class_node in (node for node in module.body if isinstance(node, ast.ClassDef)):
@@ -605,6 +621,16 @@ def get_bff_manifest(
         if not is_exported:
             continue
         _validate_export_binding(module.body, class_node, class_bindings)
+        docs_options = _literal_keyword_metadata(
+            class_node.decorator_list,
+            decorator_name="backend_for_frontend", bindings=class_bindings,
+        )
+        if set(docs_options) - {"include_session_methods_in_docs"} or type(docs_options.get("include_session_methods_in_docs")) not in {bool, type(None)}:
+            raise ValueError("include_session_methods_in_docs must be a literal boolean or None")
+        for decorator in class_node.decorator_list:
+            if _decorator_matches(decorator, decorator_name="backend_for_frontend", bindings=class_bindings)[0]:
+                if isinstance(decorator, ast.Call) and decorator.args:
+                    raise ValueError("backend_for_frontend options must be keyword arguments")
 
         class_policy = _literal_keyword_metadata(
             class_node.decorator_list,
@@ -618,6 +644,12 @@ def get_bff_manifest(
                 if member.name.startswith("_"):
                     continue
                 member_definition = _definition_identity(member)
+                external = False
+                for decorator in member.decorator_list:
+                    if _decorator_matches(decorator, decorator_name="bff_external", bindings=member_bindings[id(member)])[0]:
+                        if isinstance(decorator, ast.Call) and (decorator.args or decorator.keywords):
+                            raise ValueError("bff_external does not accept options")
+                        external = True
                 method_policy = _literal_keyword_metadata(
                     member.decorator_list,
                     decorator_name="bff_policy",
@@ -628,6 +660,8 @@ def get_bff_manifest(
                     bindings=member_bindings[id(member)],
                 )
                 parameters = _manifest_parameters(member)
+                for parameter in parameters:
+                    parameter["schema"] = annotation_schemas.schema(parameter["annotation"])
                 stream = _declared_stream(
                     member.decorator_list,
                     bindings=member_bindings[id(member)],
@@ -640,7 +674,12 @@ def get_bff_manifest(
                     "policy": {**class_policy, **method_policy},
                     "http_methods": http_methods,
                     "kind": "method",
+                    "external": external,
+                    "include_session_methods_in_docs": docs_options.get("include_session_methods_in_docs"),
                     "parameters": parameters,
+                    "docstring": ast.get_docstring(member) or "",
+                    "return_annotation": _manifest_annotation(member.returns),
+                    "return_schema": annotation_schemas.schema(member.returns),
                     "stream": stream,
                     "_class_definition": class_definition,
                     "_member_definition": member_definition,
@@ -865,10 +904,18 @@ def get_method_info_from_node(class_node: ast.ClassDef) -> Dict[str, Any]:
     
     return methods_info
 
-def backend_for_frontend(cls):
+def backend_for_frontend(cls=None, *, include_session_methods_in_docs: bool | None = None):
     """
-    A decorator that wraps `cls` in a proxy/wrapper class and generates OpenAPI specs.
+    Export a class through the browser proxy and generate its API metadata.
+
+    include_session_methods_in_docs adds session-based methods to Swagger;
+    None inherits the service's explicit development mode. Authentication and
+    external token permissions still apply.
     """
+    if type(include_session_methods_in_docs) not in {bool, type(None)}:
+        raise ValueError("include_session_methods_in_docs must be a boolean or None")
+    if cls is None:
+        return lambda target: backend_for_frontend(target, include_session_methods_in_docs=include_session_methods_in_docs)
     print(f"Registering BFF class: {cls.__name__}")
 
     # Get module/file name consistently
@@ -964,6 +1011,8 @@ def backend_for_frontend(cls):
                 'responses': responses_spec
             }
             operation_spec['x-bff-http-methods'] = list(declared_http_methods)
+            operation_spec['x-bff-external'] = bool(getattr(method, '_bff_external', False))
+            operation_spec['x-bff-include-session-methods-in-docs'] = include_session_methods_in_docs
 
             if streaming_enabled:
                 operation_spec['x-bff-streaming'] = True
@@ -1055,6 +1104,16 @@ def add_bff_docs_to_app(
     asset_uuid: str | None = None,
     docs_mode: str = "public",
     authorize: Any = None,
+    application_modules: Any = None,
+    csrf_cookie_name: str | None = None,
+    application_title: Any = None,
+    public_operation: Any = None,
+    docs_scope: str = "all",
+    api_tokens_enabled: bool = False,
+    api_clients_enabled: bool = False,
+    public_token_required: bool = False,
+    session_cookie_name: str = "session",
+    include_session_methods_by_default: bool = False,
 ):
     """
     Adds BFF-specific OpenAPI documentation to a FastAPI application
@@ -1066,76 +1125,28 @@ def add_bff_docs_to_app(
         for (module_path, class_name, method_name), operation in operations.items():
             if operation.get("kind") != "method":
                 continue
-            parameters = operation.get("parameters", ())
-            keyword_parameters = [
-                parameter
-                for parameter in parameters
-                if parameter.get("kind")
-                in {"positional_or_keyword", "keyword_only"}
-            ]
-            has_var_keyword = any(
-                parameter.get("kind") == "var_keyword"
-                for parameter in parameters
-            )
             documented_routes[
                 f"/{{application}}/classcall/{module_path}/{class_name}/{method_name}"
-            ] = {
-                "summary": f"Call {method_name} on {class_name}",
-                "operationId": f"call_{class_name}_{method_name}"[:50],
-                "tags": [module_path],
-                "parameters": [{
-                    "name": "application",
-                    "in": "path",
-                    "required": True,
-                    "schema": {"type": "string"},
-                }],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "args": {
-                                        "type": "array",
-                                        "items": {},
-                                    },
-                                    "kwargs": {
-                                        "type": "object",
-                                        "properties": {
-                                            parameter["name"]: {
-                                                "type": _bff_annotation_json_type(
-                                                    parameter.get("annotation", "Any")
-                                                )
-                                            }
-                                            for parameter in keyword_parameters
-                                        },
-                                        "required": [
-                                            parameter["name"]
-                                            for parameter in keyword_parameters
-                                            if parameter.get("required")
-                                            and parameter.get("kind") == "keyword_only"
-                                        ],
-                                        "additionalProperties": has_var_keyword,
-                                    }
-                                },
-                                "required": ["args", "kwargs"],
-                                "additionalProperties": False,
-                            }
-                        }
-                    }
-                },
-                "responses": {"200": {"description": "Successful response"}},
-                "x-bff-http-methods": list(operation.get("http_methods", ("POST",))),
-            }
+            ] = operation_spec(module_path, class_name, method_name, operation)
 
     # Get configuration from environment variables or use defaults
     docs_path = get_runtime_env("BFF_DOCS_PATH", "bff-docs")
-    docs_title = get_runtime_env("BFF_DOCS_TITLE", "pyTincture BFF API")
+    configured_title = get_runtime_env("BFF_DOCS_TITLE", "").strip()
+    docs_title = configured_title or "API documentation"
+    login_help_text = get_runtime_env("LOGIN_HELP_TEXT", "").strip()
     
     # Ensure docs_path starts with /
     docs_path = f"/{docs_path.lstrip('/')}"
     openapi_path = f"{docs_path}/openapi.json"
     docs_asset_uuid = asset_uuid or uuid.uuid4().hex
+
+    async def app_docs_title(application: str) -> str:
+        if configured_title:
+            return configured_title
+        title = application_title(application) if application_title else application
+        if inspect.isawaitable(title):
+            title = await title
+        return f"{title} API"
 
     async def authorize_request(request: Request) -> None:
         if docs_mode != "authenticated":
@@ -1156,53 +1167,15 @@ def add_bff_docs_to_app(
                 break
 
     def custom_openapi():
+        # HTTP documentation is available only through a selected app/module.
+        # FastAPI's programmatic schema must not provide an aggregate escape.
         if not app.openapi_schema:
-            openapi_schema = get_openapi(
-                title=app.title,
-                version=app.version or "1.0.0",
-                description=app.description or "pyTincture API with Backend for Frontend specification",
-                routes=app.routes
+            app.openapi_schema = get_openapi(
+                title=docs_title, version=app.version or "1.0.0", routes=[],
             )
-            
-            # Merge BFF paths into existing paths
-            paths = openapi_schema.get("paths", {}).copy()
-            # Collect unique tags from BFF
-            new_tags = set()
-            for route_path, operation_spec in documented_routes.items():
-                if route_path not in paths:
-                    paths[route_path] = {}
-                paths[route_path]['post'] = operation_spec
-                if 'tags' in operation_spec:
-                    new_tags.update(operation_spec['tags'])
-            
-            openapi_schema["paths"] = paths
-            
-            # Add components section if needed
-            if 'components' not in openapi_schema:
-                openapi_schema['components'] = {}
-            
-            # Add schemas section if needed
-            if 'schemas' not in openapi_schema['components']:
-                openapi_schema['components']['schemas'] = {}
-            
-            # Merge tags: get existing tag names
-            existing_tags = openapi_schema.get('tags', [])
-            existing_tag_names = set(tag['name'] for tag in existing_tags)
-            
-            # Add new BFF tags if not already present
-            for tag in sorted(new_tags - existing_tag_names):
-                existing_tags.append({
-                    'name': tag,
-                    'description': f'Endpoints from {tag}'
-                })
-            openapi_schema['tags'] = existing_tags
-            
-            app.openapi_schema = openapi_schema
-        
         return app.openapi_schema
 
-    async def get_bff_docs(request: Request):
-        await authorize_request(request)
+    def render_bff_docs(request: Request, schema_path: str, title: str, *, show_session_scope: bool = False):
         root_path = str(request.scope.get("root_path", "")).rstrip("/")
         encoded_uuid = quote(docs_asset_uuid, safe="")
         asset_prefix = f"{root_path}/frontend"
@@ -1213,17 +1186,61 @@ def add_bff_docs_to_app(
             f"{asset_prefix}/vendor/swagger-ui/swagger-ui-bundle.js?uuid={encoded_uuid}"
         )
         docs_js_url = f"{asset_prefix}/bff-docs.js?uuid={encoded_uuid}"
-        schema_url = f"{root_path}{openapi_path}?uuid={encoded_uuid}"
+        schema_url = f"{root_path}{schema_path}?uuid={encoded_uuid}"
+        application = request.path_params.get("application")
+        auth_base = f"{root_path}/{quote(application, safe='')}/auth" if application else ""
+        login_help = (
+            f'<p class="login-help-text">{escape(login_help_text)}</p>'
+            if login_help_text else ""
+        )
+        client_panel = '''
+    <details id="api-client-access">
+      <summary>Application credentials</summary>
+      <p>Use credentials registered by your server administrator. Access is limited to granted external classes and methods.</p>
+      <form id="api-client-login">
+        <label>Client ID <input name="client_id" autocomplete="off" required></label>
+        <label>Client secret <input name="client_secret" type="password" autocomplete="off" required></label>
+        <button type="submit">Generate application token</button>
+      </form>
+    </details>''' if api_clients_enabled else ""
+        auth_panel = f'''
+  <section id="api-auth" style="font-family:sans-serif;margin:24px 30px;padding:16px;border:1px solid #ddd;border-radius:6px" aria-label="API access">
+    <h2>{escape(title)} access</h2>
+    {login_help}
+    <p id="auth-status" role="status">Checking sign-in status…</p>
+    <form id="api-login" hidden>
+      <label>Email <input name="email" type="email" autocomplete="username" required></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Sign in here</button>
+    </form>
+    <p><a href="{escape(root_path, quote=True)}/{quote(application or '', safe='')}/login" target="_blank" rel="noopener">Other sign-in options</a>
+      <button id="refresh-auth" type="button">Refresh sign-in status</button></p>
+    <div id="api-token-controls" hidden>
+      <label>Token access <select id="api-token-scope">
+        <option value="external">External methods only</option>
+        {'<option value="session" selected>Methods allowed by my sign-in</option>' if show_session_scope else ''}
+      </select></label>
+      <button id="generate-token" type="button">Generate API token</button>
+    </div>
+    {client_panel}
+    <div id="api-token-result" hidden>
+      <label>Access token <textarea id="api-access-token" rows="3" readonly spellcheck="false" style="display:block;width:100%;max-width:900px"></textarea></label>
+      <p id="api-token-expiry"></p>
+      <button id="clear-token" type="button">Clear token</button>
+    </div>
+    <p>Browser sign-in uses a session cookie. API tokens use the Authorization: Bearer header and are kept only in this tab until it reloads.</p>
+  </section>''' if application else ""
         content = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{escape(docs_title)}</title>
+  <title>{escape(title)}</title>
   <link rel="stylesheet" href="{escape(swagger_css_url, quote=True)}">
 </head>
 <body>
-  <div id="swagger-ui" data-openapi-url="{escape(schema_url, quote=True)}"></div>
+  {auth_panel}
+  <div id="swagger-ui" data-openapi-url="{escape(schema_url, quote=True)}" data-csrf-cookie-name="{escape(csrf_cookie_name or '', quote=True)}" data-auth-base="{escape(auth_base, quote=True)}"></div>
   <script defer src="{escape(swagger_js_url, quote=True)}"></script>
   <script defer src="{escape(docs_js_url, quote=True)}"></script>
 </body>
@@ -1242,53 +1259,122 @@ def add_bff_docs_to_app(
             },
         )
 
-    # Set the custom OpenAPI function
     app.openapi = custom_openapi
 
-    if docs_mode != "disabled":
-        @app.get(openapi_path, tags=["documentation"], include_in_schema=False)
-        async def get_bff_openapi(request: Request):
-            await authorize_request(request)
-            return JSONResponse(
-                custom_openapi(),
-                headers={
-                    "Cache-Control": "private, no-store, max-age=0",
-                    "Vary": "Cookie, Authorization",
-                },
-            )
+    async def no_aggregate_docs(request: Request):
+        raise HTTPException(status_code=404, detail="Use module documentation")
 
-        app.get(docs_path, tags=["documentation"], include_in_schema=False)(
-            get_bff_docs
-        )
+    # Reserve removed aggregate URLs so /{application} cannot mistake docs for
+    # an application and redirect to login. These never expose a schema.
+    for path in dict.fromkeys((
+        docs_path, openapi_path, "/docs", "/redoc", "/openapi.json",
+        f"/{{application}}{docs_path}", f"/{{application}}{openapi_path}",
+    )):
+        app.get(path, include_in_schema=False)(no_aggregate_docs)
         place_before_application_route(app.routes[-1])
 
-        for alias in ("/docs", "/redoc"):
-            if alias == docs_path:
-                continue
+    if docs_mode != "disabled" and application_modules is not None:
+        async def module_operations(request: Request, application: str, module_path: str):
+            await authorize_request(request)
+            modules = application_modules(application)
+            if inspect.isawaitable(modules):
+                modules = await modules
+            # Exact registry/dependency membership also rejects traversal,
+            # basename aliases and references to another application's code.
+            module = f"{module_path}.py"
+            if module_path.endswith(".py") or module not in modules:
+                raise HTTPException(status_code=404, detail="BFF module not found")
+            selected = []
+            for route_path, specification in documented_routes.items():
+                route_module, class_name, method_name = route_path.split("/classcall/", 1)[1].rsplit("/", 2)
+                if route_module != module:
+                    continue
+                is_public = bool(public_operation and public_operation(application, module, class_name, method_name))
+                external = bool(specification.get("x-bff-external"))
+                include_session = specification.get("x-bff-include-session-methods-in-docs")
+                if include_session is None:
+                    include_session = include_session_methods_by_default
+                if not (external or is_public) and (docs_scope == "public" or not include_session):
+                    continue
+                selected.append((class_name, method_name, specification, is_public))
+            if not selected:
+                raise HTTPException(status_code=404, detail="BFF module not found")
+            return selected
 
-            async def docs_alias(request: Request):
-                await authorize_request(request)
-                return RedirectResponse(
-                    docs_path,
-                    status_code=307,
-                    headers={"Cache-Control": "private, no-store, max-age=0"},
+        @app.get(f"/{{application}}/{{module_path:path}}{openapi_path}", include_in_schema=False)
+        async def get_module_bff_openapi(request: Request, application: str, module_path: str):
+            selected = await module_operations(request, application, module_path)
+            schema = get_openapi(
+                title=await app_docs_title(application),
+                description=f"API methods in {module_path}.",
+                version=app.version or "1.0.0", routes=[],
+            )
+            tags = set()
+            for class_name, method_name, specification, is_public in selected:
+                operation = deepcopy(specification)
+                operation.pop("x-bff-include-session-methods-in-docs", None)
+                operation["tags"] = [class_name]
+                external = bool(operation.get("x-bff-external"))
+                anonymous = is_public and not public_token_required and not external
+                operation["x-bff-public"] = anonymous
+                if external and api_clients_enabled:
+                    operation["x-bff-client-grant"] = {
+                        "application": application, "module": module_path,
+                        "class": class_name, "methods": [method_name],
+                    }
+                access = (
+                    "Public method: no sign-in or API token required."
+                    if anonymous else
+                    "Requires an authenticated browser session or an authorized API token."
+                    if api_tokens_enabled else "Requires an authenticated browser session."
                 )
+                operation["description"] = f"{access}\n\n{operation.get('description', '')}"
+                security = [{"BrowserSession": []}]
+                if api_tokens_enabled:
+                    security.append({"BffBearer": []})
+                if anonymous:
+                    security.insert(0, {})
+                operation["security"] = security
+                operation["parameters"] = [
+                    parameter for parameter in operation.get("parameters", [])
+                    if not (parameter.get("in") == "path" and parameter["name"] == "application")
+                ]
+                path = f"/{class_name}/{method_name}"
+                schema["paths"][path] = {}
+                for method in operation.get("x-bff-http-methods", ["POST"]):
+                    method_operation = deepcopy(operation)
+                    path_id = hashlib.sha256(path.encode("utf-8")).hexdigest()[:12]
+                    method_operation["operationId"] = f"{method.lower()}_{operation['operationId']}_{path_id}"
+                    if method == "GET":
+                        method_operation.pop("requestBody", None)
+                    schema["paths"][path][method.lower()] = method_operation
+                tags.update(operation["tags"])
+            schema["tags"] = [{"name": tag} for tag in sorted(tags)]
+            schema["components"] = {"securitySchemes": {"BrowserSession": {
+                "type": "apiKey", "in": "cookie", "name": session_cookie_name,
+                "description": "Sign in through API access above. The browser sends its HttpOnly session cookie automatically; do not paste a session ID here.",
+            }}}
+            if api_tokens_enabled:
+                schema["components"]["securitySchemes"]["BffBearer"] = {
+                    "type": "http", "scheme": "bearer",
+                    "description": "Generate a short-lived user or application token in API access above, or paste one here. Application tokens require both an external decorator and a grant for the target class or method. User tokens retain their chosen scope. Tokens are restricted to this application.",
+                }
+            root_path = str(request.scope.get("root_path", "")).rstrip("/")
+            schema["servers"] = [{"url": f"{root_path}/{quote(application, safe='')}/classcall/{quote(module_path, safe='/')}"}]
+            return JSONResponse(schema, headers={
+                "Cache-Control": "private, no-store, max-age=0",
+                "Vary": "Cookie, Authorization",
+            })
 
-            app.get(alias, include_in_schema=False)(docs_alias)
-            place_before_application_route(app.routes[-1])
-
-        if openapi_path != "/openapi.json":
-            @app.get("/openapi.json", include_in_schema=False)
-            async def get_openapi_alias(request: Request):
-                await authorize_request(request)
-                return JSONResponse(
-                    custom_openapi(),
-                    headers={
-                        "Cache-Control": "private, no-store, max-age=0",
-                        "Vary": "Cookie, Authorization",
-                    },
-                )
-            place_before_application_route(app.routes[-1])
+        @app.get(f"/{{application}}/{{module_path:path}}{docs_path}", include_in_schema=False)
+        async def get_module_bff_docs(request: Request, application: str, module_path: str):
+            selected = await module_operations(request, application, module_path)
+            return render_bff_docs(
+                request,
+                f"/{quote(application, safe='')}/{quote(module_path, safe='/')}{openapi_path}",
+                await app_docs_title(application),
+                show_session_scope=any(not public and not specification.get("x-bff-external") for _, _, specification, public in selected),
+            )
 
 def get_imports_used_in_class(file_path, class_name, source_code=None):
     if source_code is None:

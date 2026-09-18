@@ -7,8 +7,26 @@ every gate below has durable evidence.
 
 ## Current decision: NO-GO pending observation and edge evidence
 
-Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc6`, and rc4
-through rc6 are published on PyPI. Rc6 is the latest recorded candidate. Its
+`1.0.0rc7` was published on 2026-09-18 after signed-tag qualification and all
+23 framework release CI jobs passed. Its exact artifacts and hashes are
+attached to the GitHub prerelease, and PyPI publication and a clean public-index
+install are verified. The optional client registry introduces shared local
+state for machine credentials; existing browser sessions remain stateless by
+default. Observation-scope review remains pending, and the separate Book Library
+example draft still has remote browser/load acceptance findings. These results
+do not assert final 1.0 approval or change the recorded observation dates.
+
+Published rc7 evidence:
+
+- [Signed-tag qualification](https://github.com/pytincture/pytincture/actions/runs/35294693486).
+- [Release CI and attestations](https://github.com/pytincture/pytincture/actions/runs/35294928734).
+- [Protected PyPI publication](https://github.com/pytincture/pytincture/actions/runs/35295139251).
+- [Release artifacts and SHA256SUMS.json](https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc7).
+- [Published Python package](https://pypi.org/project/pytincture/1.0.0rc7/).
+
+Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc7`, and rc4
+through rc7 are published on PyPI. Rc7 is the latest published candidate.
+The previous rc6 evidence remains retained below. Its
 self-hosted icon asset, browser, BFF, authentication, streaming, cache, and
 capacity coverage passed the complete acceptance matrix. PyPI deliberately
 uses a project-scoped API token, while npm uses OIDC.

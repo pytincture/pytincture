@@ -473,6 +473,7 @@
     },
     {
       "id": "REVIEW-2026-08-31-M-06-GET",
+      "subsequent_contract_note": "The controls below record the reviewed 2026-08-31 implementation. The current contract also accepts named JSON argument objects, normalized before the same limits, static signature/type validation, authorization, CSRF and replay checks. See docs/contracts/bff-v1.md and tests/test_bff_docs.py; this extension is not an additional external-review attestation.",
       "status": "remediated",
       "title": "BFF requests are canonical and validated before application execution",
       "intentional_contract": "The class-level BFF decorator remains the complete export opt-in. Body-bearing calls use exactly one JSON object with args and kwargs; GET is an explicit parameterless, read-only, repeatable developer contract.",
