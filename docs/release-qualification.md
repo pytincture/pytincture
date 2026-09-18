@@ -7,9 +7,9 @@ every gate below has durable evidence.
 
 ## Current decision: NO-GO pending observation and edge evidence
 
-`1.0.0rc8` is the development version on the open preparation branch. It has
-not been tagged, released, or published. The draft remains open for additional
-changes; release qualification and publication will be performed separately.
+`1.0.0rc8` is the current development version. It has not been tagged, released,
+or published. Additional changes may land on `main` before rc8 is released;
+release qualification and publication will be performed separately.
 The published-candidate evidence below continues to describe rc7 and earlier.
 
 `1.0.0rc7` was published on 2026-09-18 after signed-tag qualification and all
