@@ -9,7 +9,7 @@ const packageRoot = path.join(__dirname, "node_modules", "swagger-ui-dist");
 const outputRoot = path.join(__dirname, "vendor", "swagger-ui");
 const repositoryRoot = path.resolve(__dirname, "..", "..");
 const manifestPath = path.join(repositoryRoot, "security", "swagger-ui-assets.json");
-const version = "5.32.14";
+const version = "5.32.15";
 const files = ["LICENSE", "swagger-ui-bundle.js", "swagger-ui.css"];
 
 async function sha256(filePath) {
@@ -35,7 +35,7 @@ const manifest = {
     version,
     license: "Apache-2.0",
     source: `https://registry.npmjs.org/swagger-ui-dist/-/swagger-ui-dist-${version}.tgz`,
-    npm_integrity: "sha512-nOA2pSQhcmODMUQZpJHYKNuwniDUqcOWGNaSCOoZv12FdOSJ9JxV95HtyRGNMqEBj6h6lCNTy20TgZDYTSuUIg==",
+    npm_integrity: "sha512-TSFER+rFQlf1nzk6WvKkMaHTxAPQ3eAAxigFThnxQedSREanfZgSbJFayZVs/ULnSbNdrJOb99vLD6xpb3R3eg==",
     assets,
 };
 await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
