@@ -2,7 +2,7 @@
 pyTincture uvicorn launcher
 """
 
-__version__ = "1.0.0rc6"
+__version__ = "1.0.0rc7"
 
 from multiprocessing import Process, freeze_support
 from copy import deepcopy
@@ -169,7 +169,7 @@ def launch_service(
     ssl_certfile=None, 
     env_vars: dict | None = None,
     bff_docs_path: str = "/bff-docs",
-    bff_docs_title: str = "pyTincture BFF API",
+    bff_docs_title: str = "",
     default_application=None,
     favicon_folder=None,
     host=None,

@@ -5,6 +5,22 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
+## 1.0.0rc7 — 2026-09-18
+
+- Add application-branded, module-level BFF Swagger pages with extensionless
+  nested module URLs, real function argument and response schemas, inline
+  sign-in, and optional production documentation controls.
+- Accept named JSON arguments alongside the existing generated-client
+  envelope, using the same validation and authorization boundaries.
+- Add `@bff_external` and `include_session_methods_in_docs`; documentation
+  includes session methods by default in explicit development mode only.
+- Add short-lived user and application bearer tokens. Operator-managed API
+  clients receive grants for exact classes or methods, with hashed secrets,
+  rotation, immediate revocation on subsequent calls, and audit records.
+  Application credentials require HTTPS outside loopback development and a
+  shared local SQLite registry for workers on one host.
+- Remove late Pyodide preload hints that caused unused-preload browser warnings.
+
 ## 1.0.0rc6 — 2026-09-03
 
 - Complete the self-hosted Material Design Icons asset chain by shipping the

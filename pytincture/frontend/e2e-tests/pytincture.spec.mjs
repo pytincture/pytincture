@@ -136,10 +136,10 @@ async function measureAuthenticatedBff(page, sampleCount) {
 
 test("BFF documentation uses packaged hash-locked assets", async ({ page }) => {
     const diagnostics = collectDiagnostics(page);
-    const response = await page.goto("/bff-docs");
+    const response = await page.goto("/e2e_app/e2e_data/bff-docs");
     expect(response.ok()).toBe(true);
-    await expect(page).toHaveURL("/bff-docs");
-    await expect(page.locator(".swagger-ui .info .title")).toContainText("pyTincture API");
+    await expect(page).toHaveURL("/e2e_app/e2e_data/bff-docs");
+    await expect(page.locator(".swagger-ui .info .title")).toContainText("Pytincture E2E API");
 
     const documentationRequests = diagnostics.requests.filter(entry => {
         const url = new URL(entry.url);
@@ -155,6 +155,49 @@ test("BFF documentation uses packaged hash-locked assets", async ({ page }) => {
     }
     expect(diagnostics.requests.some(entry => entry.url.includes("cdn.jsdelivr.net"))).toBe(false);
     expect(diagnostics.consoleEntries.filter(entry => entry.type === "error")).toEqual([]);
+});
+
+test("application BFF documentation renders concrete class calls", async ({ page }) => {
+    const diagnostics = collectDiagnostics(page);
+    const response = await page.goto("/e2e_app/e2e_data/bff-docs");
+    expect(response.ok()).toBe(true);
+    await expect(page).toHaveURL("/e2e_app/e2e_data/bff-docs");
+    await expect(page.locator(".swagger-ui .info .title")).toContainText("Pytincture E2E API");
+    await expect(page.locator(".opblock-summary-path").first()).toBeVisible();
+    const paths = await page.locator(".opblock-summary-path").allTextContents();
+    expect(paths.every(path => path.startsWith("/E2EData/"))).toBe(true);
+    expect(paths.some(path => path.includes("{application}") || path.includes(".py"))).toBe(false);
+    await expect(page.locator(".servers select")).toHaveValue("/e2e_app/classcall/e2e_data");
+    await expect(page.locator(".errors-wrapper")).toHaveCount(0);
+    expect(diagnostics.requests.some(entry => (
+        new URL(entry.url).pathname === "/e2e_app/e2e_data/bff-docs/openapi.json"
+    ))).toBe(true);
+    expect(diagnostics.consoleEntries.filter(entry => entry.type === "error")).toEqual([]);
+});
+
+test("Swagger executes named function arguments with session CSRF protection", async ({ page }) => {
+    await page.goto("/e2e_app/login");
+    await page.getByPlaceholder("Email").fill("e2e@example.com");
+    await page.getByPlaceholder("Password").fill("demo-password");
+    await Promise.all([
+        page.waitForURL(/\/e2e_app$/),
+        page.getByRole("button", { name: "Login with Email" }).click(),
+    ]);
+    await page.goto("/e2e_app/e2e_data/bff-docs");
+    const operation = page.locator(".opblock").filter({
+        has: page.locator(".opblock-summary-path", { hasText: "/E2EData/sync_call" }),
+    });
+    await operation.locator(".opblock-summary-control").click();
+    await page.reload();
+    await expect(operation.locator(".opblock-description-wrapper table")).toContainText("value");
+    await operation.getByRole("button", { name: "Try it out" }).click();
+    await operation.locator("textarea").fill(JSON.stringify({ value: 42 }));
+    const response = page.waitForResponse(response => response.url().endsWith("/e2e_app/classcall/e2e_data/E2EData/sync_call"));
+    await operation.getByRole("button", { name: "Execute", exact: true }).click();
+    const actual = await response;
+    expect(actual.status()).toBe(200);
+    expect(await actual.json()).toEqual({ kind: "sync", value: 42, email: "e2e@example.com" });
+    await expect(operation.locator(".live-responses-table")).toContainText('42');
 });
 
 test("authenticated packaged and inline apps run through real Pyodide", async ({ page, request }, testInfo) => {
@@ -463,4 +506,80 @@ test("packaged entrypoint failure is rendered without fallback", async ({ browse
     } finally {
         await attachFailureDiagnostics(testInfo, diagnostics);
     }
+});
+
+test("Swagger exchanges application credentials without a user session", async ({ page, browser }) => {
+    const credentials = JSON.parse(readFileSync(new URL("../../../tests/.e2e-private/client.json", import.meta.url)));
+    await page.goto("/e2e_app/e2e_data/bff-docs");
+    await page.locator("#api-client-access summary").click();
+    await page.getByLabel("Client ID", { exact: true }).fill(credentials.client_id);
+    await page.getByLabel("Client secret", { exact: true }).fill("wrong-secret");
+    await page.getByRole("button", { name: "Generate application token" }).click();
+    await expect(page.locator("#auth-status")).toContainText("Invalid client credentials");
+    await expect(page.getByLabel("Client secret", { exact: true })).toHaveValue("");
+    await page.getByLabel("Client secret", { exact: true }).fill(credentials.client_secret);
+    await page.getByRole("button", { name: "Generate application token" }).click();
+    await expect(page.locator("#auth-status")).toContainText("Application token ready");
+    await expect(page.getByLabel("Client secret", { exact: true })).toHaveValue("");
+    const token = await page.locator("#api-access-token").inputValue();
+    expect(await page.evaluate(() => window.ui.authSelectors.authorized().toJS())).toMatchObject({ BffBearer: { value: token } });
+    const context = await browser.newContext();
+    try {
+        const response = await context.request.post("http://127.0.0.1:8079/e2e_app/classcall/e2e_data/E2EData/sync_call", {
+            headers: { Authorization: `Bearer ${token}` }, data: { value: 73 },
+        });
+        expect(response.status()).toBe(200);
+        expect(await response.json()).toEqual({ kind: "sync", value: 73, email: "" });
+        const denied = await context.request.post("http://127.0.0.1:8079/e2e_app/classcall/e2e_data/E2EData/async_call", {
+            headers: { Authorization: `Bearer ${token}` }, data: { value: 73 },
+        });
+        expect(denied.status()).toBe(403);
+        expect(await context.cookies()).toEqual([]);
+    } finally { await context.close(); }
+    // Execute must use the application token, without a browser login.
+    const operation = page.locator(".opblock").filter({ has: page.locator('[data-path="/E2EData/sync_call"]') });
+    await operation.locator(".opblock-summary").click();
+    await operation.getByRole("button", { name: "Try it out" }).click();
+    await operation.locator("textarea").fill('{"value":73}');
+    await operation.getByRole("button", { name: "Execute", exact: true }).click();
+    await expect(operation.locator(".responses-wrapper .response-col_status").filter({ hasText: /^200$/ }).first()).toBeVisible();
+    await expect(operation.locator(".live-responses-table")).toContainText('"value": 73');
+    await page.getByRole("button", { name: "Clear token", exact: true }).click();
+    await expect(page.locator("#api-token-result")).toBeHidden();
+    await page.reload();
+    await expect(page.locator("#api-token-result")).toBeHidden();
+});
+
+test("Swagger signs in directly and delegates an application-scoped API token", async ({ page, browser }) => {
+    await page.goto("/e2e_app/e2e_data/bff-docs");
+    await expect(page.getByRole("heading", { name: "Pytincture E2E API access" })).toBeVisible();
+    await expect(page.locator("#api-login")).toBeVisible();
+    await page.getByLabel("Email", { exact: true }).fill("e2e@example.com");
+    await page.getByLabel("Password", { exact: true }).fill("demo-password");
+    await page.getByRole("button", { name: "Sign in here" }).click();
+    await expect(page.locator("#auth-status")).toContainText("Signed in as e2e@example.com");
+    await expect(page).toHaveURL("/e2e_app/e2e_data/bff-docs");
+    await page.locator("#api-token-scope").selectOption("external");
+    await page.getByRole("button", { name: "Generate API token" }).click();
+    await expect(page.locator("#api-token-expiry")).toContainText("Ready for Execute");
+    const token = await page.locator("#api-access-token").inputValue();
+    expect(token.length).toBeGreaterThan(30);
+    // A fresh cookie-free client can use the copied credential.
+    const context = await browser.newContext();
+    try {
+        const response = await context.request.post("http://127.0.0.1:8079/e2e_app/classcall/e2e_data.py/E2EData/sync_call", {
+            headers: { Authorization: `Bearer ${token}` }, data: { value: 42 },
+        });
+        expect(response.status()).toBe(200);
+        expect(await response.json()).toMatchObject({ kind: "sync", value: 42, email: "e2e@example.com" });
+        const denied = await context.request.post("http://127.0.0.1:8079/e2e_app/classcall/e2e_data/E2EData/async_call", {
+            headers: { Authorization: `Bearer ${token}` }, data: { value: 42 },
+        });
+        expect(denied.status()).toBe(403);
+    } finally { await context.close(); }
+    const authorized = await page.evaluate(() => window.ui.authSelectors.authorized().toJS());
+    expect(authorized.BffBearer.value).toBe(token);
+    await page.getByRole("button", { name: "Clear token", exact: true }).click();
+    await expect(page.locator("#api-token-result")).toBeHidden();
+    expect(await page.evaluate(() => window.ui.authSelectors.authorized().toJS())).not.toHaveProperty("BffBearer");
 });

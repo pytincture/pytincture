@@ -82,6 +82,19 @@
       },
       "status": "passed",
       "notes": "The signed GitHub prerelease, exact retained and attested artifacts, complete acceptance matrix, and protected PyPI API-token publication all passed. The exact public wheel installs as 1.0.0rc6. The retained npm tarball remains the qualified npm artifact; npm registry publication is a separate distribution task. Rc6 completes the self-hosted Material Design Icons CSS, source-map, and font asset chain without restoring a third-party CDN dependency."
+    },
+    {
+      "version": "1.0.0rc7",
+      "published_at": "2026-09-18T01:20:35Z",
+      "commit_sha": "03b945c8d2a43101bdb6e06b7db25516e3db9550",
+      "ci_url": "https://github.com/pytincture/pytincture/actions/runs/35294928734",
+      "artifacts": {
+        "wheel": "e217def0e65f34d0b59a3b914c432f235a70605996155dedce9d406a05cc4c7a",
+        "sdist": "205eddb165c6b559c05d7c21fc844b87e1b60d94a4b359b203ae157f4eacc227",
+        "npm": "0a115d74af51c396bf12ea925cf780ba5a92edc1fbe9afc5116fc35686e50b50"
+      },
+      "status": "passed",
+      "notes": "Signed tag qualification and all 23 release CI jobs passed. Exact workflow artifacts and hashes are attached to the GitHub prerelease with verified attestations. Protected PyPI publication succeeded in run 35295139251; both public artifact hashes match and a clean public-index install reports 1.0.0rc7. The npm tarball is retained; npm registry publication is separate. The Book Library example draft has unresolved remote browser/load acceptance findings, and observation-scope review for the optional application-credential registry remains pending."
     }
   ],
   "representative_applications": {
@@ -698,6 +711,6 @@
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1 through RC6 evidence is recorded and passing, and rc4 through rc6 are published on PyPI. Rc6 completes the self-hosted Material Design Icons asset chain while preserving the approved stateless, Redis-free observation scope, so it does not reset the clock. The final release remains NO-GO until the approved 30-day observation completes after 2026-09-28T02:08:06Z, production-edge HTTPS/HSTS/canonical-origin/trusted-proxy evidence is recorded, remaining protected registry distribution tasks complete, and the release manager makes the final decision."
+    "notes": "RC1 through RC7 release evidence is recorded, and rc4 through rc7 are published on PyPI. Rc7 passed the complete framework release CI and attestation pipeline; the separate Book Library draft still has remote browser/load acceptance findings. The optional application-credential registry also needs observation-scope review. Final 1.0 remains NO-GO pending the approved observation period, production-edge evidence, current representative-application qualification and final release-manager approval. Existing observation dates have not been changed."
   }
 }

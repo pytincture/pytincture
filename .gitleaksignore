@@ -12,3 +12,8 @@
 b697cdfa59ba60b3e5c5c3456bca1703bc3c8d7f:tests/test_configuration.py:generic-api-key:90
 6a0b3fb772c816f7853362e2a17238141529a2c9:tests/test_configuration.py:generic-api-key:67
 6a0b3fb772c816f7853362e2a17238141529a2c9:tests/test_configuration.py:generic-api-key:73
+
+# Historical, synthetic signing key in the isolated tmp_path test service.
+# Replaced with a freshly generated key; never used as a deployed credential.
+# Limit this exception to the exact original commit, test file, rule and line.
+3647ee85454bdff6fb61759167e20fa5af9cd845:tests/test_bff_api_access.py:generic-api-key:33

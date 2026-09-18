@@ -1,13 +1,14 @@
 import asyncio
 
-from pytincture.dataclass import backend_for_frontend, bff_stream
+from pytincture.dataclass import backend_for_frontend, bff_stream, bff_external
 
 
-@backend_for_frontend
+@backend_for_frontend(include_session_methods_in_docs=True)
 class E2EData:
     def __init__(self, _user):
         self._user = _user
 
+    @bff_external
     def sync_call(self, value):
         return {"kind": "sync", "value": value, "email": self._user["email"]}
 
