@@ -509,6 +509,22 @@ class PytinctureConfig:
         "PYTINCTURE_API_DOCS_MODE",
         "API documentation mode: public, authenticated, or disabled.",
     )
+    api_docs_scope: str = _setting(
+        "all", "PYTINCTURE_API_DOCS_SCOPE",
+        "Honor class documentation visibility or restrict to external/public methods (all or public).",
+    )
+    enable_bff_api_tokens: bool = _setting(
+        False, "ENABLE_BFF_API_TOKENS",
+        "Allow signed-in users to issue short-lived application-scoped BFF bearer tokens.",
+    )
+    bff_api_client_registry: str = _setting(
+        "", "BFF_API_CLIENT_REGISTRY",
+        "Private SQLite client registry outside modules_path; enables application credentials when BFF API tokens are enabled.",
+    )
+    require_public_bff_token: bool = _setting(
+        False, "REQUIRE_PUBLIC_BFF_TOKEN",
+        "Require a BFF bearer token or authenticated browser session for public BFF methods.",
+    )
     diagnostic_details_mode: str = _setting(
         "public",
         "PYTINCTURE_DIAGNOSTIC_DETAILS_MODE",
@@ -1284,6 +1300,17 @@ class PytinctureConfig:
                 "api_docs_mode must be public, authenticated, or disabled"
             )
         object.__setattr__(self, "api_docs_mode", docs_mode)
+        docs_scope = self.api_docs_scope.strip().lower()
+        if docs_scope not in {"all", "public"}:
+            raise ValueError("api_docs_scope must be all or public")
+        object.__setattr__(self, "api_docs_scope", docs_scope)
+        if self.require_public_bff_token and not (
+            self.enable_bff_api_tokens and (
+                self.enable_user_login or self.enable_google_auth
+                or self.enable_microsoft_auth or self.enable_saml_auth
+            )
+        ):
+            raise ValueError("require_public_bff_token requires enable_bff_api_tokens and a login provider")
         diagnostic_details_mode = self.diagnostic_details_mode.strip().lower()
         if diagnostic_details_mode not in {"public", "minimal", "operator"}:
             raise ValueError(
@@ -1359,7 +1386,17 @@ class PytinctureConfig:
                 "bff_replay_require_shared_store requires enable_bff_replay_tokens"
             )
 
-        auth_enabled = any(
+        if self.bff_api_client_registry:
+            if not self.enable_bff_api_tokens:
+                raise ValueError("bff_api_client_registry requires enable_bff_api_tokens")
+            registry = Path(self.bff_api_client_registry).expanduser().resolve()
+            if registry.is_relative_to(Path(self.modules_path).resolve()):
+                raise ValueError("bff_api_client_registry must be outside modules_path")
+            object.__setattr__(self, "bff_api_client_registry", str(registry))
+            if len(self.session_secret) < 32 or len(set(self.session_secret)) < 8:
+                raise ValueError("API client authentication requires a strong session_secret")
+
+        auth_enabled = bool(self.bff_api_client_registry) or any(
             (self.enable_user_login, self.enable_google_auth, self.enable_microsoft_auth, self.enable_saml_auth)
         )
         dev_only = self.enable_user_login and self.enable_dev_email_login and not any(
@@ -1579,7 +1616,7 @@ class PytinctureConfig:
             "use_redis_instance", "enable_mcp", "trusted_proxy_headers",
             "mcp_allow_legacy_timeless_tokens",
             "allow_development_auth_origin", "enable_browser_logs",
-            "allow_noauth_browser_logs", "uvicorn_access_log",
+            "allow_noauth_browser_logs", "uvicorn_access_log", "enable_bff_api_tokens", "require_public_bff_token",
         }
         integer_fields = {
             "session_max_age_seconds", "session_absolute_max_age_seconds",

@@ -6,6 +6,7 @@ import ast
 import json
 import math
 from dataclasses import dataclass
+from copy import deepcopy
 from typing import Any, Mapping, Sequence
 
 
@@ -57,14 +58,14 @@ def _validate_json_limits(value: Any, *, max_depth: int, max_items: int) -> None
     visit(value, 1)
 
 
-def parse_canonical_bff_body(
+def _decode_bff_object(
     body: bytes,
     *,
     max_bytes: int,
     max_depth: int,
     max_items: int,
-) -> BFFArguments:
-    """Parse the single v1 body representation without accepting JSON aliases."""
+) -> dict[str, Any]:
+    """Decode bounded UTF-8 JSON without duplicates or non-finite numbers."""
     if len(body) > max_bytes:
         raise BFFRequestValidationError("BFF request body is too large")
     if not body:
@@ -85,6 +86,11 @@ def parse_canonical_bff_body(
         raise BFFRequestValidationError("BFF request body must be valid JSON") from exc
     if not isinstance(data, dict):
         raise BFFRequestValidationError("BFF request body must be an object")
+    _validate_json_limits(data, max_depth=max_depth, max_items=max_items)
+    return data
+
+
+def _envelope_arguments(data: dict[str, Any]) -> BFFArguments:
     if set(data) != {"args", "kwargs"}:
         raise BFFRequestValidationError(
             "BFF request body must contain exactly args and kwargs"
@@ -93,8 +99,56 @@ def parse_canonical_bff_body(
     kwargs = data["kwargs"]
     if not isinstance(args, list) or not isinstance(kwargs, dict):
         raise BFFRequestValidationError("BFF args must be an array and kwargs an object")
-    _validate_json_limits(data, max_depth=max_depth, max_items=max_items)
     return BFFArguments(tuple(args), dict(kwargs))
+
+
+def parse_canonical_bff_body(body: bytes, *, max_bytes: int, max_depth: int, max_items: int) -> BFFArguments:
+    """Parse the original envelope used by generated clients."""
+    return _envelope_arguments(_decode_bff_object(
+        body, max_bytes=max_bytes, max_depth=max_depth, max_items=max_items,
+    ))
+
+
+def parse_bff_body(
+    body: bytes, *, parameters: Sequence[Mapping[str, Any]],
+    max_bytes: int, max_depth: int, max_items: int,
+) -> BFFArguments:
+    """Accept named JSON inputs and preserve the original client envelope."""
+    data = _decode_bff_object(body, max_bytes=max_bytes, max_depth=max_depth, max_items=max_items)
+    if set(data) == {"args", "kwargs"} and isinstance(data["args"], list) and isinstance(data["kwargs"], dict):
+        return _envelope_arguments(data)
+
+    kwargs = dict(data)
+    positional = [p for p in parameters if p.get("kind") in {"positional_only", "positional_or_keyword"}]
+    var_positional = next((p for p in parameters if p.get("kind") == "var_positional"), None)
+    extra = kwargs.pop(var_positional["name"], []) if var_positional else []
+    if not isinstance(extra, list):
+        raise BFFRequestValidationError("variadic positional BFF input must be an array")
+    last_positional = len(positional) - 1 if extra else max(
+        (index for index, p in enumerate(positional) if p.get("kind") == "positional_only" and p["name"] in kwargs),
+        default=-1,
+    )
+    args = []
+    for parameter in positional[:last_positional + 1]:
+        name = parameter["name"]
+        if name in kwargs:
+            args.append(kwargs.pop(name))
+        elif parameter.get("required"):
+            raise BFFRequestValidationError(f"missing required BFF argument: {name}")
+        elif "default" in parameter and parameter.get("default_supported", True):
+            value = deepcopy(parameter["default"])
+            try:
+                json.dumps(value, allow_nan=False)
+            except (TypeError, ValueError):
+                raise BFFRequestValidationError(f"provide positional BFF argument explicitly: {name}") from None
+            args.append(value)
+        else:
+            raise BFFRequestValidationError(f"provide positional BFF argument explicitly: {name}")
+    args.extend(extra)
+    # Apply the existing semantic limits after normalization as well, so a
+    # shorter named packet cannot bypass the generated-client limits.
+    _validate_json_limits({"args": args, "kwargs": kwargs}, max_depth=max_depth, max_items=max_items)
+    return BFFArguments(tuple(args), kwargs)
 
 
 def _annotation_name(node: ast.AST) -> str:

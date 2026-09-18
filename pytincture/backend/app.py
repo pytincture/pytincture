@@ -14,6 +14,7 @@ import mimetypes
 import os as _stdlib_os
 import re
 import secrets
+import sqlite3
 import threading
 import time
 import uuid
@@ -68,6 +69,7 @@ from starlette.routing import Match, Route
 
 # Pytincture
 from pytincture import __version__, get_modules_path
+from pytincture import api_clients
 from pytincture.configuration import (
     PytinctureConfig,
     modules_path_appears_writable,
@@ -88,7 +90,7 @@ from pytincture.backend.bff import build_bff_registry as _build_bff_registry
 from pytincture.backend.bff_requests import (
     BFFArguments,
     BFFRequestValidationError,
-    parse_canonical_bff_body,
+    parse_bff_body,
     validate_bff_arguments,
 )
 from pytincture.backend.browser_packages import (
@@ -254,6 +256,21 @@ if API_DOCS_MODE not in {"public", "authenticated", "disabled"}:
 DIAGNOSTIC_DETAILS_MODE = os.getenv(
     "PYTINCTURE_DIAGNOSTIC_DETAILS_MODE", "public"
 ).strip().lower()
+API_DOCS_SCOPE = os.getenv("PYTINCTURE_API_DOCS_SCOPE", "all").strip().lower()
+if API_DOCS_SCOPE not in {"all", "public"}:
+    raise RuntimeError("PYTINCTURE_API_DOCS_SCOPE must be all or public")
+ENABLE_BFF_API_TOKENS = os.getenv("ENABLE_BFF_API_TOKENS", "false").lower() == "true"
+BFF_API_CLIENT_REGISTRY = os.getenv("BFF_API_CLIENT_REGISTRY", "").strip()
+if BFF_API_CLIENT_REGISTRY:
+    from pathlib import Path as _RegistryPath
+    BFF_API_CLIENT_REGISTRY = str(_RegistryPath(BFF_API_CLIENT_REGISTRY).expanduser().resolve())
+    if not ENABLE_BFF_API_TOKENS:
+        raise RuntimeError("BFF_API_CLIENT_REGISTRY requires ENABLE_BFF_API_TOKENS")
+    if _RegistryPath(BFF_API_CLIENT_REGISTRY).is_relative_to(_RegistryPath(get_modules_path()).resolve()):
+        raise RuntimeError("BFF_API_CLIENT_REGISTRY must be outside modules_path")
+    api_clients.check_registry(BFF_API_CLIENT_REGISTRY)
+REQUIRE_PUBLIC_BFF_TOKEN = os.getenv("REQUIRE_PUBLIC_BFF_TOKEN", "false").lower() == "true"
+BFF_API_TOKEN_TTL_SECONDS = 900
 if DIAGNOSTIC_DETAILS_MODE not in {"public", "minimal", "operator"}:
     raise RuntimeError(
         "PYTINCTURE_DIAGNOSTIC_DETAILS_MODE must be public, minimal, or operator"
@@ -831,6 +848,8 @@ def _private_response_required(request: Request) -> bool:
     }
     if (
         path in private_paths
+        or path.endswith(docs_path)
+        or path.endswith(f"{docs_path}/openapi.json")
         or "/auth/" in path
         or path.endswith("/login")
         or "/classcall/" in path
@@ -890,6 +909,7 @@ async def correlation_id_middleware(request: Request, call_next):
         logger,
         logging.INFO,
         "request.complete",
+        client_id=(request.scope.get("pytincture.api_client") or {}).get("client_id"),
         correlation_id=correlation_id,
         method=request.method,
         path=request.url.path,
@@ -1737,6 +1757,90 @@ def is_noauth_allowed(
     return False
 
 
+def _public_bff_operation(application: str, module: str, class_name: str, method: str) -> bool:
+    return not (
+        ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH or ENABLE_USER_LOGIN or ENABLE_SAML_AUTH
+    ) or is_noauth_allowed(module, class_name, method, application)
+
+
+def _bff_api_token_serializer():
+    # Separate purpose from browser cookies, OAuth state and request proofs.
+    return URLSafeTimedSerializer(
+        SAML_SECRET_KEY, salt="pytincture-bff-api-v1",
+        signer_kwargs={"digest_method": hashlib.sha256},
+    )
+
+
+def _validate_api_client_transport(request: Request):
+    if (ALLOW_DEVELOPMENT_AUTH_ORIGIN or ENABLE_DEV_EMAIL_LOGIN) and _is_loopback_network_request(request):
+        return
+    scheme = request.url.scheme
+    if TRUST_PROXY_HEADERS:
+        scheme = request.headers.get("x-forwarded-proto", scheme).split(",", 1)[0].strip()
+    if scheme != "https":
+        raise HTTPException(status_code=403, detail="API client credentials require HTTPS")
+
+
+async def _api_client_store(function, *args):
+    try:
+        return await _run_bounded_thread_stage(
+            REMOTE_STORE_GATE, function, BFF_API_CLIENT_REGISTRY, *args,
+            timeout_seconds=REMOTE_STORE_TIMEOUT_SECONDS,
+            unavailable_detail="API client registry is temporarily unavailable",
+        )
+    except (OSError, ValueError, sqlite3.Error):
+        raise HTTPException(status_code=503, detail="API client registry is temporarily unavailable") from None
+
+
+async def _authenticate_bff_api_token(request: Request, application: str):
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if not ENABLE_BFF_API_TOKENS or scheme.lower() != "bearer" or not token or len(token) > 16384:
+        raise HTTPException(status_code=401, detail="Invalid BFF access token")
+    try:
+        payload = _bff_api_token_serializer().loads(token, max_age=BFF_API_TOKEN_TTL_SECONDS)
+    except BadSignature:
+        raise HTTPException(status_code=401, detail="Invalid or expired BFF access token") from None
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        raise HTTPException(status_code=401, detail="Invalid BFF access token")
+    if payload.get("application") != application:
+        raise HTTPException(status_code=403, detail="Token is not authorized for this application")
+    if payload.get("kind") == "api_client":
+        if not BFF_API_CLIENT_REGISTRY:
+            raise HTTPException(status_code=401, detail="API client authentication is disabled")
+        _validate_api_client_transport(request)
+        client = await _api_client_store(api_clients.get_client, payload.get("client_id"))
+        if (not client or not client["enabled"] or client["application"] != application
+                or not isinstance(payload.get("revision"), str)
+                or not hmac.compare_digest(client["revision"], payload["revision"])):
+            raise HTTPException(status_code=401, detail="API client token expired or revoked")
+        request.scope["pytincture.bff_api_token"] = True
+        request.scope["pytincture.api_client"] = client
+        return {
+            "client_id": client["client_id"], "application": application,
+            "subject": client["client_id"],
+            "email": "", "name": client["client_id"],
+            "auth_type": "api_client", "auth_provider": "api_client",
+            "is_authenticated": True, "roles": [],
+        }
+    scope = payload.get("scope")
+    if scope not in {"external", "public", "session"}:
+        raise HTTPException(status_code=403, detail="Token is not authorized for this method")
+    session = payload.get("session")
+    if not isinstance(session, dict):
+        raise HTTPException(status_code=401, detail="Invalid BFF access token")
+    # Validate the original session's age, identity, admission and optional shared
+    # revocation without installing a browser cookie on the API caller.
+    token_request = Request({**request.scope, "session": session})
+    user = await require_auth(token_request)
+    if not isinstance(user, dict) or user.get("is_authenticated") is not True:
+        raise HTTPException(status_code=401, detail="Token session expired or revoked")
+    _assert_application_audience(user, application)
+    request.scope["pytincture.bff_api_token"] = True
+    request.scope["pytincture.bff_api_token_scope"] = scope
+    return user
+
+
 def _assert_application_audience(user: Any, application: Optional[str]) -> None:
     if not application or not isinstance(user, dict):
         return
@@ -2359,7 +2463,7 @@ def _request_origin(request: Request) -> str:
 
 
 def _validate_csrf(request: Request, user: Any) -> None:
-    if request.scope.get("pytincture.mcp_user") is not None:
+    if request.scope.get("pytincture.mcp_user") is not None or request.scope.get("pytincture.bff_api_token"):
         return
     if request.method in {"GET", "HEAD", "OPTIONS"}:
         return
@@ -2465,8 +2569,9 @@ async def _canonical_bff_arguments(
         arguments = BFFArguments((), {})
     else:
         try:
-            arguments = parse_canonical_bff_body(
+            arguments = parse_bff_body(
                 body,
+                parameters=operation.get("parameters", ()),
                 max_bytes=BFF_REQUEST_MAX_BYTES,
                 max_depth=BFF_REQUEST_MAX_DEPTH,
                 max_items=BFF_REQUEST_MAX_ITEMS,
@@ -2950,7 +3055,7 @@ def _admit_bff_replay_issuance(request: Request, session_id: str) -> None:
 
 
 def _validate_bff_replay_token(request: Request, user: Any) -> None:
-    if request.scope.get("pytincture.mcp_user") is not None:
+    if request.scope.get("pytincture.mcp_user") is not None or request.scope.get("pytincture.bff_api_token"):
         return
     if not ENABLE_BFF_REPLAY_TOKENS:
         return
@@ -4185,14 +4290,25 @@ async def class_call(
         request_identifier_with_ext += ".py"
 
     mcp_user = request.scope.get("pytincture.mcp_user")
+    public_session_user = None
     if mcp_user is not None:
         user = mcp_user
+    elif request.headers.get("authorization", "").partition(" ")[0].lower() == "bearer":
+        user = await _authenticate_bff_api_token(
+            request, application,
+        )
     elif is_noauth_allowed(
         request_identifier_with_ext,
         class_name,
         function_name,
         application,
     ):
+        if REQUIRE_PUBLIC_BFF_TOKEN:
+            public_user = await _resolve_auth(request)
+            if not isinstance(public_user, dict) or public_user.get("is_authenticated") is not True:
+                raise HTTPException(status_code=401, detail="API token or browser sign-in required")
+            _assert_application_audience(public_user, application)
+            public_session_user = public_user
         user = "noauth"
     else:
         # Perform authentication check for calls not whitelisted for no-auth.
@@ -4200,7 +4316,8 @@ async def class_call(
 
     if not user:
         raise HTTPException(status_code=401, detail="Call not authorized")
-    _assert_application_audience(user, application)
+    if request.scope.get("pytincture.api_client") is None:
+        _assert_application_audience(user, application)
 
     modules_root = os.path.abspath(get_modules_path())
     fs_relative = request_identifier_with_ext.replace("/", os.sep)
@@ -4224,6 +4341,33 @@ async def class_call(
     )
     if operation is None:
         raise HTTPException(status_code=404, detail="BFF operation not exported")
+    external = bool(operation.get("external"))
+    public = _public_bff_operation(application, request_identifier_with_ext, class_name, function_name)
+    api_client = request.scope.get("pytincture.api_client")
+    if api_client is not None:
+        permitted = external and api_clients.permits(
+            api_client, request_identifier_with_ext, class_name, function_name,
+        )
+        structured_log(logger, logging.INFO, "bff.client.authorization",
+            correlation_id=getattr(request.state, "correlation_id", ""),
+            client_id=api_client["client_id"], application=application,
+            module=request_identifier_with_ext, class_name=class_name,
+            function_name=function_name, allowed=bool(permitted))
+        if not permitted:
+            raise HTTPException(status_code=403, detail="API client is not authorized for this method")
+    elif request.scope.get("pytincture.bff_api_token"):
+        if request.scope.get("pytincture.bff_api_token_scope") in {"external", "public"} and not (public or external):
+            raise HTTPException(status_code=403, detail="Token is not authorized for this method")
+        if public and not external:
+            user = "noauth"
+    elif external and mcp_user is None:
+        # A source-level external declaration overrides any anonymous allowlist.
+        # Keep ordinary app clients on their existing session + CSRF/proof flow.
+        if not isinstance(user, dict) or user.get("is_authenticated") is not True:
+            user = await _resolve_auth(request)
+        if not isinstance(user, dict) or user.get("is_authenticated") is not True:
+            raise HTTPException(status_code=401, detail="API token or browser sign-in required")
+        _assert_application_audience(user, application)
     application_identifiers = await _run_bff_thread_stage(
         request,
         _application_bff_identifiers,
@@ -4243,6 +4387,7 @@ async def class_call(
         logger,
         logging.INFO,
         "bff.start",
+        client_id=api_client["client_id"] if api_client is not None else None,
         correlation_id=getattr(request.state, "correlation_id", ""),
         module=request_identifier_with_ext,
         class_name=class_name,
@@ -4258,11 +4403,11 @@ async def class_call(
         )
 
     _validate_bff_browser_request(request)
-    _validate_csrf(request, user)
+    _validate_csrf(request, public_session_user or user)
     arguments = await _canonical_bff_arguments(request, operation)
     args = arguments.args
     kwargs = arguments.kwargs
-    await _run_bff_thread_stage(request, _validate_bff_replay_token, request, user)
+    await _run_bff_thread_stage(request, _validate_bff_replay_token, request, public_session_user or user)
     policy = operation.get("policy", {})
     policy_hook = await _run_bff_thread_stage(
         request, _configured_bff_policy_hook
@@ -4744,6 +4889,11 @@ ENABLE_USER_LOGIN = os.getenv("ENABLE_USER_LOGIN", "false").lower() == "true"
 ENABLE_SAML_AUTH = os.getenv("ENABLE_SAML_AUTH", "false").lower() == "true"
 ENABLE_MICROSOFT_AUTH = os.getenv("ENABLE_MICROSOFT_AUTH", "false").lower() == "true"
 ENABLE_DEV_EMAIL_LOGIN = os.getenv("ENABLE_DEV_EMAIL_LOGIN", "false").lower() == "true"
+if REQUIRE_PUBLIC_BFF_TOKEN and not (
+    ENABLE_BFF_API_TOKENS
+    and (ENABLE_USER_LOGIN or ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH or ENABLE_SAML_AUTH)
+):
+    raise RuntimeError("REQUIRE_PUBLIC_BFF_TOKEN requires ENABLE_BFF_API_TOKENS and a login provider")
 ALLOW_DEVELOPMENT_AUTH_ORIGIN = os.getenv(
     "PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN", "false"
 ).lower() == "true"
@@ -4780,6 +4930,7 @@ def _authentication_enabled() -> bool:
         or ENABLE_MICROSOFT_AUTH
         or ENABLE_USER_LOGIN
         or ENABLE_SAML_AUTH
+        or BFF_API_CLIENT_REGISTRY
     )
 
 _configured_saml_secret = os.getenv("SAML_SECRET_KEY", "").strip()
@@ -4790,6 +4941,7 @@ if _authentication_enabled():
         not SAML_SECRET_KEY
         and ENABLE_DEV_EMAIL_LOGIN
         and DEV_EMAIL_LOGIN_ONLY
+        and not BFF_API_CLIENT_REGISTRY
     ):
         SAML_SECRET_KEY = secrets.token_urlsafe(32)
         logger.warning(
@@ -7234,6 +7386,98 @@ async def mcp_auth(request: Request, application: str):
     return {**session_user, "status": "authenticated"}
 
 # ======================
+# Application API credentials
+# ======================
+@app.get("/{application}/auth/bff-token", include_in_schema=False)
+async def bff_api_auth_status(request: Request, application: str):
+    await _api_documentation_modules(application)
+    user = await _resolve_auth(request)
+    authenticated = isinstance(user, dict) and user.get("is_authenticated") is True
+    if authenticated:
+        _assert_application_audience(user, application)
+    return {
+        "authenticated": authenticated,
+        "email": user.get("email", "") if authenticated else "",
+        "password_login": ENABLE_USER_LOGIN,
+        "tokens_enabled": ENABLE_BFF_API_TOKENS,
+        "public_token_required": REQUIRE_PUBLIC_BFF_TOKEN,
+    }
+
+
+@app.post("/{application}/auth/client-token", include_in_schema=False)
+async def issue_bff_client_token(request: Request, application: str):
+    """Exchange an operator-registered application's credentials for a BFF token."""
+    if not ENABLE_BFF_API_TOKENS or not BFF_API_CLIENT_REGISTRY:
+        raise HTTPException(status_code=404, detail="Not found")
+    _validate_api_client_transport(request)
+    _validate_bff_browser_request(request)
+    peer = request.client.host if request.client else "unknown"
+    allowed, retry_after = AUTH_LOGIN_RATE_LIMITER.allow(f"api-client-peer:{peer}")
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many token requests",
+            headers={"Retry-After": str(retry_after)})
+    await _buffer_auth_request_body(request, application, expected_content_types={"application/json"})
+    try:
+        body = await request.json()
+        if (not isinstance(body, dict) or set(body) != {"grant_type", "client_id", "client_secret"}
+                or body["grant_type"] != "client_credentials"
+                or not isinstance(body["client_id"], str) or not 1 <= len(body["client_id"]) <= 128
+                or not isinstance(body["client_secret"], str) or not 1 <= len(body["client_secret"]) <= 1024):
+            raise ValueError()
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=422, detail="Expected grant_type=client_credentials, client_id and client_secret") from None
+    client = await _api_client_store(api_clients.authenticate_client,
+        application, body["client_id"], body["client_secret"])
+    structured_log(logger, logging.INFO, "bff.client.token",
+        correlation_id=getattr(request.state, "correlation_id", ""),
+        application=application, client_id=client["client_id"] if client else None,
+        authenticated=client is not None)
+    if client is None:
+        raise HTTPException(status_code=401, detail="Invalid client credentials")
+    token = _bff_api_token_serializer().dumps({
+        "version": 1, "kind": "api_client", "application": application,
+        "client_id": client["client_id"], "revision": client["revision"],
+    })
+    return {"access_token": token, "token_type": "Bearer", "expires_in": BFF_API_TOKEN_TTL_SECONDS,
+            "application": application, "client_id": client["client_id"], "grants": client["grants"]}
+
+
+@app.post("/{application}/auth/bff-token", include_in_schema=False)
+async def issue_bff_api_token(request: Request, application: str):
+    if not ENABLE_BFF_API_TOKENS:
+        raise HTTPException(status_code=404, detail="Not found")
+    await _buffer_auth_request_body(request, application, expected_content_types={"application/json"})
+    _validate_bff_browser_request(request)
+    user = await _resolve_auth(request)
+    if not isinstance(user, dict) or user.get("is_authenticated") is not True:
+        raise HTTPException(status_code=401, detail="Sign in before generating an API token")
+    _assert_application_audience(user, application)
+    _validate_csrf(request, user)
+    await _api_documentation_modules(application)
+    try:
+        body = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=422, detail="Expected a JSON object with scope") from None
+    if not isinstance(body, dict) or set(body) != {"scope"} or body["scope"] not in ("external", "public", "session"):
+        raise HTTPException(status_code=422, detail="scope must be external or session (public is a legacy alias)")
+    session = {key: request.session[key] for key in (
+        "user", "session_id", "auth_issued_at", "auth_expires_at",
+    ) if key in request.session}
+    expires_at = min(
+        time.time() + BFF_API_TOKEN_TTL_SECONDS,
+        session.get("auth_issued_at", 0) + AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS,
+        session.get("auth_expires_at", float("inf")),
+    )
+    token = _bff_api_token_serializer().dumps({
+        "version": 1, "application": application, "scope": body["scope"], "session": session,
+    })
+    return {
+        "access_token": token, "token_type": "Bearer", "scope": body["scope"],
+        "application": application, "expires_in": max(0, int(expires_at - time.time())),
+    }
+
+
+# ======================
 # The /{application} route
 # ======================
 @app.get("/{application}", response_class=HTMLResponse, operation_id="getMainApp", responses={200: {"description": "HTMLResponse (modified index.html with widgetset)"}, 302: {"description": "RedirectResponse (to login if not authenticated)"}})
@@ -7698,12 +7942,42 @@ async def _authorize_api_documentation(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Authentication required")
 
 
+async def _api_documentation_modules(application: str) -> Set[str]:
+    try:
+        validate_application_name(application)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Application not found") from None
+    return await run_in_threadpool(
+        _application_bff_identifiers, application, get_modules_path()
+    )
+
+
+async def _api_documentation_title(application: str) -> str:
+    def read_title():
+        source = _read_application_entrypoint(application, get_modules_path())
+        return find_app_loading_title(
+            source.path, application.replace("_", " ").strip().title(),
+            source_code=decode_python_source(source.content),
+        )
+    return await run_in_threadpool(read_title)
+
+
 add_bff_docs_to_app(
     app,
     operations=reload_bff_registry(get_modules_path()),
     asset_uuid=FRONTEND_INSTANCE_UUID,
     docs_mode=API_DOCS_MODE,
     authorize=_authorize_api_documentation,
+    application_modules=_api_documentation_modules,
+    csrf_cookie_name=_CSRF_COOKIE,
+    application_title=_api_documentation_title,
+    public_operation=_public_bff_operation,
+    docs_scope=API_DOCS_SCOPE,
+    api_tokens_enabled=ENABLE_BFF_API_TOKENS,
+    api_clients_enabled=bool(BFF_API_CLIENT_REGISTRY),
+    public_token_required=REQUIRE_PUBLIC_BFF_TOKEN,
+    session_cookie_name=_SESSION_COOKIE,
+    include_session_methods_by_default=(ALLOW_DEVELOPMENT_AUTH_ORIGIN or ENABLE_DEV_EMAIL_LOGIN),
 )
 reload_mcp_tools()
 

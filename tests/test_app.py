@@ -2639,6 +2639,10 @@ def test_bff_request_validation_finishes_before_application_import(
         '{"args":[[[[[1]]]]],"kwargs":{}}',
         '{"args":[{"name":"value","type":"int","value":1}],"kwargs":{}}',
         '{"args":[],"kwargs":{"value":"wrong-type"}}',
+        '{"value":"wrong-type"}',
+        '{"value":1,"value":2}',
+        '{"value":NaN}',
+        '{"unexpected":1}',
         '{"args":[],"kwargs":{}}',
     )
     monkeypatch.setattr(backend_app, "BFF_REQUEST_MAX_DEPTH", 4)

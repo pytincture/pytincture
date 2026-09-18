@@ -1533,9 +1533,9 @@ def test_bff_documentation_is_per_app_and_redacts_defaults(tmp_path):
     first = create_app(PytinctureConfig(modules_path=str(first_root)))
     second = create_app(PytinctureConfig(modules_path=str(second_root)))
     with TestClient(first) as first_client, TestClient(second) as second_client:
-        first_schema = first_client.get("/bff-docs/openapi.json").text
-        second_schema = second_client.get("/bff-docs/openapi.json").text
-        docs_response = first_client.get("/bff-docs")
+        first_schema = first_client.get("/first/service/bff-docs/openapi.json").text
+        second_schema = second_client.get("/second/worker/bff-docs/openapi.json").text
+        docs_response = first_client.get("/first/service/bff-docs")
         swagger_bundle = first_client.get(
             "/frontend/vendor/swagger-ui/swagger-ui-bundle.js?uuid=test"
         )
@@ -1568,8 +1568,60 @@ def test_bff_documentation_is_per_app_and_redacts_defaults(tmp_path):
     assert hidden_license.status_code == 404
 
 
+@pytest.mark.parametrize("docs_path", ["/bff-docs", "/api/reference"])
+def test_application_bff_documentation_filters_calls_and_binds_application(tmp_path, docs_path):
+    (tmp_path / "first.py").write_text("from service import FirstService\n")
+    (tmp_path / "second.py").write_text("from worker import SecondService\n")
+    (tmp_path / "service.py").write_text(
+        "from pytincture.dataclass import backend_for_frontend, bff_http_methods\n"
+        "@backend_for_frontend\n"
+        "class FirstService:\n"
+        "    @bff_http_methods('GET')\n"
+        "    def read(self): return True\n"
+    )
+    (tmp_path / "worker.py").write_text(
+        "from pytincture.dataclass import backend_for_frontend\n"
+        "@backend_for_frontend\n"
+        "class SecondService:\n"
+        "    def write(self, token='secret-default'): return token\n"
+    )
+    configured = create_app(PytinctureConfig(
+        modules_path=str(tmp_path), environment={"BFF_DOCS_PATH": docs_path},
+    ))
+    with TestClient(configured, root_path="/mounted") as client:
+        docs = client.get(f"/first/service{docs_path}")
+        assert docs.status_code == 200
+        assert not docs.history
+        assert f'data-openapi-url="/mounted/first/service{docs_path}/openapi.json?' in docs.text
+        assert "/mounted/frontend/vendor/swagger-ui/" in docs.text
+        first = client.get(f"/first/service{docs_path}/openapi.json").json()
+        assert set(first["paths"]) == {"/FirstService/read"}
+        operation = first["paths"]["/FirstService/read"]
+        assert set(operation) == {"get"}
+        assert operation["get"]["parameters"] == []
+        assert "requestBody" not in operation["get"]
+        assert first["servers"] == [{"url": "/mounted/first/classcall/service"}]
+        second = client.get(f"/second/worker{docs_path}/openapi.json").json()
+        assert set(second["paths"]) == {"/SecondService/write"}
+        assert "secret-default" not in json.dumps(second)
+        # Schemas exist only at module URLs; neither aggregate route discloses calls.
+        for path in (docs_path, f"{docs_path}/openapi.json", f"/first{docs_path}", f"/first{docs_path}/openapi.json"):
+            assert client.get(path, follow_redirects=False).status_code == 404
+        assert configured.openapi()["paths"] == {}
+        for application in ("missing", "bad-name"):
+            for suffix in ("", "/openapi.json"):
+                assert client.get(f"/{application}/service{docs_path}{suffix}").status_code == 404
+
+
+
 def test_bff_documentation_can_require_authentication_or_be_disabled(tmp_path):
-    (tmp_path / "demo.py").write_text('APP_TITLE = "Docs mode"\n')
+    (tmp_path / "demo.py").write_text(
+        'APP_TITLE = "Docs mode"\n'
+        'from pytincture.dataclass import backend_for_frontend\n'
+        '@backend_for_frontend(include_session_methods_in_docs=True)\n'
+        'class Demo:\n'
+        '    def echo(self, value: str): return {"value": value}\n'
+    )
 
     authenticated = create_app(
         PytinctureConfig(
@@ -1580,10 +1632,8 @@ def test_bff_documentation_can_require_authentication_or_be_disabled(tmp_path):
     authenticated_backend = authenticated.state.pytincture_backend
     with TestClient(authenticated) as client:
         for path in (
-            "/bff-docs",
-            "/bff-docs/openapi.json",
-            "/docs",
-            "/openapi.json",
+            "/demo/demo/bff-docs",
+            "/demo/demo/bff-docs/openapi.json",
         ):
             response = client.get(path, follow_redirects=False)
             assert response.status_code == 401
@@ -1597,8 +1647,11 @@ def test_bff_documentation_can_require_authentication_or_be_disabled(tmp_path):
             "is_authenticated": True,
             "email": "docs@example.test",
         }
-        assert client.get("/bff-docs").status_code == 200
-        assert client.get("/openapi.json").status_code == 200
+        assert client.get("/bff-docs").status_code == 404
+        assert client.get("/openapi.json").status_code == 404
+        assert client.get("/demo/bff-docs").status_code == 404
+        assert client.get("/demo/demo/bff-docs").status_code == 200
+        assert client.get("/demo/demo/bff-docs/openapi.json").status_code == 200
 
     disabled = create_app(
         PytinctureConfig(
@@ -1610,11 +1663,23 @@ def test_bff_documentation_can_require_authentication_or_be_disabled(tmp_path):
         for path in (
             "/bff-docs",
             "/bff-docs/openapi.json",
+            "/demo/bff-docs",
+            "/demo/bff-docs/openapi.json",
+            "/demo/demo/bff-docs",
+            "/demo/demo/bff-docs/openapi.json",
             "/docs",
             "/redoc",
             "/openapi.json",
         ):
             assert client.get(path, follow_redirects=False).status_code == 404
+
+        for payload in (
+            {"value": "still available"},
+            {"args": [], "kwargs": {"value": "still available"}},
+        ):
+            response = client.post("/demo/classcall/demo.py/Demo/echo", json=payload)
+            assert response.status_code == 200
+            assert response.json() == {"value": "still available"}
 
 
 def test_invalid_python_file_cannot_disable_unrelated_bff_application(tmp_path):

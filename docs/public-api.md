@@ -22,7 +22,7 @@ Import these names from `pytincture`:
 - `__version__` reports the installed framework/runtime release.
 - `launch_service(modules_folder, port=8070, ssl_keyfile=None,
   ssl_certfile=None, env_vars=None, bff_docs_path="/bff-docs",
-  bff_docs_title="pyTincture BFF API", default_application=None,
+  bff_docs_title="", default_application=None,
   favicon_folder=None, host=None)` starts the Pytincture service. The existing call forms
   remain supported when the planned application factory is introduced.
 - `set_modules_path(path)` selects the application module root for the current
@@ -43,7 +43,13 @@ an explicitly routable host is rejected before the server process starts.
 Import these decorators from `pytincture.dataclass`:
 
 - `@backend_for_frontend` exports public methods and public attributes from a
-  class and produces the browser-side proxy.
+  class and produces the browser-side proxy. Swagger includes session-based
+  methods by default in explicit development mode and hides them otherwise.
+  `@backend_for_frontend(include_session_methods_in_docs=True)` or `False`
+  overrides that default for the class.
+- `@bff_external` (or `@bff_external()`) marks a method for the external API.
+  It appears in its module's Swagger page and accepts external-scoped tokens.
+  It never grants anonymous access; normal authenticated app sessions still work.
 - `@bff_http_methods(*methods)` opts a method into one or more of `GET`,
   `POST`, `PUT`, `PATCH`, and `DELETE`. Undeclared methods use `POST`; GET is a
   parameterless, read-only, repeatable operation contract.
@@ -72,6 +78,194 @@ Generated asynchronous calls attach browser cancellation to their bounded
 wait. A timeout or Python task cancellation aborts the underlying fetch, and a
 stream reader is cancelled when iteration completes or its iterator is closed.
 This cleanup does not change chunk framing, `yield`, or the synchronous API.
+
+### BFF documentation
+
+Open `/{application}/{module}/bff-docs` to see one module's documented BFF
+methods, Python signatures, named request examples and response schemas.
+Use an extensionless module path, including its folders: for example,
+`/library/services/catalog/bff-docs` documents `services/catalog.py` within the
+`library` application's dependencies. The schema is at the same URL followed
+by `/openapi.json`. Undocumented, unknown and unrelated modules return 404.
+
+Swagger's server/base URL is `/{application}/classcall/{module}` and operations
+are displayed as `/ClassName/method`. The application and module appear once
+in the base URL; no `.py` suffix is used in documented paths or tags. Both
+extensionless and historical `.py` class-call URLs continue to work, including
+nested modules. `/{application}/bff-docs`, global `/bff-docs`, `/docs`, `/redoc`
+and all aggregate OpenAPI URLs return 404 in every docs mode.
+
+ Send the actual function arguments as a JSON object, for example
+`{"page": 1, "page_size": 2}`. Swagger documents this format directly.
+The server normalizes named fields before running the existing signature,
+authorization, and type checks. A variadic positional parameter is supplied as
+an array under its declared name; extra fields bind to `**kwargs` when declared.
+
+Generated clients can continue using `{"args": [], "kwargs": {...}}`.
+An object containing exactly `args` (an array) and `kwargs` (an object) is
+recognized as the legacy envelope. If a method itself declares both of those
+names, use the envelope to disambiguate that pair of values.
+
+Add parameter and return type annotations to describe JSON types. Built-in
+types, lists, dictionaries, tuples, unions, `Optional`, `Literal`, and
+module-local `TypedDict` classes (including nested fields and inheritance)
+produce structured schemas. Undeclared or unresolved shapes remain unknown.
+Type annotations also participate in the existing BFF argument validation;
+choose annotations that describe the inputs your method accepts.
+
+Documentation is generated statically, without importing modules or invoking
+methods. Server default values stay redacted. Response examples are clearly
+labelled as illustrative; **Try it out → Execute** performs a real call and
+shows its actual response. The **API access** panel signs in directly using the
+existing email/password login controls (including login CSRF, throttling and
+password verification). Its heading uses the application documentation title, and
+it displays the same configured `LOGIN_HELP_TEXT` as the regular login page. For Google, Microsoft or SAML, use **Other sign-in
+options**, then **Refresh sign-in status**. Browser sessions work automatically;
+Swagger supplies the CSRF header for same-origin BFF writes. A raw session ID
+is not a credential and is never needed in Swagger.
+
+The page and schema title use `APP_TITLE` / `APP_LOADING_TITLE` or
+`APP_CONFIG["title"]` / `APP_CONFIG["loading_title"]` from the application
+entrypoint, followed by `API`. Without a title, the application name is used
+(with underscores replaced by spaces). `BFF_DOCS_TITLE` explicitly overrides
+the complete title. No framework branding is added.
+
+To disable documentation in production, set
+`PytinctureConfig(api_docs_mode="disabled", ...)`. Environment-based startup
+(`create_app()` or `PytinctureConfig.from_env()`) also accepts
+`PYTINCTURE_API_DOCS_MODE=disabled`. If constructing a config explicitly,
+pass the field explicitly or read the environment into it. This disables
+both Swagger pages and OpenAPI schemas, including every module-specific
+route, without disabling
+BFF calls. The `authenticated` mode instead requires a valid login to read docs.
+
+### External methods and API tokens
+
+For applications that need their own credentials without a user login, see
+[application API clients](api-clients.md). Clients receive grants against exact
+application/module/class/method identifiers; no additional permission names or
+decorator arguments are needed. User-session tokens below remain supported.
+
+Declare external access beside the method, with no environment-variable
+allowlist. For `services/catalog.py`:
+
+```python
+from pytincture.dataclass import backend_for_frontend, bff_external
+
+@backend_for_frontend
+class Catalog:
+    @bff_external
+    def search(self, query: str) -> list[str]:
+        return [query]
+
+    def refresh_index(self) -> bool:
+        return True
+```
+
+Outside development mode, `/library/services/catalog/bff-docs` shows `search`
+and hides `refresh_index`. In explicit development mode it shows both.
+`include_session_methods_in_docs` defaults to `None`, which inherits the service
+mode. Explicit `True` includes session-based methods and explicit `False` hides
+them, regardless of the mode. Development here means either
+`PytinctureConfig(allow_development_auth_origin=True, ...)` or
+`PytinctureConfig(enable_dev_email_login=True, ...)`, using the existing
+loopback-only development controls. Merely visiting localhost does not enable
+this default. That flag only controls documentation: it does not authorize
+external-scoped tokens to call `refresh_index`. Both methods remain callable
+from the app through its authenticated session. `@bff_external` requires a
+valid API token for cookie-free callers, or an authenticated browser session
+with the normal CSRF/replay protections; it rejects anonymous calls even if a
+legacy anonymous allowlist names the same method. It also rejects anonymous
+calls in a service with no login providers. The method's BFF policies still run,
+and the issuer's identity is available as `_user`.
+
+Enable token issuance in the service's existing authenticated configuration:
+
+```python
+config = PytinctureConfig(
+    modules_path="./app",
+    enable_bff_api_tokens=True,
+    api_docs_mode="public",  # or authenticated / disabled
+    # Add your existing authentication configuration here.
+)
+```
+
+The default `api_docs_scope="all"` honors each class's `include_session_methods_in_docs` flag.
+`api_docs_scope="public"` is an optional service-wide restriction: show external
+methods and legacy public methods only, even if a class requests `include_session_methods_in_docs=True`.
+If nothing is visible in a module, its docs and schema return 404.
+
+`ALLOWED_NOAUTH_CLASSCALLS` remains supported for existing anonymous APIs, but
+is not required for `@bff_external`. Matching application, module, class and
+method is exact, including folders. Services with no login providers still
+expose ordinary BFF methods anonymously; the external decorator explicitly
+requires credentials. Decorators and literal boolean/`None` documentation flags are discovered
+statically without importing application code; unrelated or shadowed decorators
+do not grant external access.
+
+With `enable_bff_api_tokens=True`, sign in in **API access**, choose the token
+scope and click **Generate API token**. Swagger fills its **Authorize** bearer
+credential automatically, shows the token for copying and uses it for Execute.
+The token is kept in memory, not local storage; reload or **Clear token** removes
+it from the page (neither revokes a copy already issued).
+
+- **External methods only** (`scope=external`): usable only on `@bff_external`
+  methods or legacy public methods for that application. It cannot call
+  session-only methods, even when issued by a privileged user or when
+  `include_session_methods_in_docs=True`. Current source declarations are checked on each request.
+- **Methods allowed by my sign-in**: carries the issuer's authenticated identity
+  for that application; normal admission and BFF policies still apply. This
+  scope is offered when the module docs include session-based methods.
+  Hiding it in external-only docs does not remove a signed-in user's existing
+  ability to delegate their own permissions.
+
+Tokens expire after at most 15 minutes, or earlier if the originating session
+expires. Issuance requires a real authenticated browser session and its CSRF
+header; anonymous visitors cannot mint access credentials. Tokens are signed,
+not encrypted, and contain the issuer's session identity, so treat them as
+credentials. They are not OAuth/MCP JWTs and cannot authenticate other framework
+endpoints. Shared session revocation, when configured, revokes delegated tokens
+as well. Without a shared revocation store, issued copies remain usable until
+expiry; removing a token from Swagger or logging out locally is not revocation.
+Tokens use the service signing key with a separate purpose/salt; key rotation
+invalidates them.
+
+For non-browser clients:
+
+```sh
+curl -X POST 'https://your-app.example/library/classcall/services/catalog/Catalog/search' \
+  -H "Authorization: Bearer $BFF_ACCESS_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"books"}'
+```
+
+Programmatic issuance uses the existing login flow: GET then POST
+`/{application}/auth/mcp` with email, password and the returned
+`login_csrf_token`, preserving cookies. POST `/{application}/auth/bff-token`
+with `{"scope":"external"}` or `{"scope":"session"}`, those cookies and
+`X-CSRF-Token` from the configured readable CSRF cookie. The response contains
+`access_token`, `token_type`, `application`, `scope` and `expires_in`.
+The old `scope=public` spelling is accepted with the same restricted access.
+GET `/{application}/auth/bff-token` reports sign-in status and enabled features.
+Token issuance returns 404 unless explicitly enabled and remains independent
+of whether Swagger is disabled in production.
+
+For legacy allowlisted methods only, anonymous calls remain the default: an optional token
+does not turn a public method into a protected method. To require credentials,
+set `require_public_bff_token=True` (`REQUIRE_PUBLIC_BFF_TOKEN=true`) alongside
+`enable_bff_api_tokens=True` and a configured login provider. Then public methods
+require a valid API token **or** authenticated browser session; ordinary generated
+app clients continue working. Browser sessions retain CSRF and optional replay
+proof checks. Explicit bearer calls use the bearer credential instead of those
+browser-only proofs; signature, expiry, application scope, origin, admission,
+input validation and BFF policy checks still apply. Invalid bearer credentials
+fail rather than falling back to cookies or anonymous access.
+
+`@bff_external` methods always require credentials; they do not need the legacy
+`require_public_bff_token` switch. For environment-based startup the equivalent settings are
+`PYTINCTURE_API_DOCS_SCOPE=public`, `ENABLE_BFF_API_TOKENS=true` and, optionally,
+`REQUIRE_PUBLIC_BFF_TOKEN=true`. Explicit `PytinctureConfig(...)` construction
+must pass these fields explicitly or read the environment into them.
 
 ### Runtime hooks
 
