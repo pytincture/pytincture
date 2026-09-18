@@ -7,6 +7,11 @@ every gate below has durable evidence.
 
 ## Current decision: NO-GO pending observation and edge evidence
 
+`1.0.0rc8` is the development version on the open preparation branch. It has
+not been tagged, released, or published. The draft remains open for additional
+changes; release qualification and publication will be performed separately.
+The published-candidate evidence below continues to describe rc7 and earlier.
+
 `1.0.0rc7` was published on 2026-09-18 after signed-tag qualification and all
 23 framework release CI jobs passed. Its exact artifacts and hashes are
 attached to the GitHub prerelease, and PyPI publication and a clean public-index

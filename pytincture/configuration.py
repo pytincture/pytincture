@@ -237,6 +237,22 @@ class PytinctureConfig:
         "PYTINCTURE_BROWSER_CONNECT_ORIGINS",
         "Exact additional HTTPS/WSS origins permitted by browser connect-src.",
     )
+    allow_camera: bool = _setting(
+        False, "PYTINCTURE_ALLOW_CAMERA",
+        "Allow same-origin camera requests through Permissions-Policy; default false.",
+    )
+    allow_microphone: bool = _setting(
+        False, "PYTINCTURE_ALLOW_MICROPHONE",
+        "Allow same-origin microphone requests through Permissions-Policy; default false.",
+    )
+    allow_geolocation: bool = _setting(
+        False, "PYTINCTURE_ALLOW_GEOLOCATION",
+        "Allow same-origin geolocation requests through Permissions-Policy; default false.",
+    )
+    allow_payment: bool = _setting(
+        False, "PYTINCTURE_ALLOW_PAYMENT",
+        "Allow same-origin Payment Request API use through Permissions-Policy; default false.",
+    )
     allowed_hosts: tuple[str, ...] = _setting(
         (), "PYTINCTURE_ALLOWED_HOSTS", "Allowed HTTP Host header names."
     )
@@ -990,6 +1006,11 @@ class PytinctureConfig:
     environment: Mapping[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self):
+        for name in (
+            "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be a boolean")
         object.__setattr__(
             self,
             "environment",
@@ -1608,6 +1629,7 @@ class PytinctureConfig:
         source = dict(os.environ if environ is None else environ)
         values = {}
         boolean_fields = {
+            "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
             "require_readonly_modules_path",
             "enable_user_login", "enable_dev_email_login", "enable_google_auth",
             "enable_microsoft_auth", "enable_saml_auth", "enable_bff_replay_tokens",

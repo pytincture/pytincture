@@ -425,6 +425,79 @@ def test_cors_origins_use_the_backend_csv_format(tmp_path):
     )
 
 
+_BROWSER_PERMISSIONS = ("camera", "microphone", "geolocation", "payment")
+
+
+@pytest.mark.parametrize("feature", _BROWSER_PERMISSIONS)
+def test_browser_permission_environment_override_and_instance_isolation(
+    tmp_path, monkeypatch, feature,
+):
+    field_name = f"allow_{feature}"
+    env_name = f"PYTINCTURE_ALLOW_{feature.upper()}"
+    for name in _BROWSER_PERMISSIONS:
+        monkeypatch.delenv(f"PYTINCTURE_ALLOW_{name.upper()}", raising=False)
+    monkeypatch.setenv(env_name, "true")
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+
+    config = PytinctureConfig.from_env()
+    assert getattr(config, field_name) is True
+    assert config.to_environ()[env_name] == "true"
+    overridden = PytinctureConfig.from_env(**{field_name: False})
+    assert getattr(overridden, field_name) is False
+    assert overridden.to_environ()[env_name] == "false"
+
+    # A direct config ignores process settings, even while another instance
+    # reads them. Interleave requests to catch process-global header state.
+    default_app = create_app(PytinctureConfig(modules_path=str(tmp_path)))
+    enabled_app = create_app()
+    overridden_app = create_app(overridden)
+    default_policy = "camera=(), microphone=(), geolocation=(), payment=()"
+    enabled_policy = default_policy.replace(f"{feature}=()", f"{feature}=(self)")
+    with (
+        TestClient(default_app) as default_client,
+        TestClient(enabled_app) as enabled_client,
+        TestClient(overridden_app) as overridden_client,
+    ):
+        for path in ("/healthz", "/frontend/pytincture.js", "/missing-app"):
+            assert default_client.get(path).headers["permissions-policy"] == default_policy
+            assert enabled_client.get(path).headers["permissions-policy"] == enabled_policy
+            assert overridden_client.get(path).headers["permissions-policy"] == default_policy
+            assert default_client.get(path).headers["permissions-policy"] == default_policy
+
+
+@pytest.mark.parametrize("feature", _BROWSER_PERMISSIONS)
+@pytest.mark.parametrize("value", ("false", "0", "no", "off"))
+def test_browser_permission_environment_false_values(tmp_path, feature, value):
+    config = PytinctureConfig.from_env({
+        "MODULES_PATH": str(tmp_path),
+        f"PYTINCTURE_ALLOW_{feature.upper()}": value,
+    })
+    assert getattr(config, f"allow_{feature}") is False
+
+
+@pytest.mark.parametrize("feature", _BROWSER_PERMISSIONS)
+def test_browser_permission_rejects_invalid_configuration(tmp_path, feature):
+    with pytest.raises(ValueError, match="boolean"):
+        PytinctureConfig.from_env({
+            "MODULES_PATH": str(tmp_path),
+            f"PYTINCTURE_ALLOW_{feature.upper()}": "allow",
+        })
+    # Do not treat a nonempty 'false' string as a truthy explicit opt-in.
+    for value in ("false", "true", 1, None):
+        with pytest.raises(ValueError, match=f"allow_{feature} must be a boolean"):
+            PytinctureConfig(modules_path=str(tmp_path), **{f"allow_{feature}": value})
+
+
+def test_browser_permission_options_can_be_combined(tmp_path):
+    app = create_app(PytinctureConfig(
+        modules_path=str(tmp_path), allow_camera=True, allow_microphone=True,
+    ))
+    with TestClient(app) as client:
+        assert client.get("/healthz").headers["permissions-policy"] == (
+            "camera=(self), microphone=(self), geolocation=(), payment=()"
+        )
+
+
 def test_browser_connect_origins_are_typed_canonical_and_environment_backed(
     tmp_path,
 ):

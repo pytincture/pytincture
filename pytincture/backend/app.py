@@ -293,6 +293,10 @@ _DEFAULT_BROWSER_CONNECT_ORIGINS = (
     "https://files.pythonhosted.org",
 )
 BROWSER_CONNECT_ORIGINS = tuple(_PYTINCTURE_CONFIG.browser_connect_origins)
+SERVICE_PERMISSIONS_POLICY = ", ".join(
+    f"{feature}=({'self' if getattr(_PYTINCTURE_CONFIG, f'allow_{feature}') else ''})"
+    for feature in ("camera", "microphone", "geolocation", "payment")
+)
 
 
 def _service_content_security_policy() -> str:
@@ -877,7 +881,7 @@ async def correlation_id_middleware(request: Request, call_next):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault(
-        "Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()"
+        "Permissions-Policy", SERVICE_PERMISSIONS_POLICY
     )
     response.headers.setdefault(
         "Content-Security-Policy",
