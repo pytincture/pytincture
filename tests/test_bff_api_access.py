@@ -1,5 +1,6 @@
 """Exercise documentation scope and real cookie-to-bearer delegation boundaries."""
 import json
+import secrets
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,7 +31,7 @@ class Catalog:
         enable_bff_api_tokens=True, allow_development_auth_origin=development,
         allowed_hosts=() if development else ("app.example.test",),
         canonical_origin=None if development else "https://app.example.test",
-        session_https_only=not development, session_secret='docs-test-secret-0123456789abcdef-abcd',
+        session_https_only=not development, session_secret=secrets.token_urlsafe(32),
         environment={
             'ALLOWED_EMAILS': 'reader@example.test',
             'AUTH_PASSWORD_HASHES': json.dumps({'reader@example.test': PASSWORD_HASH}),
