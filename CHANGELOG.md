@@ -5,7 +5,7 @@ set when a release is published.
 
 ## Unreleased — 1.0 development
 
-## 1.0.0rc7 — pending
+## 1.0.0rc7 — 2026-09-18
 
 - Add application-branded, module-level BFF Swagger pages with extensionless
   nested module URLs, real function argument and response schemas, inline
