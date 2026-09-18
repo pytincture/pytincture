@@ -24,6 +24,63 @@ config = PytinctureConfig(
 app = create_app(config)
 ```
 
+## Browser permissions
+
+Available in the unreleased `1.0.0rc8` development version.
+
+Camera, microphone, geolocation, and the Payment Request API are blocked by
+the service's `Permissions-Policy` header by default. Enable only the features
+your application needs in its deployment environment. For voice input:
+
+```sh
+export PYTINCTURE_ALLOW_MICROPHONE=true
+```
+
+The independent switches are:
+
+```dotenv
+PYTINCTURE_ALLOW_CAMERA=false
+PYTINCTURE_ALLOW_MICROPHONE=true
+PYTINCTURE_ALLOW_GEOLOCATION=false
+PYTINCTURE_ALLOW_PAYMENT=false
+```
+
+Load these into the process environment before starting the service (using
+your deployment's environment or dotenv loader). Alternatively, pass them to
+the existing launcher:
+
+```python
+from pytincture import launch_service
+
+launch_service(
+    modules_folder="./apps",
+    env_vars={"PYTINCTURE_ALLOW_MICROPHONE": "true"},
+)
+```
+
+`create_app()` and `PytinctureConfig.from_env()` also read these variables.
+Explicit `PytinctureConfig(...)` objects use their own values; set
+`allow_microphone=True` there when constructing a configuration directly.
+Changes take effect after restarting the service. Boolean values accept
+`true`/`false`, `1`/`0`, `yes`/`no`, and `on`/`off`; unrecognized values reject
+startup.
+
+An enabled feature uses `(self)` in `Permissions-Policy`; a disabled feature
+uses `()`. The voice-input example produces:
+
+```http
+Permissions-Policy: camera=(), microphone=(self), geolocation=(), payment=()
+```
+
+These settings apply to every application served by that service instance.
+They do not delegate access to cross-origin frames, grant user consent, or
+bypass browser support and secure-context requirements (use HTTPS in
+production). A parent frame or reverse proxy can still impose stricter
+restrictions. Configure separate service instances when different applications
+need different policies.
+
+## Authentication deployment
+
 When authentication is enabled outside explicit development modes,
 `allowed_hosts` must contain exact public hostnames and `canonical_origin` must
 be the one external HTTPS origin used for OAuth/SAML callbacks. Wildcard hosts
@@ -152,6 +209,10 @@ The contract test checks every row in this table against the dataclass model.
 | `favicon_folder` | `PYTINCTURE_FAVICON_FOLDER` | Optional favicon file/directory. |
 | `cors_allowed_origins` | `CORS_ALLOWED_ORIGINS` | Allowed browser origins. |
 | `browser_connect_origins` | `PYTINCTURE_BROWSER_CONNECT_ORIGINS` | Exact additional HTTPS/WSS origins permitted by browser connect-src. |
+| `allow_camera` | `PYTINCTURE_ALLOW_CAMERA` | Allow same-origin camera requests through Permissions-Policy; default false. |
+| `allow_microphone` | `PYTINCTURE_ALLOW_MICROPHONE` | Allow same-origin microphone requests through Permissions-Policy; default false. |
+| `allow_geolocation` | `PYTINCTURE_ALLOW_GEOLOCATION` | Allow same-origin geolocation requests through Permissions-Policy; default false. |
+| `allow_payment` | `PYTINCTURE_ALLOW_PAYMENT` | Allow same-origin Payment Request API use through Permissions-Policy; default false. |
 | `allowed_hosts` | `PYTINCTURE_ALLOWED_HOSTS` | Allowed HTTP Host header names. |
 | `canonical_origin` | `PYTINCTURE_CANONICAL_ORIGIN` | Canonical external HTTP(S) origin for authentication callbacks. |
 | `enable_user_login` | `ENABLE_USER_LOGIN` | Enable local user login. |

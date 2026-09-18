@@ -3,7 +3,13 @@
 This project follows semantic versioning from 1.0. Dates and final entries are
 set when a release is published.
 
-## Unreleased — 1.0 development
+## 1.0.0rc8 — Unreleased
+
+- Add environment-backed opt-ins for same-origin camera, microphone,
+  geolocation, and Payment Request API use. Permissions-Policy continues to
+  block all four by default; browser permission requirements still apply.
+- Update FastMCP support to include 4.x, setuptools to 84.0.0, Swagger UI to
+  5.32.15, Playwright to 1.63.0, and setup-uv to 10.1.0.
 
 ## 1.0.0rc7 — 2026-09-18
 

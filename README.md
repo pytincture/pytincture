@@ -85,6 +85,19 @@ pip install ".[dev]"
    (Alternatively, follow the instructions in pyproject.toml.)
 
 ## Environment Variables
+
+Browser capabilities are opt-in. All four settings below default to `false`:
+
+- `PYTINCTURE_ALLOW_MICROPHONE=true`: Allow same-origin microphone requests, for example for voice input.
+- `PYTINCTURE_ALLOW_CAMERA=true`: Allow same-origin camera requests.
+- `PYTINCTURE_ALLOW_GEOLOCATION=true`: Allow same-origin geolocation requests.
+- `PYTINCTURE_ALLOW_PAYMENT=true`: Allow same-origin Payment Request API use.
+
+Set these in the service environment or `launch_service(env_vars={...})` before
+startup. Browser consent and secure-context requirements still apply. See
+[browser permissions](docs/configuration.md#browser-permissions) for examples,
+configuration precedence, and service-wide scope.
+
 - MODULES_PATH: Directory containing module files used for dynamic packaging. This is set automatically from `modules_folder` when `launch_service` starts; overriding it via env vars is usually unnecessary.
 - USE_REDIS_INSTANCE: Set to "true" to back the legacy `USER_SESSION_DICT` with Upstash. Authentication does not read or write this dictionary.
 - ALLOWED_EMAILS: An optional comma-separated authorization allowlist. It is not a password verifier.
@@ -297,7 +310,7 @@ release artifacts described below.
 An exact npm release may be used for controlled demos only when its SRI is
 copied from the trusted release integrity manifest, for example:
 ```
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.7/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.8/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
 ```
 
 ### Using pytincture.js standalone
