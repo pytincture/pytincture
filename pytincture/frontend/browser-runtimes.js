@@ -69,27 +69,93 @@ function loadAsset(url, stylesheet = false) {
     });
 }
 
+function bffRequest(config, module, className, method, args, options = {}) {
+    if (!/^[A-Za-z_]\w*$/.test(config.application || "")) throw new Error("A BFF application is required");
+    if (!/^[A-Za-z_]\w*(\/[A-Za-z_]\w*)*$/.test(module)
+        || !/^[A-Za-z_]\w*$/.test(className) || !/^[A-Za-z_]\w*$/.test(method)) {
+        throw new Error("Invalid BFF target");
+    }
+    const cookies = document.cookie.split(";").map(value => value.trim());
+    const cookieName = config.csrfCookieName || "pytincture-dev-csrf";
+    const cookie = cookies.find(value => value.startsWith(`${cookieName}=`));
+    const csrf = cookie ? decodeURIComponent(cookie.slice(cookieName.length + 1)) : "";
+    const httpMethod = options.method || "POST";
+    if (!["POST", "GET"].includes(httpMethod)) throw new Error("Unsupported browser BFF HTTP method");
+    return {
+        url: `/${config.application}/classcall/${module}/${className}/${method}`,
+        init: {
+            method: httpMethod, credentials: "same-origin",
+            headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf},
+            ...(httpMethod === "GET" ? {} : {body: JSON.stringify(args)}),
+        },
+    };
+}
+
 export function createBffCaller(config) {
     if (!/^[A-Za-z_]\w*$/.test(config.application || "")) throw new Error("A BFF application is required");
     return async (module, className, method, args = {}, options = {}) => {
-        if (!/^[A-Za-z_]\w*(\/[A-Za-z_]\w*)*$/.test(module)
-            || !/^[A-Za-z_]\w*$/.test(className) || !/^[A-Za-z_]\w*$/.test(method)) {
-            throw new Error("Invalid BFF target");
-        }
-        const cookies = document.cookie.split(";").map(value => value.trim());
-        const cookieName = config.csrfCookieName || "pytincture-dev-csrf";
-        const cookie = cookies.find(value => value.startsWith(`${cookieName}=`));
-        const csrf = cookie ? decodeURIComponent(cookie.slice(cookieName.length + 1)) : "";
-        const httpMethod = options.method || "POST";
-        if (!["POST", "GET"].includes(httpMethod)) throw new Error("Unsupported browser BFF HTTP method");
-        const response = await fetch(`/${config.application}/classcall/${module}/${className}/${method}`, {
-            method: httpMethod, credentials: "same-origin",
-            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-            ...(httpMethod === "GET" ? {} : {body: JSON.stringify(args)}),
-            signal: AbortSignal.timeout(35000),
-        });
+        const request = bffRequest(config, module, className, method, args, options);
+        const response = await fetch(request.url, {...request.init, signal: AbortSignal.timeout(35000)});
         if (!response.ok) throw new Error(`BFF ${className}.${method} failed (${response.status})`);
         return response.json();
+    };
+}
+
+export function createBffSyncCaller(config) {
+    return (module, className, method, args = {}, options = {}) => {
+        const {url, init} = bffRequest(config, module, className, method, args, options);
+        const request = new XMLHttpRequest();
+        request.open(init.method, url, false);
+        for (const [name, value] of Object.entries(init.headers)) request.setRequestHeader(name, value);
+        request.send(init.body ?? null);
+        if (request.status < 200 || request.status >= 300) throw new Error(`BFF ${className}.${method} failed (${request.status})`);
+        return JSON.parse(request.responseText);
+    };
+}
+
+export function createBffStreamCaller(config) {
+    return async (module, className, method, args = {}, options = {}) => {
+        const {url, init} = bffRequest(config, module, className, method, args, options);
+        const controller = new AbortController();
+        const response = await fetch(url, {...init, signal: controller.signal});
+        if (!response.ok) { controller.abort(); throw new Error(`BFF ${className}.${method} failed (${response.status})`); }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "", done = false, closed = false;
+        const close = async () => {
+            if (closed) return;
+            closed = true;
+            try { await reader.cancel(); } finally { controller.abort(); reader.releaseLock(); }
+        };
+        return {
+            close,
+            async next() {
+                try {
+                    while (!closed) {
+                        if (!options.raw) {
+                            const newline = buffer.indexOf("\n");
+                            if (newline >= 0 || done && buffer.trim()) {
+                                const line = newline >= 0 ? buffer.slice(0, newline) : buffer;
+                                buffer = newline >= 0 ? buffer.slice(newline + 1) : "";
+                                if (line.trim()) return JSON.stringify({done: false, value: JSON.parse(line)});
+                                continue;
+                            }
+                        }
+                        if (done) { await close(); break; }
+                        const chunk = await reader.read();
+                        done = chunk.done;
+                        const text = decoder.decode(chunk.value, {stream: !done});
+                        if (options.raw) {
+                            if (text) return JSON.stringify({done: false, value: text});
+                        } else {
+                            buffer += text;
+                            if (buffer.length > 8 * 1024 * 1024) throw new Error("BFF stream record exceeds 8 MiB");
+                        }
+                    }
+                    return JSON.stringify({done: true});
+                } catch (error) { await close(); throw error; }
+            },
+        };
     };
 }
 
@@ -120,6 +186,8 @@ export async function runBrowserApplication(config, status = () => {}) {
     for (const path of manifest.scripts) await loadAsset(asset(path));
 
     let invoke;
+    let capturedOutput = null;
+    let consoleOutput = [];
     let queue = Promise.resolve();
     const handle = {
         engine, runtime: null,
@@ -136,7 +204,8 @@ export async function runBrowserApplication(config, status = () => {}) {
     if (typeof host.setup !== "function") throw new Error("Browser host must export setup(context)");
     await host.setup({
         engine, runtimes: [...manifest.runtimes], application: config.application,
-        callBff: createBffCaller(config), invoke: handle.call, assetUrl: asset,
+        callBff: createBffCaller(config), callBffSync: createBffSyncCaller(config),
+        streamBff: createBffStreamCaller(config), invoke: handle.call, assetUrl: asset,
     });
 
     status(`Loading ${engine}…`);
@@ -154,6 +223,19 @@ export async function runBrowserApplication(config, status = () => {}) {
             runtime = await loadMicroPython({
                 url: asset(manifest.micropython.wasm),
                 heapsize: manifest.micropython.heapBytes ?? 8 * 1024 * 1024,
+                linebuffer: false,
+                stdout: bytes => {
+                    if (capturedOutput !== null) {
+                        if (capturedOutput.length <= 1024 * 1024) capturedOutput.push(...bytes);
+                    } else {
+                        for (const byte of bytes) {
+                            if (byte === 10) {
+                                console.log(new TextDecoder().decode(Uint8Array.from(consoleOutput)));
+                                consoleOutput = [];
+                            } else consoleOutput.push(byte);
+                        }
+                    }
+                },
             });
         } else {
             const base = sameOriginUrl(config.pyodideBaseUrl, location.href);
@@ -161,6 +243,22 @@ export async function runBrowserApplication(config, status = () => {}) {
             runtime = await globalThis.loadPyodide({ indexURL: base });
         }
         handle.runtime = runtime;
+        // Widgets can run short synchronous Python snippets without loading a second interpreter.
+        handle.captureOutput = source => {
+            if (typeof source !== "string" || source.length > 1024 * 1024) throw new Error("Invalid Python snippet");
+            if (engine === "micropython") {
+                if (capturedOutput !== null) throw new Error("Nested output capture is not supported");
+                capturedOutput = [];
+                try {
+                    runtime.runPython(`exec(${JSON.stringify(source)}, {})`);
+                    if (capturedOutput.length > 1024 * 1024) throw new Error("Python output exceeds 1 MiB");
+                    return new TextDecoder().decode(Uint8Array.from(capturedOutput));
+                } finally { capturedOutput = null; }
+            }
+            const program = `import io, contextlib\nwith contextlib.redirect_stdout(io.StringIO()) as output:\n    exec(${JSON.stringify(source)}, {})\noutput.getvalue()`;
+            return runtime.runPython(program);
+        };
+        globalThis.pytinctureBrowserRuntime = handle;
         installSources(runtime, await fetchJson(asset(manifest.sources)));
         await runtime.runPythonAsync(`import sys\nsys.path.insert(0, '/')\nimport ${manifest.entrypoint} as _pytincture_client`);
         invoke = async (name, payload) => {

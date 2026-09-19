@@ -27,18 +27,18 @@ TEMPLATES = Path(__file__).with_name('browser_templates')
 VENDOR = Path(__file__).with_name('browser_vendor')
 
 
-def _widget_wheel(config, directory):
+def _widget_wheel(config, directory, package="dhxpyt"):
     if config.get('widget-wheel'):
         return (directory / config['widget-wheel']).resolve().read_bytes()
     try:
-        distribution = importlib.metadata.distribution('dhxpyt')
+        distribution = importlib.metadata.distribution(package)
     except importlib.metadata.PackageNotFoundError as exc:
-        raise ValueError('Install dhxpyt in the build environment or set widget-wheel') from exc
+        raise ValueError(f'Install {package} in the build environment or set widget-wheel') from exc
     result = io.BytesIO()
     with zipfile.ZipFile(result, 'w') as archive:
         for name in sorted(distribution.files or [], key=str):
             relative = str(name)
-            if relative.startswith('dhxpyt/') and '__pycache__' not in relative:
+            if relative.startswith(package + '/') and '__pycache__' not in relative:
                 # Fixed metadata makes installed-package builds reproducible.
                 archive.writestr(zipfile.ZipInfo(relative), Path(distribution.locate_file(name)).read_bytes())
             elif '.dist-info/' in relative and 'license' in relative.lower():
@@ -48,6 +48,9 @@ def _widget_wheel(config, directory):
 def _bff_stub(name: str, source: str) -> str:
     """Generate async session stubs from public signatures, never method bodies."""
     operations = get_bff_manifest(name, source=source)
+    async_methods = {(cls.name, method.name) for cls in ast.parse(source).body
+                     if isinstance(cls, ast.ClassDef) for method in cls.body
+                     if isinstance(method, ast.AsyncFunctionDef)}
     if not operations:
         raise ValueError(f'No decorated BFF operations found in {name}')
     classes: dict[str, list[str]] = {}
@@ -59,15 +62,15 @@ def _bff_stub(name: str, source: str) -> str:
         json_name += '_'
     while js_name in parameter_names:
         js_name += '_'
+    stream_name = '_pytincture_Stream'
+    while stream_name in parameter_names:
+        stream_name += '_'
     sentinel = '_UNSET'
     while sentinel in parameter_names:
         sentinel += '_'
     for (class_name, method), operation in operations.items():
         classes.setdefault(class_name, [])
         if operation.get('external') or operation['kind'] != 'method':
-            continue
-        if operation.get('stream', {}).get('enabled'):
-            classes[class_name].append(f'    async def {method}_async(self, *args, **kwargs):\n        raise NotImplementedError(\"Streaming BFF calls require the Pyodide package runtime\")')
             continue
         http_method = 'POST' if 'POST' in operation['http_methods'] else 'GET'
         envelope = any(p['kind'] in {'positional_only', 'var_positional', 'var_keyword'} for p in operation['parameters'])
@@ -95,16 +98,27 @@ def _bff_stub(name: str, source: str) -> str:
             signature = ['self', '*args', '**kwargs']
             body = [f"        {payload_name} = {{'args':list(args), 'kwargs':kwargs}}"]
         method_option = '' if http_method == 'POST' else f', {http_method!r}'
-        body.append(f'        return {json_name}.loads(await {js_name}.pytinctureBrowserBff({target!r}, {class_name!r}, {method!r}, {json_name}.dumps({payload_name}){method_option}))')
-        classes.setdefault(class_name, []).append(
-            f'    async def {method}_async({", ".join(signature)}):\n' + '\n'.join(body))
+        call_args = f'{target!r}, {class_name!r}, {method!r}, {json_name}.dumps({payload_name}){method_option}'
+        declaration = ", ".join(signature)
+        if operation.get('stream', {}).get('enabled'):
+            raw = operation['stream'].get('raw', False)
+            stream_body = body + [f'        return {stream_name}({target!r}, {class_name!r}, {method!r}, {payload_name}, raw={raw!r}, http_method={http_method!r})']
+            classes[class_name].append(f'    def {method}({declaration}):\n' + '\n'.join(stream_body))
+        else:
+            async_body = body + [f'        return {json_name}.loads(await {js_name}.pytinctureBrowserBff({call_args}))']
+            classes[class_name].append(f'    async def {method}_async({declaration}):\n' + '\n'.join(async_body))
+            if (class_name, method) in async_methods:
+                classes[class_name].append(f'    {method} = {method}_async')
+            else:
+                sync_body = body + [f'        return {json_name}.loads({js_name}.pytinctureBrowserBffSync({call_args}))']
+                classes[class_name].append(f'    def {method}({declaration}):\n' + '\n'.join(sync_body))
     if not classes:
         raise ValueError(f'No supported session methods found in {name}')
-    return f'import json as {json_name}\nimport js as {js_name}\n{sentinel} = object()\n\n' + '\n\n'.join(
+    return f'from _pytincture_bff import Stream as {stream_name}\nimport json as {json_name}\nimport js as {js_name}\n{sentinel} = object()\n\n' + '\n\n'.join(
         f'class {name}:\n' + ('\n\n'.join(methods) or '    pass') for name, methods in classes.items()) + '\n'
 
 
-def _check_imports(sources: dict[str, str], root: Path) -> None:
+def _check_imports(sources: dict[str, str], root: Path, vendor_modules=()) -> None:
     """Catch missing local sources and known unsupported imports before serving."""
     native = {'js', 'jsffi', 'asyncio', 'array', 'binascii', 'builtins', 'cmath',
               'collections', 'gc', 'hashlib', 'heapq', 'io', 'json', 'math',
@@ -112,7 +126,7 @@ def _check_imports(sources: dict[str, str], root: Path) -> None:
               'errno', 'deflate', '__main__'}
     available = {_module(name) for name in sources}
     for name, source in sources.items():
-        if name.startswith('_pytincture_'):
+        if name.startswith('_pytincture_') or name in vendor_modules:
             continue
         for node in ast.walk(ast.parse(source, filename=name)):
             if isinstance(node, ast.Import):
@@ -148,7 +162,7 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
         config.setdefault('output', f'browser/{application}')
     allowed = {'application', 'modules-path', 'output', 'entrypoint', 'entry-kind',
                'files', 'bff', 'widget-wheel', 'micropython-assets', 'wheels',
-               'assets', 'scripts', 'styles', 'heap-bytes', 'discover-imports'}
+               'assets', 'scripts', 'styles', 'heap-bytes', 'discover-imports', 'widget-package'}
     if set(config) - allowed:
         raise ValueError(f'Unknown browser build settings: {sorted(set(config) - allowed)}')
     for key in ('files', 'bff', 'wheels', 'assets', 'scripts', 'styles'):
@@ -168,7 +182,7 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
         if not app_name:
             raise ValueError('Set application or entrypoint in the browser build configuration')
         source = _read(root, app_name + '.py').decode()
-        entry_name = find_main_window_subclass(app_name + '.py', source_code=source)
+        entry_name = find_app_string_setting(app_name + '.py', ('APP_ENTRYPOINT',), ('entrypoint',), source_code=source) or find_main_window_subclass(app_name + '.py', source_code=source)
         if not entry_name:
             raise ValueError(f'Cannot find an entrypoint for {app_name}')
         entry = app_name + ':' + entry_name
@@ -188,6 +202,9 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
     sources: dict[str, str] = {}
     hashes = {}
     widgets = set()
+    widget_package = config.get('widget-package', 'dhxpyt')
+    if not widget_package.isidentifier():
+        raise ValueError('widget-package must be a Python package name')
     raw_sources, boundaries = discover_sources(
         root, entry_path, config.get('files', []), config.get('bff', []),
         discover=config.get('discover-imports', True),
@@ -197,7 +214,7 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
             sources[name] = _bff_stub(name, source)
             continue
         for imported, _ in imported_modules(name, source):
-            if imported == 'dhxpyt' or imported.startswith('dhxpyt.'):
+            if imported == widget_package or imported.startswith(widget_package + '.'):
                 widgets.add(imported.split('.')[1] if '.' in imported else 'layout')
         try:
             sources[name] = adapt(source)
@@ -212,23 +229,51 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
                 sources.setdefault(str(parent / '__init__.py'), '')
     artifacts: dict[str, bytes] = {}
     wheel_digest = None
+    widget_scripts, widget_styles = [], []
     if widgets or entry_kind == 'mainwindow':
         widgets.add('layout')
         widgets.discard('theme')
-        wheel = _widget_wheel(config, config_file.parent)
+        wheel = _widget_wheel(config, config_file.parent, widget_package)
         wheel_digest = hashlib.sha256(wheel).hexdigest()
         with zipfile.ZipFile(io.BytesIO(wheel)) as archive:
             for name in archive.namelist():
-                if name.endswith('/'):
+                if name.endswith('/') or any(part.startswith('.') for part in name.split('/')):
                     continue
                 _relative(name)
                 parts = name.split('/')
-                if name.startswith('dhxpyt/') and name.endswith('.py'):
-                    sources[name] = adapt(archive.read(name).decode(), widget=True, widgets=widgets)
+                if name.startswith(widget_package + '/') and name.endswith('.py'):
+                    if name in sources:
+                        raise ValueError(f'Duplicate widget module: {name}')
+                    source = archive.read(name).decode()
+                    if has_bff_export_class(name, source=source):
+                        raise ValueError(f'Widget wheel contains backend code: {name}')
+                    sources[name] = adapt(source, widget=True, widgets=widgets)
+                if name.startswith(widget_package + '/') and not name.endswith('.py'):
+                    artifacts['vendor/' + name] = archive.read(name)
                 if name.startswith('dhxpyt/dhxsrc/'):
                     artifacts['vendor/dhxpyt/' + name.removeprefix('dhxpyt/dhxsrc/')] = archive.read(name)
                 if '.dist-info/' in name and 'license' in name.lower():
                     artifacts['vendor/dhxpyt/' + Path(name).name] = archive.read(name)
+
+        if widget_package != 'dhxpyt':
+            manifest_name = 'vendor/' + widget_package + '/pytincture-assets.json'
+            if manifest_name not in artifacts:
+                raise ValueError('Widget package requires pytincture-assets.json')
+            metadata = json.loads(artifacts[manifest_name])
+            if metadata.get('schema') != 1 or metadata.get('package') != widget_package:
+                raise ValueError('Invalid widget asset manifest')
+            for asset in metadata['assets']:
+                path = 'vendor/' + _relative(asset['path'])
+                if not asset['path'].startswith(widget_package + '/') or path not in artifacts:
+                    raise ValueError('Widget manifest asset is missing or outside its package')
+                if hashlib.sha256(artifacts[path]).hexdigest() != asset['sha256']:
+                    raise ValueError(f'Widget manifest hash mismatch: {path}')
+                if asset['type'] == 'css':
+                    widget_styles.append(path)
+                elif asset['type'] == 'javascript':
+                    widget_scripts.append(path)
+                else:
+                    raise ValueError('Unsupported widget manifest asset type')
 
         for name in ('material-icons.woff2', 'MATERIAL-ICONS-LICENSE'):
             artifacts['vendor/material-icons/' + name] = (VENDOR / name).read_bytes()
@@ -258,7 +303,7 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
                     sources[name] = adapt(source)
     for name in config.get('assets', []):
         artifacts['assets/' + _relative(name)] = _read(root, name)
-    for template in ('compat', 'dataclasses', 'logging', 'inspect'):
+    for template in ('compat', 'dataclasses', 'logging', 'inspect', 'bff', 'resources'):
         sources[f'_pytincture_{template}.py'] = (TEMPLATES / f'{template}.py.txt').read_text()
     bootstrap = f'import js\nfrom {module} import {entry_name} as entry\nfrom _pytincture_compat import finish_startup\napp = None\n\nasync def main():\n    global app\n'
     if entry_kind != 'async':
@@ -267,7 +312,19 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
         bootstrap += '    app = await entry()\n'
     bootstrap += '    await finish_startup()\n    js.window.pytinctureAppReady = True\n'
     sources['_pytincture_bootstrap.py'] = bootstrap
-    _check_imports(sources, root)
+    vendor_modules = set()
+    imports = {module.split('.')[0] for name, source in sources.items() for module, _ in imported_modules(name, source)}
+    for stdlib in ('copy', 'datetime'):
+        if stdlib in imports and stdlib + '.py' not in sources:
+            vendor_modules.add(stdlib + '.py')
+            sources[stdlib + '.py'] = (VENDOR / 'stdlib' / (stdlib + '.py.txt')).read_text()
+    if 'copy.py' in vendor_modules:
+        if 'types.py' not in sources:
+            vendor_modules.add('types.py')
+        sources.setdefault('types.py', (VENDOR / 'stdlib/types.py.txt').read_text())
+    if 'copy' in imports or 'datetime' in imports:
+        artifacts['vendor/micropython-lib/LICENSE'] = (VENDOR / 'stdlib/LICENSE').read_bytes()
+    _check_imports(sources, root, vendor_modules)
     if len(sources) > 256 or sum(len(value.encode()) for value in sources.values()) > 8 * 1024 * 1024:
         raise ValueError('Browser source bundle exceeds 256 files or 8 MiB')
     micropython = (config_file.parent / config['micropython-assets']).resolve() if config.get('micropython-assets') else VENDOR
@@ -284,6 +341,9 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
         'entrypoint': '_pytincture_bootstrap', 'sources': 'sources.json',
         'micropython': {'module': 'vendor/micropython/micropython.mjs', 'wasm': 'vendor/micropython/micropython.wasm', 'heapBytes': heap},
     }
+    if widgets and widget_package != 'dhxpyt':
+        manifest['scripts'] = widget_scripts
+        manifest['styles'] = widget_styles
     for kind in ('scripts', 'styles'):
         manifest[kind].extend('assets/' + _relative(name) for name in config.get(kind, []))
     for asset in manifest['scripts'] + manifest['styles']:
@@ -298,7 +358,7 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
     ) or entry_name
     artifacts['host.js'] = (TEMPLATES / 'host.js.txt').read_text().replace(
         '__PYTINCTURE_APP_TITLE__', json.dumps(title),
-    ).replace('__PYTINCTURE_WIDGETS__', 'true' if widgets else 'false').encode()
+    ).replace('__PYTINCTURE_RESOURCES__', json.dumps([name.removeprefix('vendor/') for name in artifacts if name.startswith('vendor/')])).replace('__PYTINCTURE_WIDGETS__', 'true' if widgets else 'false').encode()
     artifacts['sources.json'] = json.dumps({'files': sources}, ensure_ascii=False).encode()
     artifacts['manifest.json'] = (json.dumps(manifest, indent=2) + '\n').encode()
     artifacts['build.json'] = (json.dumps({'entrypoint': entry, 'source_files': len(sources), 'application_sources': hashes, 'widget_wheel_sha256': wheel_digest, 'dependency_wheels': dependency_hashes, 'bff_modules': sorted(boundaries), 'runtime_sha256': {name: hashlib.sha256(content).hexdigest() for name, content in artifacts.items() if name.startswith('vendor/micropython/')}}, indent=2) + '\n').encode()

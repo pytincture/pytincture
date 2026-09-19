@@ -1,4 +1,4 @@
-from pytincture.dataclass import backend_for_frontend, bff_http_methods
+from pytincture.dataclass import backend_for_frontend, bff_http_methods, bff_stream
 
 PRIVATE_MARKER = 'server-implementation-must-not-be-shipped'
 DEFAULT_LIMIT = 3
@@ -15,3 +15,12 @@ class Catalog:
     @bff_http_methods('GET')
     def ping(self):
         return {'ok': True}
+
+    @bff_stream
+    def events(self):
+        yield {'text': 'café'}
+        yield {'text': 'streamed'}
+
+    @bff_stream(raw=True)
+    def raw_events(self):
+        yield 'raw café'

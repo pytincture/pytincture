@@ -72,7 +72,7 @@ jobs:
       - name: Install framework and browser test dependencies
         run: |
           uv sync --frozen --extra dev
-          uv pip install --python .venv/bin/python playwright==1.63.0 dhxpyt==0.9.19
+          uv pip install --python .venv/bin/python playwright==1.63.0 "dhxpyt @ git+https://github.com/pytincture/dhx_pytincture_widgetset.git@349d6dc3d2da28ec6a1ac8aa623072cd4fbc9822"
           .venv/bin/python -m playwright install --with-deps chromium
       - name: Build and exercise independent applications in both interpreters
         env:

@@ -47,7 +47,7 @@ def main():
                 'ALLOWED_NOAUTH_CLASSCALLS': json.dumps([{
                     'application': 'warehouse', 'file': 'api/catalog.py',
                     'class': 'Catalog', 'function': method,
-                } for method in ('lookup', 'combine', 'ping')]),
+                } for method in ('lookup', 'combine', 'ping', 'events', 'raw_events')]),
             },
         ))
         with socket.socket() as listener:
@@ -77,10 +77,12 @@ def main():
                         page.get_by_role('button', name='Use the DOM', exact=True).click()
                         expect(page.get_by_role('button')).to_have_text('DOM callback worked')
                         assert page.title() == 'Warehouse'
+                        assert page.evaluate("pytinctureBrowserRuntime.captureOutput(\"print('artifact café', end='')\")") == 'artifact café'
+                        assert page.evaluate("() => {try {pytinctureBrowserRuntime.captureOutput(\"raise ValueError('expected')\")} catch (_) {return pytinctureBrowserRuntime.captureOutput(\"print('recovered')\")} }") == 'recovered\n'
                         assert not errors, errors
                         assert any('/classcall/api/catalog/Catalog/lookup' in url for url in requests)
                         assert any('/pyodide/' in url for url in requests) == (runtime == 'pyodide')
-                        print(runtime + ': direct DOM, callbacks, nested imports, BFF defaults/variadic/GET, assets and dataclasses passed', flush=True)
+                        print(runtime + ': direct DOM, callbacks, nested imports, BFF sync/async/streaming/defaults/variadic/GET, assets and dataclasses passed', flush=True)
                         page.close()
                         page = browser.new_page()
                         page.on('response', lambda response: print('FAILED RESOURCE', response.url, response.status, flush=True) if response.status >= 400 else None)

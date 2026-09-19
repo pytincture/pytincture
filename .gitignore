@@ -42,3 +42,6 @@ tests/standalone-server.log
 tests/quickstart-service.log
 tests/quickstart-standalone.log
 tests/e2e_apps/*.whl
+
+# Local full-application browser validation artifacts
+/validation-results/

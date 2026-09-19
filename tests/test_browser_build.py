@@ -1,12 +1,22 @@
 import asyncio
 import json
 import sys
+from pathlib import Path
+from types import ModuleType
 from types import SimpleNamespace
 
 import pytest
 
 from pytincture.browser_build import _bff_stub, build_browser_bundle
 from pytincture.browser_compatibility import adapt
+
+
+@pytest.fixture(autouse=True)
+def browser_helpers(monkeypatch):
+    monkeypatch.setitem(sys.modules, 'js', SimpleNamespace())
+    module = ModuleType('_pytincture_bff')
+    exec(Path('pytincture/browser_templates/bff.py.txt').read_text(), module.__dict__)
+    monkeypatch.setitem(sys.modules, '_pytincture_bff', module)
 
 
 def project(tmp_path, *, client='async def main():\n    pass\n', bff=''):
@@ -118,20 +128,23 @@ def test_symlink_source_cannot_escape_root(tmp_path):
         build_browser_bundle(config)
 
 
-def test_stream_methods_report_the_runtime_limit_when_called(monkeypatch):
-    monkeypatch.setitem(sys.modules, 'js', SimpleNamespace())
+def test_stream_stubs_return_portable_async_iterators():
     source = 'from pytincture import backend_for_frontend, bff_stream\n@backend_for_frontend\nclass Catalog:\n    @bff_stream\n    def events(self): yield 1'
     namespace = {}
     exec(_bff_stub('catalog.py', source), namespace)
-    with pytest.raises(NotImplementedError, match='Streaming BFF'):
-        asyncio.run(namespace['Catalog']().events_async())
+    stream = namespace['Catalog']().events()
+    assert stream.__aiter__() is stream
+    assert stream.arguments[:4] == ('catalog', 'Catalog', 'events', '{}')
+    asyncio.run(stream.aclose())
+    with pytest.raises(StopAsyncIteration):
+        asyncio.run(stream.__anext__())
 
 
 def test_compatibility_preserves_dictionary_overrides_and_exception_binding(monkeypatch):
     monkeypatch.setitem(sys.modules, '_pytincture_compat', SimpleNamespace(
         merge_dicts=lambda *parts: dict(item for part in parts for item in part.items()),
         format_exception=lambda error: str(error), to_python=lambda value: value, spawn=lambda value: value,
-        initialize_layout=lambda cls: cls, can_to_python=lambda value: False,
+        initialize_layout=lambda cls: cls, can_to_python=lambda value: False, string_title=lambda value: value.title(),
     ))
     monkeypatch.setitem(sys.modules, '_pytincture_dataclasses', SimpleNamespace())
     namespace = {}
@@ -223,7 +236,7 @@ def test_browser_dataclasses_preserve_fields_factories_inheritance_and_post_init
     exec((Path(__file__).parents[1] / 'pytincture/browser_templates/dataclasses.py.txt').read_text(), dc.__dict__)
     monkeypatch.setitem(sys.modules, '_pytincture_dataclasses', dc)
     monkeypatch.setitem(sys.modules, '_pytincture_compat', SimpleNamespace(
-        initialize_layout=lambda cls: cls, can_to_python=lambda x: False,
+        initialize_layout=lambda cls: cls, can_to_python=lambda x: False, string_title=lambda x: x.title(),
         to_python=lambda x: x, spawn=lambda x: x, format_exception=str,
         merge_dicts=lambda *parts: dict(item for part in parts for item in part.items()),
     ))
@@ -280,3 +293,56 @@ def test_packaged_runtime_matches_vendor_inventory():
     for package in inventory['packages']:
         for name, expected in package['files'].items():
             assert hashlib.sha256((VENDOR / name).read_bytes()).hexdigest() == expected
+
+
+def test_widget_manifest_supports_other_packages_and_verifies_assets(tmp_path):
+    import hashlib
+    import zipfile
+    config = project(tmp_path, client='from customwidgets import main\n')
+    # The entrypoint itself is local; the provider package supplies browser widgets.
+    (tmp_path / 'client.py').write_text('from customwidgets import Widget\nasync def main(): pass\n')
+    with zipfile.ZipFile(tmp_path / 'widgets.whl', 'w') as wheel:
+        wheel.writestr('customwidgets/__init__.py', 'class Widget: pass\n')
+        wheel.writestr('customwidgets/assets/ui.js', 'window.customWidget = true;')
+        wheel.writestr('customwidgets/assets/.keep', '')
+        wheel.writestr('customwidgets/pytincture-assets.json', json.dumps({
+            'schema':1, 'package':'customwidgets', 'assets':[{
+                'path':'customwidgets/assets/ui.js', 'type':'javascript',
+                'sha256':hashlib.sha256(b'window.customWidget = true;').hexdigest(),
+            }],
+        }))
+    config.write_text(config.read_text() + 'widget-package="customwidgets"\nwidget-wheel="widgets.whl"\n')
+    manifest = build_browser_bundle(config)
+    assert json.loads(manifest.read_text())['scripts'] == ['vendor/customwidgets/assets/ui.js']
+    assert not (manifest.parent / 'vendor/customwidgets/assets/.keep').exists()
+    with zipfile.ZipFile(tmp_path / 'widgets.whl', 'a') as wheel:
+        wheel.writestr('customwidgets/assets/ui.js', 'tampered')
+    with pytest.raises(ValueError, match='hash mismatch'):
+        build_browser_bundle(config)
+
+
+def test_main_guard_retains_else_and_does_not_erase_or_conditions(tmp_path):
+    from pytincture.browser_sources import main_only
+    import ast
+    assert main_only(ast.parse("__name__ == '__main__' and condition", mode='eval').body)
+    assert not main_only(ast.parse("__name__ == '__main__' or condition", mode='eval').body)
+    config = project(tmp_path, client="if __name__ == '__main__':\n    import desktop_only\nelse:\n    active = True\nasync def main(): pass\n")
+    build_browser_bundle(config)
+
+
+def test_async_generators_fail_clearly_instead_of_losing_stream_events(tmp_path):
+    config = project(tmp_path, client='async def main():\n    yield 1\n')
+    with pytest.raises(ValueError, match='Async generators.*__anext__'):
+        build_browser_bundle(config)
+
+
+def test_optional_stdlib_is_pinned_and_only_bundled_when_imported(tmp_path):
+    import hashlib
+    root = Path('pytincture/browser_vendor/stdlib')
+    inventory = json.loads((root / 'inventory.json').read_text())
+    for name, digest in inventory['modules'].items():
+        assert hashlib.sha256((root / (name + '.py.txt')).read_bytes()).hexdigest() == digest
+    config = project(tmp_path, client='import copy\nimport datetime\nasync def main(): pass\n')
+    manifest = build_browser_bundle(config)
+    sources = json.loads((manifest.parent / 'sources.json').read_text())['files']
+    assert {'copy.py', 'types.py', 'datetime.py'} <= sources.keys()

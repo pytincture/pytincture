@@ -1,0 +1,34 @@
+"""Async stream iterator shared by both browser Python runtimes."""
+import json
+import js
+
+
+class Stream:
+    def __init__(self, module, class_name, method, arguments, raw=False, http_method='POST'):
+        self.arguments = (module, class_name, method, json.dumps(arguments), raw, http_method)
+        self.reader = None
+        self.closed = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.closed:
+            raise StopAsyncIteration
+        try:
+            if self.reader is None:
+                self.reader = await js.pytinctureBrowserBffStream(*self.arguments)
+            packet = json.loads(await self.reader.next())
+            if packet['done']:
+                await self.aclose()
+                raise StopAsyncIteration
+            return packet['value']
+        except BaseException:
+            await self.aclose()
+            raise
+
+    async def aclose(self):
+        if not self.closed:
+            self.closed = True
+            if self.reader is not None:
+                await self.reader.close()

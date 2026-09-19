@@ -91,6 +91,7 @@ include-package-data = false
 pytincture = [
     "browser_templates/*.txt",
     "browser_vendor/*",
+    "browser_vendor/stdlib/*",
     "frontend/index.html",
     "frontend/pytincture.js",
     "frontend/browser-runtimes.js",

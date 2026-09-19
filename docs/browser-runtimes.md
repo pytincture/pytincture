@@ -10,7 +10,7 @@ Applications without a runtime manifest keep their existing Pyodide behavior.
 | `micropython` | MicroPython in WebAssembly | Portable Python clients with a compatible API subset |
 | `transcrypt` | Python compiled to JavaScript before deployment | Portable clients compiled successfully by Transcrypt |
 
-The full Book Library example runs its original Python UI and dhxpyt
+The full Book Library and Wawesome Chat apps run their Python UIs and widget
 wrappers under MicroPython and Pyodide. Transcrypt remains limited to the earlier
 reduced client prototype. Changing engines reloads the page; unsaved client
 state is not retained. MicroPython does not request Pyodide assets.
@@ -56,7 +56,12 @@ The pinned MicroPython runtime (`1.29.0-6`) is included in the framework wheel;
 apps do not need npm or a separate MicroPython installation. The browser still
 downloads and initializes the smaller WASM runtime. For dhxpyt apps, the builder
 reads the installed dhxpyt distribution without importing it. A `widget-wheel`
-path can select an explicit wheel instead. Tested widget version: `0.9.19`.
+path can select an explicit wheel instead. Tested widget version: `0.9.19` from the widget repository (not yet on PyPI).
+For another widgetset, set `widget-package = "wapyt"` and install its wheel in the
+build environment, or provide `widget-wheel`. Other widgetsets must include a
+`pytincture-assets.json` manifest with ordered JavaScript/CSS paths and SHA-256
+hashes. The builder validates those hashes and bundles the package sources and
+assets; stale manifests fail before replacing an existing bundle.
 
 The browser build never imports or executes application/server modules. It
 follows local packages, relative imports and re-exports, replacing decorated
@@ -135,10 +140,12 @@ own application. Every app gets a separate source bundle and import graph.
 Generated stubs keep the `await Data().method_async(...)` API. Named arguments,
 keyword-only arguments, server-evaluated defaults, positional-only parameters,
 variadic calls and parameterless GET methods are supported. Sessions and CSRF
-still go through the existing server authorization. Requests have a 35-second
-browser timeout. External token methods are not exposed as session stubs.
-Streaming methods raise a clear unsupported-operation error when invoked;
-merely importing a class that also has a streaming method does not block an app.
+still go through the existing server authorization. Async JSON requests have a 35-second browser timeout. Streaming calls remain
+open until completion or explicit cancellation. External token methods are not exposed as session stubs.
+Methods are also exposed under their original names: normal methods use
+synchronous compatibility calls and async methods retain their awaitable API.
+Streaming methods return portable async iterators; close them with `aclose()`
+when stopping consumption early.
 
 The compatibility layer adapts annotations, `create_proxy`, JSON-compatible
 `to_js`/`to_py`, dictionary unpacking, UUID generation, exception formatting and
@@ -153,8 +160,9 @@ Browser dataclasses support required/default fields, factories, inheritance,
 and `is_dataclass`. Frozen/slots/order/hash options and `InitVar` are unsupported.
 This is a documented subset, not the full CPython standard library. Custom
 metaclasses, native packages such as NumPy/Pandas, structural pattern matching,
-BFF streaming/replay tokens and synchronous BFF calls still require the original
-Pyodide package runtime or application changes. MicroPython's own language
+and BFF replay tokens still require the original Pyodide package runtime or
+application changes. Synchronous BFF calls use blocking XMLHttpRequest for
+compatibility; prefer async methods. MicroPython's own language
 and standard-library differences also apply; see the
 [upstream differences](https://docs.micropython.org/en/latest/genrst/core_language.html).
 
@@ -271,10 +279,14 @@ the generated host only connects BFF and loads icons, leaving the UI to Python.
   compiled JS callbacks. Interpreter payloads are strings; JSON is convenient
   for carrying records across the foreign-function interface. Await the promise
   or handle errors. Calls do not return converted Python objects in this version.
+- `callBffSync(...)`: synchronous JSON compatibility call with the same CSRF
+  checks.
+- `streamBff(..., options)`: streamed BFF results (`raw: true` for raw UTF-8);
+  returns an object with async `next()` and `close()`.
 - `callBff(module, className, method, namedArguments)`: same-origin JSON POST,
   using session credentials and the configured CSRF cookie. Module paths may
   contain folders. It returns the parsed JSON response and rejects non-2xx
-  responses. It does not implement generated-stub login redirects or streaming.
+  responses. It does not implement generated-stub login redirects or replay tokens.
 
 The loader first loads styles and scripts, then calls the host's `setup`, starts
 the selected engine, and awaits `main()`. It returns a handle with `engine`,
@@ -295,8 +307,7 @@ const handle = await runTinctureApp({
 ## Compatibility limits and next work
 
 The shared builder includes the dhxpyt Python wrappers and async
-session BFF stubs described above. Existing CPython wheels, synchronous BFF
-calls, BFF streaming, replay-token handling have not been ported. Transcrypt cannot compile the full original example
+session BFF stubs described above. CPython native extension wheels and replay-token handling have not been ported. Transcrypt cannot compile the full original example
 unchanged and is not emitted by this builder. Deployments enabling BFF replay
 tokens receive an explicit 422 for portable clients; the existing Pyodide
 package path remains available.
@@ -311,3 +322,39 @@ and callback shapes, add runtime-specific diagnostics, and measure real devices
 before proposing production support. Runtime adapters live in
 `pytincture/frontend/browser-runtimes.js`; add another engine only after its
 client contract and browser acceptance tests work.
+
+
+### Full application validation
+
+The branch has also been exercised with the current `pytincture_example` and
+`wAwesomeChat`, using dhxpyt and wapyt respectively. The Wawesome UI uncovered
+shared compiler/transport gaps beyond the example: widget asset manifests,
+synchronous BFF methods, JSON/raw streaming, typing aliases, string title case,
+and common `copy`/`datetime` imports. The latter are bundled from pinned
+[micropython-lib sources](https://github.com/micropython/micropython-lib/tree/5139530d3327a6012921c70d44ae3151480efe2d/python-stdlib),
+with their licenses and hashes. They implement MicroPython subsets, not the entire
+CPython standard library.
+
+Client code must keep server-only imports (database, environment files, provider
+credentials) behind BFF methods. An async generator (`async def` containing
+`yield`) is rejected at build time: use an async iterator with `__aiter__` and
+`async __anext__`. Generated BFF streams already use that portable interface.
+Prefer `datetime.now(timezone.utc)` over the unsupported `datetime.utcnow()`.
+
+Wawesome validation uses a disposable authenticated database and a local
+OpenAI-compatible streaming service through the real LiteLLM/BFF stack. Voice
+validation records synthetic microphone audio using MediaRecorder and sends it
+to real Whisper. This checks recording, transcription, VAD, auto-submit and
+streaming without paid API calls or hardware permission prompts. It does not
+certify real provider accounts or physical microphones. See the app's
+`tests/browser_runtime_smoke.py` and `tests/browser_voice_smoke.py` for repeatable
+interaction checks. The framework fixture checks run in CI for both runtimes.
+
+
+Portable widgets can access `globalThis.pytinctureBrowserRuntime.engine` and
+`.runtime` after interpreter initialization. `captureOutput(source)` executes a
+short synchronous Python snippet in a fresh globals dictionary using that same
+interpreter and returns its stdout, including Unicode and output without a final
+newline. It restores output routing on exceptions. Input/output are limited to
+1 MiB. This is a convenience for existing code-preview widgets, not an isolation
+or security boundary; snippets have the same browser access as the application.

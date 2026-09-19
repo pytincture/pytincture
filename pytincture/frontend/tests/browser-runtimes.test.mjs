@@ -75,3 +75,76 @@ test('GET-only BFF requests omit the body and reject unexpected verbs', async ()
         else globalThis.document = priorDocument;
     }
 });
+
+test('streaming BFF decodes split UTF-8 JSON lines and releases readers', async () => {
+    const {createBffStreamCaller} = await import('../browser-runtimes.js');
+    const priorFetch = globalThis.fetch, priorDocument = globalThis.document;
+    try {
+        globalThis.document = {cookie:'pytincture-dev-csrf=stream-token'};
+        const bytes = new TextEncoder().encode('{"text":"café"}\n\n{"last":true}');
+        let signal;
+        globalThis.fetch = async (url, init) => {
+            assert.equal(init.headers['X-CSRF-Token'], 'stream-token');
+            assert.equal(init.credentials, 'same-origin');
+            signal = init.signal;
+            return new Response(new ReadableStream({start(controller) {
+                for (const byte of bytes) controller.enqueue(Uint8Array.of(byte));
+                controller.close();
+            }}));
+        };
+        const stream = await createBffStreamCaller({application:'chat'})('api/data','Data','events');
+        assert.deepEqual(JSON.parse(await stream.next()), {done:false,value:{text:'café'}});
+        assert.deepEqual(JSON.parse(await stream.next()), {done:false,value:{last:true}});
+        assert.deepEqual(JSON.parse(await stream.next()), {done:true});
+        assert.ok(signal.aborted);
+        await stream.close();
+    } finally { globalThis.fetch=priorFetch; globalThis.document=priorDocument; }
+});
+
+test('raw streams preserve content, cancellation and malformed JSON close the body', async () => {
+    const {createBffStreamCaller} = await import('../browser-runtimes.js');
+    const priorFetch = globalThis.fetch, priorDocument = globalThis.document;
+    try {
+        globalThis.document = {cookie:''};
+        let cancelled = false, signal;
+        globalThis.fetch = async (_, init) => {
+            signal = init.signal;
+            return new Response(new ReadableStream({start(controller) {
+                controller.enqueue(new TextEncoder().encode('not JSON\n'));
+            }, cancel() {cancelled=true;}}));
+        };
+        const caller = createBffStreamCaller({application:'chat'});
+        const stream = await caller('data','Data','events',{}, {raw:true});
+        assert.deepEqual(JSON.parse(await stream.next()), {done:false,value:'not JSON\n'});
+        await stream.close();
+        assert.ok(cancelled && signal.aborted);
+        cancelled = false;
+        const invalid = await caller('data','Data','events');
+        await assert.rejects(invalid.next(), SyntaxError);
+        assert.ok(cancelled && signal.aborted);
+        globalThis.fetch=async()=>new Response('denied',{status:403});
+        await assert.rejects(caller('data','Data','events'), /403/);
+    } finally { globalThis.fetch=priorFetch; globalThis.document=priorDocument; }
+});
+
+test('synchronous compatibility requests enforce the same target, session and CSRF', async () => {
+    const {createBffSyncCaller} = await import('../browser-runtimes.js');
+    const priorXhr=globalThis.XMLHttpRequest, priorDocument=globalThis.document;
+    try {
+        globalThis.document={cookie:'pytincture-dev-csrf=token'};
+        let request;
+        globalThis.XMLHttpRequest=class {
+            constructor() {request=this;this.headers={};this.status=200;this.responseText='{"ok":true}';}
+            open(method,url,async) {Object.assign(this,{method,url,async});}
+            setRequestHeader(name,value) {this.headers[name]=value;}
+            send(body) {this.body=body;}
+        };
+        const call=createBffSyncCaller({application:'chat'});
+        assert.deepEqual(call('data','Data','lookup',{id:7}),{ok:true});
+        assert.equal(request.url,'/chat/classcall/data/Data/lookup');
+        assert.equal(request.async,false);
+        assert.equal(request.headers['X-CSRF-Token'],'token');
+        assert.equal(request.body,'{"id":7}');
+        assert.throws(()=>call('../data','Data','lookup'),/Invalid BFF target/);
+    } finally {globalThis.XMLHttpRequest=priorXhr;globalThis.document=priorDocument;}
+});

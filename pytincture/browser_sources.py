@@ -38,10 +38,23 @@ def module_name(name):
     return '.'.join(parts[:-1] if parts[-1] == '__init__' else parts)
 
 
+def main_only(test):
+    """An imported module cannot enter a conventional __main__ guard."""
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And):
+        return any(main_only(value) for value in test.values)
+    return (isinstance(test, ast.Compare) and len(test.ops) == 1
+            and isinstance(test.ops[0], ast.Eq)
+            and isinstance(test.left, ast.Name) and test.left.id == '__name__'
+            and isinstance(test.comparators[0], ast.Constant)
+            and test.comparators[0].value == '__main__')
+
+
 def imported_modules(name, source):
     """Include both 'from package import child' and relative import shapes."""
     class RuntimeImports(ast.NodeTransformer):
         def visit_If(self, node):
+            if main_only(node.test):
+                return [self.visit(child) for child in node.orelse]
             if ast.unparse(node.test) in {'TYPE_CHECKING', 'typing.TYPE_CHECKING'}:
                 return node.orelse
             return self.generic_visit(node)

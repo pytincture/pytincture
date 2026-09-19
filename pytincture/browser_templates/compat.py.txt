@@ -74,3 +74,16 @@ async def finish_startup():
 
 def uuid4():
     return js.crypto.randomUUID()
+
+
+def string_title(value):
+    if hasattr(value, 'title'):
+        return value.title()
+    if not isinstance(value, str):
+        raise AttributeError('Object has no title method')
+    result = []
+    previous_cased = False
+    for char in value:
+        result.append(char.lower() if previous_cased else char.upper())
+        previous_cased = char.lower() != char.upper()
+    return ''.join(result)

@@ -23,7 +23,21 @@ export async function setup(context) {
             document.head.appendChild(icons);
         });
     }
+    const resources = __PYTINCTURE_RESOURCES__;
+    globalThis.pytinctureResourcePaths = JSON.stringify(resources);
+    globalThis.pytinctureReadResource = path => {
+        if (!resources.includes(path)) throw new Error('Unknown browser resource');
+        const request = new XMLHttpRequest();
+        request.open('GET', context.assetUrl('vendor/' + path), false);
+        request.send();
+        if (request.status !== 200) throw new Error('Unable to read browser resource');
+        return request.responseText;
+    };
     globalThis.pytinctureAssetUrl = context.assetUrl;
     globalThis.pytinctureBrowserBff = async (module, className, method, payload, httpMethod = "POST") =>
         JSON.stringify(await context.callBff(module, className, method, JSON.parse(payload), {method: httpMethod}));
+    globalThis.pytinctureBrowserBffSync = (module, className, method, payload, httpMethod = "POST") =>
+        JSON.stringify(context.callBffSync(module, className, method, JSON.parse(payload), {method: httpMethod}));
+    globalThis.pytinctureBrowserBffStream = (module, className, method, payload, raw, httpMethod = "POST") =>
+        context.streamBff(module, className, method, JSON.parse(payload), {raw, method: httpMethod});
 }

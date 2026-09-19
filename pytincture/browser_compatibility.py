@@ -1,5 +1,6 @@
 """Build-time compatibility transforms for experimental MicroPython clients."""
 import ast
+from pytincture.browser_sources import main_only
 
 
 class BrowserCompatibility(ast.NodeTransformer):
@@ -7,6 +8,7 @@ class BrowserCompatibility(ast.NodeTransformer):
         self.widget = widget
         self.widgets = widgets
         self.exception_names = []
+        self.typing_names = set()
         self.dataclass_names = {'dataclass', 'dataclasses.dataclass'}
 
     def generic_visit(self, node):
@@ -17,6 +19,8 @@ class BrowserCompatibility(ast.NodeTransformer):
         return result
 
     def visit_If(self, node):
+        if main_only(node.test):
+            return [self.visit(child) for child in node.orelse]
         if ast.unparse(node.test) in {'TYPE_CHECKING', 'typing.TYPE_CHECKING'}:
             return [self.visit(child) for child in node.orelse]
         return self.generic_visit(node)
@@ -37,7 +41,11 @@ class BrowserCompatibility(ast.NodeTransformer):
         return ast.Call(func=ast.Name(id='merge_dicts',ctx=ast.Load()),args=parts,keywords=[])
 
     def visit_ImportFrom(self, node):
+        if node.module == 'importlib' and all(alias.name == 'resources' for alias in node.names):
+            return ast.Import(names=[ast.alias(name='_pytincture_resources', asname=alias.asname or alias.name) for alias in node.names])
         if node.module in ('typing', '__future__'):
+            if node.module == 'typing':
+                self.typing_names.update(alias.asname or alias.name for alias in node.names)
             return None
         if node.module == 'asyncio' and any(alias.name == 'ensure_future' for alias in node.names):
             imports = []
@@ -74,7 +82,7 @@ class BrowserCompatibility(ast.NodeTransformer):
                 self.dataclass_names.add((alias.asname or 'dataclasses') + '.dataclass')
                 alias.asname = alias.asname or 'dataclasses'
                 alias.name = '_pytincture_dataclasses'
-            elif self.widget and alias.name in {'logging', 'inspect'}:
+            elif alias.name in {'logging', 'inspect'}:
                 alias.asname = alias.asname or alias.name
                 alias.name = '_pytincture_' + alias.name
         return node if node.names else None
@@ -89,12 +97,30 @@ class BrowserCompatibility(ast.NodeTransformer):
         node.body = node.body or [ast.Pass()]
         return node
 
-    visit_AsyncFunctionDef = visit_FunctionDef
+    def visit_AsyncFunctionDef(self, node):
+        class Yields(ast.NodeVisitor):
+            found = False
+            def visit_Yield(self, child):
+                self.found = True
+            visit_YieldFrom = visit_Yield
+            def visit_FunctionDef(self, child):
+                pass
+            visit_AsyncFunctionDef = visit_FunctionDef
+            def visit_Lambda(self, child):
+                pass
+        scan = Yields()
+        for child in node.body:
+            scan.visit(child)
+        if scan.found:
+            raise ValueError('Async generators are not supported by MicroPython; use an object with __aiter__ and async __anext__')
+        return self.visit_FunctionDef(node)
 
     def visit_AnnAssign(self, node):
         return ast.Assign(targets=[node.target], value=self.visit(node.value)) if node.value else None
 
     def visit_Assign(self, node):
+        if isinstance(node.value, ast.Subscript) and isinstance(node.value.value, ast.Name) and node.value.value.id in self.typing_names:
+            return None
         if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name) and node.value.func.id == 'TypeVar':
             return None
         return self.generic_visit(node)
@@ -154,6 +180,11 @@ class BrowserCompatibility(ast.NodeTransformer):
         if isinstance(func, ast.Name) and func.id == 'hasattr' and len(node.args) == 2 and isinstance(node.args[1], ast.Constant) and node.args[1].value == 'to_py':
             return ast.Call(func=ast.Name(id='can_to_python',ctx=ast.Load()),args=[node.args[0]],keywords=[])
         if isinstance(func, ast.Attribute):
+            if func.attr == 'title' and not node.args and not node.keywords:
+                return ast.Call(func=ast.Name(id='string_title',ctx=ast.Load()),args=[func.value],keywords=[])
+            if ast.unparse(func) == 'traceback.format_exception' and len(node.args) in {1, 3}:
+                error = node.args[0] if len(node.args) == 1 else node.args[1]
+                return ast.List(elts=[ast.Call(func=ast.Name(id='format_exception', ctx=ast.Load()), args=[error], keywords=[])], ctx=ast.Load())
             if func.attr == 'to_py' and not node.args and not node.keywords:
                 return ast.Call(func=ast.Name(id='to_python',ctx=ast.Load()),args=[func.value],keywords=[])
             if isinstance(func.value,ast.Name) and func.value.id == 'asyncio' and func.attr == 'ensure_future':
@@ -169,7 +200,7 @@ class BrowserCompatibility(ast.NodeTransformer):
 def adapt(source, *, widget=False, widgets=()):
     tree = BrowserCompatibility(widget=widget, widgets=widgets).visit(ast.parse(source))
     tree.body.insert(0, ast.ImportFrom(module='_pytincture_compat',names=[
-        ast.alias(name=name) for name in ('to_python','spawn','format_exception','merge_dicts','initialize_layout','can_to_python')
+        ast.alias(name=name) for name in ('to_python','spawn','format_exception','merge_dicts','initialize_layout','can_to_python','string_title')
     ],level=0))
     tree.body.insert(0, ast.Import(names=[ast.alias(name='_pytincture_dataclasses',asname='_pytincture_dc')]))
     return ast.unparse(ast.fix_missing_locations(tree))+'\n'
