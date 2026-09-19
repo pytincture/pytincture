@@ -7501,9 +7501,16 @@ def _browser_runtime_settings(application, request, entrypoint):
         entrypoint.path, ("APP_RUNTIME_MANIFEST",), ("runtime_manifest",), source_code=source,
     )
     if not manifest_path:
-        if runtime != "pyodide":
-            raise HTTPException(status_code=422, detail=f"{runtime} requires APP_RUNTIME_MANIFEST")
-        return runtime, None
+        if runtime == "pyodide":
+            return runtime, None
+        manifest_path = f"browser/{application}/manifest.json"
+        try:
+            read_contained_file(get_modules_path(), manifest_path, max_bytes=65536)
+        except (OSError, UnsafePath) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Build {manifest_path} for {runtime}, or declare APP_RUNTIME_MANIFEST",
+            ) from exc
     try:
         normalized = normalize_relative_path(manifest_path)
         _resolve_public_asset(application, normalized, get_modules_path())

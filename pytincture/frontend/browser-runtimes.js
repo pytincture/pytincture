@@ -71,7 +71,7 @@ function loadAsset(url, stylesheet = false) {
 
 export function createBffCaller(config) {
     if (!/^[A-Za-z_]\w*$/.test(config.application || "")) throw new Error("A BFF application is required");
-    return async (module, className, method, args = {}) => {
+    return async (module, className, method, args = {}, options = {}) => {
         if (!/^[A-Za-z_]\w*(\/[A-Za-z_]\w*)*$/.test(module)
             || !/^[A-Za-z_]\w*$/.test(className) || !/^[A-Za-z_]\w*$/.test(method)) {
             throw new Error("Invalid BFF target");
@@ -80,10 +80,13 @@ export function createBffCaller(config) {
         const cookieName = config.csrfCookieName || "pytincture-dev-csrf";
         const cookie = cookies.find(value => value.startsWith(`${cookieName}=`));
         const csrf = cookie ? decodeURIComponent(cookie.slice(cookieName.length + 1)) : "";
+        const httpMethod = options.method || "POST";
+        if (!["POST", "GET"].includes(httpMethod)) throw new Error("Unsupported browser BFF HTTP method");
         const response = await fetch(`/${config.application}/classcall/${module}/${className}/${method}`, {
-            method: "POST", credentials: "same-origin",
+            method: httpMethod, credentials: "same-origin",
             headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-            body: JSON.stringify(args),
+            ...(httpMethod === "GET" ? {} : {body: JSON.stringify(args)}),
+            signal: AbortSignal.timeout(35000),
         });
         if (!response.ok) throw new Error(`BFF ${className}.${method} failed (${response.status})`);
         return response.json();
@@ -133,7 +136,7 @@ export async function runBrowserApplication(config, status = () => {}) {
     if (typeof host.setup !== "function") throw new Error("Browser host must export setup(context)");
     await host.setup({
         engine, runtimes: [...manifest.runtimes], application: config.application,
-        callBff: createBffCaller(config), invoke: handle.call,
+        callBff: createBffCaller(config), invoke: handle.call, assetUrl: asset,
     });
 
     status(`Loading ${engine}…`);

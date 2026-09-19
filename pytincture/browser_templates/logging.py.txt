@@ -1,0 +1,51 @@
+"""Small console logger used by dhxpyt wrappers in the browser."""
+import js
+
+DEBUG = 10
+INFO = 20
+WARNING = 30
+ERROR = 40
+_level = WARNING
+
+
+class Logger:
+    def __init__(self, name):
+        self.name = name
+
+    def log(self, level, message, *args, **kwargs):
+        if level < _level:
+            return
+        text = message % args if args else str(message)
+        if level >= ERROR:
+            js.console.error(text)
+        elif level >= WARNING:
+            js.console.warn(text)
+        else:
+            js.console.log(text)
+
+    def debug(self, message, *args, **kwargs):
+        self.log(DEBUG, message, *args, **kwargs)
+
+    def info(self, message, *args, **kwargs):
+        self.log(INFO, message, *args, **kwargs)
+
+    def warning(self, message, *args, **kwargs):
+        self.log(WARNING, message, *args, **kwargs)
+
+    def error(self, message, *args, **kwargs):
+        self.log(ERROR, message, *args, **kwargs)
+
+    exception = error
+
+
+def getLogger(name='browser'):
+    return Logger(name)
+
+
+def basicConfig(level=WARNING, **kwargs):
+    global _level
+    _level = level
+
+
+def warning(message, *args, **kwargs):
+    getLogger().warning(message, *args, **kwargs)

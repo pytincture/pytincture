@@ -1,4 +1,6 @@
 include LICENSE
+recursive-include pytincture/browser_templates *.txt
+recursive-include pytincture/browser_vendor *
 include pytincture/frontend/index.html
 include pytincture/frontend/pytincture.js
 include pytincture/frontend/browser-runtimes.js

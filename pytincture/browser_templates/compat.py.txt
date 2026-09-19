@@ -1,0 +1,76 @@
+"""Runtime helpers for generated browser bundles."""
+import asyncio
+import io
+import json
+import sys
+import js
+
+if sys.implementation.name == 'micropython':
+    from jsffi import create_proxy, JsProxy
+else:
+    from pyodide.ffi import create_proxy, JsProxy
+
+def merge_dicts(*parts):
+    result = {}
+    for part in parts:
+        result.update(part)
+    return result
+
+
+def to_python(value):
+    if value is None or isinstance(value, (str, int, float, bool, list, dict)):
+        return value
+    return json.loads(js.JSON.stringify(value))
+
+
+def can_to_python(value):
+    return isinstance(value, JsProxy) or hasattr(value, 'to_py')
+
+
+def to_js(value, **kwargs):
+    if kwargs:
+        raise TypeError('browser to_js supports JSON-compatible data without options')
+    return js.JSON.parse(json.dumps(value))
+
+
+def initialize_layout(cls):
+    """Replace dhxpyt's metaclass, including nested and inherited layouts."""
+    if not getattr(cls, '_pytincture_layout', False):
+        return cls
+    original = cls.__init__
+
+    def initialize(self, *args, **kwargs):
+        depth = getattr(self, '_pytincture_init_depth', 0)
+        self._pytincture_init_depth = depth + 1
+        try:
+            original(self, *args, **kwargs)
+        finally:
+            self._pytincture_init_depth = depth
+        if depth == 0:
+            self.load_ui()
+
+    cls.__init__ = initialize
+    return cls
+
+
+def format_exception(error):
+    if hasattr(sys, 'print_exception'):
+        output = io.StringIO()
+        sys.print_exception(error, output)
+        return output.getvalue()
+    import traceback
+    return ''.join(traceback.format_exception(type(error), error, error.__traceback__))
+
+
+def spawn(coroutine):
+    return asyncio.create_task(coroutine)
+
+
+async def finish_startup():
+    # Background timers, polling and event listeners must not hold startup open.
+    # Apps that require data before readiness can await it in async main().
+    await asyncio.sleep(0)
+
+
+def uuid4():
+    return js.crypto.randomUUID()

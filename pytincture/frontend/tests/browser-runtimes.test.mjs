@@ -52,3 +52,26 @@ test('BFF calls retain session credentials, named arguments and configured CSRF'
         else globalThis.document=priorDocument;
     }
 });
+
+test('GET-only BFF requests omit the body and reject unexpected verbs', async () => {
+    const priorFetch = globalThis.fetch;
+    const priorDocument = globalThis.document;
+    try {
+        globalThis.document = {cookie:''};
+        let options;
+        globalThis.fetch = async (url, received) => {
+            options = received;
+            return {ok:true, json:async()=>({ready:true})};
+        };
+        const call = createBffCaller({application:'warehouse'});
+        assert.deepEqual(await call('api/catalog', 'Catalog', 'ping', {}, {method:'GET'}), {ready:true});
+        assert.equal(options.method, 'GET');
+        assert.equal('body' in options, false);
+        assert.ok(options.signal);
+        await assert.rejects(call('api/catalog', 'Catalog', 'ping', {}, {method:'DELETE'}), /Unsupported/);
+    } finally {
+        globalThis.fetch = priorFetch;
+        if (priorDocument === undefined) delete globalThis.document;
+        else globalThis.document = priorDocument;
+    }
+});

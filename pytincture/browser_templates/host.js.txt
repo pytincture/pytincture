@@ -1,0 +1,29 @@
+export async function setup(context) {
+    document.title = __PYTINCTURE_APP_TITLE__;
+    document.body.style.margin = '0';
+    document.body.dataset.browserRuntime = context.engine;
+    if (__PYTINCTURE_WIDGETS__) {
+        await new Promise((resolve, reject) => {
+            const icons = document.createElement('link');
+            icons.id = 'ragchat-material-icons';
+            icons.rel = 'stylesheet';
+            icons.href = context.assetUrl('vendor/material-icons/material-icons.css');
+            icons.onload = resolve;
+            icons.onerror = () => reject(new Error('Unable to load widget icons'));
+            document.head.appendChild(icons);
+        });
+    }
+    if (__PYTINCTURE_WIDGETS__) {
+        await new Promise((resolve, reject) => {
+            const icons = document.createElement('link');
+            icons.rel = 'stylesheet';
+            icons.href = `/${context.application}/frontend/vendor/materialdesignicons/materialdesignicons.css`;
+            icons.onload = resolve;
+            icons.onerror = () => reject(new Error('Unable to load application icons'));
+            document.head.appendChild(icons);
+        });
+    }
+    globalThis.pytinctureAssetUrl = context.assetUrl;
+    globalThis.pytinctureBrowserBff = async (module, className, method, payload, httpMethod = "POST") =>
+        JSON.stringify(await context.callBff(module, className, method, JSON.parse(payload), {method: httpMethod}));
+}

@@ -108,3 +108,16 @@ def test_portable_replay_tokens_fail_explicitly(tmp_path):
         response = client.get('/sample')
         assert response.status_code == 422
         assert 'replay tokens' in response.text
+
+
+def test_micropython_conventional_bundle_needs_no_source_declaration(tmp_path):
+    with client_for(tmp_path, manifest=False, browser_runtime='micropython', allow_runtime_selection=True) as client:
+        (tmp_path / 'browser/sample').mkdir()
+        (tmp_path / 'browser/sample/manifest.json').write_text('{"schema":1,"runtimes":["micropython"]}')
+        response = client.get('/sample')
+        assert response.status_code == 200
+        assert 'runtimeManifestUrl: "/sample/appcode/browser/sample/manifest.json"' in response.text
+        # Opting back into Pyodide retains the original package delivery path.
+        response = client.get('/sample?runtime=pyodide')
+        assert response.status_code == 200
+        assert 'runtimeManifestUrl: null' in response.text

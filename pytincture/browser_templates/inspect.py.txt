@@ -1,0 +1,3 @@
+"""Iterator detection needed by dhxpyt's async chat callback."""
+def isasyncgen(value):
+    return hasattr(value, '__aiter__') and hasattr(value, '__anext__')

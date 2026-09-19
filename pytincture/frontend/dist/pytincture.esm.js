@@ -88,7 +88,7 @@ function loadAsset(url, stylesheet = false) {
 }
 function createBffCaller(config) {
   if (!/^[A-Za-z_]\w*$/.test(config.application || "")) throw new Error("A BFF application is required");
-  return async (module, className, method, args = {}) => {
+  return async (module, className, method, args = {}, options = {}) => {
     if (!/^[A-Za-z_]\w*(\/[A-Za-z_]\w*)*$/.test(module) || !/^[A-Za-z_]\w*$/.test(className) || !/^[A-Za-z_]\w*$/.test(method)) {
       throw new Error("Invalid BFF target");
     }
@@ -96,11 +96,14 @@ function createBffCaller(config) {
     const cookieName = config.csrfCookieName || "pytincture-dev-csrf";
     const cookie = cookies.find((value) => value.startsWith(`${cookieName}=`));
     const csrf = cookie ? decodeURIComponent(cookie.slice(cookieName.length + 1)) : "";
+    const httpMethod = options.method || "POST";
+    if (!["POST", "GET"].includes(httpMethod)) throw new Error("Unsupported browser BFF HTTP method");
     const response = await fetch(`/${config.application}/classcall/${module}/${className}/${method}`, {
-      method: "POST",
+      method: httpMethod,
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-      body: JSON.stringify(args)
+      ...httpMethod === "GET" ? {} : { body: JSON.stringify(args) },
+      signal: AbortSignal.timeout(35e3)
     });
     if (!response.ok) throw new Error(`BFF ${className}.${method} failed (${response.status})`);
     return response.json();
@@ -153,7 +156,8 @@ async function runBrowserApplication(config, status = () => {
     runtimes: [...manifest.runtimes],
     application: config.application,
     callBff: createBffCaller(config),
-    invoke: handle.call
+    invoke: handle.call,
+    assetUrl: asset
   });
   status(`Loading ${engine}\u2026`);
   if (engine === "transcrypt") {
