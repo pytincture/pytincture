@@ -5,6 +5,16 @@ set when a release is published.
 
 ## 1.0.0rc8 — Unreleased
 
+- Separate browser engine from explicit legacy-package/portable-bundle delivery;
+  manifests never change the default legacy Pyodide path. Runtime query overrides
+  require a development/testing opt-in.
+- Add native portable Pyodide sources, per-engine compatibility reports, immutable
+  resource bundles, integrity verification, package data and CSS dependency checks.
+- Publish runtime identity and granular startup timings, and an asset ownership
+  hook so portable widgetsets can adopt already-loaded JavaScript and CSS.
+- Add independent exact HTTPS script/style/font origin configuration, keeping CSP
+  defaults intact, plus editor/modal and real-application conformance checks.
+
 - Add opt-in MicroPython WebAssembly for compatible applications with an
   explicit browser build. Pyodide remains the default; existing applications
   retain their package-loading path without configuration or source changes.

@@ -1,7 +1,7 @@
 # pyTincture
 
 ## Overview
-`pyTincture` is a Python framework for browser interfaces with Python backends. Pyodide is the default browser runtime. This feature branch also supports opt-in MicroPython clients through [experimental runtime selection](docs/browser-runtimes.md).
+`pyTincture` is a Python framework for browser interfaces with Python backends. Pyodide is the default browser runtime. This feature branch adds opt-in portable bundles for Pyodide and MicroPython. Engine and delivery mode are independent; see [configuration and migration](docs/browser-runtimes.md) and the [portable Python profile](docs/portable-python-profile.md).
 
 Development toward a stable 1.0 release is tracked in the [Pytincture 1.0 roadmap](ROADMAP.md) and the [Pytincture 1.0 GitHub milestone](https://github.com/pytincture/pytincture/milestone/1).
 

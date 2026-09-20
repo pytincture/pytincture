@@ -1,374 +1,257 @@
-# Experimental browser runtime choice
+# Browser engines and application delivery
 
-Branch: `feat/browser-runtime-choice`. This is an opt-in client format under
-development, with a reusable build command for compatible Python applications.
-Applications without a runtime manifest keep their existing Pyodide behavior.
+Pyodide with legacy package delivery remains the default. Upgrading the framework,
+adding a manifest, or building a bundle does not change that loading path.
+MicroPython is an opt-in target for the [portable Python profile](portable-python-profile.md).
+It is not a transparent CPython replacement. Transcrypt is not supported.
 
-| Engine | Execution | Current support |
+| Engine | Delivery mode | Behavior |
 |---|---|---|
-| `pyodide` | CPython in WebAssembly | Existing packaged applications; also portable clients |
-| `micropython` | MicroPython in WebAssembly | Portable Python clients with a compatible API subset |
+| `pyodide` | `legacy-package` (default) | Existing wheel/archive installation, widget installation and application startup |
+| `pyodide` | `portable-bundle` | Native CPython sources and resources from a prebuilt bundle; no browser package installation |
+| `micropython` | `portable-bundle` | The same application's assets with validated, reported MicroPython source adaptations |
+| `micropython` | `legacy-package` | Configuration error |
 
-The full Book Library and Wawesome Chat apps run their Python UIs and widget
-wrappers under MicroPython and Pyodide. Changing engines reloads the page;
-unsaved client state is not retained. MicroPython does not request Pyodide assets.
+Portable Pyodide is the parity reference: compare it with legacy Pyodide before
+comparing MicroPython. Portable Pyodide preserves CPython semantics; it does not
+use the MicroPython dataclass, string or standard-library replacements.
+Portable delivery is still experimental. There is no planned automatic migration
+or silent runtime fallback.
 
-## Existing applications and upgrades
+## Configuration
 
-Installing or upgrading the framework does not switch an existing application to
-MicroPython. With no new runtime settings, the server selects Pyodide and the
-browser keeps the original package, widget-wheel, dependency installation and
-BFF behavior. No browser build or app source changes are required.
-
-MicroPython requires an explicit `PYTINCTURE_BROWSER_RUNTIME=micropython` (or
-`PytinctureConfig(browser_runtime="micropython")`), a compatible browser build,
-and its public-asset configuration. A literal `APP_BROWSER_RUNTIME` can opt in a
-single app. Query-based switching is a separate development opt-in and remains
-disabled by default. Simply generating a conventional browser bundle does not
-change the default runtime or loading path.
-
-An explicit `APP_RUNTIME_MANIFEST` opts into the portable bundle loader even
-under Pyodide. Existing apps should leave it unset to retain normal packaging;
-MicroPython can discover `browser/<application>/manifest.json` without it.
-
-## Build an application
-
-Application code keeps using `import js` and the normal DOM or widget APIs. No
-application-specific JavaScript host, replacement UI, or handwritten BFF bridge
-is needed. MicroPython compatibility and packaging live in the framework.
-
-Install this branch in the app's build environment, alongside its existing
-widget dependencies. Add this to the app's `pyproject.toml`:
-
-```toml
-[tool.pytincture.browser]
-application = "orders"
-modules-path = "apps"
-```
-
-Then build and select the runtime:
+For environment-configured services:
 
 ```sh
-pytincture-build-browser --config pyproject.toml
-# Equivalent from a source checkout:
-python -m pytincture.browser_build --config pyproject.toml
-
-export PYTINCTURE_BROWSER_RUNTIME=micropython
+export PYTINCTURE_BROWSER_RUNTIME=pyodide
+export PYTINCTURE_DELIVERY_MODE=portable-bundle
 export PYTINCTURE_PUBLIC_ASSET_PATHS='{"orders":["browser/orders/*"]}'
-# Optional development runtime picker through ?runtime=:
-export PYTINCTURE_ALLOW_RUNTIME_SELECTION=true
 ```
 
-Launch your normal server and open `/orders`. Explicit `PytinctureConfig` users
-must set the corresponding fields and environment mapping, as shown below.
-The builder uses the same entrypoint convention as the server, follows local
-imports, and emits `apps/browser/orders/manifest.json`. MicroPython automatically
-uses that conventional bundle when `APP_RUNTIME_MANIFEST` is absent. Pyodide
-retains its original package delivery in that case. Declare
-`APP_RUNTIME_MANIFEST = "browser/orders/manifest.json"` only if you also want
-Pyodide to use the same generated bundle or need a nonstandard bundle location.
+Or construct an explicit configuration:
 
-The pinned MicroPython runtime (`1.29.0-6`) is included in the framework wheel;
-apps do not need npm or a separate MicroPython installation. The browser still
-downloads and initializes the smaller WASM runtime. For dhxpyt apps, the builder
-reads the installed dhxpyt distribution without importing it. A `widget-wheel`
-path can select an explicit wheel instead. Tested widget version: `0.9.19` from the widget repository (not yet on PyPI).
-For another widgetset, set `widget-package = "wapyt"` and install its wheel in the
-build environment, or provide `widget-wheel`. Other widgetsets must include a
-`pytincture-assets.json` manifest with ordered JavaScript/CSS paths and SHA-256
-hashes. The builder validates those hashes and bundles the package sources and
-assets; stale manifests fail before replacing an existing bundle.
+```python
+app = create_app(PytinctureConfig(
+    modules_path="./apps",
+    browser_runtime="pyodide",
+    delivery_mode="portable-bundle",
+    environment={
+        "PYTINCTURE_PUBLIC_ASSET_PATHS": '{"orders":["browser/orders/*"]}',
+    },
+))
+```
 
-The browser build never imports or executes application/server modules. It
-follows local packages, relative imports and re-exports, replacing decorated
-BFF modules with generated stubs and stopping traversal at that boundary.
-Backend imports, bodies and package initializers are not included through a BFF
-edge. Type-checking-only dependencies are omitted. Keep secrets and server-only
-work behind BFF modules, just as with normal browser packaging.
+Explicit `PytinctureConfig` construction uses its arguments, not implicit process
+environment defaults. Use `PytinctureConfig.from_env()` for environment settings.
 
-Rebuild after changing browser sources, BFF signatures, assets or dependencies.
-Server startup does not compile applications. `--check` validates without
-writing output; `build.json` records source, dependency and runtime hashes.
-Known incompatible imports and syntax report build errors before changing the
-existing bundle. Build output should be ignored in source control or handled as
-a deployment artifact according to the application's normal process.
+Per-application literals can override deployment defaults:
 
-### Optional build settings
+```python
+APP_BROWSER_RUNTIME = "pyodide"
+APP_DELIVERY_MODE = "portable-bundle"
+APP_RUNTIME_MANIFEST = "browser/orders/manifest.json"  # optional conventional path
+```
+
+Equivalent `APP_CONFIG` keys are `browser_runtime`, `delivery_mode` and
+`runtime_manifest`. **A manifest never selects delivery mode.** In legacy mode
+it is ignored, including an obsolete or missing manifest. In portable mode both
+engines use the conventional `browser/<application>/manifest.json` unless an
+explicit location is supplied. Rebuild earlier experimental bundles for schema 2.
+
+`PYTINCTURE_ALLOW_RUNTIME_SELECTION=true` / `allow_runtime_selection=True` is an
+explicit development/testing flag, disabled by default. It enables
+`/orders?runtime=micropython`; it does not change delivery mode. It is rejected
+alongside production hardening settings `canonical_origin` or
+`require_readonly_modules_path`. Do not enable it in production. Select the
+production engine with app/server configuration and build that target.
+
+Engine precedence is enabled query selection, application literal, then server
+configuration. Unknown/unsupported engines or combinations return 422; disabled
+query selection returns 400. Selection survives login redirects. Failures never
+switch engines automatically.
+
+## Build and inspect
+
+Install the framework and the app's widgetset in the build environment. No npm
+installation is required by application builders; the framework ships its pinned
+MicroPython runtime. A `micropython-assets` override must contain exactly the
+pinned runtime bytes; a different runtime needs a new compatibility profile. Add to the app's `pyproject.toml`:
 
 ```toml
 [tool.pytincture.browser]
 application = "orders"
 modules-path = "apps"
-entrypoint = "orders:OrdersWindow"  # override server-style entrypoint discovery
-# Inferred by default: async for async functions, callable for classes/functions.
-entry-kind = "mainwindow"         # callable and async are also accepted
+runtimes = ["pyodide", "micropython"]
+```
+
+```sh
+pytincture-build-browser --config pyproject.toml --check --compatibility-report compatibility.json
+pytincture-build-browser --config pyproject.toml
+pytincture-build-browser --inspect apps/browser/orders/manifest.json
+```
+
+`python -m pytincture.browser_build` is equivalent. The build analyzes both engines
+independently, reports unsupported targets, and fails if any **requested** target
+fails validation. Use `runtimes = ["pyodide"]` for CPython-only portable clients.
+`--check` writes no bundle; an explicitly requested report is still written.
+`--compatibility-report -` emits JSON to stdout. The build never executes app
+modules. It follows local imports and stops at decorated BFF modules, replacing
+them with stubs; backend bodies, imports and package initializers behind that
+boundary stay on the server. Review public code and resources before publication.
+
+The entrypoint is discovered using normal `APP_ENTRYPOINT`/MainWindow conventions.
+Plain DOM apps can declare `entrypoint = "orders:main"` with `async def main()`.
+JavaScript interaction still uses `import js`; a handwritten JavaScript app host
+or replacement UI is unnecessary.
+
+Optional settings:
+
+```toml
+[tool.pytincture.browser]
+application = "orders"
+modules-path = "apps"
+entrypoint = "orders:OrdersWindow"
 output = "browser/orders"
-files = ["plugins/extra_view.py"]  # extra files for dynamic imports
-bff = ["api/extra_data.py"]        # extra BFF modules; normal imports are inferred
-wheels = ["vendor/browser_helpers-1.0-py3-none-any.whl"]
-assets = ["public/theme.css", "public/settings.json", "public/helpers.js"]
+files = ["plugins/extra_view.py"]
+dynamic-imports = ["plugins.extra_view"]
+bff = ["api/extra_data.py"]
+wheels = ["vendor/helpers-1.0-py3-none-any.whl"]
+resources = ["settings/defaults.json"]
+assets = ["public/theme.css", "public/helpers.js", "public/fonts/ui.woff2"]
 styles = ["public/theme.css"]
 scripts = ["public/helpers.js"]
+required-browser-apis = ["navigator.mediaDevices.getUserMedia", "MediaRecorder"]
 heap-bytes = 16777216
-# Optional overrides; normally use the installed widget and bundled interpreter:
-widget-wheel = "vendor/dhxpyt-0.9.19-py3-none-any.whl"
-micropython-assets = "vendor/micropython"
+# Optional; otherwise use the installed widget distribution:
+widget-package = "wapyt"
+widget-wheel = "vendor/wapyt-0.1.0-py3-none-any.whl"
 ```
 
-`modules-path`, wheel paths and `micropython-assets` are relative to the TOML
-file. `files`, `bff`, `output` and `assets` are relative to `modules-path`.
-Scripts/styles must also appear in `assets`. Access a copied asset from Python
-with `js.pytinctureAssetUrl("assets/public/settings.json")`. Pure-Python wheels
-can add browser libraries; native extensions and unresolved dependencies fail
-validation. This does not make an arbitrary CPython package MicroPython-compatible.
-For a strict explicit inventory, set `discover-imports = false` and list all
-browser modules in `files` and BFF modules in `bff`.
+Wheel paths are relative to the TOML file; files, resources, assets and output are
+relative to `modules-path`. Scripts/styles must be included in `assets`.
+`discover-imports = false` requires an explicit complete module/BFF inventory.
+Shared settings with `[tool.pytincture.browser.apps.orders]` and
+`[tool.pytincture.browser.apps.dashboard]` support `--application dashboard` or
+`--all`; each app has a separate graph and output. Publish each only to its own
+public asset allowlist. Rebuild after changing sources, dependencies, assets or
+BFF signatures. Server startup does not build bundles.
 
-Plain DOM applications can use `entrypoint = "orders:main"` with
-`async def main()` and no widget dependency. Set `APP_ENTRYPOINT = "main"` in
-the entry module when needed by the server's normal discovery. MainWindow and
-nested Layout subclasses get their usual `load_ui()` invocation after their
-constructor completes, including inherited/custom constructors. Successful
-startup sets `window.pytinctureAppReady` after the entrypoint returns. Background
-tasks do not block readiness; await required initialization in `async main()`.
+## Resources, integrity and CSP
 
-### Multiple applications
+A schema-2 manifest references an immutable `releases/<sha256>/` directory. Its
+identifier covers the canonical manifest and every artifact's size/SHA-256 lock.
+The builder writes the revision before atomically replacing `manifest.json`.
+Identical inputs produce identical revisions; existing revisions cannot be
+rewritten with different bytes. Deploy the pointer and revision together and keep
+old revisions until cached pages no longer need them. Deployment tooling controls
+retention; the builder does not delete old revisions.
 
-Shared settings and independent per-app outputs can live in one file:
+The inventory includes Python source sets, JSON/package data, JavaScript, CSS,
+fonts, images, host code, licenses, runtime requirements, and build/report metadata.
+`--inspect` independently verifies the complete inventory. Browser startup verifies
+required files before execution and uses SRI on script/style elements. Pyodide
+skips MicroPython's WASM and sources, and vice versa. Both skip build/report files
+at startup. The content address provides integrity, not publisher authentication;
+serve artifacts from your trusted application origin without rewriting revisions.
 
-```toml
-[tool.pytincture.browser]
-modules-path = "apps"
+Package data from pure Python wheels is included automatically. Pyodide mounts it
+into its real filesystem for native `importlib.resources`; MicroPython exposes the
+documented resource subset over verified in-memory bytes. Explicit assets can be
+addressed using `js.pytinctureAssetUrl("assets/public/helpers.js")`.
 
-[tool.pytincture.browser.apps.orders]
+Assets are local by default. Missing CSS-relative images/fonts/styles fail the
+build. Detected active external dependencies also fail unless deliberately listed
+in `[tool.pytincture.browser.external-origins]`, with separate `script`, `style`,
+`font`, `connect` or `image` lists of exact HTTPS origins. The report identifies
+required origins and warns about external bytes outside the bundle's integrity
+coverage. Bundle those bytes locally for immutable, fully locked delivery.
+Computed JavaScript URLs need browser conformance testing; static analysis cannot
+prove every possible dependency.
 
-[tool.pytincture.browser.apps.dashboard]
-assets = ["public/dashboard.css"]
-styles = ["public/dashboard.css"]
-```
-
-Run `pytincture-build-browser --all`, or `--application dashboard`. Outputs are
-`browser/orders/` and `browser/dashboard/`. Allowlist each bundle only for its
-own application. Every app gets a separate source bundle and import graph.
-
-### BFF and compatibility
-
-Generated stubs keep the `await Data().method_async(...)` API. Named arguments,
-keyword-only arguments, server-evaluated defaults, positional-only parameters,
-variadic calls and parameterless GET methods are supported. Sessions and CSRF
-still go through the existing server authorization. Async JSON requests have a 35-second browser timeout. Streaming calls remain
-open until completion or explicit cancellation. External token methods are not exposed as session stubs.
-Methods are also exposed under their original names: normal methods use
-synchronous compatibility calls and async methods retain their awaitable API.
-Streaming methods return portable async iterators; close them with `aclose()`
-when stopping consumption early.
-
-The compatibility layer adapts annotations, `create_proxy`, JSON-compatible
-`to_js`/`to_py`, dictionary unpacking, UUID generation, exception formatting and
-task scheduling. It includes the full dhxpyt wheel's Python wrappers and shipped
-JavaScript/CSS, rather than a Book Library widget whitelist. Chat icon fonts are
-served locally under the existing content policy. Loading every wrapper does
-not mean every widget option has been exercised; the browser tests cover the
-full Book Library and separate DOM/nested-layout/CardPanel/Kanban/Chat apps.
-
-Browser dataclasses support required/default fields, factories, inheritance,
-`__post_init__`, repr/equality, `init`, `kw_only`, `asdict`, `fields`, `replace`
-and `is_dataclass`. Frozen/slots/order/hash options and `InitVar` are unsupported.
-This is a documented subset, not the full CPython standard library. Custom
-metaclasses, native packages such as NumPy/Pandas, structural pattern matching,
-and BFF replay tokens still require the original Pyodide package runtime or
-application changes. Synchronous BFF calls use blocking XMLHttpRequest for
-compatibility; prefer async methods. MicroPython's own language
-and standard-library differences also apply; see the
-[upstream differences](https://docs.micropython.org/en/latest/genrst/core_language.html).
-
-## Verification
+The build report does not loosen server CSP. If intentionally using a CDN, configure
+its respective directive separately:
 
 ```sh
-python -m pytest tests/test_browser_build.py tests/test_browser_runtimes.py
-# Test environment: playwright==1.63.0, Chromium, dhxpyt==0.9.19
-PYTHONPATH=. python tests/browser_build_smoke.py
+export PYTINCTURE_BROWSER_SCRIPT_ORIGINS='["https://scripts.example.com"]'
+export PYTINCTURE_BROWSER_STYLE_ORIGINS='["https://styles.example.com"]'
+export PYTINCTURE_BROWSER_FONT_ORIGINS='["https://fonts.example.com"]'
+export PYTINCTURE_BROWSER_CONNECT_ORIGINS='["https://api.example.com"]'
 ```
 
-The browser check builds two independent applications without manually listing
-imports/BFF modules, then runs both under MicroPython and Pyodide. It checks DOM
-callbacks, inherited dataclasses, nested imports, BFF defaults/GET/variadic calls,
-public assets, nested layout lifecycle and additional custom widgets. It rejects
-console errors and verifies MicroPython requests no Pyodide files.
+Object equivalents are `browser_script_origins`, `browser_style_origins`,
+`browser_font_origins` and `browser_connect_origins`. Script/style/font origins
+must be exact HTTPS origins, without paths, credentials or wildcards. Connect also
+supports exact WSS origins. Style permission never authorizes the stylesheet's
+font origin. Existing default CSP remains in effect. There is no automatic image
+CSP widening; prefer local images.
 
-## Choose the engine
+## Widgetset asset ownership
 
-Environment-based applications can set:
+Portable delivery loads the widget manifest's ordered JS/CSS once, then publishes
+`globalThis.pytinctureAssets`:
 
-```sh
-PYTINCTURE_BROWSER_RUNTIME=micropython
-PYTINCTURE_ALLOW_RUNTIME_SELECTION=true
-```
+- `isPackageReady(packageName)` confirms the entire declared asset list loaded.
+- `isLoaded(pathOrAbsoluteUrl, optionalSha256)` checks an individual asset.
+- `getInfo()` returns a read-only owner, bundle identifier, packages and asset list.
 
-For an explicit configuration object, pass the corresponding fields:
-
-```python
-config = PytinctureConfig(
-    modules_path="./apps",
-    browser_runtime="micropython",
-    allow_runtime_selection=True,
-    environment={
-        "PYTINCTURE_PUBLIC_ASSET_PATHS": '{"books":["browser/books/*"]}',
-    },
-)
-app = create_app(config)
-```
-
-As with other settings, explicitly constructing `PytinctureConfig` does not
-implicitly read the process environment. Use `PytinctureConfig.from_env()` when
-environment values should supply defaults.
-
-`browser_runtime` defaults to `pyodide`. `allow_runtime_selection` defaults to
-false. When enabled, `/books?runtime=micropython` selects a supported engine;
-unknown or unsupported engines return 422, and disabled selection returns 400.
-The choice survives the application's login redirect. No automatic fallback
-silently changes the requested engine.
-
-Optional per-app overrides use literals in the entry module:
-
-```python
-from books_data import Library  # BFF dependency discovery remains unchanged
-
-APP_TITLE = "Books"
-APP_RUNTIME_MANIFEST = "browser/books/manifest.json"
-# Optional per-app default, overriding the deployment default:
-APP_BROWSER_RUNTIME = "pyodide"
-```
-
-Equivalent `APP_CONFIG` keys are `runtime_manifest` and `browser_runtime`.
-Precedence is an enabled query selection, then app default, then deployment
-default. The manifest applies to all its declared engines, including Pyodide.
-The same generated full UI can run under either declared interpreter.
-
-## Portable client format
-
-The manifest and its assets are intentionally published through the existing
-application-scoped public-asset allowlist. They must contain only frontend code
-and public data. The main app page still requires its normal login, and BFF
-authorization, sessions, argument validation and CSRF checks remain enforced.
-Server `.py` files remain blocked by the public asset route. A build step puts
-only selected browser Python modules into the explicitly public source JSON.
-
-`browser/books/manifest.json`:
+A widget's `pytincture-assets.json` can declare:
 
 ```json
-{
-  "schema": 1,
-  "runtimes": ["pyodide", "micropython"],
-  "host": "host.js",
-  "scripts": ["vendor/suite.js"],
-  "styles": ["vendor/suite.css"],
-  "sources": "sources.json",
-  "entrypoint": "client",
-  "micropython": {
-    "module": "vendor/micropython.mjs",
-    "wasm": "vendor/micropython.wasm",
-    "heapBytes": 8388608
-  }
-}
+"asset_loader": {"module": "mywidgets._runtime", "function": "use_preloaded_assets"}
 ```
 
-Asset paths are relative to the manifest. They cannot be absolute, external,
-hidden paths or parent-directory traversals. Supply pinned runtime assets from
-your build; the loader does not contact a CDN or install packages automatically.
-The working example pins MicroPython npm build `1.29.0-6`.
+The hook must be a top-level synchronous function callable without arguments.
+The builder validates the hook and invokes it before importing the app entrypoint,
+after assets and package sources are installed. The hook should check
+`js.pytinctureAssets.isPackageReady("mywidgets")`, mark its loader ready, and avoid
+reloading owned assets even when a component is missing. A missing component should
+raise a useful manifest error. Keep the existing self-loader for legacy/standalone
+use, where the portable registry is absent. Package initializers must not construct
+widgets before this hook can run. Existing widgetsets that already honor loaded
+constructors can use the registry without declaring a hook.
 
-`sources.json` contains `{"files":{"client.py":"...","bridge.py":"..."}}`.
-Only these selected files are installed in the interpreter filesystem. The
-source bundle is limited to 256 files and 8 MiB. `entrypoint` names the Python
-module; it must export `async def main()`.
+The local wapyt validation branch implements this protocol. Updating Pytincture
+alone cannot force an arbitrary old widgetset to honor a new ownership API; adopt
+the hook when a widgetset unconditionally reloads its assets. The framework does
+not monkey-patch `js.eval` or silently alter legacy widget loading.
 
-`host.js` exports `async function setup(context)`. Custom hosts can create UI;
-the generated host only connects BFF and loads icons, leaving the UI to Python.
-`context` contains:
+## Runtime identity and startup timing
 
-- `engine`, `runtimes`, and `application`.
-- `assetUrl(path)`: resolve a validated bundle-relative public asset URL.
-- `invoke(name, payload)`: serialized calls to asynchronous Python callbacks.
-  Interpreter payloads are strings; JSON is convenient
-  for carrying records across the foreign-function interface. Await the promise
-  or handle errors. Calls do not return converted Python objects in this version.
-- `callBffSync(...)`: synchronous JSON compatibility call with the same CSRF
-  checks.
-- `streamBff(..., options)`: streamed BFF results (`raw: true` for raw UTF-8);
-  returns an object with async `next()` and `close()`.
-- `callBff(module, className, method, namedArguments)`: same-origin JSON POST,
-  using session credentials and the configured CSRF cookie. Module paths may
-  contain folders. It returns the parsed JSON response and rejects non-2xx
-  responses. It does not implement generated-stub login redirects or replay tokens.
-
-The loader first loads styles and scripts, then calls the host's `setup`, starts
-the selected engine, and awaits `main()`. It returns a handle with `engine`,
-`runtime`, and serialized `call(name, payload)`. Switching engines requires a
-new document; multiple simultaneous runtimes in one page are not supported.
-
-For custom HTML, call the existing entrypoint:
+Use the supported read-only API rather than internal interpreter handles:
 
 ```javascript
-const handle = await runTinctureApp({
-  application: "books",
-  runtime: "micropython",
-  runtimeManifestUrl: "/books/appcode/browser/books/manifest.json",
-  csrfCookieName: "__Host-pytincture-csrf"
-});
+const info = globalThis.pytinctureRuntime.getInfo();
+// schema, engine, deliveryMode, runtimeVersion, pythonImplementation,
+// pythonVersion, bundleId, compatibilityProfile, startupTimings
+window.addEventListener("pytincture:lifecycle", event => console.log(event.detail));
 ```
 
-## Compatibility limits and next work
+The body exposes `data-browser-runtime` and `data-delivery-mode`. Versions come
+from the running interpreter; unavailable values are null. Legacy mode has null
+bundle/profile identifiers. Each timing has a stage, duration in milliseconds,
+resource, cache status and completion/failure status. Lifecycle events also carry
+engine, delivery mode, timestamp and request identifier. Resource queries are
+sanitized. Cache status is `network`, `cache` or `unknown` when browser timing
+cannot establish it.
 
-The shared builder includes the dhxpyt Python wrappers and async
-session BFF stubs described above. CPython native extension wheels and replay-token
-handling have not been ported. Deployments enabling BFF replay
-tokens receive an explicit 422 for portable clients; the existing Pyodide
-package path remains available.
+Phases distinguish runtime download/initialization, legacy package and widget
+installation, assets, bundle download/installation, module import, entrypoint and
+`first-render`. Parent phases include child durations; do not sum both. Runtime
+initialization can itself download WASM and stdlib resources. `first-render` is the
+first frame opportunity after entrypoint completion (bounded in background tabs),
+not proof that arbitrary background tasks have rendered. Await required startup
+work in an async entrypoint and verify actual app DOM in conformance tests.
 
-Portable clients skip the Pyodide package installer, widget-wheel installer,
-service-worker setup and cache warmup. This is part of the measured startup
-benefit, alongside the smaller interpreter. Compare engines
-using equivalent client features and cold/warm network conditions.
+## Validation and rollout
 
-Next work on this branch should expand `dhxpyt` compatibility, cover more widgets
-and callback shapes, add runtime-specific diagnostics, and measure real devices
-before proposing production support. Runtime adapters live in
-`pytincture/frontend/browser-runtimes.js`; add another engine only after its
-client contract and browser acceptance tests work.
+Validate legacy Pyodide first, then portable Pyodide, then portable MicroPython.
+Compare screenshots and behavior using identical app inputs. Do not use one
+startup measurement as a general performance guarantee; capture cold/warm timing,
+network/cache conditions, runtime identity and the first useful app DOM.
 
-
-### Full application validation
-
-The branch has also been exercised with the current `pytincture_example` and
-`wAwesomeChat`, using dhxpyt and wapyt respectively. The Wawesome UI uncovered
-shared compiler/transport gaps beyond the example: widget asset manifests,
-synchronous BFF methods, JSON/raw streaming, typing aliases, string title case,
-and common `copy`/`datetime` imports. The latter are bundled from pinned
-[micropython-lib sources](https://github.com/micropython/micropython-lib/tree/5139530d3327a6012921c70d44ae3151480efe2d/python-stdlib),
-with their licenses and hashes. They implement MicroPython subsets, not the entire
-CPython standard library.
-
-Client code must keep server-only imports (database, environment files, provider
-credentials) behind BFF methods. An async generator (`async def` containing
-`yield`) is rejected at build time: use an async iterator with `__aiter__` and
-`async __anext__`. Generated BFF streams already use that portable interface.
-Prefer `datetime.now(timezone.utc)` over the unsupported `datetime.utcnow()`.
-
-Wawesome validation uses a disposable authenticated database and a local
-OpenAI-compatible streaming service through the real LiteLLM/BFF stack. Voice
-validation records synthetic microphone audio using MediaRecorder and sends it
-to real Whisper. This checks recording, transcription, VAD, auto-submit and
-streaming without paid API calls or hardware permission prompts. It does not
-certify real provider accounts or physical microphones. See the app's
-`tests/browser_runtime_smoke.py` and `tests/browser_voice_smoke.py` for repeatable
-interaction checks. The framework fixture checks run in CI for both runtimes.
-
-
-Portable widgets can access `globalThis.pytinctureBrowserRuntime.engine` and
-`.runtime` after interpreter initialization. `captureOutput(source)` executes a
-short synchronous Python snippet in a fresh globals dictionary using that same
-interpreter and returns its stdout, including Unicode and output without a final
-newline. It restores output routing on exceptions. Input/output are limited to
-1 MiB. This is a convenience for existing code-preview widgets, not an isolation
-or security boundary; snippets have the same browser access as the application.
+The CI conformance fixtures cover direct DOM, BFF sync/async/streaming, nested
+widgets, CodeMirror, modal persistence, fonts, CSP, runtime identity and screenshots.
+`tests/run_application_conformance.py` runs the complete example and Wawesome apps
+in all three supported combinations, including authentication and voice. See
+[validation evidence and boundaries](browser-runtime-validation.md) for commands,
+versions and the exact features exercised. Legacy delivery has not been deprecated.

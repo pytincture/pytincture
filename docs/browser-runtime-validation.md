@@ -1,108 +1,98 @@
-# Full application runtime validation — 2026-09-18
+# Full application runtime conformance — 2026-09-20
 
-The complete Book Library example and Wawesome Chat were exercised automatically
-in Playwright Chromium under **MicroPython and Pyodide**. Both runtime runs passed
-without browser errors or failed resource requests. MicroPython requested no
-Pyodide assets, including when previewing Python artifacts.
+The complete Book Library example and Wawesome Chat passed automated Playwright
+Chromium tests in all three supported configurations. The final matrix used new
+checkouts from pinned public commits, hash-checked integration patches, rebuilt
+widget wheels, a new hash-locked Python environment and a pinned Whisper model.
+The framework branch remains `feat/browser-runtime-choice`; rc8 is unreleased.
 
-## Versions and local branches
-
-| Repository | Updated source | Validation checkout |
+| Configuration | Book Library | Wawesome Chat, including voice |
 |---|---|---|
-| pytincture | `feat/browser-runtime-choice` | Original framework checkout; branch remains checked out |
-| pytincture_example | latest main `0971ee3` | `pytincture-example-latest-runtime`, `test/latest-browser-runtimes`, commit `f9b0fde` |
-| dhxpyt | latest main `349d6dc` | Updated original checkout; existing local edits preserved |
-| wAwesomeChat | latest main `23085c7` | Original app checkout, `feat/browser-runtime-validation`, commit `8139590` |
-| wapyt | latest voice/widget integration branch `e614507` | `wapyt-runtime-validation`, `test/browser-runtimes`, commit `ebf61a5` |
+| Default legacy Pyodide | Passed | Passed |
+| Portable Pyodide | Passed | Passed |
+| Portable MicroPython | Passed | Passed |
 
-The wapyt main checkout had uncommitted changes; those were preserved. Its newer
-voice branch was needed by the current app, so validation used a separate
-checkout. Updated widget wheels were built and installed locally; no manual
-widget pull or browser interaction was required. App/widget validation commits
-are local, separate from the framework branch publication.
+Portable Pyodide used native CPython sources. MicroPython requested no Pyodide
+assets, including when executing Python artifacts. Each route probe checked the
+public runtime identity, delivery mode, profile/bundle identity where applicable,
+CSP, fonts, unexpected errors and failed HTTP responses, then recorded cold/warm
+startup stages and screenshots.
 
 ## Features exercised
 
-| Application | Passed in both runtimes |
+| Application | Automated coverage in each configuration |
 |---|---|
-| Book Library | Password login; full widget layout; grid data, row selection and column filters; ratings chart and fitted axis; sidebar collapse/expand; form population and controls; report modal; double-click and context-menu edit; save/reload persistence and date preservation; restoration of edited records; calendar month navigation/date selection; light/dark preference and reload behavior |
-| Wawesome Chat | Password login; full Chat/Providers/Users UI; new/delete/clear chat; model selection and remembered choice; theme toggle and remembered choice; sidebar controls; send/copy messages; incremental replies through real LiteLLM and BFF streaming; persisted transcript; provider create/edit/search/reload/delete; model addition/deletion; user create/edit/select; provider/model access toggles; HTML artifact preview/code/copy/download/close; Python artifact execution using the selected interpreter |
-| Wawesome voice | MediaRecorder capture; real Whisper transcription; composer insertion; continuous listening and voice activity detection; automatic submission; streamed response; stop-listening control; denied-microphone recovery |
+| Book Library | Password login; full layout; grid/BFF data; row selection; column filters; ratings chart/axis; sidebar collapse/expand; form population; reports modal; double-click and context-menu edit; save/reload/date preservation; restoration of edited records; calendar navigation/date selection; light/dark preference and persistence |
+| Wawesome | Password login; Chat/Providers/Users on fresh pages; new/delete/clear conversations; model and theme persistence; sidebar controls; send/copy; incremental replies through real LiteLLM/BFF streaming; provider create/edit/search/reload/delete; model add/delete; user create/edit/select and access-card controls; HTML artifact preview/code/copy/download/close; Python artifacts using the existing interpreter |
+| Voice | Synthetic MediaStream captured by real MediaRecorder; real Whisper transcription; push-to-talk composer insertion; continuous listening/VAD; automatic submission and streamed reply; stop control; denied-microphone recovery |
 
-Voice input used committed synthetic speech and a browser-generated MediaStream.
-The test asserted two successful transcription requests, one for push-to-talk and
-one for continuous listening. It required no physical microphone or human input.
+The independent fixture suite also passed in both portable engines: direct DOM
+callbacks, nested imports/layouts, dataclasses, BFF arguments/defaults/GET/variadic
+calls, JSON and raw streams, package resource bytes, CardPanel/Kanban/Chat, real
+CodeMirror editing, modal persistence, reload, fonts and screenshots.
 
-## Fixes found through the applications
+## Asset ownership regression
 
-- Generic widget-package/asset-manifest support; stale asset hashes fail the build.
-- Synchronous and streaming BFF compatibility, alongside async JSON methods.
-- Portable type aliases, title case, optional pinned copy/datetime modules,
-  and clear rejection of unsupported async generators.
-- Wawesome server configuration/database imports moved behind authenticated BFF
-  methods; transcript rows are scoped to the authenticated user.
-- Widget task scheduling compatible with browser MicroPython; stream cleanup.
-- Clipboard target lifetime, persisted theme restoration, and Python artifact
-  output capture without starting a second interpreter.
-- CI dependency installation fixed: dhxpyt 0.9.19 is selected from its pinned
-  Git source because that version is not published to PyPI.
+The portable loader owns the verified manifest's script/style path. The wapyt
+integration hook adopts that completed registry before app startup. Fresh-page
+probes observed each widget constructor registered once, verified that forcing
+its private loader did not execute assets again, and compared inline style hashes
+against owned styles to reject duplicate CSS injection. Application-specific inline
+styles remain valid. Material Icons and Material Design Icons CSS/fonts now belong
+to the same verified bundle path rather than a second host-loader path.
+
+Unexpected resource failures are errors. Explicit BFF stream-reader cancellation
+and the legacy wheel metadata probe can appear as `ERR_ABORTED` after successful
+consumption; fixture tests distinguish these from failed asset downloads and
+assert the complete stream values. No broader network-error ignore is used.
 
 ## Regression checks
 
-- Framework: **915 Python tests**, **46 JavaScript tests**, **10 browser lifecycle tests**.
-- Wawesome backend: **7 tests**, including user-scoped transcript storage.
-- Wapyt stream handling: **31 tests**.
-- Independent DOM and widget fixture applications passed in both interpreters,
-  including sync/async/JSON/raw BFF streams, nested modules/layouts, dataclasses,
-  UTF-8 output capture and recovery after Python errors.
-- The same fixture applications also passed using the **installed framework wheel**.
-- Wheel, source distribution, and npm artifact inventories validated.
+- Full framework suite: 955 Python tests passed; the subsequent extensionless CSS
+  origin regression also passed with its resource/profile test file.
+- JavaScript: 49 tests passed. Browser lifecycle: 10 tests passed.
+- Legacy Chromium end-to-end: 9 tests passed, covering packaged/inline apps,
+  authentication, Swagger/API access, widget integrity and SVG isolation.
+- Firefox/WebKit were not executed locally because their Playwright binaries were
+  absent. The existing CI browser job installs and exercises those engines.
+- Wapyt: 33 local stream/asset-ownership tests passed.
+- Wheel, source distribution and npm inventories validated.
+- The new framework/conformance changes passed the local secret scan.
+
+## Reproducible inputs
+
+The complete source, patch and dependency pins are in
+[`tests/conformance/`](../tests/conformance/README.md). Upstream bases are example
+`0971ee3`, dhxpyt `349d6dc`, Wawesome `23085c7` and wapyt `e614507`. The companion
+local validation commits are example `840c72c`, Wawesome `97cf912` and wapyt
+`0fb5f99`; these repositories were not pushed as part of the framework task.
+Original dirty widget checkouts were preserved.
+
+The full application CI job prepares these inputs and runs all three modes. It
+also gates release artifact attestation. The smaller fixture job covers the
+editor/resource regressions and uploads its screenshots/results separately.
+
+Local final matrix evidence is under `validation-results/pinned-full-apps/`, with
+its transcript in `validation-results/pinned-full-conformance.log`. The resource
+fixture evidence is under `validation-results/conformance-fixtures/` and
+`validation-results/conformance-resources-final.log`. These are ignored local
+artifacts; CI uploads equivalent evidence. The harness stops its own test servers;
+use the committed launchers to start a persistent local preview.
 
 ## Boundaries
 
-The chat provider was a local OpenAI-compatible streaming fixture reached through
-the real LiteLLM/BFF stack. Live OpenAI/Anthropic/Bedrock/etc. accounts, live SAML
-identity providers, and OS/hardware microphone permission prompts were not tested.
-No production database or provider credentials were used.
+The provider is a local OpenAI-compatible streaming fixture reached through the
+real LiteLLM/BFF stack. Tests use isolated SQLite data and public demo credentials.
+Live model-provider accounts, SAML identity providers and physical microphone/OS
+permission prompts are outside this conformance run. The synthetic voice fixture
+exercises recording, encoding and real transcription without human interaction.
 
-The app's user-access cards remain in-memory demonstration controls, not backend
-authorization enforcement. Deleting widget conversations does not purge the
-server transcript archive. These existing product boundaries are not evidence of
-runtime incompatibility. MicroPython still supports a Python/stdlib subset;
-CPython-only packages and replay-token BFF mode require the original Pyodide path.
+Wawesome's user-access cards are demonstration state, not backend authorization
+enforcement. Deleting widget conversations does not purge its server archive.
+Those existing app boundaries are separate from runtime compatibility.
 
-## Local results and repeatable checks
-
-Screenshots, JSON results and logs are saved under the framework checkout's
-ignored `validation-results/` directory. The app repositories contain the
-Playwright scripts and persistent local test launchers:
-
-- Example: `tests/ui_smoke.py`, `tests/browser_interactions.py`, `tests/runtime_server.py`.
-- Wawesome: `tests/browser_runtime_smoke.py`, `tests/browser_voice_smoke.py`, `tests/runtime_server.py`.
-
-Both servers remain available locally:
-
-- [Book Library, MicroPython](http://127.0.0.1:8095/py_ui?runtime=micropython)
-- [Wawesome Chat, MicroPython](http://127.0.0.1:8094/chat?runtime=micropython)
-
-Use `runtime=pyodide` for the comparison. The isolated launchers use the public
-demo login `demo@example.com` / `demo-password`.
-
-## Default upgrade verification — 2026-09-19
-
-After removing the experimental Transcrypt adapter, an unchanged snapshot of
-the latest example (`0971ee3`) passed the full UI smoke test with this framework.
-It used its original `run.py`, app sources and widget wheel, no runtime settings,
-no manifest declaration, and no browser build. Only the isolated database and
-local listening port differed. Network requests confirmed the original Pyodide,
-widget-wheel and `appcode.pyt` package-loading path.
-
-The default remains `pyodide`, and query-based runtime selection remains
-disabled. Regression tests cover these defaults in configuration and browser
-startup, including BFF replay tokens and unused/malformed conventional bundles.
-MicroPython still requires an explicit opt-in and compatible browser bundle.
-
-Validation passed: 917 Python tests, 47 JavaScript tests, 10 browser lifecycle
-tests, nine Chromium end-to-end tests, the untouched full example, and the independent DOM/widget
-fixture applications under both supported interpreters. Logs and the example
-screenshot are in `validation-results/runtime-default-*`.
+MicroPython remains a documented Python subset. Static compatibility checks do
+not prove arbitrary dynamic Python/JavaScript behavior or every widget option.
+The startup reports distinguish parent/child phases; they are diagnostic evidence,
+not a general speed guarantee. Compare equivalent inputs and cache conditions
+before drawing performance conclusions.
