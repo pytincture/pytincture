@@ -36,8 +36,10 @@
   "javascript": {
     "globals": [
       "PytinctureLifecycleError",
+      "pytinctureAssets",
       "pytinctureAutoStartConfig",
       "pytinctureAutoStartDisabled",
+      "pytinctureRuntime",
       "runTinctureApp"
     ],
     "run_tincture_app_config": [
@@ -46,6 +48,7 @@
       "application",
       "backendWidgetSources",
       "csrfCookieName",
+      "deliveryMode",
       "devWheelVersion",
       "devWidgetHost",
       "enableBackendLogging",
@@ -73,7 +76,22 @@
       "widgetAssetManifest",
       "widgetSource",
       "widgetlib"
-    ]
+    ],
+    "runtime_diagnostics": {
+      "schema": 1,
+      "method": "pytinctureRuntime.getInfo",
+      "fields": [
+        "schema",
+        "engine",
+        "deliveryMode",
+        "runtimeVersion",
+        "pythonImplementation",
+        "pythonVersion",
+        "bundleId",
+        "compatibilityProfile",
+        "startupTimings"
+      ]
+    }
   },
   "bff": {
     "contract_version": 1,
@@ -145,7 +163,10 @@
     "download_filename": "appcode.pyt",
     "entrypoint": "{application}.py",
     "path_format": "relative-posix",
-    "cache_limits": ["entries", "aggregate-bytes"],
+    "cache_limits": [
+      "entries",
+      "aggregate-bytes"
+    ],
     "warm_validation": "no-follow-source-and-directory-metadata"
   }
 }

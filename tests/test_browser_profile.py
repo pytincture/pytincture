@@ -33,3 +33,10 @@ def test_alias_scheduler_adaptation_is_visible_in_the_build_report():
     assert 'browser_event_loop as loop' in result
     assert any(f['rule']=='adapt-Call' and f['behavior_changing'] for f in findings)
     assert all(f['file']=='app.py' for f in findings)
+
+
+def test_micropython_rejects_iterable_display_unpacking_but_allows_assignment():
+    source = 'values=[0,*items]\nfirst,*rest=items\n'
+    assert not inspect_source('app.py',source,'pyodide')
+    findings = inspect_source('app.py',source,'micropython')
+    assert len(findings)==1 and findings[0]['rule']=='runtime-syntax'

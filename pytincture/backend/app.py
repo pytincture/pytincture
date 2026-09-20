@@ -7515,7 +7515,7 @@ def _browser_runtime_settings(application, request, entrypoint):
     if not manifest_path:
         manifest_path = f"browser/{application}/manifest.json"
         try:
-            read_contained_file(get_modules_path(), manifest_path, max_bytes=65536)
+            read_contained_file(get_modules_path(), manifest_path, max_bytes=1048576)
         except (OSError, UnsafePath) as exc:
             raise HTTPException(
                 status_code=422,
@@ -7524,12 +7524,12 @@ def _browser_runtime_settings(application, request, entrypoint):
     try:
         normalized = normalize_relative_path(manifest_path)
         _resolve_public_asset(application, normalized, get_modules_path())
-        manifest_file = read_contained_file(get_modules_path(), normalized, max_bytes=65536)
+        manifest_file = read_contained_file(get_modules_path(), normalized, max_bytes=1048576)
         manifest = json.loads(manifest_file.content)
     except (OSError, UnsafePath, ValueError, HTTPException) as exc:
         raise HTTPException(status_code=422, detail="Runtime manifest must be a valid, explicitly public JSON asset") from exc
     supported = manifest.get("runtimes") if isinstance(manifest, dict) else None
-    if (not isinstance(manifest, dict) or manifest.get("schema") != 1
+    if (not isinstance(manifest, dict) or manifest.get("schema") != 2
             or not isinstance(supported, list) or not supported
             or any(not isinstance(name, str) or name not in {"pyodide", "micropython"} for name in supported)
             or len(set(supported)) != len(supported)):

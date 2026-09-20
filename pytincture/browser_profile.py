@@ -58,6 +58,10 @@ def inspect_source(name, source, engine, *, explicit_dynamic=()):
                 add(node, 'runtime-api', f'{call} is unavailable in the pinned browser MicroPython; use a portable/browser API')
             if call.startswith('js.') and any(part in call for part in ('.MediaRecorder', '.getUserMedia', '.clipboard', '.gpu', '.indexedDB')):
                 add(node, 'browser-api', f'Requires browser API {call}; availability/permissions must be tested on the target browser', 'warning')
+        if (engine == 'micropython' and isinstance(node, (ast.List, ast.Tuple, ast.Set))
+                and not isinstance(getattr(node, 'ctx', None), ast.Store)
+                and any(isinstance(element, ast.Starred) for element in node.elts)):
+            add(node, 'runtime-syntax', 'Iterable unpacking in collection literals requires CPython; use concatenation or update')
         if engine == 'micropython' and isinstance(node, (ast.Match, ast.TryStar)):
             add(node, 'runtime-syntax', f'{type(node).__name__} requires CPython')
     return findings

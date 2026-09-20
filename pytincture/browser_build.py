@@ -5,6 +5,7 @@ Application and backend modules are parsed, never imported or executed.
 from __future__ import annotations
 
 import argparse
+import base64
 import ast
 import hashlib
 import importlib.metadata
@@ -18,6 +19,9 @@ import tomllib
 import zipfile
 
 from pytincture.browser_compatibility import adapt
+from pytincture.browser_profile import (PROFILE, MICROPYTHON_MODULES, pyodide_modules,
+                                        import_source, inspect_source, verified_stdlib, CompatibilityError)
+from pytincture.browser_assets import canonical_json, audit_assets, seal_manifest, inspect_bundle
 from pytincture.backend.pages import find_app_string_setting, find_main_window_subclass
 from pytincture.browser_sources import (relative_path as _relative, read_source as _read,
                                         module_name as _module, discover_sources, imported_modules)
@@ -118,12 +122,9 @@ def _bff_stub(name: str, source: str) -> str:
         f'class {name}:\n' + ('\n\n'.join(methods) or '    pass') for name, methods in classes.items()) + '\n'
 
 
-def _check_imports(sources: dict[str, str], root: Path, vendor_modules=()) -> None:
+def _check_imports(sources: dict[str, str], root: Path, vendor_modules=(), engine="micropython") -> None:
     """Catch missing local sources and known unsupported imports before serving."""
-    native = {'js', 'jsffi', 'asyncio', 'array', 'binascii', 'builtins', 'cmath',
-              'collections', 'gc', 'hashlib', 'heapq', 'io', 'json', 'math',
-              'micropython', 'os', 'random', 're', 'select', 'struct', 'sys', 'time',
-              'errno', 'deflate', '__main__'}
+    native = MICROPYTHON_MODULES if engine == 'micropython' else pyodide_modules()
     available = {_module(name) for name in sources}
     for name, source in sources.items():
         if name.startswith('_pytincture_') or name in vendor_modules:
@@ -145,7 +146,7 @@ def _check_imports(sources: dict[str, str], root: Path, vendor_modules=()) -> No
                 raise ValueError(f'{name}:{node.lineno}: unresolved browser import {module}; include a compatible pure-Python wheel or browser source (CPython-only packages are not supported)')
 
 
-def build_browser_bundle(config_file: str | Path, *, application: str | None = None, check: bool = False) -> Path:
+def _prepare_browser_bundle(config_file, *, application=None, engine="micropython", report=None):
     """Build the [tool.pytincture.browser] table in an app's pyproject.toml."""
     config_file = Path(config_file).resolve()
     config = tomllib.loads(config_file.read_text())['tool']['pytincture']['browser']
@@ -162,10 +163,11 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
         config.setdefault('output', f'browser/{application}')
     allowed = {'application', 'modules-path', 'output', 'entrypoint', 'entry-kind',
                'files', 'bff', 'widget-wheel', 'micropython-assets', 'wheels',
-               'assets', 'scripts', 'styles', 'heap-bytes', 'discover-imports', 'widget-package'}
+               'assets', 'scripts', 'styles', 'heap-bytes', 'discover-imports', 'widget-package',
+               'runtimes', 'resources', 'dynamic-imports', 'external-origins', 'required-browser-apis'}
     if set(config) - allowed:
         raise ValueError(f'Unknown browser build settings: {sorted(set(config) - allowed)}')
-    for key in ('files', 'bff', 'wheels', 'assets', 'scripts', 'styles'):
+    for key in ('files', 'bff', 'wheels', 'assets', 'scripts', 'styles', 'resources', 'dynamic-imports', 'required-browser-apis'):
         values = config.get(key, [])
         if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
             raise ValueError(f'{key} must be a list of paths')
@@ -199,14 +201,33 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
     entry_kind = config.get('entry-kind', inferred_kind)
     if entry_kind not in {'mainwindow', 'async', 'callable'}:
         raise ValueError('entry-kind must be mainwindow, callable or async')
+    def convert(name, source, *, widget=False, widgets=()):
+        findings = inspect_source(name, source, engine, explicit_dynamic=config.get('dynamic-imports', []))
+        report['findings'].extend(findings)
+        if any(f['severity'] == 'error' for f in findings):
+            raise ValueError(f"{name}: " + '; '.join(f['message'] for f in findings if f['severity'] == 'error'))
+        if engine == 'pyodide':
+            result = import_source(source)
+            report['findings'].append({'file': name, 'line': 0, 'severity': 'supported',
+                                      'rule': 'cpython-source', 'message': 'CPython syntax/stdlib preserved; unreachable __main__ launch blocks removed'})
+            return result
+        return adapt(source, widget=widget, widgets=widgets, report=report['findings'], filename=name)
     sources: dict[str, str] = {}
     hashes = {}
     widgets = set()
     widget_package = config.get('widget-package', 'dhxpyt')
-    if not widget_package.isidentifier():
+    if not isinstance(widget_package, str) or not widget_package.isidentifier():
         raise ValueError('widget-package must be a Python package name')
+    dynamic_files = []
+    for name in config.get('dynamic-imports', []):
+        if not all(part.isidentifier() for part in name.split('.')):
+            raise ValueError('dynamic-imports entries must be literal module names')
+        for candidate in (name.replace('.', '/')+'.py', name.replace('.', '/')+'/__init__.py'):
+            if (root/candidate).is_file():
+                dynamic_files.append(candidate)
+                break
     raw_sources, boundaries = discover_sources(
-        root, entry_path, config.get('files', []), config.get('bff', []),
+        root, entry_path, [*config.get('files', []), *dynamic_files], config.get('bff', []),
         discover=config.get('discover-imports', True),
     )
     for name, source in raw_sources.items():
@@ -217,7 +238,7 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
             if imported == widget_package or imported.startswith(widget_package + '.'):
                 widgets.add(imported.split('.')[1] if '.' in imported else 'layout')
         try:
-            sources[name] = adapt(source)
+            sources[name] = convert(name, source)
         except (ValueError, SyntaxError) as exc:
             raise ValueError(f'{name}: {exc}') from exc
         hashes[name] = hashlib.sha256(source.encode()).hexdigest()
@@ -230,13 +251,18 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
     artifacts: dict[str, bytes] = {}
     wheel_digest = None
     widget_scripts, widget_styles = [], []
+    asset_hook = None
     if widgets or entry_kind == 'mainwindow':
         widgets.add('layout')
         widgets.discard('theme')
         wheel = _widget_wheel(config, config_file.parent, widget_package)
         wheel_digest = hashlib.sha256(wheel).hexdigest()
         with zipfile.ZipFile(io.BytesIO(wheel)) as archive:
+            if len(archive.infolist()) > 4096 or sum(i.file_size for i in archive.infolist()) > 128 * 1024 * 1024:
+                raise ValueError('Widget wheel exceeds 4096 entries or 128 MiB uncompressed')
             for name in archive.namelist():
+                if archive.getinfo(name).file_size > 32 * 1024 * 1024:
+                    raise ValueError('Widget wheel asset exceeds 32 MiB: ' + name)
                 if name.endswith('/') or any(part.startswith('.') for part in name.split('/')):
                     continue
                 _relative(name)
@@ -247,21 +273,22 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
                     source = archive.read(name).decode()
                     if has_bff_export_class(name, source=source):
                         raise ValueError(f'Widget wheel contains backend code: {name}')
-                    sources[name] = adapt(source, widget=True, widgets=widgets)
+                    sources[name] = convert(name, source, widget=True, widgets=widgets)
                 if name.startswith(widget_package + '/') and not name.endswith('.py'):
                     artifacts['vendor/' + name] = archive.read(name)
                 if name.startswith('dhxpyt/dhxsrc/'):
                     artifacts['vendor/dhxpyt/' + name.removeprefix('dhxpyt/dhxsrc/')] = archive.read(name)
                 if '.dist-info/' in name and 'license' in name.lower():
-                    artifacts['vendor/dhxpyt/' + Path(name).name] = archive.read(name)
+                    artifacts['vendor/' + widget_package + '/' + Path(name).name] = archive.read(name)
 
-        if widget_package != 'dhxpyt':
-            manifest_name = 'vendor/' + widget_package + '/pytincture-assets.json'
-            if manifest_name not in artifacts:
-                raise ValueError('Widget package requires pytincture-assets.json')
+        manifest_name = 'vendor/' + widget_package + '/pytincture-assets.json'
+        if widget_package != 'dhxpyt' and manifest_name not in artifacts:
+            raise ValueError('Widget package requires pytincture-assets.json')
+        if manifest_name in artifacts:
             metadata = json.loads(artifacts[manifest_name])
             if metadata.get('schema') != 1 or metadata.get('package') != widget_package:
                 raise ValueError('Invalid widget asset manifest')
+            asset_hook = metadata.get('asset_loader')
             for asset in metadata['assets']:
                 path = 'vendor/' + _relative(asset['path'])
                 if not asset['path'].startswith(widget_package + '/') or path not in artifacts:
@@ -279,18 +306,27 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
             artifacts['vendor/material-icons/' + name] = (VENDOR / name).read_bytes()
         artifacts['vendor/material-icons/material-icons.css'] = b'@font-face{font-family:"Material Icons";font-style:normal;font-weight:400;src:url("material-icons.woff2") format("woff2")} .material-icons{font-family:"Material Icons";font-weight:normal;font-style:normal;font-size:24px;line-height:1;letter-spacing:normal;text-transform:none;display:inline-block;white-space:nowrap;word-wrap:normal;direction:ltr;font-feature-settings:"liga";-webkit-font-smoothing:antialiased;}'
 
+    if widgets:
+        icon_root = Path(__file__).with_name('frontend')/'vendor/materialdesignicons'
+        for name in ('LICENSE', 'materialdesignicons.css', 'materialdesignicons.css.map', 'fonts/materialdesignicons-webfont.woff2'):
+            artifacts['vendor/materialdesignicons/'+name] = _read(icon_root, name)
+
     dependency_hashes = {}
     for wheel_name in config.get('wheels', []):
         wheel_path = (config_file.parent / wheel_name).resolve()
         dependency_hashes[wheel_path.name] = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
         with zipfile.ZipFile(wheel_path) as archive:
+            if len(archive.infolist()) > 4096 or sum(i.file_size for i in archive.infolist()) > 128 * 1024 * 1024:
+                raise ValueError('Dependency wheel exceeds 4096 entries or 128 MiB uncompressed')
             for info in archive.infolist():
                 name = info.filename
+                if info.file_size > 32 * 1024 * 1024:
+                    raise ValueError('Dependency wheel asset exceeds 32 MiB: ' + name)
                 if info.is_dir():
                     continue
                 _relative(name)
                 if name.endswith(('.so', '.pyd', '.dylib')):
-                    raise ValueError(f'{wheel_path.name}: native extensions cannot run in MicroPython')
+                    raise ValueError(f'{wheel_path.name}: native extensions require a compatible legacy browser package installation')
                 if name.endswith('.py') and '.dist-info/' not in name:
                     _module(name)
                     if name in sources or name.split('/')[0].startswith('_pytincture_') or name.startswith('dhxpyt/'):
@@ -300,12 +336,41 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
                     source = archive.read(name).decode()
                     if has_bff_export_class(name, source=source):
                         raise ValueError(f'Browser wheel contains backend code: {name}')
-                    sources[name] = adapt(source)
+                    sources[name] = convert(name, source)
+                elif '.dist-info/' not in name:
+                    artifacts['vendor/' + name] = archive.read(name)
+                elif 'license' in name.lower():
+                    artifacts['licenses/' + wheel_path.stem + '/' + Path(name).name] = archive.read(name)
+    for name in config.get('resources', []):
+        if name.endswith(('.py', '.pyc', '.pyo')):
+            raise ValueError('Package resources cannot contain Python source or bytecode; use files/BFF discovery')
+        artifacts['vendor/' + _relative(name)] = _read(root, name)
     for name in config.get('assets', []):
+        if name.endswith(('.py', '.pyc', '.pyo')):
+            raise ValueError('Public assets cannot contain Python source or bytecode; use files/BFF discovery')
         artifacts['assets/' + _relative(name)] = _read(root, name)
     for template in ('compat', 'dataclasses', 'logging', 'inspect', 'bff', 'resources'):
         sources[f'_pytincture_{template}.py'] = (TEMPLATES / f'{template}.py.txt').read_text()
-    bootstrap = f'import js\nfrom {module} import {entry_name} as entry\nfrom _pytincture_compat import finish_startup\napp = None\n\nasync def main():\n    global app\n'
+        findings = inspect_source(f'_pytincture_{template}.py', sources[f'_pytincture_{template}.py'], engine)
+        report['findings'].extend(findings)
+        if any(f['severity'] == 'error' for f in findings):
+            raise ValueError('Framework shim failed profile validation: ' + template + ': ' + '; '.join(f['message'] for f in findings))
+    hook_source = ''
+    if asset_hook is not None:
+        if (not isinstance(asset_hook, dict) or set(asset_hook) != {'module', 'function'}
+                or not all(isinstance(value, str) for value in asset_hook.values())
+                or not all(part.isidentifier() and not keyword.iskeyword(part) for part in [*asset_hook['module'].split('.'), asset_hook['function']])):
+            raise ValueError('Widget asset_loader must declare a Python module and function')
+        hook_path = next((asset_hook['module'].replace('.', '/')+suffix for suffix in ('.py', '/__init__.py')
+                          if asset_hook['module'].replace('.', '/')+suffix in sources), None)
+        if hook_path is None:
+            raise ValueError('Widget asset_loader module is missing')
+        hook = next((node for node in ast.parse(sources[hook_path]).body
+                     if isinstance(node, ast.FunctionDef) and node.name == asset_hook['function']), None)
+        if hook is None or len(hook.args.posonlyargs + hook.args.args) > len(hook.args.defaults) or any(value is None for value in hook.args.kw_defaults):
+            raise ValueError('Widget asset_loader must name a top-level synchronous function callable without arguments')
+        hook_source = f"from {asset_hook['module']} import {asset_hook['function']} as _adopt_assets\n_adopt_assets()\n"
+    bootstrap = f'import js\n{hook_source}from {module} import {entry_name} as entry\nfrom _pytincture_compat import finish_startup\napp = None\n\nasync def main():\n    global app\n'
     if entry_kind != 'async':
         bootstrap += '    app = entry()\n'
     else:
@@ -314,28 +379,34 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
     sources['_pytincture_bootstrap.py'] = bootstrap
     vendor_modules = set()
     imports = {module.split('.')[0] for name, source in sources.items() for module, _ in imported_modules(name, source)}
-    for stdlib in ('copy', 'datetime'):
+    for stdlib in (('copy', 'datetime') if engine == 'micropython' else ()):
         if stdlib in imports and stdlib + '.py' not in sources:
             vendor_modules.add(stdlib + '.py')
-            sources[stdlib + '.py'] = (VENDOR / 'stdlib' / (stdlib + '.py.txt')).read_text()
+            sources[stdlib + '.py'] = verified_stdlib(stdlib)
     if 'copy.py' in vendor_modules:
         if 'types.py' not in sources:
             vendor_modules.add('types.py')
-        sources.setdefault('types.py', (VENDOR / 'stdlib/types.py.txt').read_text())
+        sources.setdefault('types.py', verified_stdlib('types'))
     if 'copy' in imports or 'datetime' in imports:
         artifacts['vendor/micropython-lib/LICENSE'] = (VENDOR / 'stdlib/LICENSE').read_bytes()
-    _check_imports(sources, root, vendor_modules)
+    report['shims'] = sorted(vendor_modules | {name for name in sources if name.startswith('_pytincture_') and name not in {'_pytincture_bootstrap.py', '_pytincture_bff.py'}}) if engine == 'micropython' else []
+    _check_imports({**sources, 'declared_dynamic_imports.py': '\n'.join('import '+name for name in config.get('dynamic-imports', []))}, root, vendor_modules, engine)
     if len(sources) > 256 or sum(len(value.encode()) for value in sources.values()) > 8 * 1024 * 1024:
         raise ValueError('Browser source bundle exceeds 256 files or 8 MiB')
     micropython = (config_file.parent / config['micropython-assets']).resolve() if config.get('micropython-assets') else VENDOR
+    runtime_inventory = json.loads((VENDOR/'inventory.json').read_text())['packages'][0]['files']
     for name in ('micropython.mjs', 'micropython.wasm'):
-        artifacts['vendor/micropython/' + name] = _read(micropython, name)
+        content = _read(micropython, name)
+        if hashlib.sha256(content).hexdigest() != runtime_inventory[name]:
+            raise ValueError(f'{name}: runtime bytes do not match the pinned portable profile')
+        artifacts['vendor/micropython/' + name] = content
     artifacts['vendor/micropython/LICENSE'] = (VENDOR / 'MICROPYTHON-LICENSE').read_bytes()
     heap = config.get('heap-bytes', 16 * 1024 * 1024)
     if type(heap) is not int or not 1024 * 1024 <= heap <= 128 * 1024 * 1024:
         raise ValueError('heap-bytes must be between 1 and 128 MiB')
     manifest = {
-        'schema': 1, 'runtimes': ['pyodide', 'micropython'], 'host': 'host.js',
+        'schema': 2, 'runtimes': [engine], 'host': 'host.js', 'profile': PROFILE,
+        'widgetPackages': [widget_package] if widgets else [], 'assetLoader': asset_hook,
         'scripts': ['vendor/dhxpyt/' + name for name in ('suite.js', 'cardflow.js', 'cardpanel.js', 'chat.js', 'kanban.js', 'kanban_board.js', 'ragwidget.js', 'theme.js', 'webgpu.js') if 'vendor/dhxpyt/' + name in artifacts] if widgets else [],
         'styles': ['vendor/dhxpyt/suite.css', 'vendor/dhxpyt/fonts/inter.css', 'vendor/dhxpyt/dhx_custom.css'] + (['vendor/dhxpyt/kanban.css'] if 'vendor/dhxpyt/kanban.css' in artifacts else []) if widgets else [],
         'entrypoint': '_pytincture_bootstrap', 'sources': 'sources.json',
@@ -344,6 +415,9 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
     if widgets and widget_package != 'dhxpyt':
         manifest['scripts'] = widget_scripts
         manifest['styles'] = widget_styles
+    if widgets:
+        manifest['styles'].extend(['vendor/material-icons/material-icons.css', 'vendor/materialdesignicons/materialdesignicons.css'])
+        manifest['styleIds'] = {'vendor/material-icons/material-icons.css': 'ragchat-material-icons'}
     for kind in ('scripts', 'styles'):
         manifest[kind].extend('assets/' + _relative(name) for name in config.get(kind, []))
     for asset in manifest['scripts'] + manifest['styles']:
@@ -358,47 +432,126 @@ def build_browser_bundle(config_file: str | Path, *, application: str | None = N
     ) or entry_name
     artifacts['host.js'] = (TEMPLATES / 'host.js.txt').read_text().replace(
         '__PYTINCTURE_APP_TITLE__', json.dumps(title),
-    ).replace('__PYTINCTURE_RESOURCES__', json.dumps([name.removeprefix('vendor/') for name in artifacts if name.startswith('vendor/')])).replace('__PYTINCTURE_WIDGETS__', 'true' if widgets else 'false').encode()
-    artifacts['sources.json'] = json.dumps({'files': sources}, ensure_ascii=False).encode()
-    artifacts['manifest.json'] = (json.dumps(manifest, indent=2) + '\n').encode()
-    artifacts['build.json'] = (json.dumps({'entrypoint': entry, 'source_files': len(sources), 'application_sources': hashes, 'widget_wheel_sha256': wheel_digest, 'dependency_wheels': dependency_hashes, 'bff_modules': sorted(boundaries), 'runtime_sha256': {name: hashlib.sha256(content).hexdigest() for name, content in artifacts.items() if name.startswith('vendor/micropython/')}}, indent=2) + '\n').encode()
+    ).encode()
+    resources = {name.removeprefix('vendor/'): base64.b64encode(content).decode()
+                 for name, content in sorted(artifacts.items())
+                 if name.startswith('vendor/' + widget_package + '/') or
+                    (name.startswith('vendor/') and name.removeprefix('vendor/') in config.get('resources', [])) or
+                    (name.startswith('vendor/') and name.split('/')[1] not in {'dhxpyt', 'material-icons', 'materialdesignicons', 'micropython', 'micropython-lib'})}
+    source_name = 'sources.json' if engine == 'micropython' else 'sources-pyodide.json'
+    artifacts[source_name] = canonical_json({'files': sources})
+    # CPython resources are installed in its real filesystem, preserving importlib.resources.
+    artifacts['resources.json'] = canonical_json({'files': resources})
+    manifest['sources'] = source_name
+    manifest['resources'] = 'resources.json'
+    manifest['requiredBrowserApis'] = ['fetch', 'WebAssembly', 'crypto.subtle', *config.get('required-browser-apis', [])]
+    if any(not all(part.isidentifier() for part in name.split('.')) for name in manifest['requiredBrowserApis']):
+        raise ValueError('required-browser-apis entries must be browser property paths')
+    manifest['runtimeRequirements'] = {'pyodide': '0.29.3', 'micropython': '1.29.0-6'}
+    report['source_files'] = len(sources)
+    report['source_bytes'] = sum(len(value.encode()) for value in sources.values())
+    report['native_modules'] = sorted(MICROPYTHON_MODULES if engine == 'micropython' else pyodide_modules())
+    report['asset_audit'] = audit_assets(artifacts, config.get('external-origins'))
+    report['findings'].extend(report['asset_audit']['findings'])
+    artifacts['build.json'] = canonical_json({'entrypoint': entry, 'source_files': len(sources),
+        'application_sources': hashes, 'widget_wheel_sha256': wheel_digest,
+        'dependency_wheels': dependency_hashes, 'bff_modules': sorted(boundaries)})
+    return output, manifest, artifacts
+
+
+def build_browser_bundle(config_file, *, application=None, check=False, report_path=None):
+    config_file = Path(config_file).resolve()
+    settings = tomllib.loads(config_file.read_text())['tool']['pytincture']['browser']
+    applications = settings.get('apps', {})
+    if application is None and len(applications) == 1:
+        application = next(iter(applications))
+    app_settings = applications.get(application, {})
+    requested = app_settings.get('runtimes', settings.get('runtimes', ['pyodide', 'micropython']))
+    if not isinstance(requested, list) or not requested or any(not isinstance(r, str) or r not in {'pyodide', 'micropython'} for r in requested) or len(set(requested)) != len(requested):
+        raise ValueError('runtimes must be a nonempty list of pyodide and/or micropython')
+    report = {'schema': 1, 'profile': PROFILE, 'requested_runtimes': requested, 'runtimes': {},
+              'limits': {'source_files': 256, 'source_bytes': 8388608, 'bundle_bytes': 134217728},
+              'analysis_limits': 'Static validation cannot prove arbitrary dynamic Python or JS; run the conformance suite.'}
+    prepared = {}
+    for engine in ('pyodide', 'micropython'):
+        result = report['runtimes'][engine] = {'status': 'checking', 'findings': [], 'shims': []}
+        try:
+            prepared[engine] = _prepare_browser_bundle(config_file, application=application, engine=engine, report=result)
+            result['status'] = 'supported'
+        except (ValueError, OSError, SyntaxError, KeyError, zipfile.BadZipFile) as exc:
+            result['status'] = 'unsupported'
+            result['findings'].append({'severity': 'error', 'rule': 'build-validation', 'message': str(exc)})
+    if report_path:
+        if str(report_path) == '-':
+            print(canonical_json(report).decode(), end='')
+        else:
+            Path(report_path).write_bytes(canonical_json(report))
+    if any(report['runtimes'][engine]['status'] != 'supported' for engine in requested):
+        raise CompatibilityError(report)
+    output, manifest, artifacts = prepared[requested[0]]
+    artifacts = dict(artifacts)
+    targets = {}
+    for engine in requested:
+        _, target, files = prepared[engine]
+        artifacts[target['sources']] = files[target['sources']]
+        targets[engine] = {'sources': target['sources']}
+    manifest.update(runtimes=requested, targets=targets)
+    artifacts['compatibility.json'] = canonical_json(report)
+    manifest = seal_manifest(manifest, artifacts)
     if check:
         return output / 'manifest.json'
-    # Complete validation before touching an existing working bundle.
+    # Immutable content-addressed revisions. Publish the pointer only after all bytes exist.
     output.mkdir(parents=True, exist_ok=True)
-    for name in artifacts:
-        target = output / name
+    release = output / manifest['assetBase']
+    release.mkdir(parents=True, exist_ok=True)
+    if not release.resolve().is_relative_to(output.resolve()):
+        raise ValueError('Browser release path escapes output')
+    for name, content in artifacts.items():
+        target = release / name
         if not target.resolve().is_relative_to(output.resolve()):
-            raise ValueError(f'Browser output asset escapes destination: {name}')
-    with tempfile.TemporaryDirectory(prefix='pytincture-browser-') as temporary:
-        stage = Path(temporary)
-        for name, content in artifacts.items():
-            path = stage / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-        for name in artifacts:
-            target = output / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(stage / name, target)
-    return output / 'manifest.json'
+            raise ValueError('Browser output asset escapes destination')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() and target.read_bytes() != content:
+            raise ValueError('Refusing to overwrite immutable browser bundle: ' + name)
+        if not target.exists():
+            target.write_bytes(content)
+    # Root copies are inspection conveniences; the browser uses only the revision above.
+    for name in ('sources.json', 'sources-pyodide.json', 'build.json', 'compatibility.json'):
+        if name in artifacts:
+            target = output/name
+            if not target.resolve().is_relative_to(output.resolve()):
+                raise ValueError('Browser inspection path escapes output')
+            target.write_bytes(artifacts[name])
+    with tempfile.NamedTemporaryFile(dir=output, prefix='.manifest-', delete=False) as temporary:
+        temporary.write(canonical_json(manifest))
+        pointer = Path(temporary.name)
+    pointer.replace(output/'manifest.json')
+    return output/'manifest.json'
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Build an experimental Pyodide/MicroPython browser application.')
+    parser.add_argument('--compatibility-report', metavar='PATH', help='Write per-runtime JSON diagnostics; use - for stdout')
+    parser.add_argument('--inspect', type=Path, help='Verify an existing immutable bundle manifest')
     parser.add_argument('--application', help='App name in a multi-app build configuration')
     parser.add_argument('--all', action='store_true', help='Build every configured application')
     parser.add_argument('--check', action='store_true', help='Validate inputs without writing output')
     parser.add_argument('--config', default='pyproject.toml', help='TOML file containing [tool.pytincture.browser]')
     args = parser.parse_args()
     try:
+        if args.inspect:
+            print(canonical_json(inspect_bundle(args.inspect)).decode(), end='')
+            return
         if args.all:
             config = tomllib.loads(Path(args.config).read_text())['tool']['pytincture']['browser']
             names = list(config.get('apps', {})) or [None]
         else:
             names = [args.application]
         for name in names:
-            result = build_browser_bundle(args.config, application=name, check=args.check)
-            print(('Validated: ' if args.check else '') + str(result))
+            result = build_browser_bundle(args.config, application=name, check=args.check, report_path=args.compatibility_report)
+            if args.compatibility_report != '-':
+                print(('Validated: ' if args.check else '') + str(result))
+                print('Use --compatibility-report PATH for per-runtime details.' if args.check else 'Compatibility transformations and exclusions: ' + str(result.parent/'compatibility.json'))
     except (KeyError, ValueError, OSError, SyntaxError, zipfile.BadZipFile) as error:
         parser.exit(2, f'Browser build failed: {error}\n')
 

@@ -20,9 +20,11 @@ __export(browser_runtimes_exports, {
   createBffCaller: () => createBffCaller,
   createBffStreamCaller: () => createBffStreamCaller,
   createBffSyncCaller: () => createBffSyncCaller,
+  publishLoadedAssets: () => publishLoadedAssets,
   runBrowserApplication: () => runBrowserApplication,
   sameOriginUrl: () => sameOriginUrl,
-  validateRuntimeManifest: () => validateRuntimeManifest
+  validateRuntimeManifest: () => validateRuntimeManifest,
+  verifyBundle: () => verifyBundle
 });
 function relativePath(value) {
   if (typeof value !== "string" || !/^[A-Za-z0-9_@./-]+$/.test(value) || value.split("/").some((part) => !part || part.startsWith("."))) {
@@ -38,12 +40,14 @@ function sameOriginUrl(value, base) {
   return url.href;
 }
 function validateRuntimeManifest(manifest, engine) {
-  var _a, _b, _c;
+  var _a, _b, _c, _d, _e, _f, _g;
   if (!BROWSER_RUNTIMES.includes(engine)) throw new Error(`Unknown browser runtime: ${engine}`);
-  if ((manifest == null ? void 0 : manifest.schema) !== 1 || !Array.isArray(manifest.runtimes) || !manifest.runtimes.length || new Set(manifest.runtimes).size !== manifest.runtimes.length || manifest.runtimes.some((name) => !BROWSER_RUNTIMES.includes(name))) {
+  if ((manifest == null ? void 0 : manifest.schema) !== 2 || !Array.isArray(manifest.runtimes) || !manifest.runtimes.length || new Set(manifest.runtimes).size !== manifest.runtimes.length || manifest.runtimes.some((name) => !BROWSER_RUNTIMES.includes(name))) {
     throw new Error("Invalid browser runtime manifest");
   }
   if (!manifest.runtimes.includes(engine)) throw new Error(`Application does not support ${engine}`);
+  if (((_a = manifest.runtimeRequirements) == null ? void 0 : _a[engine]) !== (engine === "pyodide" ? "0.29.3" : "1.29.0-6")) throw new Error("Unsupported runtime version requirement");
+  if (!Array.isArray(manifest.requiredBrowserApis) || manifest.requiredBrowserApis.some((name) => typeof name !== "string" || !/^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$/.test(name))) throw new Error("Invalid browser API requirements");
   relativePath(manifest.host);
   for (const kind of ["scripts", "styles"]) {
     if (!Array.isArray(manifest[kind]) || manifest[kind].length > 64) {
@@ -51,26 +55,138 @@ function validateRuntimeManifest(manifest, engine) {
     }
     manifest[kind].forEach(relativePath);
   }
+  if (manifest.styleIds && (typeof manifest.styleIds !== "object" || Array.isArray(manifest.styleIds) || Object.entries(manifest.styleIds).some(([path, id]) => !manifest.styles.includes(path) || typeof id !== "string" || !/^[A-Za-z][\w-]*$/.test(id)))) throw new Error("Invalid stylesheet identifiers");
+  if (!/^[a-f0-9]{64}$/.test(manifest.bundleId || "") || manifest.assetBase !== `releases/${manifest.bundleId}/`) throw new Error("Invalid immutable bundle identifier");
+  if (manifest.profile !== "pytincture-portable-1") throw new Error("Unsupported portable Python profile");
+  const target = (_b = manifest.targets) == null ? void 0 : _b[engine];
+  relativePath(target == null ? void 0 : target.sources);
+  relativePath(manifest.resources);
+  const inventory = manifest.integrity;
+  if (!inventory || Array.isArray(inventory) || Object.keys(inventory).length > 4096) throw new Error("Invalid bundle integrity inventory");
+  let size = 0;
+  for (const [path, entry] of Object.entries(inventory)) {
+    relativePath(path);
+    if (!/^[a-f0-9]{64}$/.test(entry.sha256 || "") || !Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || entry.bytes > 33554432) throw new Error("Invalid bundle integrity entry");
+    size += entry.bytes;
+  }
+  if (size > 134217728) throw new Error("Bundle exceeds 128 MiB");
+  for (const path of [
+    manifest.host,
+    target.sources,
+    manifest.resources,
+    ...manifest.scripts,
+    ...manifest.styles,
+    ...engine === "micropython" ? [(_c = manifest.micropython) == null ? void 0 : _c.module, (_d = manifest.micropython) == null ? void 0 : _d.wasm] : []
+  ]) {
+    if (!Object.hasOwn(inventory, path)) throw new Error(`Missing integrity lock: ${path}`);
+  }
   relativePath(manifest.sources);
   if (!/^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$/.test(manifest.entrypoint || "")) {
     throw new Error("Manifest entrypoint must be a Python module name");
   }
   if (engine === "micropython") {
-    relativePath((_a = manifest.micropython) == null ? void 0 : _a.module);
-    relativePath((_b = manifest.micropython) == null ? void 0 : _b.wasm);
-    const heap = (_c = manifest.micropython.heapBytes) != null ? _c : 8 * 1024 * 1024;
+    relativePath((_e = manifest.micropython) == null ? void 0 : _e.module);
+    relativePath((_f = manifest.micropython) == null ? void 0 : _f.wasm);
+    const heap = (_g = manifest.micropython.heapBytes) != null ? _g : 8 * 1024 * 1024;
     if (!Number.isInteger(heap) || heap < 1024 * 1024 || heap > 128 * 1024 * 1024) {
       throw new Error("MicroPython heapBytes must be between 1 and 128 MiB");
     }
   }
   return manifest;
 }
-async function fetchJson(url) {
-  const response = await fetch(url, { credentials: "same-origin" });
-  if (!response.ok) throw new Error(`Browser bundle request failed (${response.status}): ${url}`);
-  return response.json();
+async function fetchBytes(url, limit) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 35e3);
+  try {
+    const response = await fetch(url, { credentials: "same-origin", signal: controller.signal });
+    if (!response.ok) throw new Error(`Browser bundle request failed (${response.status}): ${url}`);
+    const declared = response.headers.get("content-length");
+    if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > limit)) throw new Error("Browser bundle response exceeds byte limit");
+    const reader = response.clone().body.getReader();
+    const monitor = async () => {
+      let size = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          size += value.byteLength;
+          if (size > limit) {
+            controller.abort();
+            throw new Error("Browser bundle response exceeds byte limit");
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    };
+    const [bytes] = await Promise.all([response.arrayBuffer(), monitor()]);
+    return new Uint8Array(bytes);
+  } catch (error) {
+    controller.abort();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
-function loadAsset(url, stylesheet = false) {
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
+  return value;
+}
+async function verifyBundle(manifest, asset, engine = null) {
+  var _a, _b;
+  const { bundleId, assetBase, ...identity } = manifest;
+  if (await digest(new TextEncoder().encode(JSON.stringify(canonical(identity)) + "\n")) !== bundleId) throw new Error("Bundle identifier does not match manifest contents");
+  const excluded = new Set(engine ? ["build.json", "compatibility.json"] : []);
+  if (engine) {
+    for (const [target, options] of Object.entries(manifest.targets || {})) {
+      if (target !== engine) excluded.add(options.sources);
+    }
+    if (engine === "pyodide") {
+      excluded.add((_a = manifest.micropython) == null ? void 0 : _a.module);
+      excluded.add((_b = manifest.micropython) == null ? void 0 : _b.wasm);
+    }
+  }
+  const entries = Object.entries(manifest.integrity).filter(([path]) => !excluded.has(path));
+  const contents = /* @__PURE__ */ new Map();
+  let cursor = 0;
+  await Promise.all(Array.from({ length: 4 }, async () => {
+    while (cursor < entries.length) {
+      const [path, entry] = entries[cursor++];
+      const bytes = await fetchBytes(asset(path), entry.bytes);
+      if (bytes.length !== entry.bytes || await digest(bytes) !== entry.sha256) throw new Error(`Bundle integrity mismatch: ${path}`);
+      contents.set(path, bytes);
+    }
+  }));
+  return contents;
+}
+function sri(entry) {
+  return "sha256-" + btoa(String.fromCharCode(...entry.sha256.match(/../g).map((byte) => parseInt(byte, 16))));
+}
+function publishLoadedAssets(manifest, asset) {
+  const records = [...manifest.scripts, ...manifest.styles].map((path) => Object.freeze({
+    path,
+    url: asset(path),
+    sha256: manifest.integrity[path].sha256
+  }));
+  const packages = Object.freeze([...manifest.widgetPackages || []]);
+  globalThis.pytinctureAssets = Object.freeze({
+    isPackageReady: (name) => packages.includes(name),
+    isLoaded: (path, hash) => records.some((record) => (record.path === path || record.url === path) && (!hash || hash === record.sha256)),
+    getInfo: () => Object.freeze({ owner: "portable-bundle", bundleId: manifest.bundleId, packages, assets: Object.freeze([...records]) })
+  });
+}
+function installResources(runtime, bundle) {
+  if (!bundle.files || typeof bundle.files !== "object" || Array.isArray(bundle.files)) throw new Error("Invalid package resources");
+  for (const [path, encoded] of Object.entries(bundle.files)) {
+    relativePath(path);
+    if (path.endsWith(".py") || path.endsWith(".pyc") || typeof encoded !== "string") throw new Error("Invalid package resource");
+    const directory = path.slice(0, path.lastIndexOf("/"));
+    if (path.includes("/")) runtime.FS.mkdirTree("/" + directory);
+    runtime.FS.writeFile("/" + path, Uint8Array.from(atob(encoded), (value) => value.charCodeAt(0)));
+  }
+}
+function loadAsset(url, stylesheet = false, integrity = null, id = null) {
   return new Promise((resolve, reject) => {
     const node = document.createElement(stylesheet ? "link" : "script");
     if (stylesheet) {
@@ -80,6 +196,11 @@ function loadAsset(url, stylesheet = false) {
       node.src = url;
       node.async = false;
     }
+    if (integrity) {
+      node.integrity = integrity;
+      node.crossOrigin = "anonymous";
+    }
+    if (id) node.id = id;
     node.onload = () => resolve();
     node.onerror = () => reject(new Error(`Unable to load browser asset: ${url}`));
     document.head.appendChild(node);
@@ -204,13 +325,30 @@ async function runBrowserApplication(config, status = () => {
 }) {
   var _a;
   const engine = config.runtime || "pyodide";
+  if (config.deliveryMode !== "portable-bundle") throw new Error("Portable loader requires deliveryMode=portable-bundle");
+  const phase = config._measurePhase || (async (_stage, _resource, callback) => callback());
   if (!config.runtimeManifestUrl) throw new Error(`${engine} requires an application runtime manifest`);
   const manifestUrl = sameOriginUrl(config.runtimeManifestUrl, location.href);
   status(`Preparing ${engine}\u2026`);
-  const manifest = validateRuntimeManifest(await fetchJson(manifestUrl), engine);
-  const asset = (path) => sameOriginUrl(relativePath(path), manifestUrl);
-  await Promise.all(manifest.styles.map((path) => loadAsset(asset(path), true)));
-  for (const path of manifest.scripts) await loadAsset(asset(path));
+  const manifest = validateRuntimeManifest(decodeJson(await phase("bundle-manifest", manifestUrl, () => fetchBytes(manifestUrl, 1048576))), engine);
+  for (const name of manifest.requiredBrowserApis) {
+    let value = globalThis;
+    for (const part of name.split(".")) value = value == null ? void 0 : value[part];
+    if (value == null) throw new Error(`Required browser API unavailable: ${name}`);
+  }
+  const assetBase = new URL(manifest.assetBase, manifestUrl).href;
+  const asset = (path) => sameOriginUrl(relativePath(path), assetBase);
+  (_a = config._runtimeInfo) == null ? void 0 : _a.call(config, { bundleId: manifest.bundleId, compatibilityProfile: manifest.profile });
+  const contents = await phase("bundle-download", assetBase, () => verifyBundle(manifest, asset, engine));
+  status("Loading application assets\u2026");
+  await phase("asset-loading", assetBase, async () => {
+    await Promise.all(manifest.styles.map((path) => {
+      var _a2;
+      return loadAsset(asset(path), true, sri(manifest.integrity[path]), (_a2 = manifest.styleIds) == null ? void 0 : _a2[path]);
+    }));
+    for (const path of manifest.scripts) await loadAsset(asset(path), false, sri(manifest.integrity[path]));
+  });
+  publishLoadedAssets(manifest, asset);
   let invoke;
   let capturedOutput = null;
   let consoleOutput = [];
@@ -228,7 +366,7 @@ async function runBrowserApplication(config, status = () => {
       return queue;
     }
   };
-  const host = await import(asset(manifest.host));
+  const host = await phase("host-import", asset(manifest.host), () => import(asset(manifest.host)));
   if (typeof host.setup !== "function") throw new Error("Browser host must export setup(context)");
   await host.setup({
     engine,
@@ -240,32 +378,42 @@ async function runBrowserApplication(config, status = () => {
     invoke: handle.call,
     assetUrl: asset
   });
+  const resourceBundle = decodeJson(contents.get(manifest.resources));
+  globalThis.pytinctureResourcePaths = JSON.stringify(Object.keys(resourceBundle.files));
+  globalThis.pytinctureReadResourceBytes = (path) => {
+    if (!Object.hasOwn(resourceBundle.files, path)) throw new Error(`Unknown package resource: ${path}`);
+    return resourceBundle.files[path];
+  };
   status(`Loading ${engine}\u2026`);
   let runtime;
   if (engine === "micropython") {
-    const { loadMicroPython } = await import(asset(manifest.micropython.module));
-    runtime = await loadMicroPython({
-      url: asset(manifest.micropython.wasm),
-      heapsize: (_a = manifest.micropython.heapBytes) != null ? _a : 8 * 1024 * 1024,
-      linebuffer: false,
-      stdout: (bytes) => {
-        if (capturedOutput !== null) {
-          if (capturedOutput.length <= 1024 * 1024) capturedOutput.push(...bytes);
-        } else {
-          for (const byte of bytes) {
-            if (byte === 10) {
-              console.log(new TextDecoder().decode(Uint8Array.from(consoleOutput)));
-              consoleOutput = [];
-            } else consoleOutput.push(byte);
+    const { loadMicroPython } = await phase("runtime-download", asset(manifest.micropython.module), () => import(asset(manifest.micropython.module)));
+    runtime = await phase("runtime-initialization", asset(manifest.micropython.wasm), () => {
+      var _a2;
+      return loadMicroPython({
+        url: asset(manifest.micropython.wasm),
+        heapsize: (_a2 = manifest.micropython.heapBytes) != null ? _a2 : 8 * 1024 * 1024,
+        linebuffer: false,
+        stdout: (bytes) => {
+          if (capturedOutput !== null) {
+            if (capturedOutput.length <= 1024 * 1024) capturedOutput.push(...bytes);
+          } else {
+            for (const byte of bytes) {
+              if (byte === 10) {
+                console.log(new TextDecoder().decode(Uint8Array.from(consoleOutput)));
+                consoleOutput = [];
+              } else consoleOutput.push(byte);
+            }
           }
         }
-      }
+      });
     });
   } else {
     const base = sameOriginUrl(config.pyodideBaseUrl, location.href);
-    if (typeof globalThis.loadPyodide !== "function") await loadAsset(new URL("pyodide.js", base).href);
-    runtime = await globalThis.loadPyodide({ indexURL: base });
+    if (typeof globalThis.loadPyodide !== "function") await phase("runtime-download", new URL("pyodide.js", base).href, () => loadAsset(new URL("pyodide.js", base).href));
+    runtime = await phase("runtime-initialization", base, () => globalThis.loadPyodide({ indexURL: base }));
   }
+  if (engine === "pyodide" && runtime.version !== manifest.runtimeRequirements.pyodide) throw new Error("Pyodide version does not match the portable profile");
   handle.runtime = runtime;
   handle.captureOutput = (source) => {
     if (typeof source !== "string" || source.length > 1024 * 1024) throw new Error("Invalid Python snippet");
@@ -287,22 +435,30 @@ output.getvalue()`;
     return runtime.runPython(program);
   };
   globalThis.pytinctureBrowserRuntime = handle;
-  installSources(runtime, await fetchJson(asset(manifest.sources)));
-  await runtime.runPythonAsync(`import sys
+  status("Installing application bundle\u2026");
+  await phase("bundle-installation", asset(manifest.targets[engine].sources), async () => {
+    installSources(runtime, decodeJson(contents.get(manifest.targets[engine].sources)));
+    if (engine === "pyodide") installResources(runtime, resourceBundle);
+  });
+  status("Importing application\u2026");
+  await phase("module-import", manifest.entrypoint, () => runtime.runPythonAsync(`import sys
 sys.path.insert(0, '/')
-import ${manifest.entrypoint} as _pytincture_client`);
+import ${manifest.entrypoint} as _pytincture_client`));
   invoke = async (name, payload) => {
     if (payload !== void 0 && typeof payload !== "string") throw new Error("Interpreter callback payload must be a JSON string");
     runtime.globals.set("_pytincture_payload", payload != null ? payload : "");
     await runtime.runPythonAsync(`await _pytincture_client.${name}(${payload === void 0 ? "" : "_pytincture_payload"})`);
   };
-  await handle.call("main");
+  status("Running application entrypoint\u2026");
+  await phase("application-entrypoint", manifest.entrypoint, () => handle.call("main"));
   return handle;
 }
-var BROWSER_RUNTIMES;
+var BROWSER_RUNTIMES, decodeJson, digest;
 var init_browser_runtimes = __esm({
   "browser-runtimes.js"() {
     BROWSER_RUNTIMES = Object.freeze(["pyodide", "micropython"]);
+    decodeJson = (bytes) => JSON.parse(new TextDecoder().decode(bytes));
+    digest = async (bytes) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
   }
 });
 
@@ -340,6 +496,7 @@ var CSRF_COOKIE_NAMES = Object.freeze([
 ]);
 var DEFAULT_CONFIG = {
   runtime: "pyodide",
+  deliveryMode: "legacy-package",
   runtimeManifestUrl: null,
   application: null,
   entrypoint: null,
@@ -507,14 +664,118 @@ var PytinctureLifecycleError = class extends Error {
     };
   }
 };
+var runtimeDiagnostics = /* @__PURE__ */ new WeakMap();
+var now = () => {
+  var _a, _b, _c;
+  return (_c = (_b = (_a = globalThis.performance) == null ? void 0 : _a.now) == null ? void 0 : _b.call(_a)) != null ? _c : Date.now();
+};
+function initializeRuntimeDiagnostics(config) {
+  const state = {
+    schema: 1,
+    engine: config.runtime || "pyodide",
+    deliveryMode: config.deliveryMode || "legacy-package",
+    runtimeVersion: null,
+    pythonImplementation: null,
+    pythonVersion: null,
+    bundleId: null,
+    compatibilityProfile: null,
+    startupTimings: []
+  };
+  runtimeDiagnostics.set(config, state);
+  delete globalThis.pytinctureAssets;
+  delete globalThis.pytinctureBrowserRuntime;
+  const snapshot = () => Object.freeze({
+    ...state,
+    startupTimings: Object.freeze(state.startupTimings.map((entry) => Object.freeze({ ...entry })))
+  });
+  globalThis.pytinctureRuntime = Object.freeze({ getInfo: snapshot });
+  if (typeof document !== "undefined" && document.body) {
+    document.body.dataset.browserRuntime = state.engine;
+    document.body.dataset.deliveryMode = state.deliveryMode;
+  }
+  config._runtimeInfo = (values) => Object.assign(state, values);
+  config._measurePhase = (stage, resource, callback) => measureRuntimePhase(config, stage, resource, callback);
+}
+function resourceCacheStatus(resource) {
+  var _a;
+  if (!resource || !((_a = globalThis.performance) == null ? void 0 : _a.getEntriesByName) || typeof location === "undefined") return "unknown";
+  try {
+    const entry = performance.getEntriesByName(new URL(resource, location.href).href).at(-1);
+    if (!entry || !entry.decodedBodySize) return "unknown";
+    return entry.transferSize === 0 ? "cache" : "network";
+  } catch (_) {
+    return "unknown";
+  }
+}
+async function measureRuntimePhase(config, stage, resource, callback) {
+  const started = now();
+  emitLifecycleEvent(config, "stage-start", stage, { resource: sanitizeResource(resource) });
+  try {
+    const result = await callback();
+    emitLifecycleEvent(config, "stage-complete", stage, {
+      resource: sanitizeResource(resource),
+      durationMs: Math.max(0, now() - started),
+      cacheStatus: resourceCacheStatus(resource)
+    });
+    return result;
+  } catch (error) {
+    emitLifecycleEvent(config, "stage-failed", stage, {
+      resource: sanitizeResource(resource),
+      durationMs: Math.max(0, now() - started),
+      cacheStatus: resourceCacheStatus(resource)
+    });
+    throw error;
+  }
+}
+function recordRuntimeIdentity(config, runtime) {
+  var _a;
+  let identity = {};
+  try {
+    runtime.runPython("import sys as _pt_sys, json as _pt_json, js as _pt_js\n_pt_js.globalThis._pytinctureIdentityResult = _pt_json.dumps({'pythonImplementation': _pt_sys.implementation.name, 'pythonVersion': _pt_sys.version.split()[0], 'runtimeVersion': '.'.join(str(v) for v in _pt_sys.implementation.version[:3])})");
+    const result = JSON.parse(globalThis._pytinctureIdentityResult);
+    if (result && typeof result === "object") identity = result;
+  } catch (_) {
+  } finally {
+    delete globalThis._pytinctureIdentityResult;
+  }
+  (_a = config._runtimeInfo) == null ? void 0 : _a.call(config, { ...identity, runtimeVersion: runtime.version || identity.runtimeVersion || null });
+}
+async function firstApplicationFrame(config) {
+  await measureRuntimePhase(config, "first-render", null, async () => {
+    if (typeof requestAnimationFrame === "function") {
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 250);
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          clearTimeout(timer);
+          resolve();
+        }));
+      });
+    }
+  });
+}
 function emitLifecycleEvent(config, type, stage, details = {}) {
+  var _a;
   const event = Object.freeze({
     type,
     stage,
+    engine: config.runtime || "pyodide",
+    deliveryMode: config.deliveryMode || "legacy-package",
+    durationMs: null,
+    resource: null,
+    cacheStatus: "unknown",
     requestId: config.requestUuid || null,
     timestamp: (/* @__PURE__ */ new Date()).toISOString(),
     ...details
   });
+  if (["stage-complete", "stage-failed"].includes(type)) {
+    (_a = runtimeDiagnostics.get(config)) == null ? void 0 : _a.startupTimings.push({
+      stage,
+      durationMs: event.durationMs,
+      resource: event.resource,
+      cacheStatus: event.cacheStatus,
+      status: type
+    });
+  }
   if (typeof config.onLifecycleEvent === "function") {
     try {
       config.onLifecycleEvent(event);
@@ -528,11 +789,12 @@ function emitLifecycleEvent(config, type, stage, details = {}) {
   return event;
 }
 async function runLifecycleStage(config, stage, resource, callback, metadata = {}) {
+  const started = now();
   const safeResource = sanitizeResource(resource);
   emitLifecycleEvent(config, "stage-start", stage, { resource: safeResource });
   try {
     const result = await callback();
-    emitLifecycleEvent(config, "stage-complete", stage, { resource: safeResource });
+    emitLifecycleEvent(config, "stage-complete", stage, { resource: safeResource, durationMs: Math.max(0, now() - started), cacheStatus: resourceCacheStatus(resource) });
     return result;
   } catch (error) {
     const lifecycleError = error instanceof PytinctureLifecycleError ? error : new PytinctureLifecycleError({
@@ -1635,7 +1897,14 @@ var DEFAULT_RUNTIME_OPERATIONS = Object.freeze({
   runInlineApp
 });
 async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_OPERATIONS) {
-  if (config.runtimeManifestUrl || config.runtime && config.runtime !== "pyodide") {
+  if (config.runtime && !["pyodide", "micropython"].includes(config.runtime)) throw new Error("Unknown browser runtime");
+  initializeRuntimeDiagnostics(config);
+  const delivery = config.deliveryMode || "legacy-package";
+  if (!["legacy-package", "portable-bundle"].includes(delivery)) throw new Error("Unknown application delivery mode");
+  if (delivery === "legacy-package" && config.runtime && config.runtime !== "pyodide") {
+    throw new Error("MicroPython requires deliveryMode=portable-bundle");
+  }
+  if (delivery === "portable-bundle") {
     const handle = await runLifecycleStage(
       config,
       LIFECYCLE_STAGES.ENTRYPOINT_EXECUTION,
@@ -1645,6 +1914,8 @@ async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_O
         return runBrowserApplication2(config, (message) => updateLoadingStatus(loadingOverlay, message));
       }
     );
+    recordRuntimeIdentity(config, handle.runtime);
+    await firstApplicationFrame(config);
     emitLifecycleEvent(config, "ready", LIFECYCLE_STAGES.READY, { runtime: handle.engine });
     return handle;
   }
@@ -1672,13 +1943,30 @@ async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_O
     LIFECYCLE_STAGES.RUNTIME_LOAD,
     `${config.pyodideBaseUrl}pyodide.js`,
     async () => {
-      await operations.ensurePyodideLoaded(config);
-      const pyodide2 = await operations.loadPyodideRuntime({ indexURL: config.pyodideBaseUrl });
+      await measureRuntimePhase(config, "runtime-download", `${config.pyodideBaseUrl}pyodide.js`, () => operations.ensurePyodideLoaded(config));
+      const pyodide2 = await measureRuntimePhase(
+        config,
+        "runtime-initialization",
+        config.pyodideBaseUrl,
+        () => operations.loadPyodideRuntime({ indexURL: config.pyodideBaseUrl })
+      );
+      recordRuntimeIdentity(config, pyodide2);
       const report = await operations.preflightPyodide(pyodide2);
       return { pyodide: pyodide2, report };
     }
   );
   const { pyodide } = runtimeResult;
+  globalThis.pytinctureBrowserRuntime = {
+    engine: "pyodide",
+    runtime: pyodide,
+    captureOutput(source) {
+      if (typeof source !== "string" || source.length > 1024 * 1024) throw new Error("Invalid Python snippet");
+      return pyodide.runPython(`import io, contextlib
+with contextlib.redirect_stdout(io.StringIO()) as output:
+    exec(${JSON.stringify(source)}, {})
+output.getvalue()`);
+    }
+  };
   updateLoadingStatus(loadingOverlay, "Installing packages\u2026");
   await runLifecycleStage(
     config,
@@ -1794,6 +2082,7 @@ async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_O
       }
     );
   }
+  await firstApplicationFrame(config);
   emitLifecycleEvent(config, "ready", LIFECYCLE_STAGES.READY, {
     compatibility: { ...configReport, ...runtimeResult.report, ...widgetReport }
   });

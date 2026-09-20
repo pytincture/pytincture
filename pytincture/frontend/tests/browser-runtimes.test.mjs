@@ -1,13 +1,55 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {createHash} from 'node:crypto';
 import {BROWSER_RUNTIMES, createBffCaller, sameOriginUrl, validateRuntimeManifest} from '../browser-runtimes.js';
 
 const manifest = {
-    schema:1, runtimes:['pyodide','micropython'], host:'host.js',
+    schema:2, runtimes:['pyodide','micropython'], host:'host.js',
+    runtimeRequirements:{pyodide:'0.29.3',micropython:'1.29.0-6'},
     scripts:['suite.js'], styles:['suite.css'], sources:'sources.json',
-    entrypoint:'client',
+    entrypoint:'client', resources:'resources.json', profile:'pytincture-portable-1',
+    requiredBrowserApis:['fetch', 'WebAssembly', 'crypto.subtle'],
+    bundleId:'a'.repeat(64), assetBase:'releases/'+ 'a'.repeat(64)+'/',
+    targets:{pyodide:{sources:'sources.json'},micropython:{sources:'sources.json'}},
+    integrity:Object.fromEntries(['host.js','suite.js','suite.css','sources.json','resources.json','micropython.mjs','micropython.wasm'].map(name=>[name,{sha256:'b'.repeat(64),bytes:0}])) ,
     micropython:{module:'micropython.mjs',wasm:'micropython.wasm'},
 };
+
+test('bundle verification rejects changed bytes and changed manifests before execution', async () => {
+    const {verifyBundle} = await import('../browser-runtimes.js');
+    const hash = value => createHash('sha256').update(value).digest('hex');
+    const sorted = value => Array.isArray(value) ? value.map(sorted) : value && typeof value === 'object'
+        ? Object.fromEntries(Object.keys(value).sort().map(key => [key,sorted(value[key])])) : value;
+    const content = 'window.executionCount = 1;';
+    const unsigned = {schema:2,integrity:{'app.js':{sha256:hash(content),bytes:content.length}}};
+    const id = hash(JSON.stringify(sorted(unsigned))+'\n');
+    const signed = {...unsigned,bundleId:id,assetBase:`releases/${id}/`};
+    const priorFetch = globalThis.fetch;
+    try {
+        globalThis.fetch = async () => new Response(content);
+        assert.equal((await verifyBundle(signed, path=>'https://app.test/'+path)).size, 1);
+        globalThis.fetch = async () => new Response(content.replace('1','2'));
+        await assert.rejects(verifyBundle(signed,path=>'https://app.test/'+path), /integrity mismatch/);
+        await assert.rejects(verifyBundle({...signed,profile:'changed'},path=>path), /identifier/);
+        globalThis.fetch = async () => new Response(content+'oversized');
+        await assert.rejects(verifyBundle(signed,path=>'https://app.test/'+path), /byte limit/);
+        globalThis.fetch = async () => new Response(content,{headers:{'content-length':'999999'}});
+        await assert.rejects(verifyBundle(signed,path=>'https://app.test/'+path), /byte limit/);
+    } finally {globalThis.fetch=priorFetch;}
+});
+
+test('widget asset ownership registry identifies exact successfully loaded assets', async () => {
+    const {publishLoadedAssets} = await import('../browser-runtimes.js');
+    publishLoadedAssets({...manifest,widgetPackages:['examplewidgets']},path=>'https://app.test/'+path);
+    const registry = globalThis.pytinctureAssets;
+    assert.equal(registry.isPackageReady('examplewidgets'), true);
+    assert.equal(registry.isPackageReady('otherwidgets'), false);
+    assert.equal(registry.isLoaded('suite.js','b'.repeat(64)),true);
+    assert.equal(registry.isLoaded('suite.js','c'.repeat(64)),false);
+    assert.equal(registry.getInfo().owner,'portable-bundle');
+    assert.throws(()=>registry.getInfo().assets.push({}),TypeError);
+    delete globalThis.pytinctureAssets;
+});
 
 test('each built-in runtime validates its required assets', () => {
     assert.deepEqual(BROWSER_RUNTIMES, ['pyodide', 'micropython']);

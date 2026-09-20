@@ -12,7 +12,7 @@ def client_for(tmp_path, *, manifest=True, public=True, **settings):
     )
     (tmp_path / "browser").mkdir(exist_ok=True)
     (tmp_path / "browser/manifest.json").write_text(json.dumps({
-        "schema": 1, "runtimes": ["pyodide", "micropython"],
+        "schema": 2, "runtimes": ["pyodide", "micropython"],
     }))
     settings.setdefault("delivery_mode", "portable-bundle" if manifest else "legacy-package")
     config = PytinctureConfig(
@@ -94,7 +94,7 @@ def test_missing_private_and_unsupported_manifests_fail_explicitly(tmp_path):
     with client_for(tmp_path, public=False) as client:
         assert client.get('/sample').status_code == 422
     with client_for(tmp_path, browser_runtime='micropython') as client:
-        (tmp_path/'browser/manifest.json').write_text('{"schema":1,"runtimes":["pyodide"]}')
+        (tmp_path/'browser/manifest.json').write_text('{"schema":2,"runtimes":["pyodide"]}')
         response = client.get('/sample')
         assert response.status_code == 422
         assert 'does not support micropython' in response.text
@@ -120,7 +120,7 @@ def test_unused_bundle_does_not_change_existing_pyodide_delivery(tmp_path, repla
 def test_removed_engine_is_rejected_in_app_settings_and_manifests(tmp_path):
     with client_for(tmp_path) as client:
         (tmp_path / 'browser/manifest.json').write_text(
-            '{"schema":1,"runtimes":["pyodide","transcrypt"]}')
+            '{"schema":2,"runtimes":["pyodide","transcrypt"]}')
         assert client.get('/sample').status_code == 422
         (tmp_path / 'sample.py').write_text('APP_BROWSER_RUNTIME = "transcrypt"\n')
         assert client.get('/sample').status_code == 422
@@ -148,7 +148,7 @@ def test_portable_replay_tokens_fail_explicitly(tmp_path):
 def test_micropython_conventional_bundle_needs_no_source_declaration(tmp_path):
     with client_for(tmp_path, manifest=False, browser_runtime='micropython', delivery_mode='portable-bundle', allow_runtime_selection=True) as client:
         (tmp_path / 'browser/sample').mkdir()
-        (tmp_path / 'browser/sample/manifest.json').write_text('{"schema":1,"runtimes":["pyodide","micropython"]}')
+        (tmp_path / 'browser/sample/manifest.json').write_text('{"schema":2,"runtimes":["pyodide","micropython"]}')
         response = client.get('/sample')
         assert response.status_code == 200
         assert 'runtimeManifestUrl: "/sample/appcode/browser/sample/manifest.json"' in response.text

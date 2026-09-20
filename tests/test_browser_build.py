@@ -23,7 +23,7 @@ def project(tmp_path, *, client='async def main():\n    pass\n', bff=''):
     (tmp_path / 'client.py').write_text(client)
     (tmp_path / 'runtime').mkdir()
     for name in ('micropython.mjs', 'micropython.wasm'):
-        (tmp_path / 'runtime' / name).write_bytes(b'fixture-runtime')
+        (tmp_path / 'runtime' / name).write_bytes((Path(__file__).resolve().parents[1]/'pytincture/browser_vendor'/name).read_bytes())
     bff_setting = ''
     if bff:
         (tmp_path / 'api').mkdir()
@@ -144,7 +144,7 @@ def test_compatibility_preserves_dictionary_overrides_and_exception_binding(monk
     monkeypatch.setitem(sys.modules, '_pytincture_compat', SimpleNamespace(
         merge_dicts=lambda *parts: dict(item for part in parts for item in part.items()),
         format_exception=lambda error: str(error), to_python=lambda value: value, spawn=lambda value: value,
-        initialize_layout=lambda cls: cls, can_to_python=lambda value: False, string_title=lambda value: value.title(),
+        initialize_layout=lambda cls: cls, can_to_python=lambda value: False, browser_event_loop=lambda: None, string_title=lambda value: value.title(),
     ))
     monkeypatch.setitem(sys.modules, '_pytincture_dataclasses', SimpleNamespace())
     namespace = {}
@@ -200,7 +200,7 @@ def test_browser_wheel_and_assets(tmp_path):
     result = build_browser_bundle(config)
     files = json.loads((result.parent / 'sources.json').read_text())['files']
     assert 'browsermath/__init__.py' in files
-    assert (result.parent / 'assets/theme.css').read_text() == 'body {color: navy;}'
+    assert (result.parent / json.loads(result.read_text())['assetBase'] / 'assets/theme.css').read_text() == 'body {color: navy;}'
     assert json.loads(result.read_text())['styles'] == ['assets/theme.css']
     with zipfile.ZipFile(wheel, 'a') as archive:
         archive.writestr('browsermath/native.so', b'not-wasm')
@@ -236,7 +236,7 @@ def test_browser_dataclasses_preserve_fields_factories_inheritance_and_post_init
     exec((Path(__file__).parents[1] / 'pytincture/browser_templates/dataclasses.py.txt').read_text(), dc.__dict__)
     monkeypatch.setitem(sys.modules, '_pytincture_dataclasses', dc)
     monkeypatch.setitem(sys.modules, '_pytincture_compat', SimpleNamespace(
-        initialize_layout=lambda cls: cls, can_to_python=lambda x: False, string_title=lambda x: x.title(),
+        initialize_layout=lambda cls: cls, can_to_python=lambda x: False, browser_event_loop=lambda: None, string_title=lambda x: x.title(),
         to_python=lambda x: x, spawn=lambda x: x, format_exception=str,
         merge_dicts=lambda *parts: dict(item for part in parts for item in part.items()),
     ))
@@ -282,8 +282,8 @@ def test_default_build_uses_packaged_runtime(tmp_path):
     config = project(tmp_path)
     config.write_text(config.read_text().replace('micropython-assets = "runtime"\n', ''))
     result = build_browser_bundle(config)
-    assert (result.parent / 'vendor/micropython/micropython.wasm').read_bytes()[:4] == b'\0asm'
-    assert (result.parent / 'vendor/micropython/LICENSE').is_file()
+    assert (result.parent / json.loads(result.read_text())['assetBase'] / 'vendor/micropython/micropython.wasm').read_bytes()[:4] == b'\0asm'
+    assert (result.parent / json.loads(result.read_text())['assetBase'] / 'vendor/micropython/LICENSE').is_file()
 
 
 def test_packaged_runtime_matches_vendor_inventory():
@@ -302,11 +302,11 @@ def test_widget_manifest_supports_other_packages_and_verifies_assets(tmp_path):
     # The entrypoint itself is local; the provider package supplies browser widgets.
     (tmp_path / 'client.py').write_text('from customwidgets import Widget\nasync def main(): pass\n')
     with zipfile.ZipFile(tmp_path / 'widgets.whl', 'w') as wheel:
-        wheel.writestr('customwidgets/__init__.py', 'class Widget: pass\n')
+        wheel.writestr('customwidgets/__init__.py', 'class Widget: pass\ndef adopt(): pass\n')
         wheel.writestr('customwidgets/assets/ui.js', 'window.customWidget = true;')
         wheel.writestr('customwidgets/assets/.keep', '')
         wheel.writestr('customwidgets/pytincture-assets.json', json.dumps({
-            'schema':1, 'package':'customwidgets', 'assets':[{
+            'schema':1, 'package':'customwidgets', 'asset_loader':{'module':'customwidgets','function':'adopt'}, 'assets':[{
                 'path':'customwidgets/assets/ui.js', 'type':'javascript',
                 'sha256':hashlib.sha256(b'window.customWidget = true;').hexdigest(),
             }],
@@ -314,6 +314,9 @@ def test_widget_manifest_supports_other_packages_and_verifies_assets(tmp_path):
     config.write_text(config.read_text() + 'widget-package="customwidgets"\nwidget-wheel="widgets.whl"\n')
     manifest = build_browser_bundle(config)
     assert json.loads(manifest.read_text())['scripts'] == ['vendor/customwidgets/assets/ui.js']
+    for name in ('sources.json','sources-pyodide.json'):
+        bootstrap = json.loads((manifest.parent/name).read_text())['files']['_pytincture_bootstrap.py']
+        assert bootstrap.index('_adopt_assets()') < bootstrap.index('from client import')
     assert not (manifest.parent / 'vendor/customwidgets/assets/.keep').exists()
     with zipfile.ZipFile(tmp_path / 'widgets.whl', 'a') as wheel:
         wheel.writestr('customwidgets/assets/ui.js', 'tampered')
@@ -346,3 +349,13 @@ def test_optional_stdlib_is_pinned_and_only_bundled_when_imported(tmp_path):
     manifest = build_browser_bundle(config)
     sources = json.loads((manifest.parent / 'sources.json').read_text())['files']
     assert {'copy.py', 'types.py', 'datetime.py'} <= sources.keys()
+
+
+def test_custom_runtime_bytes_must_match_the_profile_before_publication(tmp_path):
+    config = project(tmp_path)
+    manifest = build_browser_bundle(config)
+    original = manifest.read_bytes()
+    (tmp_path/'runtime/micropython.wasm').write_bytes(b'unknown-interpreter')
+    with pytest.raises(ValueError, match='pinned portable profile'):
+        build_browser_bundle(config)
+    assert manifest.read_bytes() == original

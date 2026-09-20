@@ -1,6 +1,7 @@
-"""Text resources from the widget wheel's same-origin public asset bundle."""
+"""Package resources from the verified portable asset bundle."""
 import json
 import js
+import binascii
 
 
 class Resource:
@@ -8,18 +9,40 @@ class Resource:
         self.path = path
 
     @property
+    def name(self):
+        return self.path.rsplit('/', 1)[-1]
+
+    def joinpath(self, *parts):
+        for part in parts:
+            if not isinstance(part, str) or part.startswith('/') or any(p in {'', '.', '..'} for p in part.split('/')):
+                raise ValueError('Package resource paths must stay inside their package')
+        return Resource('/'.join([self.path] + list(parts)))
+
+    def __truediv__(self, part):
+        return self.joinpath(part)
+
+    def is_file(self):
+        return self.path in json.loads(js.pytinctureResourcePaths)
+
+    def is_dir(self):
+        return any(path.startswith(self.path + '/') for path in json.loads(js.pytinctureResourcePaths))
+
+    @property
     def suffix(self):
-        return '.' + self.path.rsplit('.', 1)[-1] if '.' in self.path else ''
+        return '.' + self.name.rsplit('.', 1)[-1] if '.' in self.name else ''
 
     def iterdir(self):
         prefix = self.path + '/'
-        return [Resource(path) for path in json.loads(js.pytinctureResourcePaths)
-                if path.startswith(prefix) and '/' not in path[len(prefix):]]
+        return [Resource(prefix + name) for name in sorted(set(path[len(prefix):].split('/')[0]
+                for path in json.loads(js.pytinctureResourcePaths) if path.startswith(prefix)))]
 
     def read_text(self, encoding='utf-8'):
         if encoding.lower() != 'utf-8':
             raise ValueError('Browser resources use UTF-8')
-        return js.pytinctureReadResource(self.path)
+        return self.read_bytes().decode('utf-8')
+
+    def read_bytes(self):
+        return binascii.a2b_base64(str(js.pytinctureReadResourceBytes(self.path)).encode())
 
 
 def files(package):

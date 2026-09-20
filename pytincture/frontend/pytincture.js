@@ -227,14 +227,95 @@ class PytinctureLifecycleError extends Error {
     }
 }
 
+const runtimeDiagnostics = new WeakMap();
+const now = () => globalThis.performance?.now?.() ?? Date.now();
+
+function initializeRuntimeDiagnostics(config) {
+    const state = {schema: 1, engine: config.runtime || "pyodide",
+        deliveryMode: config.deliveryMode || "legacy-package", runtimeVersion: null,
+        pythonImplementation: null, pythonVersion: null, bundleId: null,
+        compatibilityProfile: null, startupTimings: []};
+    runtimeDiagnostics.set(config, state);
+    delete globalThis.pytinctureAssets;
+    delete globalThis.pytinctureBrowserRuntime;
+    const snapshot = () => Object.freeze({...state,
+        startupTimings: Object.freeze(state.startupTimings.map(entry => Object.freeze({...entry})))});
+    globalThis.pytinctureRuntime = Object.freeze({getInfo: snapshot});
+    if (typeof document !== "undefined" && document.body) {
+        document.body.dataset.browserRuntime = state.engine;
+        document.body.dataset.deliveryMode = state.deliveryMode;
+    }
+    config._runtimeInfo = values => Object.assign(state, values);
+    config._measurePhase = (stage, resource, callback) => measureRuntimePhase(config, stage, resource, callback);
+}
+
+function resourceCacheStatus(resource) {
+    if (!resource || !globalThis.performance?.getEntriesByName || typeof location === "undefined") return "unknown";
+    try {
+        const entry = performance.getEntriesByName(new URL(resource, location.href).href).at(-1);
+        if (!entry || !entry.decodedBodySize) return "unknown";
+        return entry.transferSize === 0 ? "cache" : "network";
+    } catch (_) { return "unknown"; }
+}
+
+async function measureRuntimePhase(config, stage, resource, callback) {
+    const started = now();
+    emitLifecycleEvent(config, "stage-start", stage, {resource: sanitizeResource(resource)});
+    try {
+        const result = await callback();
+        emitLifecycleEvent(config, "stage-complete", stage, {
+            resource: sanitizeResource(resource), durationMs: Math.max(0, now() - started),
+            cacheStatus: resourceCacheStatus(resource),
+        });
+        return result;
+    } catch (error) {
+        emitLifecycleEvent(config, "stage-failed", stage, {
+            resource: sanitizeResource(resource), durationMs: Math.max(0, now() - started), cacheStatus: resourceCacheStatus(resource),
+        });
+        throw error;
+    }
+}
+
+function recordRuntimeIdentity(config, runtime) {
+    let identity = {};
+    try {
+        // runPython executes a file in MicroPython; expression return values differ by engine.
+        runtime.runPython("import sys as _pt_sys, json as _pt_json, js as _pt_js\n_pt_js.globalThis._pytinctureIdentityResult = _pt_json.dumps({'pythonImplementation': _pt_sys.implementation.name, 'pythonVersion': _pt_sys.version.split()[0], 'runtimeVersion': '.'.join(str(v) for v in _pt_sys.implementation.version[:3])})");
+        const result = JSON.parse(globalThis._pytinctureIdentityResult);
+        if (result && typeof result === "object") identity = result;
+    } catch (_) { /* Missing introspection remains null, never inferred from a build label. */ }
+    finally { delete globalThis._pytinctureIdentityResult; }
+    config._runtimeInfo?.({...identity, runtimeVersion: runtime.version || identity.runtimeVersion || null});
+}
+
+async function firstApplicationFrame(config) {
+    await measureRuntimePhase(config, "first-render", null, async () => {
+        if (typeof requestAnimationFrame === "function") {
+            await new Promise(resolve => {
+                const timer = setTimeout(resolve, 250);
+                requestAnimationFrame(() => requestAnimationFrame(() => {clearTimeout(timer); resolve();}));
+            });
+        }
+    });
+}
+
 function emitLifecycleEvent(config, type, stage, details = {}) {
     const event = Object.freeze({
         type,
         stage,
+        engine: config.runtime || "pyodide",
+        deliveryMode: config.deliveryMode || "legacy-package",
+        durationMs: null,
+        resource: null,
+        cacheStatus: "unknown",
         requestId: config.requestUuid || null,
         timestamp: new Date().toISOString(),
         ...details,
     });
+    if (["stage-complete", "stage-failed"].includes(type)) {
+        runtimeDiagnostics.get(config)?.startupTimings.push({stage, durationMs: event.durationMs,
+            resource: event.resource, cacheStatus: event.cacheStatus, status: type});
+    }
     if (typeof config.onLifecycleEvent === "function") {
         try {
             config.onLifecycleEvent(event);
@@ -249,11 +330,12 @@ function emitLifecycleEvent(config, type, stage, details = {}) {
 }
 
 async function runLifecycleStage(config, stage, resource, callback, metadata = {}) {
+    const started = now();
     const safeResource = sanitizeResource(resource);
     emitLifecycleEvent(config, "stage-start", stage, { resource: safeResource });
     try {
         const result = await callback();
-        emitLifecycleEvent(config, "stage-complete", stage, { resource: safeResource });
+        emitLifecycleEvent(config, "stage-complete", stage, { resource: safeResource, durationMs: Math.max(0, now() - started), cacheStatus: resourceCacheStatus(resource) });
         return result;
     } catch (error) {
         const lifecycleError = error instanceof PytinctureLifecycleError
@@ -1466,6 +1548,8 @@ const DEFAULT_RUNTIME_OPERATIONS = Object.freeze({
 });
 
 async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_OPERATIONS) {
+    if (config.runtime && !["pyodide", "micropython"].includes(config.runtime)) throw new Error("Unknown browser runtime");
+    initializeRuntimeDiagnostics(config);
     const delivery = config.deliveryMode || "legacy-package";
     if (!["legacy-package", "portable-bundle"].includes(delivery)) throw new Error("Unknown application delivery mode");
     if (delivery === "legacy-package" && config.runtime && config.runtime !== "pyodide") {
@@ -1480,6 +1564,8 @@ async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_O
                 return runBrowserApplication(config, message => updateLoadingStatus(loadingOverlay, message));
             },
         );
+        recordRuntimeIdentity(config, handle.runtime);
+        await firstApplicationFrame(config);
         emitLifecycleEvent(config, "ready", LIFECYCLE_STAGES.READY, { runtime: handle.engine });
         return handle;
     }
@@ -1509,13 +1595,23 @@ async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_O
         LIFECYCLE_STAGES.RUNTIME_LOAD,
         `${config.pyodideBaseUrl}pyodide.js`,
         async () => {
-            await operations.ensurePyodideLoaded(config);
-            const pyodide = await operations.loadPyodideRuntime({ indexURL: config.pyodideBaseUrl });
+            await measureRuntimePhase(config, "runtime-download", `${config.pyodideBaseUrl}pyodide.js`, () => operations.ensurePyodideLoaded(config));
+            const pyodide = await measureRuntimePhase(config, "runtime-initialization", config.pyodideBaseUrl,
+                () => operations.loadPyodideRuntime({ indexURL: config.pyodideBaseUrl }));
+            recordRuntimeIdentity(config, pyodide);
             const report = await operations.preflightPyodide(pyodide);
             return { pyodide, report };
         },
     );
     const { pyodide } = runtimeResult;
+    // Widget artifact execution must reuse this interpreter in either delivery mode.
+    globalThis.pytinctureBrowserRuntime = {
+        engine: "pyodide", runtime: pyodide,
+        captureOutput(source) {
+            if (typeof source !== "string" || source.length > 1024 * 1024) throw new Error("Invalid Python snippet");
+            return pyodide.runPython(`import io, contextlib\nwith contextlib.redirect_stdout(io.StringIO()) as output:\n    exec(${JSON.stringify(source)}, {})\noutput.getvalue()`);
+        },
+    };
 
     updateLoadingStatus(loadingOverlay, "Installing packages…");
     await runLifecycleStage(
@@ -1637,6 +1733,7 @@ async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_O
         );
     }
 
+    await firstApplicationFrame(config);
     emitLifecycleEvent(config, "ready", LIFECYCLE_STAGES.READY, {
         compatibility: { ...configReport, ...runtimeResult.report, ...widgetReport },
     });

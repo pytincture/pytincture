@@ -117,7 +117,10 @@ test("omitting runtime settings retains the complete Pyodide package startup", a
     const defaults = normalizeConfig({ application: "sample" });
     assert.equal(defaults.runtime, "pyodide");
     assert.equal(defaults.runtimeManifestUrl, null);
+    assert.equal(defaults.deliveryMode, 'legacy-package');
     const fixture = startupFixture();
+    // A leftover manifest declaration cannot change delivery.
+    fixture.config.runtimeManifestUrl = '/unused/manifest.json';
     const calls = [];
     for (const [name, operation] of Object.entries(fixture.operations)) {
         fixture.operations[name] = (...args) => {
@@ -126,6 +129,12 @@ test("omitting runtime settings retains the complete Pyodide package startup", a
         };
     }
     assert.equal(await runStartup(fixture.config, null, fixture.operations), fixture.pyodide);
+    const info = globalThis.pytinctureRuntime.getInfo();
+    assert.equal(info.engine, 'pyodide');
+    assert.equal(info.deliveryMode, 'legacy-package');
+    assert.equal(info.bundleId, null);
+    assert.ok(info.startupTimings.some(entry => entry.stage === 'runtime-initialization' && entry.durationMs >= 0));
+    assert.throws(()=>info.startupTimings.push({}),TypeError);
     for (const name of ["ensureServiceWorker", "warmPyodideCache", "loadPyodideRuntime",
         "installExtraMicropipLibs", "installWidgetset", "downloadPackagedApp",
         "unpackPackagedApp", "executePackagedApp"]) {

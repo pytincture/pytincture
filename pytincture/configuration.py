@@ -228,7 +228,7 @@ class PytinctureConfig:
     )
     browser_runtime: str = _setting(
         "pyodide", "PYTINCTURE_BROWSER_RUNTIME",
-        "Default browser engine: pyodide (default) or micropython; alternatives require an app runtime manifest.",
+        "Default engine: pyodide or micropython. MicroPython requires explicit portable-bundle delivery.",
     )
     delivery_mode: str = _setting(
         "legacy-package", "PYTINCTURE_DELIVERY_MODE",
