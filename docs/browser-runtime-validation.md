@@ -87,3 +87,22 @@ Both servers remain available locally:
 
 Use `runtime=pyodide` for the comparison. The isolated launchers use the public
 demo login `demo@example.com` / `demo-password`.
+
+## Default upgrade verification — 2026-09-19
+
+After removing the experimental Transcrypt adapter, an unchanged snapshot of
+the latest example (`0971ee3`) passed the full UI smoke test with this framework.
+It used its original `run.py`, app sources and widget wheel, no runtime settings,
+no manifest declaration, and no browser build. Only the isolated database and
+local listening port differed. Network requests confirmed the original Pyodide,
+widget-wheel and `appcode.pyt` package-loading path.
+
+The default remains `pyodide`, and query-based runtime selection remains
+disabled. Regression tests cover these defaults in configuration and browser
+startup, including BFF replay tokens and unused/malformed conventional bundles.
+MicroPython still requires an explicit opt-in and compatible browser bundle.
+
+Validation passed: 917 Python tests, 47 JavaScript tests, 10 browser lifecycle
+tests, nine Chromium end-to-end tests, the untouched full example, and the independent DOM/widget
+fixture applications under both supported interpreters. Logs and the example
+screenshot are in `validation-results/runtime-default-*`.

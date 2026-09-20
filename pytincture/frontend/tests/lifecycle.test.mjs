@@ -113,6 +113,26 @@ for (const [stage, operationName] of failureCases) {
     });
 }
 
+test("omitting runtime settings retains the complete Pyodide package startup", async () => {
+    const defaults = normalizeConfig({ application: "sample" });
+    assert.equal(defaults.runtime, "pyodide");
+    assert.equal(defaults.runtimeManifestUrl, null);
+    const fixture = startupFixture();
+    const calls = [];
+    for (const [name, operation] of Object.entries(fixture.operations)) {
+        fixture.operations[name] = (...args) => {
+            calls.push(name);
+            return operation(...args);
+        };
+    }
+    assert.equal(await runStartup(fixture.config, null, fixture.operations), fixture.pyodide);
+    for (const name of ["ensureServiceWorker", "warmPyodideCache", "loadPyodideRuntime",
+        "installExtraMicropipLibs", "installWidgetset", "downloadPackagedApp",
+        "unpackPackagedApp", "executePackagedApp"]) {
+        assert.ok(calls.includes(name), `existing startup must still call ${name}`);
+    }
+});
+
 test("reports package-install failures", async () => {
     const fixture = startupFixture();
     fixture.pyodide.loadPackage = async () => {

@@ -8,12 +8,28 @@ Applications without a runtime manifest keep their existing Pyodide behavior.
 |---|---|---|
 | `pyodide` | CPython in WebAssembly | Existing packaged applications; also portable clients |
 | `micropython` | MicroPython in WebAssembly | Portable Python clients with a compatible API subset |
-| `transcrypt` | Python compiled to JavaScript before deployment | Portable clients compiled successfully by Transcrypt |
 
 The full Book Library and Wawesome Chat apps run their Python UIs and widget
-wrappers under MicroPython and Pyodide. Transcrypt remains limited to the earlier
-reduced client prototype. Changing engines reloads the page; unsaved client
-state is not retained. MicroPython does not request Pyodide assets.
+wrappers under MicroPython and Pyodide. Changing engines reloads the page;
+unsaved client state is not retained. MicroPython does not request Pyodide assets.
+
+## Existing applications and upgrades
+
+Installing or upgrading the framework does not switch an existing application to
+MicroPython. With no new runtime settings, the server selects Pyodide and the
+browser keeps the original package, widget-wheel, dependency installation and
+BFF behavior. No browser build or app source changes are required.
+
+MicroPython requires an explicit `PYTINCTURE_BROWSER_RUNTIME=micropython` (or
+`PytinctureConfig(browser_runtime="micropython")`), a compatible browser build,
+and its public-asset configuration. A literal `APP_BROWSER_RUNTIME` can opt in a
+single app. Query-based switching is a separate development opt-in and remains
+disabled by default. Simply generating a conventional browser bundle does not
+change the default runtime or loading path.
+
+An explicit `APP_RUNTIME_MANIFEST` opts into the portable bundle loader even
+under Pyodide. Existing apps should leave it unset to retain normal packaging;
+MicroPython can discover `browser/<application>/manifest.json` without it.
 
 ## Build an application
 
@@ -243,13 +259,12 @@ only selected browser Python modules into the explicitly public source JSON.
 ```json
 {
   "schema": 1,
-  "runtimes": ["pyodide", "micropython", "transcrypt"],
+  "runtimes": ["pyodide", "micropython"],
   "host": "host.js",
   "scripts": ["vendor/suite.js"],
   "styles": ["vendor/suite.css"],
   "sources": "sources.json",
   "entrypoint": "client",
-  "compiled": "transcrypt/client.js",
   "micropython": {
     "module": "vendor/micropython.mjs",
     "wasm": "vendor/micropython.wasm",
@@ -261,13 +276,12 @@ only selected browser Python modules into the explicitly public source JSON.
 Asset paths are relative to the manifest. They cannot be absolute, external,
 hidden paths or parent-directory traversals. Supply pinned runtime assets from
 your build; the loader does not contact a CDN or install packages automatically.
-The working example pins MicroPython npm build `1.29.0-6` and Transcrypt `3.9.4`.
+The working example pins MicroPython npm build `1.29.0-6`.
 
 `sources.json` contains `{"files":{"client.py":"...","bridge.py":"..."}}`.
 Only these selected files are installed in the interpreter filesystem. The
 source bundle is limited to 256 files and 8 MiB. `entrypoint` names the Python
-module; it must export `async def main()`. The compiled module must export
-`main()` and any callbacks used by its host.
+module; it must export `async def main()`.
 
 `host.js` exports `async function setup(context)`. Custom hosts can create UI;
 the generated host only connects BFF and loads icons, leaving the UI to Python.
@@ -275,8 +289,8 @@ the generated host only connects BFF and loads icons, leaving the UI to Python.
 
 - `engine`, `runtimes`, and `application`.
 - `assetUrl(path)`: resolve a validated bundle-relative public asset URL.
-- `invoke(name, payload)`: serialized calls to asynchronous Python callbacks or
-  compiled JS callbacks. Interpreter payloads are strings; JSON is convenient
+- `invoke(name, payload)`: serialized calls to asynchronous Python callbacks.
+  Interpreter payloads are strings; JSON is convenient
   for carrying records across the foreign-function interface. Await the promise
   or handle errors. Calls do not return converted Python objects in this version.
 - `callBffSync(...)`: synchronous JSON compatibility call with the same CSRF
@@ -307,14 +321,14 @@ const handle = await runTinctureApp({
 ## Compatibility limits and next work
 
 The shared builder includes the dhxpyt Python wrappers and async
-session BFF stubs described above. CPython native extension wheels and replay-token handling have not been ported. Transcrypt cannot compile the full original example
-unchanged and is not emitted by this builder. Deployments enabling BFF replay
+session BFF stubs described above. CPython native extension wheels and replay-token
+handling have not been ported. Deployments enabling BFF replay
 tokens receive an explicit 422 for portable clients; the existing Pyodide
 package path remains available.
 
 Portable clients skip the Pyodide package installer, widget-wheel installer,
 service-worker setup and cache warmup. This is part of the measured startup
-benefit, alongside the smaller interpreter/compiler output. Compare engines
+benefit, alongside the smaller interpreter. Compare engines
 using equivalent client features and cold/warm network conditions.
 
 Next work on this branch should expand `dhxpyt` compatibility, cover more widgets

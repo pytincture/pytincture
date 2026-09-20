@@ -1,19 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {createBffCaller, sameOriginUrl, validateRuntimeManifest} from '../browser-runtimes.js';
+import {BROWSER_RUNTIMES, createBffCaller, sameOriginUrl, validateRuntimeManifest} from '../browser-runtimes.js';
 
 const manifest = {
-    schema:1, runtimes:['pyodide','micropython','transcrypt'], host:'host.js',
+    schema:1, runtimes:['pyodide','micropython'], host:'host.js',
     scripts:['suite.js'], styles:['suite.css'], sources:'sources.json',
-    entrypoint:'client', compiled:'compiled/client.js',
+    entrypoint:'client',
     micropython:{module:'micropython.mjs',wasm:'micropython.wasm'},
 };
 
 test('each built-in runtime validates its required assets', () => {
+    assert.deepEqual(BROWSER_RUNTIMES, ['pyodide', 'micropython']);
     for (const engine of manifest.runtimes) assert.equal(validateRuntimeManifest(manifest,engine),manifest);
     assert.throws(()=>validateRuntimeManifest(manifest,'other'),/Unknown/);
     assert.throws(()=>validateRuntimeManifest({...manifest,runtimes:['pyodide']},'micropython'),/does not support/);
-    assert.throws(()=>validateRuntimeManifest({...manifest,compiled:null},'transcrypt'),/path/);
+    assert.throws(()=>validateRuntimeManifest(manifest,'transcrypt'),/Unknown/);
+    assert.throws(()=>validateRuntimeManifest({...manifest,runtimes:['pyodide','transcrypt']},'pyodide'),/Invalid/);
+    assert.throws(()=>validateRuntimeManifest({...manifest,sources:null},'pyodide'),/path/);
     assert.throws(()=>validateRuntimeManifest({...manifest,micropython:{...manifest.micropython,heapBytes:-1}},'micropython'),/heapBytes/);
 });
 

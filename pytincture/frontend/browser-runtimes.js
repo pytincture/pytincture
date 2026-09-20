@@ -1,6 +1,6 @@
 /* Experimental portable browser applications. Pyodide's existing package path
  * remains in pytincture.js; these adapters use an explicit client-only bundle. */
-export const BROWSER_RUNTIMES = Object.freeze(["pyodide", "micropython", "transcrypt"]);
+export const BROWSER_RUNTIMES = Object.freeze(["pyodide", "micropython"]);
 
 function relativePath(value) {
     if (typeof value !== "string" || !/^[A-Za-z0-9_@./-]+$/.test(value)
@@ -34,12 +34,9 @@ export function validateRuntimeManifest(manifest, engine) {
         }
         manifest[kind].forEach(relativePath);
     }
-    if (engine === "transcrypt") relativePath(manifest.compiled);
-    else {
-        relativePath(manifest.sources);
-        if (!/^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$/.test(manifest.entrypoint || "")) {
-            throw new Error("Manifest entrypoint must be a Python module name");
-        }
+    relativePath(manifest.sources);
+    if (!/^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$/.test(manifest.entrypoint || "")) {
+        throw new Error("Manifest entrypoint must be a Python module name");
     }
     if (engine === "micropython") {
         relativePath(manifest.micropython?.module);
@@ -209,64 +206,55 @@ export async function runBrowserApplication(config, status = () => {}) {
     });
 
     status(`Loading ${engine}…`);
-    if (engine === "transcrypt") {
-        const client = await import(asset(manifest.compiled));
-        handle.runtime = client;
-        invoke = (name, payload) => {
-            if (typeof client[name] !== "function") throw new Error(`Missing client function: ${name}`);
-            return payload === undefined ? client[name]() : client[name](payload);
-        };
-    } else {
-        let runtime;
-        if (engine === "micropython") {
-            const { loadMicroPython } = await import(asset(manifest.micropython.module));
-            runtime = await loadMicroPython({
-                url: asset(manifest.micropython.wasm),
-                heapsize: manifest.micropython.heapBytes ?? 8 * 1024 * 1024,
-                linebuffer: false,
-                stdout: bytes => {
-                    if (capturedOutput !== null) {
-                        if (capturedOutput.length <= 1024 * 1024) capturedOutput.push(...bytes);
-                    } else {
-                        for (const byte of bytes) {
-                            if (byte === 10) {
-                                console.log(new TextDecoder().decode(Uint8Array.from(consoleOutput)));
-                                consoleOutput = [];
-                            } else consoleOutput.push(byte);
-                        }
+    let runtime;
+    if (engine === "micropython") {
+        const { loadMicroPython } = await import(asset(manifest.micropython.module));
+        runtime = await loadMicroPython({
+            url: asset(manifest.micropython.wasm),
+            heapsize: manifest.micropython.heapBytes ?? 8 * 1024 * 1024,
+            linebuffer: false,
+            stdout: bytes => {
+                if (capturedOutput !== null) {
+                    if (capturedOutput.length <= 1024 * 1024) capturedOutput.push(...bytes);
+                } else {
+                    for (const byte of bytes) {
+                        if (byte === 10) {
+                            console.log(new TextDecoder().decode(Uint8Array.from(consoleOutput)));
+                            consoleOutput = [];
+                        } else consoleOutput.push(byte);
                     }
-                },
-            });
-        } else {
-            const base = sameOriginUrl(config.pyodideBaseUrl, location.href);
-            if (typeof globalThis.loadPyodide !== "function") await loadAsset(new URL("pyodide.js", base).href);
-            runtime = await globalThis.loadPyodide({ indexURL: base });
-        }
-        handle.runtime = runtime;
-        // Widgets can run short synchronous Python snippets without loading a second interpreter.
-        handle.captureOutput = source => {
-            if (typeof source !== "string" || source.length > 1024 * 1024) throw new Error("Invalid Python snippet");
-            if (engine === "micropython") {
-                if (capturedOutput !== null) throw new Error("Nested output capture is not supported");
-                capturedOutput = [];
-                try {
-                    runtime.runPython(`exec(${JSON.stringify(source)}, {})`);
-                    if (capturedOutput.length > 1024 * 1024) throw new Error("Python output exceeds 1 MiB");
-                    return new TextDecoder().decode(Uint8Array.from(capturedOutput));
-                } finally { capturedOutput = null; }
-            }
-            const program = `import io, contextlib\nwith contextlib.redirect_stdout(io.StringIO()) as output:\n    exec(${JSON.stringify(source)}, {})\noutput.getvalue()`;
-            return runtime.runPython(program);
-        };
-        globalThis.pytinctureBrowserRuntime = handle;
-        installSources(runtime, await fetchJson(asset(manifest.sources)));
-        await runtime.runPythonAsync(`import sys\nsys.path.insert(0, '/')\nimport ${manifest.entrypoint} as _pytincture_client`);
-        invoke = async (name, payload) => {
-            if (payload !== undefined && typeof payload !== "string") throw new Error("Interpreter callback payload must be a JSON string");
-            runtime.globals.set("_pytincture_payload", payload ?? "");
-            await runtime.runPythonAsync(`await _pytincture_client.${name}(${payload === undefined ? "" : "_pytincture_payload"})`);
-        };
+                }
+            },
+        });
+    } else {
+        const base = sameOriginUrl(config.pyodideBaseUrl, location.href);
+        if (typeof globalThis.loadPyodide !== "function") await loadAsset(new URL("pyodide.js", base).href);
+        runtime = await globalThis.loadPyodide({ indexURL: base });
     }
+    handle.runtime = runtime;
+    // Widgets can run short synchronous Python snippets without loading a second interpreter.
+    handle.captureOutput = source => {
+        if (typeof source !== "string" || source.length > 1024 * 1024) throw new Error("Invalid Python snippet");
+        if (engine === "micropython") {
+            if (capturedOutput !== null) throw new Error("Nested output capture is not supported");
+            capturedOutput = [];
+            try {
+                runtime.runPython(`exec(${JSON.stringify(source)}, {})`);
+                if (capturedOutput.length > 1024 * 1024) throw new Error("Python output exceeds 1 MiB");
+                return new TextDecoder().decode(Uint8Array.from(capturedOutput));
+            } finally { capturedOutput = null; }
+        }
+        const program = `import io, contextlib\nwith contextlib.redirect_stdout(io.StringIO()) as output:\n    exec(${JSON.stringify(source)}, {})\noutput.getvalue()`;
+        return runtime.runPython(program);
+    };
+    globalThis.pytinctureBrowserRuntime = handle;
+    installSources(runtime, await fetchJson(asset(manifest.sources)));
+    await runtime.runPythonAsync(`import sys\nsys.path.insert(0, '/')\nimport ${manifest.entrypoint} as _pytincture_client`);
+    invoke = async (name, payload) => {
+        if (payload !== undefined && typeof payload !== "string") throw new Error("Interpreter callback payload must be a JSON string");
+        runtime.globals.set("_pytincture_payload", payload ?? "");
+        await runtime.runPythonAsync(`await _pytincture_client.${name}(${payload === undefined ? "" : "_pytincture_payload"})`);
+    };
     await handle.call("main");
     return handle;
 }

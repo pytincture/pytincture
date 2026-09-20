@@ -228,7 +228,7 @@ class PytinctureConfig:
     )
     browser_runtime: str = _setting(
         "pyodide", "PYTINCTURE_BROWSER_RUNTIME",
-        "Default browser engine: pyodide, micropython, or transcrypt; alternatives require an app runtime manifest.",
+        "Default browser engine: pyodide (default) or micropython; alternatives require an app runtime manifest.",
     )
     allow_runtime_selection: bool = _setting(
         False, "PYTINCTURE_ALLOW_RUNTIME_SELECTION",
@@ -1014,8 +1014,8 @@ class PytinctureConfig:
     environment: Mapping[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self):
-        if not isinstance(self.browser_runtime, str) or self.browser_runtime not in {"pyodide", "micropython", "transcrypt"}:
-            raise ValueError("browser_runtime must be pyodide, micropython, or transcrypt")
+        if not isinstance(self.browser_runtime, str) or self.browser_runtime not in {"pyodide", "micropython"}:
+            raise ValueError("browser_runtime must be pyodide or micropython")
         for name in (
             "allow_runtime_selection",
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",

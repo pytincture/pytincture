@@ -7495,7 +7495,7 @@ def _browser_runtime_settings(application, request, entrypoint):
         if os.getenv("PYTINCTURE_ALLOW_RUNTIME_SELECTION", "false").lower() not in {"true", "1", "yes", "on"}:
             raise HTTPException(status_code=400, detail="Browser runtime selection is disabled")
         runtime = selected
-    if runtime not in {"pyodide", "micropython", "transcrypt"}:
+    if runtime not in {"pyodide", "micropython"}:
         raise HTTPException(status_code=422, detail="Unknown browser runtime")
     manifest_path = _find_app_string_setting(
         entrypoint.path, ("APP_RUNTIME_MANIFEST",), ("runtime_manifest",), source_code=source,
@@ -7521,7 +7521,7 @@ def _browser_runtime_settings(application, request, entrypoint):
     supported = manifest.get("runtimes") if isinstance(manifest, dict) else None
     if (not isinstance(manifest, dict) or manifest.get("schema") != 1
             or not isinstance(supported, list) or not supported
-            or any(not isinstance(name, str) or name not in {"pyodide", "micropython", "transcrypt"} for name in supported)
+            or any(not isinstance(name, str) or name not in {"pyodide", "micropython"} for name in supported)
             or len(set(supported)) != len(supported)):
         raise HTTPException(status_code=422, detail="Invalid browser runtime manifest")
     if runtime not in supported:

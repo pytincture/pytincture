@@ -5,9 +5,9 @@ set when a release is published.
 
 ## 1.0.0rc8 — Unreleased
 
-- Feature branch experiment: select Pyodide, MicroPython WebAssembly, or
-  Transcrypt JavaScript for applications with an explicit portable client
-  manifest. Existing applications retain the packaged Pyodide path.
+- Add opt-in MicroPython WebAssembly for compatible applications with an
+  explicit browser build. Pyodide remains the default; existing applications
+  retain their package-loading path without configuration or source changes.
 - Add environment-backed opt-ins for same-origin camera, microphone,
   geolocation, and Payment Request API use. Permissions-Policy continues to
   block all four by default; browser permission requirements still apply.
