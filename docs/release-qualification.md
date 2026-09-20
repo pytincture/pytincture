@@ -30,6 +30,14 @@ Published rc8 evidence:
 - [Published Python package](https://pypi.org/project/pytincture/1.0.0rc8/).
 - [npm publication awaiting independent environment approval](https://github.com/pytincture/pytincture/actions/runs/35511220284).
 
+After publication, GitHub's dependency-graph update reported advisories against
+LiteLLM and python-dotenv pinned in `tests/conformance/requirements.txt`. Neither
+package is installed by the released framework's default dependencies, as checked
+in the fresh public-index installation. The separate test environment still needs
+dependency remediation and a repeated application matrix; the passing framework
+dependency audit must not be interpreted as covering that conformance lockfile.
+No published artifact was changed or replaced.
+
 `1.0.0rc7` was published on 2026-09-18 after signed-tag qualification and all
 23 framework release CI jobs passed. Its exact artifacts and hashes are
 attached to the GitHub prerelease, and PyPI publication and a clean public-index
