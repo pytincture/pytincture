@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased
 
+- Add profile-2 MicroPython string, UUID, Base64, HTML parser/entity, context-manager,
+  CSV, ZIP-reader, and managed event-listener support with recursive shim discovery.
+  UUID4 now returns UUID values consistently; existing profile-1 bundles remain loadable.
+- Pin portable Path suffix tests to the browser's CPython 3.13 semantics so Python
+  3.14 build hosts do not produce false parity failures.
 - Add portable `create_once_callable`, preserve valid catch-all exception handlers,
   and provide documented MicroPython `pathlib.Path` and `html.escape` subsets.
 - Install verified resources into both portable filesystems so Path-based resource

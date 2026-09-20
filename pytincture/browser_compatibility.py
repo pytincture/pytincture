@@ -107,6 +107,10 @@ class BrowserCompatibility(ast.NodeTransformer):
             if any(alias.name not in {'create_proxy', 'create_once_callable', 'to_js', 'JsProxy'} for alias in node.names):
                 raise ValueError('Unsupported pyodide.ffi import; supported: create_proxy, create_once_callable, to_js, JsProxy')
             node.module = '_pytincture_compat'
+        if node.module == 'pyodide.ffi.wrappers':
+            if any(alias.name not in {'add_event_listener', 'remove_event_listener'} for alias in node.names):
+                raise ValueError('Portable ffi wrappers support add_event_listener and remove_event_listener')
+            node.module = '_pytincture_events'
         if node.module == 'dataclasses':
             for alias in node.names:
                 if alias.name == 'dataclass':
@@ -114,10 +118,6 @@ class BrowserCompatibility(ast.NodeTransformer):
                 if alias.name not in {'dataclass', 'field', 'asdict', 'replace', 'fields', 'is_dataclass', 'MISSING'}:
                     raise ValueError('Unsupported browser dataclasses import: ' + alias.name)
             node.module = '_pytincture_dataclasses'
-        if node.module == 'uuid':
-            if any(alias.name != 'uuid4' for alias in node.names):
-                raise ValueError('Only uuid.uuid4 is supported by this build')
-            node.module = '_pytincture_compat'
         return node
 
     def visit_Attribute(self, node):

@@ -1,0 +1,239 @@
+"""Incremental HTMLParser callbacks for portable browser clients.
+
+Parses tags/attributes, text, comments, declarations, entities and raw script/style
+text. It does not construct a DOM, repair nesting, or sanitize HTML.
+"""
+from html import unescape, _scan_ref
+
+_SPACE = ' \t\r\n\f'
+
+
+class HTMLParser:
+    def __init__(self, *, convert_charrefs=True):
+        self.convert_charrefs = convert_charrefs
+        self.reset()
+
+    def reset(self):
+        self.rawdata = ''
+        self.lasttag = '???'
+        self.cdata_elem = None
+        self._starttag = None
+        self._line = 1
+        self._offset = 0
+
+    def getpos(self):
+        return self._line, self._offset
+
+    def get_starttag_text(self):
+        return self._starttag
+
+    def feed(self, data):
+        if not isinstance(data, str):
+            raise TypeError('HTMLParser.feed requires text')
+        self.rawdata += data
+        self._process(False)
+
+    def close(self):
+        self._process(True)
+
+    def _consume(self, size):
+        text = self.rawdata[:size]
+        count = text.count('\n')
+        if count:
+            self._line += count
+            self._offset = len(text.rsplit('\n', 1)[-1])
+        else:
+            self._offset += size
+        self.rawdata = self.rawdata[size:]
+
+    def _tag_end(self):
+        quote = None
+        for index in range(1, len(self.rawdata)):
+            char = self.rawdata[index]
+            if quote:
+                if char == quote:
+                    quote = None
+            elif char in '\"\'':
+                quote = char
+            elif char == '>':
+                return index + 1
+        return -1
+
+    def _start(self, text):
+        self._starttag = text
+        index = 1
+        while index < len(text) and text[index] not in _SPACE + '/>':
+            index += 1
+        tag = text[1:index].lower()
+        attrs = []
+        self_closing = False
+        while index < len(text) - 1:
+            while index < len(text) - 1 and text[index] in _SPACE + '/':
+                if text[index:] == '/>':
+                    self_closing = True
+                index += 1
+            start = index
+            while index < len(text) - 1 and text[index] not in _SPACE + '/=>':
+                index += 1
+            name = text[start:index].lower()
+            if not name:
+                index += 1
+                continue
+            while index < len(text) - 1 and text[index] in _SPACE:
+                index += 1
+            value = None
+            if text[index:index + 1] == '=':
+                index += 1
+                while index < len(text) - 1 and text[index] in _SPACE:
+                    index += 1
+                quote = text[index:index + 1]
+                if quote in ('"', "'"):
+                    index += 1
+                    start = index
+                    index = text.find(quote, index)
+                    value = text[start:index]
+                    index += 1
+                else:
+                    start = index
+                    while index < len(text) - 1 and text[index] not in _SPACE + '>':
+                        index += 1
+                    value = text[start:index]
+                value = unescape(value)
+            attrs.append((name, value))
+        self.lasttag = tag
+        if self_closing:
+            self.handle_startendtag(tag, attrs)
+        else:
+            self.handle_starttag(tag, attrs)
+            if tag in ('script', 'style'):
+                self.cdata_elem = tag
+
+    def _data(self, text):
+        if not text:
+            return
+        if self.convert_charrefs:
+            self.handle_data(unescape(text))
+            self._consume(len(text))
+            return
+        while text:
+            start = text.find('&')
+            if start < 0:
+                self.handle_data(text)
+                self._consume(len(text))
+                return
+            if start:
+                self.handle_data(text[:start])
+                self._consume(start)
+            end, ref = _scan_ref(text, start)
+            if ref:
+                if ref.startswith('#'):
+                    self.handle_charref(ref[1:].rstrip(';'))
+                else:
+                    self.handle_entityref(ref.rstrip(';'))
+            else:
+                self.handle_data('&')
+            self._consume(end - start)
+            text = text[end:]
+
+    def _process(self, final):
+        while self.rawdata:
+            text = self.rawdata
+            if self.cdata_elem:
+                prefix = '</' + self.cdata_elem
+                end = text.lower().find(prefix)
+                while end >= 0 and text[end + len(prefix):end + len(prefix) + 1] not in _SPACE + '>':
+                    end = text.lower().find(prefix, end + 1)
+                if end < 0:
+                    if final:
+                        self.handle_data(text)
+                        self._consume(len(text))
+                    return
+                if end:
+                    self.handle_data(text[:end])
+                    self._consume(end)
+                    continue
+            if text.startswith('<!--'):
+                end = text.find('-->', 4)
+                if end < 0:
+                    if not final:
+                        return
+                else:
+                    self.handle_comment(text[4:end])
+                    self._consume(end + 3)
+                    continue
+            if text.startswith('<'):
+                if not final and text in ('<', '<!', '<!-', '</', '<?'):
+                    return
+                if len(text) > 1 and ('a' <= text[1].lower() <= 'z' or text[1] in '/!?'):
+                    end = self._tag_end()
+                    if end < 0:
+                        if not final:
+                            return
+                        self.handle_data(text)
+                        self._consume(len(text))
+                        return
+                    raw = text[:end]
+                    if raw.startswith('</'):
+                        tag = raw[2:-1].strip().split()[0].lower() if raw[2:-1].strip() else ''
+                        self.handle_endtag(tag)
+                        if tag == self.cdata_elem:
+                            self.cdata_elem = None
+                    elif raw.startswith('<?'):
+                        self.handle_pi(raw[2:-1])
+                    elif raw.lower().startswith('<!doctype'):
+                        self.handle_decl(raw[2:-1])
+                    elif raw.startswith('<!['):
+                        self.unknown_decl(raw[3:-2])
+                    elif raw.startswith('<!'):
+                        self.handle_comment(raw[2:-1])
+                    else:
+                        self._start(raw)
+                    self._consume(end)
+                    continue
+                self.handle_data('<')
+                self._consume(1)
+                continue
+            end = text.find('<')
+            if end < 0:
+                end = len(text)
+                if not final:
+                    amp = text.rfind('&')
+                    if amp >= 0:
+                        ref_end, ref = _scan_ref(text, amp)
+                        tail = text[amp + 1:]
+                        if not ref.endswith(';') and (ref_end == len(text) or tail in ('#', '#x', '#X')):
+                            end = amp
+            if not end:
+                return
+            self._data(text[:end])
+
+    def handle_starttag(self, tag, attrs):
+        pass
+
+    def handle_endtag(self, tag):
+        pass
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        self.handle_endtag(tag)
+
+    def handle_data(self, data):
+        pass
+
+    def handle_comment(self, data):
+        pass
+
+    def handle_decl(self, decl):
+        pass
+
+    def handle_pi(self, data):
+        pass
+
+    def handle_entityref(self, name):
+        pass
+
+    def handle_charref(self, name):
+        pass
+
+    def unknown_decl(self, data):
+        pass

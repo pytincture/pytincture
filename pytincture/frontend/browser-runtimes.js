@@ -39,7 +39,7 @@ export function validateRuntimeManifest(manifest, engine) {
     if (manifest.styleIds && (typeof manifest.styleIds !== 'object' || Array.isArray(manifest.styleIds)
         || Object.entries(manifest.styleIds).some(([path, id]) => !manifest.styles.includes(path) || typeof id !== 'string' || !/^[A-Za-z][\w-]*$/.test(id)))) throw new Error('Invalid stylesheet identifiers');
     if (!/^[a-f0-9]{64}$/.test(manifest.bundleId || "") || manifest.assetBase !== `releases/${manifest.bundleId}/`) throw new Error("Invalid immutable bundle identifier");
-    if (manifest.profile !== "pytincture-portable-1") throw new Error("Unsupported portable Python profile");
+    if (!["pytincture-portable-1", "pytincture-portable-2"].includes(manifest.profile)) throw new Error("Unsupported portable Python profile");
     const target = manifest.targets?.[engine];
     relativePath(target?.sources);
     relativePath(manifest.resources);
@@ -297,8 +297,16 @@ export function createOnceCallable(callback) {
     return once;
 }
 
+export function createEventCallback(callback) {
+    if (typeof callback !== 'function') throw new TypeError('Expected a callable');
+    const listener = (...args) => callback === null ? undefined : callback(...args);
+    listener.destroy = () => { callback = null; };
+    return listener;
+}
+
 export async function runBrowserApplication(config, status = () => {}) {
     globalThis.pytinctureCreateOnceCallable = createOnceCallable;
+    globalThis.pytinctureCreateEventCallback = createEventCallback;
     const engine = config.runtime || "pyodide";
     if (config.deliveryMode !== "portable-bundle") throw new Error("Portable loader requires deliveryMode=portable-bundle");
     const phase = config._measurePhase || (async (_stage, _resource, callback) => callback());

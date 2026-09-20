@@ -26,7 +26,8 @@ def test_new_portable_imports_build_on_both_engines(tmp_path, statement):
     assert statement in pyodide['app.py']
     for name in ('pathlib','html'):
         if 'from '+name in statement:
-            assert name+'.py' in sources and name+'.py' not in pyodide
+            path = 'html/__init__.py' if name == 'html' else name+'.py'
+            assert path in sources and path not in pyodide
 
 
 def test_bare_handlers_catch_base_exceptions_and_keep_nested_tracebacks():
@@ -62,7 +63,11 @@ def test_portable_path_properties_match_cpython(path):
     portable=namespace['Path'](path)
     native=Path(path)
     for attribute in ('name','suffix','suffixes','stem','parts'):
-        assert getattr(portable,attribute)==getattr(native,attribute)
+        # Browser Pyodide is pinned to CPython 3.13. Python 3.14 hosts changed
+        # trailing-dot suffixes; the build host must not change this profile.
+        reference = {'suffix':'', 'suffixes':[], 'stem':'b.'}
+        expected = reference[attribute] if path == 'a/b.' and attribute in reference else getattr(native,attribute)
+        assert getattr(portable,attribute)==expected
     assert str(portable)==str(native)
     assert str(portable.parent)==str(native.parent)
     assert list(map(str,portable.parents))==list(map(str,native.parents))
@@ -111,6 +116,7 @@ def test_computed_import_allowlist_is_bundled_and_enforced_before_execution(tmp_
     config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\ndynamic-imports=["providers.demo"]\n')
     result=build_browser_bundle(config)
     monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setitem(sys.modules, '_pytincture_resources', types.ModuleType('_pytincture_resources'))
     for name in ('sources.json','sources-pyodide.json'):
         sources=json.loads((result.parent/name).read_text())['files']
         assert 'providers/demo.py' in sources

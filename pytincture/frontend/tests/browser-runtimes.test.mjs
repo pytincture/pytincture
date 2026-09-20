@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {createHash} from 'node:crypto';
-import {BROWSER_RUNTIMES, createBffCaller, createOnceCallable, sameOriginUrl, validateRuntimeManifest} from '../browser-runtimes.js';
+import {BROWSER_RUNTIMES, createBffCaller, createOnceCallable, createEventCallback, sameOriginUrl, validateRuntimeManifest} from '../browser-runtimes.js';
+
+test('managed event callbacks remain callable until released', () => {
+    let calls = 0;
+    const listener = createEventCallback(value => { calls++; return value + 1; });
+    assert.equal(listener(1), 2);
+    assert.equal(listener(2), 3);
+    listener.destroy();
+    assert.equal(listener(3), undefined);
+    assert.equal(calls, 2);
+});
 
 test('once callables reject repeats, cancellation, reentry and exception retries', () => {
     let calls = 0;
@@ -70,6 +80,10 @@ test('widget asset ownership registry identifies exact successfully loaded asset
 test('each built-in runtime validates its required assets', () => {
     assert.deepEqual(BROWSER_RUNTIMES, ['pyodide', 'micropython']);
     for (const engine of manifest.runtimes) assert.equal(validateRuntimeManifest(manifest,engine),manifest);
+    for (const profile of ['pytincture-portable-1', 'pytincture-portable-2']) {
+        assert.equal(validateRuntimeManifest({...manifest, profile}, 'micropython').profile, profile);
+    }
+    assert.throws(()=>validateRuntimeManifest({...manifest,profile:'pytincture-portable-3'},'micropython'),/profile/);
     assert.throws(()=>validateRuntimeManifest(manifest,'other'),/Unknown/);
     assert.throws(()=>validateRuntimeManifest({...manifest,runtimes:['pyodide']},'micropython'),/does not support/);
     assert.throws(()=>validateRuntimeManifest(manifest,'transcrypt'),/Unknown/);

@@ -1,0 +1,71 @@
+"""Synchronous context-manager helpers for the portable profile."""
+
+
+class _GeneratorContext:
+    def __init__(self, function, args, kwargs):
+        self.generator = function(*args, **kwargs)
+
+    def __enter__(self):
+        try:
+            return next(self.generator)
+        except StopIteration:
+            raise RuntimeError('generator did not yield')
+
+    def __exit__(self, kind, value, traceback):
+        try:
+            if kind is None:
+                try:
+                    next(self.generator)
+                except StopIteration:
+                    return False
+            else:
+                try:
+                    self.generator.throw(value)
+                except StopIteration as error:
+                    return error is not value
+                except BaseException as error:
+                    if error is value:
+                        return False
+                    raise
+            raise RuntimeError('generator did not stop')
+        finally:
+            self.generator.close()
+
+
+def contextmanager(function):
+    def factory(*args, **kwargs):
+        return _GeneratorContext(function, args, kwargs)
+    return factory
+
+
+class closing:
+    def __init__(self, thing):
+        self.thing = thing
+
+    def __enter__(self):
+        return self.thing
+
+    def __exit__(self, *args):
+        self.thing.close()
+
+
+class nullcontext:
+    def __init__(self, enter_result=None):
+        self.enter_result = enter_result
+
+    def __enter__(self):
+        return self.enter_result
+
+    def __exit__(self, *args):
+        return False
+
+
+class suppress:
+    def __init__(self, *exceptions):
+        self.exceptions = exceptions
+
+    def __enter__(self):
+        return None
+
+    def __exit__(self, kind, value, traceback):
+        return kind is not None and issubclass(kind, self.exceptions)

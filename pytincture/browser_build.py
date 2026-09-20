@@ -401,13 +401,52 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     bootstrap += '    await finish_startup()\n    js.window.pytinctureAppReady = True\n'
     sources['_pytincture_bootstrap.py'] = bootstrap
     vendor_modules = set()
-    imports = {module.split('.')[0] for name, source in sources.items() for module, _ in imported_modules(name, source)}
-    for stdlib in (('pathlib', 'html') if engine == 'micropython' else ()):
-        if stdlib in imports and stdlib + '.py' not in sources:
-            sources[stdlib + '.py'] = (TEMPLATES / (stdlib + '.py.txt')).read_text()
-            vendor_modules.add(stdlib + '.py')
-            report['findings'].append({'file': stdlib + '.py', 'line': 0, 'rule': 'portable-stdlib',
-                                      'severity': 'supported', 'message': 'Framework subset shim; see portable-python-profile.md for supported APIs'})
+    imports = {module for name, source in sources.items() for module, _ in imported_modules(name, source)}
+    imports.update(config.get('dynamic-imports', ()))
+    if engine == 'micropython':
+        optional = {
+            'pathlib': ('pathlib.py', 'pathlib', False),
+            'html': ('html/__init__.py', 'html', False),
+            'html.parser': ('html/parser.py', 'html_parser', False),
+            'html.entities': ('html/entities.py', 'html_entities', True),
+            'uuid': ('uuid.py', 'uuid', False),
+            'string': ('string.py', 'string', True),
+            'base64': ('base64.py', 'base64', True),
+            'zipfile': ('zipfile.py', 'zipfile', True),
+            'contextlib': ('contextlib.py', 'contextlib', False),
+            'csv': ('csv.py', 'csv', False),
+            'importlib': ('importlib/__init__.py', 'importlib', False),
+            'importlib.resources': ('importlib/resources.py', 'resources', False),
+            '_pytincture_events': ('_pytincture_events.py', 'events', False),
+        }
+        # Follow dependencies of optional shims too, including package parents.
+        while True:
+            available = {_module(name) for name in sources}
+            requested = imports | {name.split('.')[0] for name in imports}
+            missing = sorted((requested & optional.keys()) - available)
+            if not missing:
+                break
+            for module in missing:
+                name, template, upstream = optional[module]
+                source = verified_stdlib(template) if upstream else (TEMPLATES / (template + '.py.txt')).read_text()
+                if module == 'zipfile':
+                    source = 'from micropython import const\n' + source
+                    source = source.replace('stream = _ZipIO(self._f, info.file_size)', 'stream = _ZipIO(self._f, info.compress_size)')
+                    report['findings'].append({'file': name, 'line': 0, 'rule': 'portable-stdlib-extension',
+                                              'severity': 'transformation', 'behavior_changing': True,
+                                              'message': 'Bound ZIP input streams by compressed size, avoiding truncated deflate data'})
+                if module == 'base64':
+                    source += '\n' + (TEMPLATES / 'base64_extensions.py.txt').read_text()
+                    report['findings'].append({'file': name, 'line': 0, 'rule': 'portable-stdlib-extension',
+                                              'severity': 'transformation', 'behavior_changing': True,
+                                              'message': 'Add URL-safe Base64 decoding and a portable binascii.Error alias'})
+                sources[name] = source
+                if module == 'importlib' and '_pytincture_imports.py' not in sources:
+                    sources['_pytincture_imports.py'] = 'ALLOWED_MODULES = ()\n' + (TEMPLATES / 'imports.py.txt').read_text()
+                vendor_modules.add(name)
+                imports.update(module for module, _ in imported_modules(name, source))
+                report['findings'].append({'file': name, 'line': 0, 'rule': 'portable-stdlib',
+                                          'severity': 'supported', 'message': 'Optional portable shim; see portable-python-profile.md for supported APIs'})
     for stdlib in (('copy', 'datetime') if engine == 'micropython' else ()):
         if stdlib in imports and stdlib + '.py' not in sources:
             vendor_modules.add(stdlib + '.py')
@@ -416,8 +455,10 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
         if 'types.py' not in sources:
             vendor_modules.add('types.py')
         sources.setdefault('types.py', verified_stdlib('types'))
-    if 'copy' in imports or 'datetime' in imports:
+    if {'copy', 'datetime', 'string', 'base64', 'zipfile'} & imports:
         artifacts['vendor/micropython-lib/LICENSE'] = (VENDOR / 'stdlib/LICENSE').read_bytes()
+    if {'html/entities.py', 'html/__init__.py', 'base64.py'} & vendor_modules:
+        artifacts['vendor/cpython/LICENSE'] = (VENDOR / 'stdlib/CPYTHON-LICENSE').read_bytes()
     report['shims'] = sorted(vendor_modules | {name for name in sources if name.startswith('_pytincture_') and name not in {'_pytincture_bootstrap.py', '_pytincture_bff.py'}}) if engine == 'micropython' else []
     _check_imports({**sources, 'declared_dynamic_imports.py': '\n'.join('import '+name for name in config.get('dynamic-imports', []))}, root, vendor_modules, engine)
     if len(sources) > 256 or sum(len(value.encode()) for value in sources.values()) > 8 * 1024 * 1024:

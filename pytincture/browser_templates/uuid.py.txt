@@ -1,0 +1,102 @@
+"""Portable UUID values and browser-cryptographic UUID4 generation."""
+import builtins
+import js
+
+_int = builtins.int
+_bytes = builtins.bytes
+RFC_4122 = 'specified in RFC 4122'
+RESERVED_NCS = 'reserved for NCS compatibility'
+RESERVED_MICROSOFT = 'reserved for Microsoft compatibility'
+RESERVED_FUTURE = 'reserved for future definition'
+
+
+class UUID:
+    def __init__(self, hex=None, bytes=None, bytes_le=None, fields=None, int=None, version=None):
+        if sum(value is not None for value in (hex, bytes, bytes_le, fields, int)) != 1:
+            raise TypeError('exactly one UUID representation is required')
+        if hex is not None:
+            if not isinstance(hex, str):
+                raise TypeError('hex must be a string')
+            value = hex.replace('urn:', '').replace('uuid:', '').strip('{}').replace('-', '')
+            if len(value) != 32:
+                raise ValueError('badly formed UUID string')
+            int = _int(value, 16)
+        elif bytes is not None or bytes_le is not None:
+            value = bytes if bytes is not None else bytes_le
+            if len(value) != 16:
+                raise ValueError('UUID bytes must have length 16')
+            if bytes_le is not None:
+                value = value[0:4][::-1] + value[4:6][::-1] + value[6:8][::-1] + value[8:]
+            int = _int.from_bytes(value, 'big')
+        elif fields is not None:
+            if len(fields) != 6:
+                raise ValueError('UUID fields must contain six integers')
+            int = 0
+            for value, width in zip(fields, (32, 16, 16, 8, 8, 48)):
+                if not 0 <= value < (1 << width):
+                    raise ValueError('UUID field out of range')
+                int = (int << width) | value
+        if not isinstance(int, _int) or not 0 <= int < (1 << 128):
+            raise ValueError('UUID integer out of range')
+        if version is not None:
+            if version not in (1, 2, 3, 4, 5):
+                raise ValueError('unsupported UUID version')
+            int = (int & ~(0xc000 << 48)) | (0x8000 << 48)
+            int = (int & ~(0xf000 << 64)) | (version << 76)
+        self._value = int
+
+    @property
+    def int(self):
+        return self._value
+
+    @property
+    def bytes(self):
+        return self._value.to_bytes(16, 'big')
+
+    @property
+    def bytes_le(self):
+        value = self.bytes
+        return value[0:4][::-1] + value[4:6][::-1] + value[6:8][::-1] + value[8:]
+
+    @property
+    def hex(self):
+        return self.bytes.hex()
+
+    @property
+    def variant(self):
+        value = self.bytes[8]
+        if not value & 0x80:
+            return RESERVED_NCS
+        if not value & 0x40:
+            return RFC_4122
+        return RESERVED_FUTURE if value & 0x20 else RESERVED_MICROSOFT
+
+    @property
+    def version(self):
+        return self.bytes[6] >> 4 if self.variant == RFC_4122 else None
+
+    @property
+    def urn(self):
+        return 'urn:uuid:' + str(self)
+
+    @property
+    def fields(self):
+        return (self.int >> 96, (self.int >> 80) & 0xffff, (self.int >> 64) & 0xffff,
+                (self.int >> 56) & 0xff, (self.int >> 48) & 0xff, self.int & ((1 << 48) - 1))
+
+    def __str__(self):
+        value = self.hex
+        return '-'.join((value[:8], value[8:12], value[12:16], value[16:20], value[20:]))
+
+    def __repr__(self):
+        return "UUID('" + str(self) + "')"
+
+    def __eq__(self, other):
+        return isinstance(other, UUID) and self.int == other.int
+
+    def __hash__(self):
+        return hash(self.int)
+
+
+def uuid4():
+    return UUID(str(js.crypto.randomUUID()))

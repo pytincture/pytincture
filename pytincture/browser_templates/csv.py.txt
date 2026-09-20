@@ -1,0 +1,159 @@
+"""Portable CSV reader/writer for Excel-style delimited text."""
+QUOTE_MINIMAL = 0
+QUOTE_ALL = 1
+QUOTE_NONNUMERIC = 2
+QUOTE_NONE = 3
+
+
+class Error(Exception):
+    pass
+
+
+def _options(dialect, options):
+    if dialect not in ('excel', 'excel-tab', 'unix'):
+        raise ValueError('portable CSV supports excel, excel-tab and unix dialects')
+    result = dict(delimiter='\t' if dialect == 'excel-tab' else ',', quotechar='"',
+                  escapechar=None, doublequote=True, skipinitialspace=False,
+                  lineterminator='\n' if dialect == 'unix' else '\r\n',
+                  quoting=QUOTE_ALL if dialect == 'unix' else QUOTE_MINIMAL, strict=False)
+    for name, value in options.items():
+        if name not in result:
+            raise TypeError('unsupported CSV option: ' + name)
+        result[name] = value
+    for name in ('delimiter', 'quotechar', 'escapechar'):
+        value = result[name]
+        if value is None and name != 'delimiter':
+            continue
+        if not isinstance(value, str) or len(value) != 1 or value in '\r\n':
+            raise TypeError('CSV ' + name + ' must be one character')
+    if result['quoting'] not in (0, 1, 2, 3):
+        raise ValueError('unsupported CSV quoting mode')
+    if result['quotechar'] is None and result['quoting'] != QUOTE_NONE:
+        raise TypeError('quotechar is required when quoting is enabled')
+    return result
+
+
+class reader:
+    def __init__(self, iterable, dialect='excel', **options):
+        self.options = _options(dialect, options)
+        self.line_num = 0
+        self.rows = self._read(iterable)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self.rows)
+
+    def _read(self, iterable):
+        options = self.options
+        row, field = [], []
+        quoted = False
+        was_quoted = False
+        after_quote = False
+        escaped = False
+        def finish():
+            value = ''.join(field)
+            if options['quoting'] == QUOTE_NONNUMERIC and not was_quoted and value:
+                value = float(value)
+            return value
+        for line in iterable:
+            if not isinstance(line, str):
+                raise Error('CSV input must be text')
+            self.line_num += 1
+            continued = False
+            if not line and not quoted:
+                yield []
+                continue
+            index = 0
+            while index < len(line):
+                char = line[index]
+                index += 1
+                if escaped:
+                    field.append(char)
+                    escaped = False
+                    continued = index == len(line) and char in '\r\n'
+                elif char == options['escapechar']:
+                    escaped = True
+                elif quoted:
+                    if char == options['quotechar']:
+                        if options['doublequote'] and index < len(line) and line[index] == char:
+                            field.append(char)
+                            index += 1
+                        else:
+                            quoted = False
+                            after_quote = True
+                    else:
+                        field.append(char)
+                elif char == options['delimiter']:
+                    row.append(finish())
+                    field = []
+                    was_quoted = after_quote = False
+                elif char in '\r\n':
+                    if char == '\r' and index < len(line) and line[index] == '\n':
+                        index += 1
+                    yield row + [finish()] if row or field or was_quoted else []
+                    row, field = [], []
+                    was_quoted = after_quote = False
+                elif not field and not after_quote and options['skipinitialspace'] and char == ' ':
+                    continue
+                elif not field and not after_quote and char == options['quotechar'] and options['quoting'] != QUOTE_NONE:
+                    quoted = was_quoted = True
+                else:
+                    if after_quote and options['strict']:
+                        raise Error('unexpected character after closing quote')
+                    field.append(char)
+            if not quoted and not escaped and not continued and (row or field or was_quoted):
+                yield row + [finish()]
+                row, field = [], []
+                was_quoted = after_quote = False
+        if (quoted or escaped) and options['strict']:
+            raise Error('unexpected end of CSV input')
+        if escaped:
+            field.append('\n')
+        if row or field or was_quoted:
+            yield row + [finish()]
+
+
+class writer:
+    def __init__(self, stream, dialect='excel', **options):
+        self.stream = stream
+        self.options = _options(dialect, options)
+
+    def writerow(self, row):
+        values = list(row)
+        options = self.options
+        quote = options['quotechar']
+        escape = options['escapechar']
+        fields = []
+        for item in values:
+            text = '' if item is None else str(item)
+            special = options['delimiter'] + '\r\n' + options['lineterminator'] + (quote or '') + (escape or '')
+            quote_special = options['delimiter'] + '\r\n' + options['lineterminator'] + ((quote or '') if options['doublequote'] else '')
+            quoted = options['quoting'] == QUOTE_ALL or options['quoting'] == QUOTE_NONNUMERIC and not isinstance(item, (int, float))
+            quoted = quoted or options['quoting'] == QUOTE_MINIMAL and (any(c in text for c in quote_special) or len(values) == 1 and text == '')
+            if options['quoting'] == QUOTE_NONE and len(values) == 1 and text == '':
+                raise Error('single empty field must be quoted')
+            output = []
+            for char in text:
+                if escape and char == escape:
+                    output.append(escape)
+                elif char == quote and options['quoting'] != QUOTE_NONE:
+                    if options['doublequote']:
+                        output.append(quote)
+                    elif escape:
+                        output.append(escape)
+                    else:
+                        raise Error('CSV escapechar required')
+                elif options['quoting'] == QUOTE_NONE and char in special:
+                    if not escape:
+                        raise Error('CSV escapechar required')
+                    output.append(escape)
+                output.append(char)
+            text = ''.join(output)
+            fields.append(quote + text + quote if quoted else text)
+        return self.stream.write(options['delimiter'].join(fields) + options['lineterminator'])
+
+    def writerows(self, rows):
+        for row in rows:
+            self.writerow(row)

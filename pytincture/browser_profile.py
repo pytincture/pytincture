@@ -7,7 +7,7 @@ import zipfile
 
 from pytincture.browser_sources import main_only
 
-PROFILE = 'pytincture-portable-1'
+PROFILE = 'pytincture-portable-2'
 MICROPYTHON_MODULES = frozenset('js jsffi asyncio array binascii builtins cmath collections gc hashlib heapq io json math micropython os random re select struct sys time errno deflate __main__'.split())
 VENDOR = Path(__file__).with_name('browser_vendor')
 

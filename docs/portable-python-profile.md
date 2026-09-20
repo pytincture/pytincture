@@ -1,8 +1,14 @@
-# Portable Python profile 1
+# Portable Python profile 2
 
-Identifier: `pytincture-portable-1`. The supported targets are the framework's
+Identifier: `pytincture-portable-2`. The supported targets are the framework's
 pinned Pyodide 0.29.3 (CPython) and MicroPython WebAssembly package 1.29.0-6.
 This profile defines a browser build target, not general CPython emulation.
+
+Profile 2 returns UUID objects from both `uuid.uuid4()` and `from uuid import
+uuid4`, matching CPython's value API. Profile 1's direct-import transformation
+returned strings. Rebuild to opt into profile 2 and use `str(uuid4())` where text
+is required. The updated browser loader still accepts existing profile-1 bundles;
+it does not rewrite their embedded code. Legacy Pyodide is unchanged.
 
 ## Independent targets
 
@@ -36,6 +42,7 @@ findings and run application conformance before enabling the target.
 | Annotations and typing-only imports | Removed from runtime evaluation; introspection of annotations is unavailable |
 | `create_proxy`, `to_js`, `to_py` | Browser callback bridge; JSON-compatible data conversion, not arbitrary object conversion |
 | `create_once_callable` | Callable JS wrapper with one invocation or explicit `.destroy()` cancellation; releases its callback reference even if invocation throws |
+| `pyodide.ffi.wrappers` | `add_event_listener` and `remove_event_listener` retain callbacks until removal, then release their JS bridge references |
 | MainWindow/Layout subclass initialization | Framework/widget lifecycle initializes nested layouts after constructors |
 | Dictionary unpacking and selected class keywords | Rewritten to supported forms; custom metaclasses are rejected |
 | List, tuple and set display unpacking | Expanded with helpers that preserve expression evaluation and iterator-consumption order |
@@ -43,11 +50,18 @@ findings and run application conformance before enabling the target.
 | `time.monotonic`, including import aliases | Browser `performance.now()` divided by 1000; elapsed seconds independent of wall-clock adjustments |
 | Dataclasses | Portable helper supports fields, factories, inheritance, post-init, repr/equality, init, kw-only, asdict/fields/replace/is_dataclass; frozen/slots/order/hash/InitVar rejected |
 | String title casing | Portable implementation; Unicode title rules can differ from CPython |
-| UUID helpers | Browser-generated UUID strings through the compatibility helper |
+| `uuid` | `UUID` values and cryptographic browser `uuid4`; string, hex, bytes, bytes_le, fields and integer construction; no host identity/time-based UUID generation |
 | Exception formatting and inspect helpers | Limited browser diagnostics; no arbitrary stack/source/signature reflection |
 | Bare `except:` | Catches `BaseException`, including interrupts; generated exception bindings are distinct for nested traceback formatting |
 | `from pathlib import Path` | Optional POSIX path subset over the browser filesystem; supported methods and limits below |
 | `from html import escape` | Optional shim escapes ampersands, angle brackets and (by default) both quote characters; `quote=False` preserves quotes |
+| `html.unescape`, `html.entities` | Pinned CPython 3.13 HTML5 entities and character-reference replacement rules, with a MicroPython-compatible scanner |
+| `html.parser.HTMLParser` | Incremental tag/attribute, text, comment, declaration, entity and raw script/style callbacks, `feed`, `close`, `reset`, `getpos`, `get_starttag_text`; no DOM construction or nesting repair |
+| `string` | ASCII character constants and the upstream `translate` helper; `Template` and `Formatter` are not provided |
+| `base64` | Base16/32/64 encoding and decoding, standard and URL-safe Base64; reported extension fills upstream URL-safe decoding and error-alias gaps |
+| `contextlib` | Synchronous `contextmanager`, `closing`, `suppress`, `nullcontext`; async contexts and `ExitStack` are not provided |
+| `csv` | Text `reader`/`writer`, Excel/Excel-tab/Unix dialects, quoting, delimiters and escapes; no dialect registration or dictionary helpers |
+| `zipfile` | Pinned read-only stored/deflated ZIP support, with compressed-stream bound fix; no archive writing, encryption, extraction, ZIP64 or CRC verification |
 | Task scheduling | Browser scheduler handles callbacks/awaitables; no threads |
 | `asyncio.get_running_loop()` | Scheduling view with `is_running()` and `create_task()` only; not a full asyncio loop |
 | Resources | Verified in-memory `files`, joinpath, name/suffix, is_file/is_dir, iterdir, read_bytes and UTF-8 read_text (string package names); no filesystem writes or arbitrary encodings |
@@ -55,13 +69,17 @@ findings and run application conformance before enabling the target.
 
 The report names actual changed AST rules (for example `adapt-Call` or
 `adapt-ClassDef`) rather than claiming that every construct in this table changed.
-Python helper modules are listed in `shims`; optional `copy`, `types` and `datetime`
+Python helper modules are listed in `shims`; optional `copy`, `types`, `datetime`, `string`, `base64` and `zipfile`
 come from hash-verified pinned MicroPython standard-library sources. These modules
 also have upstream limitations. Review the corresponding generated source for an
 exact transformation. This profile's version must change when its promised
 semantics change incompatibly.
 
-The framework's optional `pathlib` and `html` shims are included only when imported
+Optional modules and their dependencies are included only when imported or
+declared in the dynamic-import allowlist; all are listed in the report. Pinned
+vendor sources remain hash-checked before reported extensions are applied, and
+bundles carry their upstream licenses. The framework's `pathlib` and `html` shims
+are included only when imported
 and listed in the compatibility report. Pyodide continues using its native
 standard library and native `create_once_callable` implementation.
 
@@ -75,11 +93,15 @@ the ten basic fields, without nanosecond or platform-specific extensions. Text
 methods support UTF-8. Use Path's IO methods (or explicit `str(path)` with native
 MicroPython IO); OS-wide path-protocol support is not implied.
 
+Path suffix semantics follow the browser's CPython 3.13 reference: for `Path("a/b.")`,
+`suffix == ""`, `suffixes == []`, and `stem == "b."`. Python 3.14 changed this
+behavior; running a build or its tests on a 3.14 host does not change the target.
+
 Verified bundle resources are installed into the in-memory filesystem on both
 engines, so `Path(__file__).resolve().parent / "data.json"` can read a declared
 resource. Writes remain local to that browser runtime and are not persisted or
 sent to the server. Windows paths, symlink resolution, globbing, home expansion,
-permissions and the rest of CPython's pathlib/HTML parser APIs are outside this
+permissions and pathlib APIs beyond those listed are outside this
 subset. Unavailable methods are not silently emulated.
 
 ## Build failures and explicit requirements

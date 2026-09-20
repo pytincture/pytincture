@@ -94,6 +94,7 @@ var PytinctureRuntime = (() => {
     createBffCaller: () => createBffCaller,
     createBffStreamCaller: () => createBffStreamCaller,
     createBffSyncCaller: () => createBffSyncCaller,
+    createEventCallback: () => createEventCallback,
     createOnceCallable: () => createOnceCallable,
     publishLoadedAssets: () => publishLoadedAssets,
     runBrowserApplication: () => runBrowserApplication,
@@ -132,7 +133,7 @@ var PytinctureRuntime = (() => {
     }
     if (manifest.styleIds && (typeof manifest.styleIds !== "object" || Array.isArray(manifest.styleIds) || Object.entries(manifest.styleIds).some(([path, id]) => !manifest.styles.includes(path) || typeof id !== "string" || !/^[A-Za-z][\w-]*$/.test(id)))) throw new Error("Invalid stylesheet identifiers");
     if (!/^[a-f0-9]{64}$/.test(manifest.bundleId || "") || manifest.assetBase !== `releases/${manifest.bundleId}/`) throw new Error("Invalid immutable bundle identifier");
-    if (manifest.profile !== "pytincture-portable-1") throw new Error("Unsupported portable Python profile");
+    if (!["pytincture-portable-1", "pytincture-portable-2"].includes(manifest.profile)) throw new Error("Unsupported portable Python profile");
     const target = (_b = manifest.targets) == null ? void 0 : _b[engine];
     relativePath(target == null ? void 0 : target.sources);
     relativePath(manifest.resources);
@@ -409,10 +410,19 @@ var PytinctureRuntime = (() => {
     };
     return once;
   }
+  function createEventCallback(callback) {
+    if (typeof callback !== "function") throw new TypeError("Expected a callable");
+    const listener = (...args) => callback === null ? void 0 : callback(...args);
+    listener.destroy = () => {
+      callback = null;
+    };
+    return listener;
+  }
   async function runBrowserApplication(config, status = () => {
   }) {
     var _a;
     globalThis.pytinctureCreateOnceCallable = createOnceCallable;
+    globalThis.pytinctureCreateEventCallback = createEventCallback;
     const engine = config.runtime || "pyodide";
     if (config.deliveryMode !== "portable-bundle") throw new Error("Portable loader requires deliveryMode=portable-bundle");
     const phase = config._measurePhase || (async (_stage, _resource, callback) => callback());

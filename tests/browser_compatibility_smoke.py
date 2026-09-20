@@ -40,8 +40,10 @@ from pyodide.ffi import create_proxy, create_once_callable
 from pathlib import Path
 from html import escape
 import traceback
+from stdlib_probe import validate
 
 def main():
+    validate()
     caught = False
     try:
         raise KeyboardInterrupt('bare-handler')
@@ -52,7 +54,7 @@ def main():
     assets = Path(__file__).resolve().parent / 'sample'
     assert assets.joinpath('message.txt').read_text(encoding='utf-8') == 'bundled text'
     assert assets.is_dir()
-    assert [p.name for p in assets.iterdir()] == ['message.txt']
+    assert sorted(p.name for p in assets.iterdir()) == ['archive.zip', 'message.txt']
     scratch = Path('/compat-output')
     scratch.mkdir(parents=True, exist_ok=True)
     output = scratch / 'result.txt'
@@ -125,6 +127,7 @@ def main():
             files['oldwidgets-1.0.0.dist-info/RECORD']='\n'.join(path+',,' for path in files)+'\noldwidgets-1.0.0.dist-info/RECORD,,\n'
             for name,text in files.items(): archive.writestr(name,text)
         (root/'app.py').write_text(APP)
+        (root/'stdlib_probe.py').write_text((repo/'tests/fixtures/portable_stdlib/probe.py').read_text())
         (root/'registry.py').write_text('import importlib\nvalue=importlib.import_module(input())\n')
         (root/'browser_registry.py').write_text('label="browser substitute"\n')
         (root/'providers').mkdir()
@@ -133,8 +136,10 @@ def main():
         (root/'providers/denied.py').write_text('raise RuntimeError("must not execute")\n')
         (root/'sample').mkdir()
         (root/'sample/message.txt').write_text('bundled text')
+        with zipfile.ZipFile(root/'sample/archive.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('data.txt', 'portable archive')
         config=root/'pyproject.toml'
-        config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\nwidget-package="oldwidgets"\nwidget-wheel="'+wheel.name+'"\nimport-aliases={registry="browser_registry"}\ndynamic-imports=["providers.demo"]\nresources=["sample/message.txt"]\n')
+        config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\nwidget-package="oldwidgets"\nwidget-wheel="'+wheel.name+'"\nimport-aliases={registry="browser_registry"}\ndynamic-imports=["providers.demo"]\nresources=["sample/message.txt", "sample/archive.zip"]\n')
         build_browser_bundle(config)
 
         # The real legacy archive must carry the discovered installed dotenv
@@ -191,6 +196,11 @@ class ActualWindow(Intermediate):
                         expect(page.locator('#compat-result')).to_have_attribute('data-clicked','yes')
                         assert page.evaluate('compatOnce(41)') == 42
                         expect(page.locator('#compat-result')).to_have_attribute('data-once','41')
+                        page.locator('#portable-listener').click()
+                        expect(page.locator('#portable-listener')).to_have_attribute('data-count', '1')
+                        page.evaluate('removePortableListener()')
+                        page.locator('#portable-listener').click()
+                        expect(page.locator('#portable-listener')).to_have_attribute('data-count', '1')
                         assert page.evaluate('() => {try {compatOnce(100); return false;} catch {return true;}}')
                         assert page.evaluate('() => {compatCancelled.destroy(); try {compatCancelled(100); return false;} catch {return true;}}')
                         expect(page.locator('#compat-result')).to_have_attribute('data-once','41')

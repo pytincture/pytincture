@@ -1,5 +1,6 @@
 """Exact-name dynamic imports for portable bundles (not a Python sandbox)."""
 import sys
+import _pytincture_resources as resources
 
 
 def import_module(name, package=None):
