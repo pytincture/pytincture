@@ -3,7 +3,7 @@
 This project follows semantic versioning from 1.0. Dates and final entries are
 set when a release is published.
 
-## 1.0.0rc8 — Unreleased
+## 1.0.0rc8 — 2026-09-20
 
 - Separate browser engine from explicit legacy-package/portable-bundle delivery;
   manifests never change the default legacy Pyodide path. Runtime query overrides

@@ -95,6 +95,19 @@
       },
       "status": "passed",
       "notes": "Signed tag qualification and all 23 release CI jobs passed. Exact workflow artifacts and hashes are attached to the GitHub prerelease with verified attestations. Protected PyPI publication succeeded in run 35295139251; both public artifact hashes match and a clean public-index install reports 1.0.0rc7. The npm tarball is retained; npm registry publication is separate. The Book Library example draft has unresolved remote browser/load acceptance findings, and observation-scope review for the optional application-credential registry remains pending."
+    },
+    {
+      "version": "1.0.0rc8",
+      "published_at": "2026-09-20T12:28:04Z",
+      "commit_sha": "bb59bd2b73fc356c13a2ed4ae36bb06acc66f047",
+      "ci_url": "https://github.com/pytincture/pytincture/actions/runs/35510694984",
+      "artifacts": {
+        "wheel": "3ae409e08c456f65e02555552d0e5ff5b1d29aa2d554f27aacc184eeae2032db",
+        "sdist": "d2e3d59cd4358bb57318c0734fec96e66851fa5276ecc220432c0321f2968bb6",
+        "npm": "33c77bfcb4e77976951d76d32689abafd67cc753b8848c42ee9eb51dda179428"
+      },
+      "status": "passed",
+      "notes": "Signed tag qualification (35510250996), complete release CI and attestations (35510694984), and protected PyPI publication (35511220297) passed. The exact wheel, source distribution, npm tarball and SHA256SUMS.json are attached to the GitHub prerelease. Public PyPI wheel and sdist bytes match the attested hashes; a fresh Python 3.13 public-index installation imports pytincture and reports 1.0.0rc8. Full pinned Book Library and Wawesome Chat conformance passed for legacy Pyodide, portable Pyodide and portable MicroPython, including voice. npm publisher 35511220284 is waiting for its required independent environment approval; the attested npm artifact remains retained. Companion widget/app changes are conformance patches, not separately published releases. Final 1.0 observation and production-edge approval remain pending."
     }
   ],
   "representative_applications": {
@@ -711,6 +724,6 @@
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1 through RC7 release evidence is recorded, and rc4 through rc7 are published on PyPI. Rc7 passed the complete framework release CI and attestation pipeline; the separate Book Library draft still has remote browser/load acceptance findings. The optional application-credential registry also needs observation-scope review. Final 1.0 remains NO-GO pending the approved observation period, production-edge evidence, current representative-application qualification and final release-manager approval. Existing observation dates have not been changed."
+    "notes": "RC1 through RC8 release evidence is recorded, and rc4 through rc8 are published on PyPI. Rc8 passed the complete framework release CI, full pinned application conformance across all three runtime/delivery profiles, attestation and a clean public-index install. Portable delivery remains opt-in and legacy Pyodide remains the default. The optional application-credential registry and new portable runtime targets still need observation-scope review; these checks do not establish production-edge qualification or arbitrary Python compatibility. Final 1.0 remains NO-GO pending the approved observation period, production-edge evidence, remaining registry distribution and final release-manager approval. Existing observation dates have not been changed."
   }
 }
