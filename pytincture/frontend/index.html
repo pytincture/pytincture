@@ -5,14 +5,16 @@
     <script type="text/javascript">
         window.languagePluginUrl = './***APPLICATION***/frontend/pyodide/0.29.3/full/';
     </script>
-    <script src="./***APPLICATION***/frontend/pyodide/0.29.3/full/pyodide.js?uuid=***REQUEST_UUID***"></script>
-    <script src="./***APPLICATION***/frontend/pyodide/0.29.3/full/pyodide.asm.js?uuid=***REQUEST_UUID***"></script>
+    ***RUNTIME_PRELOAD***
     <script src="./***APPLICATION***/frontend/pytincture.js?uuid=***REQUEST_UUID***"></script>
 </head>
 <body>
     <script>
       runTinctureApp({
         application: ***APPLICATION_JSON***,
+        runtime: ***BROWSER_RUNTIME_JSON***,
+        deliveryMode: ***DELIVERY_MODE_JSON***,
+        runtimeManifestUrl: ***RUNTIME_MANIFEST_JSON***,
         widgetlib: ***WIDGETSET_JSON***,
         widgetAssetManifest: ***WIDGET_ASSET_MANIFEST_JSON***,
         backendWidgetSources: ***BACKEND_WIDGET_SOURCES_JSON***,

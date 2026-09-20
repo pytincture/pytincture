@@ -1,0 +1,133 @@
+"""Browser dataclass subset: explicit fields, factories, inheritance and JSON data."""
+MISSING = object()
+
+
+class Field:
+    def __init__(self, default=MISSING, default_factory=MISSING, init=True,
+                 repr=True, compare=True, kw_only=False, metadata=None):
+        if default is not MISSING and default_factory is not MISSING:
+            raise ValueError('cannot specify both default and default_factory')
+        self.default = default
+        self.default_factory = default_factory
+        self.init = init
+        self.repr = repr
+        self.compare = compare
+        self.kw_only = kw_only
+        self.metadata = metadata or {}
+        self.name = None
+
+
+def field(**kwargs):
+    return Field(**kwargs)
+
+
+def dataclass(cls=None, *, init=True, repr=True, eq=True, order=False,
+              unsafe_hash=False, frozen=False, slots=False, kw_only=False):
+    if frozen or slots or unsafe_hash:
+        raise ValueError('browser dataclasses do not support frozen, slots or unsafe_hash')
+    def decorate(target):
+        collected = []
+        for base in getattr(target, '__bases__', ()):
+            for item in getattr(base, '__dataclass_fields__', ()):
+                collected.append(item)
+        for name, value in target.__pytincture_fields__:
+            item = value if isinstance(value, Field) else Field(default=value)
+            item.name = name
+            item.kw_only = item.kw_only or kw_only
+            if item.default is not MISSING:
+                setattr(target, name, item.default)
+            replaced = False
+            for index, previous in enumerate(collected):
+                if previous.name == name:
+                    collected[index] = item
+                    replaced = True
+                    break
+            if not replaced:
+                collected.append(item)
+        definitions = tuple(collected)
+        target.__dataclass_fields__ = definitions
+        positional = [item for item in definitions if item.init and not item.kw_only]
+        optional = False
+        for item in positional:
+            has_default = item.default is not MISSING or item.default_factory is not MISSING
+            if optional and not has_default:
+                raise TypeError('non-default field follows default field')
+            optional = optional or has_default
+        if init and not target.__pytincture_own_init__:
+            def initialize(self, *args, **kwargs):
+                if len(args) > len(positional):
+                    raise TypeError('too many positional arguments')
+                values = dict(kwargs)
+                for item, value in zip(positional, args):
+                    if item.name in values:
+                        raise TypeError('multiple values for ' + item.name)
+                    values[item.name] = value
+                for item in definitions:
+                    if item.init and item.name in values:
+                        value = values.pop(item.name)
+                    elif item.default_factory is not MISSING:
+                        value = item.default_factory()
+                    elif item.default is not MISSING:
+                        value = item.default
+                    elif not item.init:
+                        continue
+                    else:
+                        raise TypeError('missing required argument: ' + item.name)
+                    setattr(self, item.name, value)
+                if values:
+                    raise TypeError('unexpected arguments: ' + ', '.join(values))
+                post = getattr(self, '__post_init__', None)
+                if post:
+                    post()
+            target.__init__ = initialize
+        if repr and not target.__pytincture_own_repr__:
+            def represent(self):
+                return target.__name__ + '(' + ', '.join(
+                    item.name + '=' + __builtins_repr(getattr(self, item.name))
+                    for item in definitions if item.repr) + ')'
+            target.__repr__ = represent
+        if eq and not target.__pytincture_own_eq__:
+            def equal(self, other):
+                if type(self) is not type(other):
+                    return NotImplemented
+                return all(getattr(self, item.name) == getattr(other, item.name)
+                           for item in definitions if item.compare)
+            target.__eq__ = equal
+            target.__hash__ = None
+        if order:
+            raise ValueError('browser dataclasses do not support order=True')
+        return target
+    return decorate(cls) if cls is not None else decorate
+
+
+def is_dataclass(value):
+    return hasattr(value, '__dataclass_fields__')
+
+
+def fields(value):
+    if not is_dataclass(value):
+        raise TypeError('expected a dataclass')
+    return value.__dataclass_fields__
+
+
+def asdict(value):
+    def convert(item):
+        if is_dataclass(item):
+            return {f.name: convert(getattr(item, f.name)) for f in fields(item)}
+        if isinstance(item, dict):
+            return {k: convert(v) for k, v in item.items()}
+        if isinstance(item, (list, tuple)):
+            return type(item)(convert(v) for v in item)
+        return item
+    if not is_dataclass(value):
+        raise TypeError('expected a dataclass')
+    return convert(value)
+
+
+def replace(value, **changes):
+    args = {item.name: getattr(value, item.name) for item in fields(value) if item.init}
+    args.update(changes)
+    return type(value)(**args)
+
+
+__builtins_repr = repr

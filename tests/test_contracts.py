@@ -103,6 +103,7 @@ def test_browser_asset_integrity_manifest_covers_runtime_dependencies():
         "npm_integrity": mdi_lock["integrity"],
     }
     expected = {
+        "browser-runtimes.js",
         "pytincture.js",
         "sw.js",
         "dist/pytincture.js",

@@ -206,9 +206,15 @@ The contract test checks every row in this table against the dataclass model.
 | `modules_path` | `MODULES_PATH` | Application module root. |
 | `require_readonly_modules_path` | `PYTINCTURE_REQUIRE_READONLY_MODULES_PATH` | Fail startup when the effective service account can write the module root. |
 | `default_application` | `PYTINCTURE_DEFAULT_APPLICATION` | Optional application for the root redirect. |
+| `browser_runtime` | `PYTINCTURE_BROWSER_RUNTIME` | Default engine: pyodide or micropython. MicroPython requires explicit portable-bundle delivery. |
+| `delivery_mode` | `PYTINCTURE_DELIVERY_MODE` | Application delivery: legacy-package (default) or portable-bundle; independent of the engine. |
+| `allow_runtime_selection` | `PYTINCTURE_ALLOW_RUNTIME_SELECTION` | Development/testing only: allow the runtime query parameter; keep false in production. |
 | `favicon_folder` | `PYTINCTURE_FAVICON_FOLDER` | Optional favicon file/directory. |
 | `cors_allowed_origins` | `CORS_ALLOWED_ORIGINS` | Allowed browser origins. |
 | `browser_connect_origins` | `PYTINCTURE_BROWSER_CONNECT_ORIGINS` | Exact additional HTTPS/WSS origins permitted by browser connect-src. |
+| `browser_script_origins` | `PYTINCTURE_BROWSER_SCRIPT_ORIGINS` | Exact additional HTTPS origins permitted by browser script-src; independent of other asset types. |
+| `browser_style_origins` | `PYTINCTURE_BROWSER_STYLE_ORIGINS` | Exact additional HTTPS origins permitted by browser style-src; independent of other asset types. |
+| `browser_font_origins` | `PYTINCTURE_BROWSER_FONT_ORIGINS` | Exact additional HTTPS origins permitted by browser font-src; independent of other asset types. |
 | `allow_camera` | `PYTINCTURE_ALLOW_CAMERA` | Allow same-origin camera requests through Permissions-Policy; default false. |
 | `allow_microphone` | `PYTINCTURE_ALLOW_MICROPHONE` | Allow same-origin microphone requests through Permissions-Policy; default false. |
 | `allow_geolocation` | `PYTINCTURE_ALLOW_GEOLOCATION` | Allow same-origin geolocation requests through Permissions-Policy; default false. |

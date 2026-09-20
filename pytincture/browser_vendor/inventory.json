@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "packages": [
+    {
+      "name": "@micropython/micropython-webassembly-pyscript",
+      "version": "1.29.0-6",
+      "license": "MIT",
+      "files": {
+        "micropython.mjs": "26cc7a99064a16518ab9a695e848efb248bfce504aee56ae73b2af35f3dcbf8b",
+        "micropython.wasm": "d5913c9327072e71d3e7a2e9384ea326f7d784bcc2f50a01b602c52bd2bdcafd"
+      }
+    },
+    {
+      "name": "@fontsource/material-icons",
+      "version": "5.3.0",
+      "license": "OFL-1.1",
+      "files": {
+        "material-icons.woff2": "8265f64786397d6b832d1ca0aafdf149ad84e72759fffa9f7272e91a0fb015d1",
+        "MATERIAL-ICONS-LICENSE": "18aabf190848725e2576eefb5c29ba06aac1029d02132252a7f312eac2e50cf3"
+      }
+    }
+  ]
+}

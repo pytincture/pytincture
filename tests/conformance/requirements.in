@@ -1,0 +1,7 @@
+# Full-application conformance only; never installed by the framework package.
+playwright==1.63.0
+SQLAlchemy==2.0.44
+litellm==1.80.9
+boto3==1.42.5
+faster-whisper==1.2.1
+python-dotenv==1.1.1

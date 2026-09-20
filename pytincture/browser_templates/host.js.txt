@@ -1,0 +1,12 @@
+export async function setup(context) {
+    document.title = __PYTINCTURE_APP_TITLE__;
+    document.body.style.margin = '0';
+    document.body.dataset.browserRuntime = context.engine;
+    globalThis.pytinctureAssetUrl = context.assetUrl;
+    globalThis.pytinctureBrowserBff = async (module, className, method, payload, httpMethod = "POST") =>
+        JSON.stringify(await context.callBff(module, className, method, JSON.parse(payload), {method: httpMethod}));
+    globalThis.pytinctureBrowserBffSync = (module, className, method, payload, httpMethod = "POST") =>
+        JSON.stringify(context.callBffSync(module, className, method, JSON.parse(payload), {method: httpMethod}));
+    globalThis.pytinctureBrowserBffStream = (module, className, method, payload, raw, httpMethod = "POST") =>
+        context.streamBff(module, className, method, JSON.parse(payload), {raw, method: httpMethod});
+}

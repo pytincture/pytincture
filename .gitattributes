@@ -1,0 +1,2 @@
+# Unified patches require a space on blank context lines.
+tests/conformance/*.patch whitespace=-blank-at-eol

@@ -206,6 +206,12 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
     try {
         const coldStartedAt = Date.now();
         await loginAndStartPackagedApp(page);
+        // No runtime settings: keep the established Pyodide/package path.
+        const startupPaths = diagnostics.requests.map(entry => new URL(entry.url).pathname);
+        expect(startupPaths.some(path => path.endsWith("/pyodide.asm.wasm"))).toBe(true);
+        expect(startupPaths.some(path => path.endsWith("/appcode.pyt"))).toBe(true);
+        expect(startupPaths.some(path => path.includes("micropython")
+            || path.endsWith("/browser-runtimes.js") || path.endsWith("/sources.json"))).toBe(false);
         performanceEvidence.cold_authenticated_start_ms = Date.now() - coldStartedAt;
         expect(performanceEvidence.cold_authenticated_start_ms).toBeLessThanOrEqual(
             PERFORMANCE_BUDGETS.browser.cold_authenticated_start_ms,

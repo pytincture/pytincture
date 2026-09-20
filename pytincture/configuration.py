@@ -226,6 +226,18 @@ class PytinctureConfig:
     default_application: Optional[str] = _setting(
         None, "PYTINCTURE_DEFAULT_APPLICATION", "Optional application for the root redirect."
     )
+    browser_runtime: str = _setting(
+        "pyodide", "PYTINCTURE_BROWSER_RUNTIME",
+        "Default engine: pyodide or micropython. MicroPython requires explicit portable-bundle delivery.",
+    )
+    delivery_mode: str = _setting(
+        "legacy-package", "PYTINCTURE_DELIVERY_MODE",
+        "Application delivery: legacy-package (default) or portable-bundle; independent of the engine.",
+    )
+    allow_runtime_selection: bool = _setting(
+        False, "PYTINCTURE_ALLOW_RUNTIME_SELECTION",
+        "Development/testing only: allow the runtime query parameter; keep false in production.",
+    )
     favicon_folder: Optional[str] = _setting(
         None, "PYTINCTURE_FAVICON_FOLDER", "Optional favicon file/directory."
     )
@@ -236,6 +248,18 @@ class PytinctureConfig:
         (),
         "PYTINCTURE_BROWSER_CONNECT_ORIGINS",
         "Exact additional HTTPS/WSS origins permitted by browser connect-src.",
+    )
+    browser_script_origins: tuple[str, ...] = _setting(
+        (), "PYTINCTURE_BROWSER_SCRIPT_ORIGINS",
+        "Exact additional HTTPS origins permitted by browser script-src; independent of other asset types.",
+    )
+    browser_style_origins: tuple[str, ...] = _setting(
+        (), "PYTINCTURE_BROWSER_STYLE_ORIGINS",
+        "Exact additional HTTPS origins permitted by browser style-src; independent of other asset types.",
+    )
+    browser_font_origins: tuple[str, ...] = _setting(
+        (), "PYTINCTURE_BROWSER_FONT_ORIGINS",
+        "Exact additional HTTPS origins permitted by browser font-src; independent of other asset types.",
     )
     allow_camera: bool = _setting(
         False, "PYTINCTURE_ALLOW_CAMERA",
@@ -1006,7 +1030,14 @@ class PytinctureConfig:
     environment: Mapping[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self):
+        if self.delivery_mode not in {"legacy-package", "portable-bundle"}:
+            raise ValueError("delivery_mode must be legacy-package or portable-bundle")
+        if self.allow_runtime_selection and (self.canonical_origin or self.require_readonly_modules_path):
+            raise ValueError("allow_runtime_selection is development/testing only; disable it with production origin or read-only module settings")
+        if not isinstance(self.browser_runtime, str) or self.browser_runtime not in {"pyodide", "micropython"}:
+            raise ValueError("browser_runtime must be pyodide or micropython")
         for name in (
+            "allow_runtime_selection",
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
         ):
             if not isinstance(getattr(self, name), bool):
@@ -1020,7 +1051,7 @@ class PytinctureConfig:
         )
         for name in (
             "cors_allowed_origins",
-            "browser_connect_origins",
+            "browser_connect_origins", "browser_script_origins", "browser_style_origins", "browser_font_origins",
             "allowed_hosts",
             "previous_session_secrets",
             "widget_public_index_allowlist",
@@ -1053,6 +1084,12 @@ class PytinctureConfig:
             "browser_connect_origins",
             canonical_browser_connect_origins(self.browser_connect_origins),
         )
+        for kind in ("script", "style", "font"):
+            name = f"browser_{kind}_origins"
+            origins = canonical_browser_connect_origins(getattr(self, name))
+            if any(not origin.startswith("https://") for origin in origins):
+                raise ValueError(f"{name} requires exact HTTPS origins")
+            object.__setattr__(self, name, origins)
         object.__setattr__(
             self,
             "widget_public_index_allowlist",
@@ -1629,6 +1666,7 @@ class PytinctureConfig:
         source = dict(os.environ if environ is None else environ)
         values = {}
         boolean_fields = {
+            "allow_runtime_selection",
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
             "require_readonly_modules_path",
             "enable_user_login", "enable_dev_email_login", "enable_google_auth",
@@ -1729,7 +1767,7 @@ class PytinctureConfig:
         }
         tuple_fields = {
             "cors_allowed_origins", "allowed_hosts", "previous_session_secrets",
-            "browser_connect_origins",
+            "browser_connect_origins", "browser_script_origins", "browser_style_origins", "browser_font_origins",
             "widget_public_index_allowlist",
             "mcp_allowed_hosts", "mcp_allowed_origins",
         }
@@ -1751,7 +1789,7 @@ class PytinctureConfig:
                     _json_or_csv(raw)
                     if definition.name in {
                         "previous_session_secrets",
-                        "browser_connect_origins",
+                        "browser_connect_origins", "browser_script_origins", "browser_style_origins", "browser_font_origins",
                         "widget_public_index_allowlist",
                         "mcp_allowed_hosts",
                         "mcp_allowed_origins",

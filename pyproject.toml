@@ -76,6 +76,7 @@ Source = "https://github.com/pytincture/pytincture"
 
 [project.scripts]
 pytincture-build-appcode = "pytincture.prebuild:main"
+pytincture-build-browser = "pytincture.browser_build:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -88,8 +89,12 @@ include-package-data = false
 
 [tool.setuptools.package-data]
 pytincture = [
+    "browser_templates/*.txt",
+    "browser_vendor/*",
+    "browser_vendor/stdlib/*",
     "frontend/index.html",
     "frontend/pytincture.js",
+    "frontend/browser-runtimes.js",
     "frontend/sw.js",
     "frontend/bff-docs.js",
     "frontend/dist/*",

@@ -307,12 +307,15 @@ def _service_content_security_policy() -> str:
             *BROWSER_CONNECT_ORIGINS,
         )
     )
+    script_sources = " ".join(_PYTINCTURE_CONFIG.browser_script_origins)
+    style_sources = " ".join(_PYTINCTURE_CONFIG.browser_style_origins)
+    font_sources = " ".join(_PYTINCTURE_CONFIG.browser_font_origins)
     return (
         "default-src 'self'; object-src 'none'; base-uri 'self'; "
         "frame-ancestors 'none'; form-action 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; "
-        "style-src 'self' 'unsafe-inline'; "
-        "font-src 'self' data:; "
+        f"script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:{' ' + script_sources if script_sources else ''}; "
+        f"style-src 'self' 'unsafe-inline'{' ' + style_sources if style_sources else ''}; "
+        f"font-src 'self' data:{' ' + font_sources if font_sources else ''}; "
         f"img-src 'self' data: https:; connect-src {connect_sources}; "
         "worker-src 'self' blob:"
     )
@@ -1113,6 +1116,7 @@ _PUBLIC_FRAMEWORK_FILES = frozenset({
     "dist/pytincture.min.js",
     "dist/pytincture.min.js.map",
     "bff-docs.js",
+    "browser-runtimes.js",
     "vendor/swagger-ui/swagger-ui-bundle.js",
     "vendor/swagger-ui/swagger-ui.css",
     "vendor/materialdesignicons/materialdesignicons.css",
@@ -7484,6 +7488,59 @@ async def issue_bff_api_token(request: Request, application: str):
 # ======================
 # The /{application} route
 # ======================
+def _browser_runtime_settings(application, request, entrypoint):
+    source = decode_python_source(entrypoint.content)
+    runtime = _find_app_string_setting(
+        entrypoint.path, ("APP_BROWSER_RUNTIME",), ("browser_runtime",), source_code=source,
+    ) or os.getenv("PYTINCTURE_BROWSER_RUNTIME", "pyodide")
+    selected = request.query_params.get("runtime")
+    if selected is not None:
+        if os.getenv("PYTINCTURE_ALLOW_RUNTIME_SELECTION", "false").lower() not in {"true", "1", "yes", "on"}:
+            raise HTTPException(status_code=400, detail="Browser runtime selection is disabled")
+        runtime = selected
+    if runtime not in {"pyodide", "micropython"}:
+        raise HTTPException(status_code=422, detail="Unknown browser runtime")
+    delivery = _find_app_string_setting(
+        entrypoint.path, ("APP_DELIVERY_MODE",), ("delivery_mode",), source_code=source,
+    ) or os.getenv("PYTINCTURE_DELIVERY_MODE", "legacy-package")
+    if delivery not in {"legacy-package", "portable-bundle"}:
+        raise HTTPException(status_code=422, detail="Unknown application delivery mode")
+    if delivery == "legacy-package":
+        if runtime != "pyodide":
+            raise HTTPException(status_code=422, detail="MicroPython requires delivery_mode=portable-bundle")
+        return runtime, delivery, None
+    manifest_path = _find_app_string_setting(
+        entrypoint.path, ("APP_RUNTIME_MANIFEST",), ("runtime_manifest",), source_code=source,
+    )
+    if not manifest_path:
+        manifest_path = f"browser/{application}/manifest.json"
+        try:
+            read_contained_file(get_modules_path(), manifest_path, max_bytes=1048576)
+        except (OSError, UnsafePath) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Build {manifest_path} for {runtime}, or declare APP_RUNTIME_MANIFEST",
+            ) from exc
+    try:
+        normalized = normalize_relative_path(manifest_path)
+        _resolve_public_asset(application, normalized, get_modules_path())
+        manifest_file = read_contained_file(get_modules_path(), normalized, max_bytes=1048576)
+        manifest = json.loads(manifest_file.content)
+    except (OSError, UnsafePath, ValueError, HTTPException) as exc:
+        raise HTTPException(status_code=422, detail="Runtime manifest must be a valid, explicitly public JSON asset") from exc
+    supported = manifest.get("runtimes") if isinstance(manifest, dict) else None
+    if (not isinstance(manifest, dict) or manifest.get("schema") != 2
+            or not isinstance(supported, list) or not supported
+            or any(not isinstance(name, str) or name not in {"pyodide", "micropython"} for name in supported)
+            or len(set(supported)) != len(supported)):
+        raise HTTPException(status_code=422, detail="Invalid browser runtime manifest")
+    if runtime not in supported:
+        raise HTTPException(status_code=422, detail=f"Application does not support {runtime}")
+    if ENABLE_BFF_REPLAY_TOKENS:
+        raise HTTPException(status_code=422, detail="Portable browser runtimes do not yet support BFF replay tokens")
+    return runtime, delivery, f"/{application}/appcode/{quote(normalized, safe='/._-')}"
+
+
 @app.get("/{application}", response_class=HTMLResponse, operation_id="getMainApp", responses={200: {"description": "HTMLResponse (modified index.html with widgetset)"}, 302: {"description": "RedirectResponse (to login if not authenticated)"}})
 async def main_app_route(response: Response, application: str, request: Request):
     """
@@ -7496,6 +7553,10 @@ async def main_app_route(response: Response, application: str, request: Request)
     except ValueError:
         raise HTTPException(status_code=404, detail="Application not found")
 
+    return_path = f"/{application}"
+    if "runtime" in request.query_params:
+        return_path += "?runtime=" + quote(request.query_params["runtime"], safe="")
+
     # Check session
     try:
         user_session = await _resolve_auth(request)
@@ -7503,7 +7564,7 @@ async def main_app_route(response: Response, application: str, request: Request)
         if auth_error.status_code != 401:
             raise
         _clear_auth_session(request)
-        request.session["return_to"] = f"/{application}"
+        request.session["return_to"] = return_path
         return RedirectResponse(url=f"/{application}/login")
 
     if (
@@ -7513,14 +7574,14 @@ async def main_app_route(response: Response, application: str, request: Request)
         or ENABLE_SAML_AUTH
     ) and not user_session:
         # Not logged in, so remember where they wanted to go:
-        request.session["return_to"] = f"/{application}"
+        request.session["return_to"] = return_path
         # Then send them to Login page:
         return RedirectResponse(url=f"/{application}/login")
 
     try:
         _assert_application_audience(user_session, application)
     except HTTPException:
-        request.session["return_to"] = f"/{application}"
+        request.session["return_to"] = return_path
         return RedirectResponse(url=f"/{application}/login")
 
     # Already logged in, proceed normally
@@ -7531,9 +7592,10 @@ async def main_app_route(response: Response, application: str, request: Request)
         )
     except UnsafePath:
         raise HTTPException(status_code=404, detail="Application not found")
+    browser_runtime, delivery_mode, runtime_manifest_url = _browser_runtime_settings(application, request, secure_entrypoint)
     widgetset = get_widgetset(application, appcode_folder)
     try:
-        widget_asset_manifest = _trusted_widget_manifest(widgetset)
+        widget_asset_manifest = None if runtime_manifest_url else _trusted_widget_manifest(widgetset)
     except WidgetTrustPolicyError as exc:
         logger.error(
             "Application widgetset rejected by deployment trust policy",
@@ -7553,6 +7615,14 @@ async def main_app_route(response: Response, application: str, request: Request)
 
     # Modify the index.html to include the application name and widgetset
     index_html = open(f"{STATIC_PATH}/index.html").read()
+    preload = "" if runtime_manifest_url else (
+        f'<script src="/{safe_application}/frontend/pyodide/0.29.3/full/pyodide.js?uuid={request_uuid}"></script>\n'
+        f'<script src="/{safe_application}/frontend/pyodide/0.29.3/full/pyodide.asm.js?uuid={request_uuid}"></script>'
+    )
+    index_html = index_html.replace("***RUNTIME_PRELOAD***", preload)
+    index_html = index_html.replace("***DELIVERY_MODE_JSON***", _html_script_json(delivery_mode))
+    index_html = index_html.replace("***BROWSER_RUNTIME_JSON***", _html_script_json(browser_runtime))
+    index_html = index_html.replace("***RUNTIME_MANIFEST_JSON***", _html_script_json(runtime_manifest_url))
     index_html = index_html.replace(
         "***APPLICATION_JSON***", _html_script_json(application)
     )
