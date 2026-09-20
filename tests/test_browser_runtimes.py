@@ -14,6 +14,7 @@ def client_for(tmp_path, *, manifest=True, public=True, **settings):
     (tmp_path / "browser/manifest.json").write_text(json.dumps({
         "schema": 1, "runtimes": ["pyodide", "micropython"],
     }))
+    settings.setdefault("delivery_mode", "portable-bundle" if manifest else "legacy-package")
     config = PytinctureConfig(
         modules_path=str(tmp_path),
         environment={"PYTINCTURE_PUBLIC_ASSET_PATHS": '{"sample":["browser/*"]}'} if public else {},
@@ -26,6 +27,7 @@ def test_runtime_configuration_environment_and_validation():
     for default in (PytinctureConfig(), PytinctureConfig.from_env({})):
         assert default.browser_runtime == "pyodide"
         assert default.allow_runtime_selection is False
+        assert default.delivery_mode == "legacy-package"
         assert default.to_environ()["PYTINCTURE_BROWSER_RUNTIME"] == "pyodide"
     config = PytinctureConfig.from_env({
         "PYTINCTURE_BROWSER_RUNTIME": "micropython",
@@ -85,7 +87,7 @@ def test_engine_default_and_application_override(tmp_path):
 
 
 def test_missing_private_and_unsupported_manifests_fail_explicitly(tmp_path):
-    with client_for(tmp_path, manifest=False, browser_runtime='micropython') as client:
+    with client_for(tmp_path, manifest=False, browser_runtime='micropython', delivery_mode='portable-bundle') as client:
         response = client.get('/sample')
         assert response.status_code == 422
         assert 'APP_RUNTIME_MANIFEST' in response.text
@@ -144,13 +146,35 @@ def test_portable_replay_tokens_fail_explicitly(tmp_path):
 
 
 def test_micropython_conventional_bundle_needs_no_source_declaration(tmp_path):
-    with client_for(tmp_path, manifest=False, browser_runtime='micropython', allow_runtime_selection=True) as client:
+    with client_for(tmp_path, manifest=False, browser_runtime='micropython', delivery_mode='portable-bundle', allow_runtime_selection=True) as client:
         (tmp_path / 'browser/sample').mkdir()
-        (tmp_path / 'browser/sample/manifest.json').write_text('{"schema":1,"runtimes":["micropython"]}')
+        (tmp_path / 'browser/sample/manifest.json').write_text('{"schema":1,"runtimes":["pyodide","micropython"]}')
         response = client.get('/sample')
         assert response.status_code == 200
         assert 'runtimeManifestUrl: "/sample/appcode/browser/sample/manifest.json"' in response.text
-        # Opting back into Pyodide retains the original package delivery path.
+        # Changing engine retains the explicitly configured portable delivery mode.
         response = client.get('/sample?runtime=pyodide')
         assert response.status_code == 200
+        assert 'deliveryMode: "portable-bundle"' in response.text
+
+
+def test_manifest_never_selects_delivery(tmp_path):
+    with client_for(tmp_path, delivery_mode="legacy-package", public=False) as client:
+        (tmp_path / 'browser/manifest.json').write_text('broken unused manifest')
+        response = client.get('/sample')
+        assert response.status_code == 200
+        assert 'deliveryMode: "legacy-package"' in response.text
         assert 'runtimeManifestUrl: null' in response.text
+    with client_for(tmp_path, delivery_mode="legacy-package", browser_runtime="micropython") as client:
+        assert client.get('/sample').status_code == 422
+
+
+def test_app_delivery_override_and_production_query_guard(tmp_path):
+    with client_for(tmp_path, delivery_mode="legacy-package") as client:
+        with (tmp_path/'sample.py').open('a') as source:
+            source.write('APP_DELIVERY_MODE = "portable-bundle"\n')
+        assert 'deliveryMode: "portable-bundle"' in client.get('/sample').text
+    with pytest.raises(ValueError, match="delivery_mode"):
+        PytinctureConfig(delivery_mode="auto")
+    with pytest.raises(ValueError, match="development/testing"):
+        PytinctureConfig(allow_runtime_selection=True, canonical_origin="https://app.example.com")

@@ -41,7 +41,7 @@ def main():
             manifest = build_browser_bundle(config, application=name)
             assert 'server-implementation-must-not-be-shipped' not in (manifest.parent / 'sources.json').read_text()
         app = create_app(PytinctureConfig(
-            modules_path=str(root), allow_runtime_selection=True,
+            modules_path=str(root), allow_runtime_selection=True, delivery_mode="portable-bundle",
             environment={
                 'PYTINCTURE_PUBLIC_ASSET_PATHS': '{"warehouse":["browser/warehouse/*"],"widgets":["browser/widgets/*"]}',
                 'ALLOWED_NOAUTH_CLASSCALLS': json.dumps([{

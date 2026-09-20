@@ -230,9 +230,13 @@ class PytinctureConfig:
         "pyodide", "PYTINCTURE_BROWSER_RUNTIME",
         "Default browser engine: pyodide (default) or micropython; alternatives require an app runtime manifest.",
     )
+    delivery_mode: str = _setting(
+        "legacy-package", "PYTINCTURE_DELIVERY_MODE",
+        "Application delivery: legacy-package (default) or portable-bundle; independent of the engine.",
+    )
     allow_runtime_selection: bool = _setting(
         False, "PYTINCTURE_ALLOW_RUNTIME_SELECTION",
-        "Allow the runtime query parameter to choose an engine declared by the application.",
+        "Development/testing only: allow the runtime query parameter; keep false in production.",
     )
     favicon_folder: Optional[str] = _setting(
         None, "PYTINCTURE_FAVICON_FOLDER", "Optional favicon file/directory."
@@ -1014,6 +1018,10 @@ class PytinctureConfig:
     environment: Mapping[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self):
+        if self.delivery_mode not in {"legacy-package", "portable-bundle"}:
+            raise ValueError("delivery_mode must be legacy-package or portable-bundle")
+        if self.allow_runtime_selection and (self.canonical_origin or self.require_readonly_modules_path):
+            raise ValueError("allow_runtime_selection is development/testing only; disable it with production origin or read-only module settings")
         if not isinstance(self.browser_runtime, str) or self.browser_runtime not in {"pyodide", "micropython"}:
             raise ValueError("browser_runtime must be pyodide or micropython")
         for name in (

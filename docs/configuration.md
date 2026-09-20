@@ -207,7 +207,7 @@ The contract test checks every row in this table against the dataclass model.
 | `require_readonly_modules_path` | `PYTINCTURE_REQUIRE_READONLY_MODULES_PATH` | Fail startup when the effective service account can write the module root. |
 | `default_application` | `PYTINCTURE_DEFAULT_APPLICATION` | Optional application for the root redirect. |
 | `browser_runtime` | `PYTINCTURE_BROWSER_RUNTIME` | Default browser engine: pyodide (default) or micropython; alternatives require an app runtime manifest. |
-| `allow_runtime_selection` | `PYTINCTURE_ALLOW_RUNTIME_SELECTION` | Allow the runtime query parameter to choose an engine declared by the application. |
+| `allow_runtime_selection` | `PYTINCTURE_ALLOW_RUNTIME_SELECTION` | Development/testing only: allow the runtime query parameter; keep false in production. |
 | `favicon_folder` | `PYTINCTURE_FAVICON_FOLDER` | Optional favicon file/directory. |
 | `cors_allowed_origins` | `CORS_ALLOWED_ORIGINS` | Allowed browser origins. |
 | `browser_connect_origins` | `PYTINCTURE_BROWSER_CONNECT_ORIGINS` | Exact additional HTTPS/WSS origins permitted by browser connect-src. |
@@ -460,3 +460,5 @@ or `False` on the class to override; `None` restores inheritance. The stricter
 `api_docs_scope="public"` and `api_docs_mode="disabled"` settings still win.
 This only changes documentation visibility; calling methods still requires the
 same session or scoped token permissions.
+
+| `delivery_mode` | `PYTINCTURE_DELIVERY_MODE` | Application delivery: legacy-package (default) or portable-bundle; independent of the engine. |

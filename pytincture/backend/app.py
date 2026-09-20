@@ -7497,12 +7497,19 @@ def _browser_runtime_settings(application, request, entrypoint):
         runtime = selected
     if runtime not in {"pyodide", "micropython"}:
         raise HTTPException(status_code=422, detail="Unknown browser runtime")
+    delivery = _find_app_string_setting(
+        entrypoint.path, ("APP_DELIVERY_MODE",), ("delivery_mode",), source_code=source,
+    ) or os.getenv("PYTINCTURE_DELIVERY_MODE", "legacy-package")
+    if delivery not in {"legacy-package", "portable-bundle"}:
+        raise HTTPException(status_code=422, detail="Unknown application delivery mode")
+    if delivery == "legacy-package":
+        if runtime != "pyodide":
+            raise HTTPException(status_code=422, detail="MicroPython requires delivery_mode=portable-bundle")
+        return runtime, delivery, None
     manifest_path = _find_app_string_setting(
         entrypoint.path, ("APP_RUNTIME_MANIFEST",), ("runtime_manifest",), source_code=source,
     )
     if not manifest_path:
-        if runtime == "pyodide":
-            return runtime, None
         manifest_path = f"browser/{application}/manifest.json"
         try:
             read_contained_file(get_modules_path(), manifest_path, max_bytes=65536)
@@ -7528,7 +7535,7 @@ def _browser_runtime_settings(application, request, entrypoint):
         raise HTTPException(status_code=422, detail=f"Application does not support {runtime}")
     if ENABLE_BFF_REPLAY_TOKENS:
         raise HTTPException(status_code=422, detail="Portable browser runtimes do not yet support BFF replay tokens")
-    return runtime, f"/{application}/appcode/{quote(normalized, safe='/._-')}"
+    return runtime, delivery, f"/{application}/appcode/{quote(normalized, safe='/._-')}"
 
 
 @app.get("/{application}", response_class=HTMLResponse, operation_id="getMainApp", responses={200: {"description": "HTMLResponse (modified index.html with widgetset)"}, 302: {"description": "RedirectResponse (to login if not authenticated)"}})
@@ -7582,7 +7589,7 @@ async def main_app_route(response: Response, application: str, request: Request)
         )
     except UnsafePath:
         raise HTTPException(status_code=404, detail="Application not found")
-    browser_runtime, runtime_manifest_url = _browser_runtime_settings(application, request, secure_entrypoint)
+    browser_runtime, delivery_mode, runtime_manifest_url = _browser_runtime_settings(application, request, secure_entrypoint)
     widgetset = get_widgetset(application, appcode_folder)
     try:
         widget_asset_manifest = None if runtime_manifest_url else _trusted_widget_manifest(widgetset)
@@ -7610,6 +7617,7 @@ async def main_app_route(response: Response, application: str, request: Request)
         f'<script src="/{safe_application}/frontend/pyodide/0.29.3/full/pyodide.asm.js?uuid={request_uuid}"></script>'
     )
     index_html = index_html.replace("***RUNTIME_PRELOAD***", preload)
+    index_html = index_html.replace("***DELIVERY_MODE_JSON***", _html_script_json(delivery_mode))
     index_html = index_html.replace("***BROWSER_RUNTIME_JSON***", _html_script_json(browser_runtime))
     index_html = index_html.replace("***RUNTIME_MANIFEST_JSON***", _html_script_json(runtime_manifest_url))
     index_html = index_html.replace(

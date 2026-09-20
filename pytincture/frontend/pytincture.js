@@ -42,6 +42,7 @@ const CSRF_COOKIE_NAMES = Object.freeze([
 
 const DEFAULT_CONFIG = {
     runtime: "pyodide",
+    deliveryMode: "legacy-package",
     runtimeManifestUrl: null,
     application: null,
     entrypoint: null,
@@ -1465,7 +1466,12 @@ const DEFAULT_RUNTIME_OPERATIONS = Object.freeze({
 });
 
 async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_OPERATIONS) {
-    if (config.runtimeManifestUrl || (config.runtime && config.runtime !== "pyodide")) {
+    const delivery = config.deliveryMode || "legacy-package";
+    if (!["legacy-package", "portable-bundle"].includes(delivery)) throw new Error("Unknown application delivery mode");
+    if (delivery === "legacy-package" && config.runtime && config.runtime !== "pyodide") {
+        throw new Error("MicroPython requires deliveryMode=portable-bundle");
+    }
+    if (delivery === "portable-bundle") {
         const handle = await runLifecycleStage(
             config, LIFECYCLE_STAGES.ENTRYPOINT_EXECUTION,
             config.runtimeManifestUrl,
