@@ -4,7 +4,9 @@ The complete Book Library example and Wawesome Chat passed automated Playwright
 Chromium tests in all three supported configurations. The final matrix used new
 checkouts from pinned public commits, hash-checked integration patches, rebuilt
 widget wheels, a new hash-locked Python environment and a pinned Whisper model.
-The framework branch remains `feat/browser-runtime-choice`; rc8 is unreleased.
+This matrix qualified `feat/browser-runtime-choice` before its merge into
+`main` and the subsequent rc8 release. Publication evidence is tracked in
+[`release-qualification.md`](release-qualification.md).
 
 | Configuration | Book Library | Wawesome Chat, including voice |
 |---|---|---|

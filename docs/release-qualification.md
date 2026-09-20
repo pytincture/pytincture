@@ -7,10 +7,36 @@ every gate below has durable evidence.
 
 ## Current decision: NO-GO pending observation and edge evidence
 
-`1.0.0rc8` is the current development version. It has not been tagged, released,
-or published. Additional changes may land on `main` before rc8 is released;
-release qualification and publication will be performed separately.
-The published-candidate evidence below continues to describe rc7 and earlier.
+`1.0.0rc8` was published on 2026-09-20 from
+`bb59bd2b73fc356c13a2ed4ae36bb06acc66f047`. Signed-tag qualification, complete
+release CI and artifact attestation passed. PyPI publication succeeded, public
+wheel/sdist bytes match the retained hashes, and a fresh Python 3.13 installation
+from the public index imports Pytincture and reports `1.0.0rc8`.
+
+The full pinned Book Library and Wawesome Chat conformance matrix passed for
+legacy Pyodide, portable Pyodide and portable MicroPython, including voice.
+Portable delivery is opt-in; legacy Pyodide remains the default. Companion app
+and widget integrations are retained as conformance patches rather than separately
+published packages. See [the validation report](browser-runtime-validation.md)
+for coverage and boundaries. These results do not replace production-edge or
+observation-scope review, and the existing observation dates remain unchanged.
+
+Published rc8 evidence:
+
+- [Signed-tag qualification](https://github.com/pytincture/pytincture/actions/runs/35510250996).
+- [Release CI, full-app conformance and attestations](https://github.com/pytincture/pytincture/actions/runs/35510694984).
+- [Successful protected PyPI publication](https://github.com/pytincture/pytincture/actions/runs/35511220297).
+- [Release artifacts and SHA256SUMS.json](https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc8).
+- [Published Python package](https://pypi.org/project/pytincture/1.0.0rc8/).
+- [npm publication awaiting independent environment approval](https://github.com/pytincture/pytincture/actions/runs/35511220284).
+
+After publication, GitHub's dependency-graph update reported advisories against
+LiteLLM and python-dotenv pinned in `tests/conformance/requirements.txt`. Neither
+package is installed by the released framework's default dependencies, as checked
+in the fresh public-index installation. The separate test environment still needs
+dependency remediation and a repeated application matrix; the passing framework
+dependency audit must not be interpreted as covering that conformance lockfile.
+No published artifact was changed or replaced.
 
 `1.0.0rc7` was published on 2026-09-18 after signed-tag qualification and all
 23 framework release CI jobs passed. Its exact artifacts and hashes are
@@ -29,8 +55,8 @@ Published rc7 evidence:
 - [Release artifacts and SHA256SUMS.json](https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc7).
 - [Published Python package](https://pypi.org/project/pytincture/1.0.0rc7/).
 
-Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc7`, and rc4
-through rc7 are published on PyPI. Rc7 is the latest published candidate.
+Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc8`, and rc4
+through rc8 are published on PyPI. Rc8 is the latest published candidate.
 The previous rc6 evidence remains retained below. Its
 self-hosted icon asset, browser, BFF, authentication, streaming, cache, and
 capacity coverage passed the complete acceptance matrix. PyPI deliberately
