@@ -143,3 +143,13 @@ def test_source_cannot_bypass_bff_discovery_through_resource_settings(tmp_path):
         (tmp_path/'private.py').write_text('private_data = "server-only fixture"\n')
         with pytest.raises(ValueError,match='Python source or bytecode'):
             build_browser_bundle(config)
+
+
+def test_extensionless_css_import_requires_style_origin_without_font_permission(tmp_path):
+    config = project(tmp_path,'async def main(): pass\n',
+                     'assets=["theme.css"]\nstyles=["theme.css"]\n[tool.pytincture.browser.external-origins]\nstyle=["https://styles.example"]\n')
+    (tmp_path/'theme.css').write_text('@import url("https://styles.example/theme");')
+    manifest = build_browser_bundle(config)
+    report = json.loads((manifest.parent/'compatibility.json').read_text())
+    origins = report['runtimes']['pyodide']['asset_audit']['required_origins']
+    assert origins['style']==['https://styles.example'] and origins['font']==[]

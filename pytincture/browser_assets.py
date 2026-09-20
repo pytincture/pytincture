@@ -52,7 +52,8 @@ def audit_assets(artifacts, external_origins=None):
             for match in re.finditer(r'url\(\s*[\'"]?([^\)\'"\s]+)[\'"]?\s*\)', text, re.I):
                 value = match.group(1)
                 extension = posixpath.splitext(urlsplit(value).path)[1].lower()
-                kind = 'font' if extension in {'.woff', '.woff2', '.ttf', '.otf', '.eot'} else 'style' if extension == '.css' else 'image'
+                is_import = re.search(r'@import\s*$', text[:match.start()], re.I) is not None
+                kind = 'style' if is_import or extension == '.css' else 'font' if extension in {'.woff', '.woff2', '.ttf', '.otf', '.eot'} else 'image'
                 dependency(name, value, kind)
             for match in re.finditer(r'@import\s+[\'"]([^\'"]+)[\'"]', text, re.I):
                 dependency(name, match.group(1), 'style')
