@@ -4,6 +4,7 @@ APP_ENTRYPOINT = 'main'
 
 import js
 import asyncio
+from importlib import resources
 from asyncio import ensure_future
 from pyodide.ffi import create_proxy
 from api.catalog import Catalog
@@ -18,6 +19,8 @@ async def heartbeat():
 
 
 async def main():
+    package_data = resources.files('components') / 'logo.bin'
+    assert package_data.read_bytes() == b'\x00\xffportable-resource'
     service = Catalog()
     result = await service.lookup_async('part-7')
     title = js.document.createElement('h1')

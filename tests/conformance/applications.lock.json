@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "source_date_epoch": 1789776000,
+  "repositories": {
+    "example": {
+      "url": "https://github.com/pytincture/pytincture_example.git",
+      "commit": "0971ee3ba7087dc310003c1d3812b92331c7fe95",
+      "patch": "example.patch",
+      "patch_sha256": "efa5729cda8a9fbe3241699c4e23bdfca316c61506f79f2fa9259a91f8b57969"
+    },
+    "chat": {
+      "url": "https://github.com/WAwesome-AI/wAwesomeChat.git",
+      "commit": "23085c7b58b539ef270200e35c84c33cba946a69",
+      "patch": "chat.patch",
+      "patch_sha256": "917725c77932b677d79972cba5611658b4983e9ba04ad9bf904941991441f7f7"
+    },
+    "wapyt": {
+      "url": "https://github.com/WAwesome-AI/wa_pytincture_widgetset.git",
+      "commit": "e614507cdda90324e39f93b6c93e6d7410d48842",
+      "patch": "wapyt.patch",
+      "patch_sha256": "1c6e9c04c9e12ae078bc3efc3d1e79ff4706fb4eea2c59f1eeb176f5ac4ecc10"
+    },
+    "dhxpyt": {
+      "url": "https://github.com/pytincture/dhx_pytincture_widgetset.git",
+      "commit": "349d6dc3d2da28ec6a1ac8aa623072cd4fbc9822"
+    }
+  },
+  "voice_model": {
+    "repository": "Systran/faster-whisper-base.en",
+    "revision": "3d3d5dee26484f91867d81cb899cfcf72b96be6c"
+  }
+}

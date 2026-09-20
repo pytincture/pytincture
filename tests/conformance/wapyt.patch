@@ -1,0 +1,280 @@
+diff --git a/README.md b/README.md
+index be94e9a..9aab373 100644
+--- a/README.md
++++ b/README.md
+@@ -74,3 +74,13 @@ wapyt/
+ ## License
+ 
+ MIT – see `pyproject.toml` for details.
++
++### Portable browser runtime validation
++
++The local `test/browser-runtimes` branch includes MicroPython compatibility fixes:
++use the browser's existing task scheduler, close stream iterators on exit,
++restore saved themes, keep clipboard click targets before awaiting promises, and
++run Python artifact previews through `pytinctureBrowserRuntime.captureOutput`
++when provided by pytincture. Original Pyodide pages retain the legacy fallback.
++After changing JavaScript, regenerate `wapyt/pytincture-assets.json` with
++`python scripts/generate_assets_manifest.py` before building the wheel.
+diff --git a/scripts/generate_assets_manifest.py b/scripts/generate_assets_manifest.py
+index 5bbd9da..51d26b5 100644
+--- a/scripts/generate_assets_manifest.py
++++ b/scripts/generate_assets_manifest.py
+@@ -75,6 +75,7 @@ def main() -> int:
+     manifest = {
+         "schema": 1,
+         "package": PACKAGE,
++        "asset_loader": {"module": "wapyt._runtime", "function": "use_preloaded_assets"},
+         "version": project_version(root),
+         "assets": assets,
+     }
+diff --git a/tests/test_asset_ownership.py b/tests/test_asset_ownership.py
+new file mode 100644
+index 0000000..5cf501e
+--- /dev/null
++++ b/tests/test_asset_ownership.py
+@@ -0,0 +1,35 @@
++"""Portable ownership must preserve the legacy self-loader and avoid reexecution."""
++from types import SimpleNamespace
++import pytest
++from wapyt import _runtime
++
++
++def test_preloaded_assets_are_adopted_and_never_force_reloaded(monkeypatch):
++    calls = []
++    monkeypatch.setattr(_runtime, '_portable_assets_owner', False)
++    monkeypatch.setattr(_runtime, '_assets_loaded', False)
++    monkeypatch.setattr(_runtime, 'js', SimpleNamespace(
++        pytinctureAssets=SimpleNamespace(isPackageReady=lambda name:name=='wapyt'),
++        wapyt=SimpleNamespace(Chat=object()), eval=lambda source:calls.append(source)))
++    _runtime.use_preloaded_assets()
++    _runtime.require_js('Chat')
++    _runtime._load_assets(force=True)
++    with pytest.raises(RuntimeError, match='missing widget component'):
++        _runtime.require_js('Missing')
++    assert not calls
++
++
++def test_hook_rejects_partial_assets_and_legacy_can_still_load(monkeypatch):
++    monkeypatch.setattr(_runtime, '_portable_assets_owner', False)
++    monkeypatch.setattr(_runtime, '_assets_loaded', False)
++    js = SimpleNamespace(wapyt=SimpleNamespace())
++    monkeypatch.setattr(_runtime, 'js', js)
++    with pytest.raises(RuntimeError, match='not finished'):
++        _runtime.use_preloaded_assets()
++    calls = []
++    def load(force=False):
++        calls.append(force)
++        js.wapyt.Chat = object()
++    monkeypatch.setattr(_runtime, '_load_assets', load)
++    _runtime.require_js('Chat')
++    assert calls == [False]
+diff --git a/wapyt/_runtime.py b/wapyt/_runtime.py
+index db82f08..2ead507 100644
+--- a/wapyt/_runtime.py
++++ b/wapyt/_runtime.py
+@@ -28,6 +28,17 @@ except Exception:  # pragma: no cover
+     _create_proxy = _missing_create_proxy  # type: ignore
+ 
+ _assets_loaded = False
++_portable_assets_owner = False
++
++
++def use_preloaded_assets() -> None:
++    """Pytincture's portable loader calls this only after verifying/loading the manifest."""
++    global _assets_loaded, _portable_assets_owner
++    registry = getattr(js, 'pytinctureAssets', None) if js is not None else None
++    if registry is None or not registry.isPackageReady('wapyt'):
++        raise RuntimeError('The portable widget asset manifest has not finished loading')
++    _assets_loaded = True
++    _portable_assets_owner = True
+ 
+ 
+ def create_proxy(callback):  # type: ignore
+@@ -54,6 +65,8 @@ def _load_assets(force: bool = False) -> None:
+         force: When ``True`` the assets are reloaded even if we previously ran.
+     """
+     global _assets_loaded
++    if _portable_assets_owner:
++        return
+     if js is None:
+         return
+     if _assets_loaded and not force:
+@@ -106,6 +119,8 @@ def require_js(component: str) -> None:
+     # offline fallback for when nothing else has injected the bundle.
+     if _component_ready(component):
+         return
++    if _portable_assets_owner:
++        raise RuntimeError(f"The portable asset manifest is missing widget component '{component}'")
+     _load_assets()
+     if not _component_ready(component):
+         _load_assets(force=True)
+diff --git a/wapyt/assets/chat.js b/wapyt/assets/chat.js
+index b076703..f2d5dd6 100644
+--- a/wapyt/assets/chat.js
++++ b/wapyt/assets/chat.js
+@@ -223,6 +223,10 @@
+ 
+     let pyodideReady = null;
+     function ensurePyodide() {
++        const selected = globalThis.pytinctureBrowserRuntime;
++        if (selected && selected.runtime && typeof selected.runtime.runPython === "function") {
++            return Promise.resolve(selected.runtime);
++        }
+         if (pyodideReady) {
+             return pyodideReady;
+         }
+@@ -649,10 +653,12 @@
+             this.isArtifactResizing = false;
+             this.artifactPanelWidth = localStorage.getItem(this._storageKeys.artifactPanelWidth) || (this.options.artifactPanelWidth ? `${this.options.artifactPanelWidth}px` : "40%");
+             this.sidebarCollapsed = localStorage.getItem(this._storageKeys.sidebarCollapsed) === "true";
+-            this.isDarkMode = localStorage.getItem(this._storageKeys.isDarkMode) === "true";
++            const savedDarkMode = localStorage.getItem(this._storageKeys.isDarkMode);
+             const hostTheme = this._detectHostTheme();
+-            if (hostTheme) {
+-                this.isDarkMode = hostTheme === "dark";
++            this.isDarkMode = savedDarkMode === null ? hostTheme === "dark" : savedDarkMode === "true";
++            if (savedDarkMode !== null && document.documentElement) {
++                // Restore the user's choice before subscribing to host changes.
++                document.documentElement.setAttribute("data-wapyt-theme", this.isDarkMode ? "dark" : "light");
+             }
+             this._persistedDarkMode = this.isDarkMode;
+             this._themeObserver = null;
+@@ -3297,36 +3303,39 @@
+ 
+             showHtml("<h3>Python Execution Output</h3><pre>Running...</pre>");
+ 
+-            const encodedSource = encodeBase64Utf8(source || "");
+-
+-            ensurePyodide().then((pyodide) => {
+-                try {
+-                    if (!pyodide.__wapytHelperInstalled) {
+-                        pyodide.runPython(`
+-import base64, io, sys, textwrap
+-
+-def _wapyt_run_py_artifact(code_b64: str) -> str:
+-    code = base64.b64decode(code_b64).decode("utf-8")
++            const lines = String(source || "").replace(/\t/g, "        ").split("\n");
++            const nonempty = lines.filter(line => line.trim());
++            const indent = nonempty.length ? Math.min(...nonempty.map(line => line.match(/^ */)[0].length)) : 0;
++            const code = lines.map(line => line.slice(indent)).join("\n");
++            const selected = globalThis.pytinctureBrowserRuntime;
++            const execution = selected && typeof selected.captureOutput === "function"
++                ? Promise.resolve().then(() => selected.captureOutput(code))
++                : ensurePyodide().then((pyodide) => {
++                    pyodide.globals.set("_wapyt_artifact_source", code);
++                    try {
++                        return pyodide.runPython(`
++import io, sys
++
++def _wapyt_run_py_artifact(code):
+     buffer = io.StringIO()
+     old_stdout = sys.stdout
+     sys.stdout = buffer
+     try:
+-        exec(textwrap.dedent(code), {})
++        exec(code, {})
+     finally:
+         sys.stdout = old_stdout
+     return buffer.getvalue()
++_wapyt_run_py_artifact(_wapyt_artifact_source)
+                         `);
+-                        pyodide.__wapytHelperInstalled = true;
++                    } finally {
++                        pyodide.runPython("del _wapyt_artifact_source");
+                     }
+-                    const renderedResult = pyodide.runPython(`_wapyt_run_py_artifact("${encodedSource}")`);
+-                    const withoutAnsi = (renderedResult || "").replace(/\u001b\[[0-9;]*[A-Za-z]/g, "");
+-                    const normalized = withoutAnsi.replace(/\r/g, "\n");
+-                    const hasVisible = /[\S]/.test(normalized);
+-                    const displayResult = hasVisible ? normalized : (withoutAnsi.length ? normalized : "(no output)");
+-                    showHtml(`<h3>Python Execution Output</h3><pre>${escapeHtml(String(displayResult))}</pre>`);
+-                } catch (executionError) {
+-                    showHtml(`<h3>Python Execution Output</h3><pre style="color:#fca5a5;">${escapeHtml(String(executionError))}</pre>`);
+-                }
++                });
++            execution.then((renderedResult) => {
++                const withoutAnsi = (renderedResult || "").replace(/\u001b\[[0-9;]*[A-Za-z]/g, "");
++                const normalized = withoutAnsi.replace(/\r/g, "\n");
++                const displayResult = normalized || "(no output)";
++                showHtml(`<h3>Python Execution Output</h3><pre>${escapeHtml(String(displayResult))}</pre>`);
+             }).catch((error) => {
+                 showHtml(`<h3>Python Execution Output</h3><pre style="color:#fca5a5;">${escapeHtml(String(error))}</pre>`);
+             });
+@@ -3353,8 +3362,8 @@ def _wapyt_run_py_artifact(code_b64: str) -> str:
+ 
+         copyArtifactCode(event) {
+             if (!this.currentArtifact) return;
++            const btn = event.currentTarget;
+             navigator.clipboard.writeText(this.currentArtifact.content).then(() => {
+-                const btn = event.currentTarget;
+                 const original = btn.textContent;
+                 btn.textContent = "Copied!";
+                 setTimeout(() => { btn.textContent = original; }, 2000);
+diff --git a/wapyt/chat/chat.py b/wapyt/chat/chat.py
+index 13aa69a..90dbdc8 100644
+--- a/wapyt/chat/chat.py
++++ b/wapyt/chat/chat.py
+@@ -456,6 +456,9 @@ class Chat:
+                 else:
+                     if finish:
+                         self.finish_stream(response_id)
++                finally:
++                    if hasattr(stream, "aclose"):
++                        await stream.aclose()
+ 
+             self._run_async(runner())
+             return
+@@ -491,6 +494,10 @@ class Chat:
+         `ensure_future` schedules onto the existing loop and lets the browser
+         drive it.
+         """
++        if js is not None:
++            asyncio.ensure_future(coro)
++            return
++
+         try:
+             loop = asyncio.get_running_loop()
+         except RuntimeError:
+diff --git a/wapyt/pytincture-assets.json b/wapyt/pytincture-assets.json
+index 04f4890..1bb9c23 100644
+--- a/wapyt/pytincture-assets.json
++++ b/wapyt/pytincture-assets.json
+@@ -1,6 +1,10 @@
+ {
+   "schema": 1,
+   "package": "wapyt",
++  "asset_loader": {
++    "module": "wapyt._runtime",
++    "function": "use_preloaded_assets"
++  },
+   "version": "0.1.0",
+   "assets": [
+     {
+@@ -11,7 +15,7 @@
+     {
+       "path": "wapyt/assets/icons.js",
+       "type": "javascript",
+-      "sha256": "53a8ec36156d07fb5515eda8f8bc202bdebb10366d1826be306ba3dbbceee85e"
++      "sha256": "c6b641553933be2ebf8dfd652feb9d89338da24d1cbaf78aeef11f4e0c7b3f35"
+     },
+     {
+       "path": "wapyt/assets/layout.js",
+@@ -36,7 +40,7 @@
+     {
+       "path": "wapyt/assets/cardpanel.js",
+       "type": "javascript",
+-      "sha256": "bfda7e1e671307011714c53f2846a185970a62d12200186d76ad4f763fc21e1d"
++      "sha256": "a018ee748810cf2177728ff6dd2d22d1843c07c14d9fa4d2f20f23743262295f"
+     },
+     {
+       "path": "wapyt/assets/resourceboard.js",
+@@ -46,7 +50,7 @@
+     {
+       "path": "wapyt/assets/chat.js",
+       "type": "javascript",
+-      "sha256": "a47793c10d6e531e8678c24661cb1f3e7c6d7d8bd3529092afd081f4c8bb8875"
++      "sha256": "4680408cd8a6814e0b27c4bff8f7c3268efa2a433436c7c02fc2619621de23db"
+     }
+   ]
+ }

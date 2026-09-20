@@ -74,10 +74,58 @@ jobs:
           uv sync --frozen --extra dev
           uv pip install --python .venv/bin/python playwright==1.63.0 "dhxpyt @ git+https://github.com/pytincture/dhx_pytincture_widgetset.git@349d6dc3d2da28ec6a1ac8aa623072cd4fbc9822"
           .venv/bin/python -m playwright install --with-deps chromium
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Install locked editor fixture
+        working-directory: pytincture/frontend
+        run: npm ci --ignore-scripts
       - name: Build and exercise independent applications in both interpreters
         env:
           PYTHONPATH: .
         run: .venv/bin/python tests/browser_build_smoke.py
+
+      - name: Upload portable conformance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: portable-application-conformance
+          path: validation-results/conformance-fixtures
+          if-no-files-found: warn
+
+  real-application-conformance:
+    name: Full application delivery and runtime parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Set up locked dependency installer
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.8.0"
+      - name: Install hash-locked conformance environment
+        run: |
+          uv venv .venv
+          uv pip sync --python .venv/bin/python --require-hashes tests/conformance/requirements.txt
+          uv pip install --python .venv/bin/python --no-deps .
+          .venv/bin/python -m playwright install --with-deps chromium
+      - name: Prepare pinned applications, widgets and speech model
+        run: .venv/bin/python tests/prepare_application_conformance.py --destination "$RUNNER_TEMP/pytincture-apps"
+      - name: Validate legacy Pyodide, portable Pyodide and MicroPython
+        run: .venv/bin/python tests/run_application_conformance.py --prepared "$RUNNER_TEMP/pytincture-apps/prepared.json"
+      - name: Upload full application conformance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: full-application-runtime-conformance
+          path: validation-results/full-apps
+          if-no-files-found: warn
 
   python-package:
     name: Validate release artifacts
@@ -920,6 +968,7 @@ jobs:
     needs:
       - python-tests
       - micropython-browser
+      - real-application-conformance
       - python-package
       - optional-extras
       - upgrade-rollback

@@ -1,0 +1,251 @@
+diff --git a/.gitignore b/.gitignore
+index 4d1728b..2529dca 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -11,3 +11,6 @@ load-results*.json
+ rc1-observation*.json
+ observation-input/
+ build/
++
++# Rebuilt client-only runtime bundles
++example/browser/
+diff --git a/README.md b/README.md
+index d642592..63848f7 100644
+--- a/README.md
++++ b/README.md
+@@ -107,3 +107,21 @@ and is retained as the `pytincture-rc1-observation` workflow artifact.
+ This is application observation evidence, not automatic release approval. A
+ reviewer must link an accepted run from the Pytincture qualification record;
+ failed observations or discovered P0/P1 defects remain release blockers.
++
++## Runtime validation checkout
++
++This local branch compares the complete app under the shared MicroPython and
++Pyodide browser bundle. With the pytincture feature branch and latest dhxpyt
++installed, run:
++
++```sh
++python -m pytincture.browser_build --config pyproject.toml
++python tests/runtime_server.py
++python tests/ui_smoke.py --base-url http://127.0.0.1:8095 --runtime micropython
++python tests/ui_smoke.py --base-url http://127.0.0.1:8095 --runtime pyodide
++python tests/browser_interactions.py
++```
++
++The launcher uses its own database; it does not modify the existing service's
++books. Open `http://127.0.0.1:8095/py_ui?runtime=micropython` with the documented
++demo credentials. The tests cover the real UI and restore edited book records.
+diff --git a/example/py_ui.py b/example/py_ui.py
+index eea63ff..ded76d1 100644
+--- a/example/py_ui.py
++++ b/example/py_ui.py
+@@ -3,6 +3,7 @@ Example application using MainWindow subclass and layout management
+ with a collapsible sidebar, content area, a Tabbar containing a grid, chart,
+ calendar, and form.
+ """
++APP_RUNTIME_MANIFEST = 'browser/py_ui/manifest.json'
+ import asyncio
+ import json
+ 
+diff --git a/pyproject.toml b/pyproject.toml
+index 5648ee1..1660547 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -31,3 +31,7 @@ Homepage = "https://github.com/pytincture/pytincture_example"
+ 
+ [tool.setuptools.packages]
+ find = {}
++
++[tool.pytincture.browser]
++modules-path = "example"
++application = "py_ui"
+diff --git a/tests/browser_interactions.py b/tests/browser_interactions.py
+new file mode 100644
+index 0000000..d092a75
+--- /dev/null
++++ b/tests/browser_interactions.py
+@@ -0,0 +1,85 @@
++"""Exercise full-app interactions without changing stored book records."""
++import argparse
++import json
++import re
++from pathlib import Path
++from playwright.sync_api import expect, sync_playwright
++
++BASE = 'http://127.0.0.1:8095'
++parser = argparse.ArgumentParser(description=__doc__)
++parser.add_argument('--runtime',choices=['pyodide','micropython'],action='append')
++parser.add_argument('--output',type=Path,default=Path.home()/'Library/Caches/pytincture-runtime-choice/latest-example-interactions')
++args = parser.parse_args()
++OUT = args.output
++OUT.mkdir(parents=True,exist_ok=True)
++results = {}
++
++with sync_playwright() as pw:
++    browser = pw.chromium.launch()
++    context = browser.new_context(viewport={'width':1400,'height':900})
++    response = context.request.get(BASE+'/py_ui/login')
++    csrf = re.search(r'name="login_csrf_token" value="([^"]+)"',response.text())[1]
++    assert context.request.post(BASE+'/py_ui/auth/user',form={
++        'email':'demo@example.com','password':'demo-password','login_csrf_token':csrf,
++    },max_redirects=0).status == 303
++    for runtime in args.runtime or ('micropython','pyodide'):
++        page = context.new_page()
++        errors = []
++        requests = []
++        page.on('pageerror',lambda error:errors.append(str(error)))
++        page.on('console',lambda message:errors.append(message.text) if message.type=='error' else None)
++        page.on('request',lambda request:requests.append(request.url))
++        page.goto(BASE+'/py_ui?runtime='+runtime)
++        page.locator('#pytincture-loading').wait_for(state='hidden',timeout=180000)
++        page.locator('.dhx_grid-row').first.wait_for(timeout=30000)
++        assert page.locator('body').get_attribute('data-browser-runtime') == runtime
++        for widget in ('.dhx_grid','.dhx_toolbar','.dhx_sidebar','.dhx_tabbar'):
++            assert page.locator(widget).count() == 1
++
++        sidebar = page.locator('.dhx_sidebar')
++        width = sidebar.bounding_box()['width']
++        page.locator('[data-dhx-id="hamburger"]').click()
++        page.wait_for_function('(width)=>document.querySelector(".dhx_sidebar").getBoundingClientRect().width<width',arg=width)
++        page.locator('[data-dhx-id="hamburger"]').click()
++        page.wait_for_function('(width)=>document.querySelector(".dhx_sidebar").getBoundingClientRect().width===width',arg=width)
++
++        row = page.locator('.dhx_grid-row').nth(2)
++        title = row.locator('.dhx_grid-cell').first.inner_text().strip()
++        row.click()
++        page.get_by_text('FORM VIEW').click()
++        assert page.locator('.dhx_form input').first.input_value() == title
++
++        page.get_by_text('CALENDAR VIEW').click()
++        calendar = page.locator('.dhx_calendar:visible')
++        month = calendar.locator('.dhx_calendar-action__show-month').inner_text()
++        calendar.get_by_role('button',name='next',exact=True).click()
++        expect(calendar.locator('.dhx_calendar-action__show-month')).not_to_have_text(month)
++        day = calendar.locator('.dhx_calendar-day:not(.dhx_calendar-day--muffled)').filter(has_text=re.compile('^15$'))
++        day.click()
++        expect(day).to_have_attribute('aria-pressed', 'true')
++
++        page.get_by_text('GRID VIEW').click()
++        row.locator('.dhx_grid-cell').first.click(button='right')
++        try:
++            page.locator('.dhx_menu [data-dhx-id="edit"]').click(timeout=5000)
++        except Exception:
++            print('Context menu failure:', errors, page.locator('.dhx_menu').all_inner_texts(), flush=True)
++            page.screenshot(path=str(OUT/f'{runtime}-failure.png'))
++            raise
++        page.locator('.dhx_window input').first.wait_for()
++        assert page.locator('.dhx_window input').first.input_value() == title
++        page.locator('.dhx_window [data-dhx-id="close"]').click()
++        page.locator('.dhx_window').wait_for(state='detached')
++        assert not errors, errors
++        loaded_pyodide = any('/pyodide/' in url for url in requests)
++        assert loaded_pyodide == (runtime == 'pyodide')
++        page.screenshot(path=str(OUT/f'{runtime}-full-app.png'))
++        results[runtime] = {
++            'full_app':True,'widgets_built_once':True,'sidebar_toggle':True,
++            'form_mirrors_selection':True,'calendar_navigation_and_selection':True,
++            'context_menu_edit':True,'loaded_pyodide':loaded_pyodide,'console_errors':errors,
++        }
++        print(runtime,results[runtime],flush=True)
++        page.close()
++    browser.close()
++(OUT/'interactions.json').write_text(json.dumps(results,indent=2)+'\n')
+diff --git a/tests/runtime_server.py b/tests/runtime_server.py
+new file mode 100644
+index 0000000..ad82131
+--- /dev/null
++++ b/tests/runtime_server.py
+@@ -0,0 +1,25 @@
++"""Authenticated isolated service for local full-application runtime validation."""
++import os
++import secrets
++import sys
++from dataclasses import replace
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[1]
++CACHE = Path.home()/'Library/Caches/pytincture-runtime-choice'
++CACHE.mkdir(parents=True, exist_ok=True)
++os.environ['PYTINCTURE_EXAMPLE_DB'] = str(CACHE/'latest-books.db')
++os.environ['PYTINCTURE_EXAMPLE_SESSION_SECRET'] = secrets.token_urlsafe(48)
++sys.path.insert(0, str(ROOT/'example'))
++import run
++from pytincture import create_app
++
++app = create_app(replace(
++    run.app.state.pytincture_config, allow_runtime_selection=True,
++    delivery_mode=os.getenv("PYTINCTURE_TEST_DELIVERY_MODE", "portable-bundle"),
++    environment={**run.app.state.pytincture_config.environment,
++                 'PYTINCTURE_PUBLIC_ASSET_PATHS':'{"py_ui":["browser/py_ui/*"]}'},
++))
++if __name__ == '__main__':
++    import uvicorn
++    uvicorn.run(app,host='127.0.0.1',port=8095)
+diff --git a/tests/ui_smoke.py b/tests/ui_smoke.py
+index 61c5861..73bf6f4 100644
+--- a/tests/ui_smoke.py
++++ b/tests/ui_smoke.py
+@@ -71,10 +71,15 @@ def wait_for_service(timeout: float = 30.0) -> dict:
+ 
+ 
+ def main() -> int:
++    global BASE_URL
+     parser = argparse.ArgumentParser()
+     parser.add_argument("--headed", action="store_true", help="show the browser")
+     parser.add_argument("--screenshot-dir", type=Path, default=None)
++    parser.add_argument("--base-url", default=BASE_URL)
++    parser.add_argument("--runtime", choices=("pyodide", "micropython"), default=None)
+     args = parser.parse_args()
++    BASE_URL = args.base_url.rstrip("/")
++    app_url = f"{BASE_URL}/py_ui" + (f"?runtime={args.runtime}" if args.runtime else "")
+ 
+     health = wait_for_service()
+     print(f"service healthy: {health}")
+@@ -114,14 +119,18 @@ def main() -> int:
+         )
+ 
+         print("\nlogin")
+-        page.goto(BASE_URL, wait_until="domcontentloaded")
++        requests = []
++        page.on("request", lambda request: requests.append(request.url))
++        page.goto(app_url, wait_until="domcontentloaded")
+         page.get_by_placeholder("Email").fill(EMAIL)
+         page.get_by_placeholder("Password").fill(PASSWORD)
+         page.get_by_role("button", name="Login with Email").click()
+ 
+-        print("waiting for the app (Pyodide boot)")
++        print(f"waiting for the app ({args.runtime or 'default'} runtime)")
+         page.get_by_text("Book Details and Ratings").wait_for(timeout=BOOT_TIMEOUT_MS)
+-        check("url after login", page.url, f"{BASE_URL}/py_ui")
++        check("url after login", page.url, app_url)
++        if args.runtime:
++            check("requested runtime", page.locator("body").get_attribute("data-browser-runtime"), args.runtime)
+ 
+         print("\nwidgets built exactly once")
+         # The heading attaches slightly before the widgets finish painting.
+@@ -177,6 +186,7 @@ def main() -> int:
+         check("chart visible", chart.first.is_visible(), True)
+         # dhx draws each bar as an SVG <path class="chart">; the only <rect>
+         # is the plot background. Ten bars means the data reached the chart.
++        page.wait_for_function('document.querySelectorAll(".book-ratings-chart svg path.chart").length === 10')
+         check("chart bars", page.locator(".book-ratings-chart svg path.chart").count(), 10)
+         # The axis is fitted to the data rather than spanning the full 0-5,
+         # which is what keeps ten near-identical ratings visually distinct.
+@@ -281,6 +291,17 @@ def main() -> int:
+         page.wait_for_timeout(600)
+         check("an explicit choice pins the mode", theme(), "dark")
+ 
++        print("\nrestore the edited record")
++        page.get_by_text("GRID VIEW").click()
++        page.locator(".dhx_grid .dhx_grid-row").nth(5).dblclick()
++        page.locator(".dhx_window input").first.wait_for(timeout=15000)
++        page.locator(".dhx_window input").first.fill(shown)
++        page.get_by_role("button", name="Save").click()
++        page.wait_for_function("document.querySelectorAll('.dhx_window').length===0", timeout=15000)
++        check("original title restored", collapse(edited_cell()), collapse(expected))
++        if args.runtime == "micropython":
++            check("no Pyodide downloads", any("/pyodide/" in url for url in requests), False)
++
+         if args.screenshot_dir:
+             args.screenshot_dir.mkdir(parents=True, exist_ok=True)
+             page.screenshot(path=args.screenshot_dir / "ui_smoke.png")
