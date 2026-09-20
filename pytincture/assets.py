@@ -14,6 +14,7 @@ from . import __version__
 _FRONTEND_ROOT = Path(__file__).resolve().parent / "frontend"
 _EXPORT_PATHS = (
     "browser-runtimes.js",
+    "widget-assets.js",
     "pytincture.js",
     "sw.js",
     "dist",

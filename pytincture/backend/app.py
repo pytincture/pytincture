@@ -1117,6 +1117,7 @@ _PUBLIC_FRAMEWORK_FILES = frozenset({
     "dist/pytincture.min.js.map",
     "bff-docs.js",
     "browser-runtimes.js",
+    "widget-assets.js",
     "vendor/swagger-ui/swagger-ui-bundle.js",
     "vendor/swagger-ui/swagger-ui.css",
     "vendor/materialdesignicons/materialdesignicons.css",
@@ -7643,8 +7644,9 @@ async def main_app_route(response: Response, application: str, request: Request)
         # Use the discovered MainWindow subclass name as the entrypoint
         entrypoint = main_window_class
     else:
-        # If no MainWindow subclass is found, fallback to using application name
-        entrypoint = application
+        # Resolve indirect/imported subclasses in the browser, where application
+        # code already runs. Never import client modules into the server.
+        entrypoint = ""
     index_html = index_html.replace(
         "***ENTRYPOINT_JSON***", _html_script_json(entrypoint)
     )
@@ -7721,7 +7723,7 @@ def find_main_window_subclass(file_path, *, expected_digest=None, source_code=No
                 "Browser entrypoint source changed during discovery"
             )
         source_code = decode_python_source(secure_source.content)
-    return _find_main_window(file_path, source_code=source_code)
+    return _find_main_window(file_path, source_code=source_code, allow_browser_discovery=True)
 
 def _find_app_string_setting(
     file_path, assignment_names, config_keys, *, source_code=None

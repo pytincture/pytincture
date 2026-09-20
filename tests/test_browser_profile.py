@@ -35,8 +35,8 @@ def test_alias_scheduler_adaptation_is_visible_in_the_build_report():
     assert all(f['file']=='app.py' for f in findings)
 
 
-def test_micropython_rejects_iterable_display_unpacking_but_allows_assignment():
+def test_micropython_reports_iterable_display_adaptation_and_allows_assignment():
     source = 'values=[0,*items]\nfirst,*rest=items\n'
     assert not inspect_source('app.py',source,'pyodide')
     findings = inspect_source('app.py',source,'micropython')
-    assert len(findings)==1 and findings[0]['rule']=='runtime-syntax'
+    assert len(findings)==1 and findings[0]['rule']=='iterable-display' and findings[0]['severity']=='supported'

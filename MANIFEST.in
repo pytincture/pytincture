@@ -4,6 +4,7 @@ recursive-include pytincture/browser_vendor *
 include pytincture/frontend/index.html
 include pytincture/frontend/pytincture.js
 include pytincture/frontend/browser-runtimes.js
+include pytincture/frontend/widget-assets.js
 include pytincture/frontend/sw.js
 recursive-include pytincture/frontend/dist *
 recursive-include pytincture/frontend/integrity *

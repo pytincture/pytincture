@@ -3,6 +3,17 @@
 This project follows semantic versioning from 1.0. Dates and final entries are
 set when a release is published.
 
+## Unreleased
+
+- Restore portable registry substitutions through explicit import aliases,
+  MicroPython environment defaults and ordered collection unpacking.
+- Restore legacy browser discovery of indirect MainWindow subclasses and aliases,
+  and include discovered installed pure-Python client dependencies in appcode.
+- Add a widget-scoped bridge so conventional existing Widgetset loaders adopt
+  already-loaded portable assets without requiring immediate Widgetset changes.
+- Add private-application pattern fixtures across both portable engines and legacy
+  Pyodide. These fixtures do not claim validation of unavailable client source.
+
 ## 1.0.0rc8 — 2026-09-20
 
 - Separate browser engine from explicit legacy-package/portable-bundle delivery;

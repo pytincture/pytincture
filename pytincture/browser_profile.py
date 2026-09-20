@@ -54,14 +54,16 @@ def inspect_source(name, source, engine, *, explicit_dynamic=()):
                     add(node, 'dynamic-import', 'Declare each literal dynamic import in dynamic-imports; computed imports are unsupported')
             if engine == 'micropython' and call in {'eval', 'exec', 'compile', 'inspect.signature', 'inspect.getsource', 'inspect.getmembers', 'inspect.stack'}:
                 add(node, 'dynamic-reflection', f'{call} is outside the portable MicroPython profile')
-            if engine == 'micropython' and call in {'time.perf_counter', 'time.monotonic', 'datetime.datetime.utcnow', 'datetime.utcnow', 'asyncio.to_thread', 'os.getenv', 'os.environ.get'}:
+            if engine == 'micropython' and call in {'os.getenv', 'os.environ.get'}:
+                add(node, 'browser-environment', 'Uses the browser-local environment, initially empty; build/server environment values are never copied', 'supported')
+            if engine == 'micropython' and call in {'time.perf_counter', 'time.monotonic', 'datetime.datetime.utcnow', 'datetime.utcnow', 'asyncio.to_thread'}:
                 add(node, 'runtime-api', f'{call} is unavailable in the pinned browser MicroPython; use a portable/browser API')
             if call.startswith('js.') and any(part in call for part in ('.MediaRecorder', '.getUserMedia', '.clipboard', '.gpu', '.indexedDB')):
                 add(node, 'browser-api', f'Requires browser API {call}; availability/permissions must be tested on the target browser', 'warning')
         if (engine == 'micropython' and isinstance(node, (ast.List, ast.Tuple, ast.Set))
                 and not isinstance(getattr(node, 'ctx', None), ast.Store)
                 and any(isinstance(element, ast.Starred) for element in node.elts)):
-            add(node, 'runtime-syntax', 'Iterable unpacking in collection literals requires CPython; use concatenation or update')
+            add(node, 'iterable-display', 'Collection unpacking is expanded in evaluation order for MicroPython', 'supported')
         if engine == 'micropython' and isinstance(node, (ast.Match, ast.TryStar)):
             add(node, 'runtime-syntax', f'{type(node).__name__} requires CPython')
     return findings

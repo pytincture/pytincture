@@ -7,8 +7,37 @@ import js
 
 if sys.implementation.name == 'micropython':
     from jsffi import create_proxy, JsProxy
+    import os
+
+    # Browser state only: never read or serialize the build/server environment.
+    if not hasattr(os, 'environ'):
+        os.environ = {}
+
+    def _browser_getenv(key, default=None):
+        if not isinstance(key, str):
+            raise TypeError('environment variable name must be a string')
+        return os.environ.get(key, default)
+
+    if not hasattr(os, 'getenv'):
+        os.getenv = _browser_getenv
 else:
     from pyodide.ffi import create_proxy, JsProxy
+
+
+def _expand_list(result, values):
+    result.extend(values)
+    return result
+
+
+def _expand_set(result, values):
+    if result is None:
+        result = set()
+    result.update(values)
+    return result
+
+
+def _display_tuple(values):
+    return tuple(values)
 
 def merge_dicts(*parts):
     result = {}

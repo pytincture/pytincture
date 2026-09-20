@@ -13,6 +13,7 @@ class BrowserCompatibility(ast.NodeTransformer):
         self.asyncio_names = {'asyncio'}
         self.report = report
         self.filename = filename
+        self.additional_helpers = set()
 
     def visit(self, node):
         tracked = self.report is not None and hasattr(self, 'visit_' + type(node).__name__)
@@ -22,7 +23,7 @@ class BrowserCompatibility(ast.NodeTransformer):
         if tracked and before != (ast.dump(result, include_attributes=False) if isinstance(result, ast.AST) else str(result)):
             self.report.append({'file': self.filename, 'line': line,
                                 'rule': 'adapt-' + type(node).__name__, 'severity': 'transformation',
-                                'behavior_changing': type(node).__name__ not in {'If', 'arg'},
+                                'behavior_changing': type(node).__name__ not in {'If', 'arg', 'List', 'Tuple', 'Set'},
                                 'message': 'MicroPython profile transformation; see portable-python-profile.md'})
         return result
 
@@ -54,6 +55,27 @@ class BrowserCompatibility(ast.NodeTransformer):
         for key, value in zip(node.keys, node.values):
             parts.append(value if key is None else ast.Dict(keys=[key],values=[value]))
         return ast.Call(func=ast.Name(id='merge_dicts',ctx=ast.Load()),args=parts,keywords=[])
+
+    def _collection_display(self, node):
+        self.generic_visit(node)
+        if isinstance(getattr(node, 'ctx', None), ast.Store) or not any(isinstance(item, ast.Starred) for item in node.elts):
+            return node
+        is_set = isinstance(node, ast.Set)
+        self.additional_helpers.add('_expand_set' if is_set else '_expand_list')
+        result = ast.Constant(None) if is_set else ast.List(elts=[], ctx=ast.Load())
+        for item in node.elts:
+            values = item.value if isinstance(item, ast.Starred) else ast.Tuple(elts=[item], ctx=ast.Load())
+            # Nest calls so each iterator is consumed before evaluating the next
+            # expression, including when iteration raises or has side effects.
+            result = ast.Call(func=ast.Name(id='_expand_set' if is_set else '_expand_list', ctx=ast.Load()), args=[result, values], keywords=[])
+        if isinstance(node, ast.Tuple):
+            self.additional_helpers.add('_display_tuple')
+            result = ast.Call(func=ast.Name(id='_display_tuple', ctx=ast.Load()), args=[result], keywords=[])
+        return ast.copy_location(result, node)
+
+    visit_List = _collection_display
+    visit_Tuple = _collection_display
+    visit_Set = _collection_display
 
     def visit_ImportFrom(self, node):
         if node.module == 'importlib' and all(alias.name == 'resources' for alias in node.names):
@@ -221,7 +243,7 @@ def adapt(source, *, widget=False, widgets=(), report=None, filename='<source>')
     transformer.asyncio_names.update(alias.asname or alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names if alias.name == 'asyncio')
     tree = transformer.visit(tree)
     tree.body.insert(0, ast.ImportFrom(module='_pytincture_compat',names=[
-        ast.alias(name=name) for name in ('to_python','spawn','format_exception','merge_dicts','initialize_layout','can_to_python','string_title','browser_event_loop')
+        ast.alias(name=name) for name in ('to_python','spawn','format_exception','merge_dicts','initialize_layout','can_to_python','string_title','browser_event_loop', *sorted(transformer.additional_helpers))
     ],level=0))
     tree.body.insert(0, ast.Import(names=[ast.alias(name='_pytincture_dataclasses',asname='_pytincture_dc')]))
     return ast.unparse(ast.fix_missing_locations(tree))+'\n'

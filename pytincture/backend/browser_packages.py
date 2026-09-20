@@ -27,6 +27,7 @@ from packaging.version import InvalidVersion, Version
 
 from pytincture.configuration import get_runtime_env
 from pytincture.dataclass import has_bff_export_class
+from pytincture.backend.browser_dependencies import pure_python_dependencies
 from pytincture.backend.safe_paths import (
     UnsafePath,
     canonical_root,
@@ -946,8 +947,10 @@ def create_appcode_archive(
         secure_files.append(secure_file)
 
     in_memory_zip = io.BytesIO()
+    dependency_records = []
     with zipfile.ZipFile(in_memory_zip, "w", zipfile.ZIP_DEFLATED) as zip_file:
         output_bytes = 0
+        client_sources = {}
         for secure_file in secure_files:
             arcname = secure_file.relative_path
             if secure_file.path.endswith(".py"):
@@ -960,6 +963,7 @@ def create_appcode_archive(
                     source_code=decode_python_source(secure_file.content),
                 )
                 payload = (file_contents or "").encode("utf-8")
+                client_sources[arcname] = payload.decode('utf-8')
             else:
                 payload = secure_file.content
             if len(payload) > max_file_bytes:
@@ -968,6 +972,18 @@ def create_appcode_archive(
             if output_bytes > max_total_bytes:
                 raise HTTPException(status_code=413, detail="Appcode generated-size limit exceeded")
             zip_file.writestr(arcname, payload)
+        try:
+            dependencies, dependency_records = pure_python_dependencies(
+                client_sources, max_files=max_files - len(secure_files),
+                max_file_bytes=max_file_bytes, max_total_bytes=max_total_bytes - output_bytes,
+                safe_path=browser_asset_path_is_safe,
+            )
+        except (ValueError, UnsafePath) as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        for name, payload in sorted(dependencies.items()):
+            if name in zip_file.namelist():
+                raise HTTPException(status_code=422, detail=f'Client dependency collision: {name}')
+            zip_file.writestr(name, payload)
     in_memory_zip.seek(0)
     if manifest_out is not None:
         source_files = [
@@ -995,9 +1011,13 @@ def create_appcode_archive(
                     source_manifest
                 ).hexdigest(),
                 "source_files": source_files,
+                "dependencies": dependency_records,
             }
         )
-    if cache is not None and replay_client is None:
+    # Installed dependency files live outside the application root. Until the
+    # cache tracks their independent fingerprints, rebuild these archives rather
+    # than serving stale external source bytes after an environment change.
+    if cache is not None and replay_client is None and not dependency_records:
         cache.put(
             cache_key,
             in_memory_zip.getvalue(),

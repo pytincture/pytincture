@@ -309,6 +309,12 @@ export async function runBrowserApplication(config, status = () => {}) {
     });
     // Publish only after every asset succeeded; widget hooks must not infer readiness from a partial load.
     publishLoadedAssets(manifest, asset);
+    const {createWidgetAssetBridge} = await import('./widget-assets.js');
+    globalThis.pytinctureWidgetBridge = createWidgetAssetBridge(globalThis,
+        [...manifest.scripts.map(path => ({path, type: 'script'})),
+            ...manifest.styles.map(path => ({path, type: 'style'}))].map(item => ({
+                ...item, url: asset(item.path), text: new TextDecoder().decode(contents.get(item.path)),
+            })));
 
     let invoke;
     let capturedOutput = null;

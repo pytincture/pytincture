@@ -1168,9 +1168,9 @@ def test_main_page_revocation_lookup_runs_off_the_event_loop(
     )
 
     response = fresh_client.get("/example", follow_redirects=False)
-    # Authentication completes before this fixture's intentionally missing UI
-    # entrypoint is reported.
-    assert response.status_code == 422
+    # Authentication completes before unresolved UI entrypoint discovery is
+    # deferred to the browser (client modules are never executed here).
+    assert response.status_code == 200
     assert store_threads[0] != event_loop_threads[0]
 
 

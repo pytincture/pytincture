@@ -14,7 +14,8 @@ errors and static-analysis limitations for each target.
 
 Pyodide preserves CPython annotations, dataclasses and standard-library APIs. It
 removes conventional `__main__` and `TYPE_CHECKING` guards and replaces BFF modules
-with client stubs, as required by browser delivery. It does not apply MicroPython
+with client stubs, as required by browser delivery. Explicit import substitutions
+and widget-scoped asset bridges apply to both targets and are reported. It does not apply MicroPython
 transforms. Native extensions needing browser installation still use legacy
 package delivery; portable wheels must contain compatible Python and data.
 
@@ -36,6 +37,8 @@ findings and run application conformance before enabling the target.
 | `create_proxy`, `to_js`, `to_py` | Browser callback bridge; JSON-compatible data conversion, not arbitrary object conversion |
 | MainWindow/Layout subclass initialization | Framework/widget lifecycle initializes nested layouts after constructors |
 | Dictionary unpacking and selected class keywords | Rewritten to supported forms; custom metaclasses are rejected |
+| List, tuple and set display unpacking | Expanded with helpers that preserve expression evaluation and iterator-consumption order |
+| `os.getenv`, `from os import getenv`, `os.environ.get` | Browser-local environment initialized empty; defaults and browser-assigned values work, and build/server environment values are never copied |
 | Dataclasses | Portable helper supports fields, factories, inheritance, post-init, repr/equality, init, kw-only, asdict/fields/replace/is_dataclass; frozen/slots/order/hash/InitVar rejected |
 | String title casing | Portable implementation; Unicode title rules can differ from CPython |
 | UUID helpers | Browser-generated UUID strings through the compatibility helper |
@@ -56,15 +59,20 @@ semantics change incompatibly.
 ## Build failures and explicit requirements
 
 Build-time checks reject unresolved imports, native extension wheels, unsupported
-syntax (including match/exception groups and iterable display unpacking for MicroPython), custom reflection,
+syntax (including match/exception groups for MicroPython), custom reflection,
 computed dynamic imports, unsupported dataclass options, source escape paths,
 stale widget asset hashes, missing package/CSS resources and oversized inputs.
 Known unsupported MicroPython APIs such as `time.perf_counter`, `time.monotonic`,
-`asyncio.to_thread` and environment lookups are diagnosed. Other runtime API
+and `asyncio.to_thread` are diagnosed. Other runtime API
 differences still need application tests; the checker is not a whole-program proof.
 
 Literal dynamic imports must be declared in `dynamic-imports` and resolve to a
 bundled/native module. Computed module names are outside the static profile.
+Use explicit `import-aliases` to substitute a portable registry module for a
+computed/server registry while leaving the application import unchanged. The
+selected implementation must itself pass the target profile, and the report lists
+every substituted source. Widget JS import adaptation also appears in the report;
+it prevents old loaders from executing/inserting manifest-owned assets again.
 Additional modules may be listed in `files`; that alone does not authorize arbitrary
 dynamic import behavior. Computed JavaScript asset URLs and reflective Python
 patterns cannot all be determined statically and remain a documented test boundary.

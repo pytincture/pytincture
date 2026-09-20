@@ -114,6 +114,7 @@ entrypoint = "orders:OrdersWindow"
 output = "browser/orders"
 files = ["plugins/extra_view.py"]
 dynamic-imports = ["plugins.extra_view"]
+import-aliases = {app_registry = "browser.app_registry"}
 bff = ["api/extra_data.py"]
 wheels = ["vendor/helpers-1.0-py3-none-any.whl"]
 resources = ["settings/defaults.json"]
@@ -135,6 +136,27 @@ Shared settings with `[tool.pytincture.browser.apps.orders]` and
 `--all`; each app has a separate graph and output. Publish each only to its own
 public asset allowlist. Rebuild after changing sources, dependencies, assets or
 BFF signatures. Server startup does not build bundles.
+
+`import-aliases` selects an explicitly supplied browser implementation without
+editing application imports. For example, `import app_registry` uses
+`browser/app_registry.py` under the original `app_registry` module identity;
+the original computed/server registry is not bundled or evaluated. Package aliases
+also cover their children. Relative imports inside a substitute keep the
+implementation's package context. Targets must exist under `modules-path`;
+cycles and escaping paths fail the build. Each applied substitution appears in
+the compatibility report. This does not enable unrestricted computed imports.
+
+Legacy Pyodide discovers imported/indirect MainWindow subclasses and aliases in
+the browser when static discovery cannot decide, without executing client code
+on the server. Explicit entrypoints may refer to imported or simple aliases.
+Its application archive now includes discovered installed pure-Python dependency
+files, package data and metadata, including `python-dotenv`, without runtime PyPI
+downloads for those dependencies. BFF implementation imports stay server-side;
+hidden/environment files, native-extension distributions and widget packages are
+excluded from this dependency path. Existing appcode limits still apply. Archives
+with installed dependencies currently bypass the in-memory appcode cache so an
+updated dependency cannot leave stale source bytes in that cache. Prebuilt archives
+remain immutable snapshots and should be rebuilt after dependency changes.
 
 ## Resources, integrity and CSP
 
@@ -210,10 +232,19 @@ use, where the portable registry is absent. Package initializers must not constr
 widgets before this hook can run. Existing widgetsets that already honor loaded
 constructors can use the registry without declaring a hook.
 
-The local wapyt validation branch implements this protocol. Updating Pytincture
-alone cannot force an arbitrary old widgetset to honor a new ownership API; adopt
-the hook when a widgetset unconditionally reloads its assets. The framework does
-not monkey-patch `js.eval` or silently alter legacy widget loading.
+The hook is optional for existing Widgetsets. When building a portable bundle,
+Pytincture routes widget Python `import js` and named `from js import ...` bindings
+through a widget-scoped browser bridge. The bridge suppresses repeated `eval` of
+already-loaded script bytes and repeated DOM insertion of matching styles or
+owned script/stylesheet URLs. It preserves loader completion events, and unrelated
+JavaScript/CSS continues normally. Application JS imports and global browser APIs
+are unchanged. The build report identifies this adaptation in both engines.
+
+This supports conventional old resource-based loaders without a Widgetset source
+change. Loaders that rewrite asset contents, use star imports from `js`, or obtain
+browser APIs through an unrelated bridge still need the explicit ownership hook
+or their own readiness check. This compatibility bridge applies to portable
+delivery; legacy widget loading retains its existing path.
 
 ## Runtime identity and startup timing
 
@@ -255,3 +286,12 @@ widgets, CodeMirror, modal persistence, fonts, CSP, runtime identity and screens
 in all three supported combinations, including authentication and voice. See
 [validation evidence and boundaries](browser-runtime-validation.md) for commands,
 versions and the exact features exercised. Legacy delivery has not been deprecated.
+
+`PYTHONPATH=. python tests/browser_compatibility_smoke.py` exercises compatibility
+regressions in real Chromium: substituted computed registries, browser-local
+environment defaults, collection unpacking, callbacks, and an unchanged old-style
+Widgetset without an ownership hook on both portable engines. It also checks
+legacy Pyodide with installed `python-dotenv` and an imported alias of an indirect
+MainWindow subclass. CI runs this alongside the existing portable fixtures.
+These self-contained cases reproduce reported private-app patterns; they do not
+claim validation of an unavailable client application.
