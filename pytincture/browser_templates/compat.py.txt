@@ -66,6 +66,19 @@ def spawn(coroutine):
     return asyncio.create_task(coroutine)
 
 
+class _BrowserEventLoop:
+    """Only task scheduling and running-state inspection are portable."""
+    def is_running(self):
+        return True
+
+    def create_task(self, coroutine):
+        return spawn(coroutine)
+
+
+def browser_event_loop():
+    return _BrowserEventLoop()
+
+
 async def finish_startup():
     # Background timers, polling and event listeners must not hold startup open.
     # Apps that require data before readiness can await it in async main().
