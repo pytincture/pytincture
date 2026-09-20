@@ -20,7 +20,7 @@ import zipfile
 
 from pytincture.browser_compatibility import adapt
 from pytincture.browser_profile import (PROFILE, MICROPYTHON_MODULES, pyodide_modules,
-                                        import_source, inspect_source, verified_stdlib, CompatibilityError)
+                                        import_source, inspect_source, verified_stdlib, CompatibilityError, guard_dynamic_imports)
 from pytincture.browser_assets import canonical_json, audit_assets, seal_manifest, inspect_bundle
 from pytincture.backend.pages import find_app_string_setting, find_main_window_subclass, entrypoint_definitions
 from pytincture.browser_sources import (relative_path as _relative, read_source as _read,
@@ -218,6 +218,8 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
         report['findings'].extend(findings)
         if any(f['severity'] == 'error' for f in findings):
             raise ValueError(f"{name}: " + '; '.join(f['message'] for f in findings if f['severity'] == 'error'))
+        if config.get('dynamic-imports'):
+            source = guard_dynamic_imports(source, engine=engine, report=report['findings'], filename=name)
         if engine == 'pyodide':
             result = import_source(source)
             report['findings'].append({'file': name, 'line': 0, 'severity': 'supported',
@@ -374,6 +376,9 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
         if any(f['severity'] == 'error' for f in findings):
             raise ValueError('Framework shim failed profile validation: ' + template + ': ' + '; '.join(f['message'] for f in findings))
     hook_source = ''
+    if config.get('dynamic-imports'):
+        sources['_pytincture_imports.py'] = ('ALLOWED_MODULES = ' + repr(tuple(sorted(set(config['dynamic-imports'])))) + '\n'
+                                            + (TEMPLATES / 'imports.py.txt').read_text())
     if asset_hook is not None:
         if (not isinstance(asset_hook, dict) or set(asset_hook) != {'module', 'function'}
                 or not all(isinstance(value, str) for value in asset_hook.values())

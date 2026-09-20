@@ -14,6 +14,7 @@ class BrowserCompatibility(ast.NodeTransformer):
         self.report = report
         self.filename = filename
         self.additional_helpers = set()
+        self.time_names = {'time'}
 
     def visit(self, node):
         tracked = self.report is not None and hasattr(self, 'visit_' + type(node).__name__)
@@ -78,6 +79,11 @@ class BrowserCompatibility(ast.NodeTransformer):
     visit_Set = _collection_display
 
     def visit_ImportFrom(self, node):
+        if node.module == 'time' and any(alias.name == 'monotonic' for alias in node.names):
+            rest = [alias for alias in node.names if alias.name != 'monotonic']
+            return ([ast.ImportFrom(module='time', names=rest, level=0)] if rest else []) + [
+                ast.ImportFrom(module='_pytincture_compat', names=[ast.alias(name='browser_monotonic', asname=alias.asname or 'monotonic')], level=0)
+                for alias in node.names if alias.name == 'monotonic']
         if node.module == 'importlib' and all(alias.name == 'resources' for alias in node.names):
             return ast.Import(names=[ast.alias(name='_pytincture_resources', asname=alias.asname or alias.name) for alias in node.names])
         if node.module in ('typing', '__future__'):
@@ -111,6 +117,13 @@ class BrowserCompatibility(ast.NodeTransformer):
             if any(alias.name != 'uuid4' for alias in node.names):
                 raise ValueError('Only uuid.uuid4 is supported by this build')
             node.module = '_pytincture_compat'
+        return node
+
+    def visit_Attribute(self, node):
+        self.generic_visit(node)
+        if isinstance(node.value, ast.Name) and node.value.id in self.time_names and node.attr == 'monotonic' and isinstance(node.ctx, ast.Load):
+            self.additional_helpers.add('browser_monotonic')
+            return ast.copy_location(ast.Name(id='browser_monotonic', ctx=ast.Load()), node)
         return node
 
     def visit_Import(self, node):
@@ -240,6 +253,7 @@ class BrowserCompatibility(ast.NodeTransformer):
 def adapt(source, *, widget=False, widgets=(), report=None, filename='<source>'):
     tree = ast.parse(source)
     transformer = BrowserCompatibility(widget=widget, widgets=widgets, report=report, filename=filename)
+    transformer.time_names.update(alias.asname or alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names if alias.name == 'time')
     transformer.asyncio_names.update(alias.asname or alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names if alias.name == 'asyncio')
     tree = transformer.visit(tree)
     tree.body.insert(0, ast.ImportFrom(module='_pytincture_compat',names=[

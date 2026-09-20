@@ -39,6 +39,7 @@ findings and run application conformance before enabling the target.
 | Dictionary unpacking and selected class keywords | Rewritten to supported forms; custom metaclasses are rejected |
 | List, tuple and set display unpacking | Expanded with helpers that preserve expression evaluation and iterator-consumption order |
 | `os.getenv`, `from os import getenv`, `os.environ.get` | Browser-local environment initialized empty; defaults and browser-assigned values work, and build/server environment values are never copied |
+| `time.monotonic`, including import aliases | Browser `performance.now()` divided by 1000; elapsed seconds independent of wall-clock adjustments |
 | Dataclasses | Portable helper supports fields, factories, inheritance, post-init, repr/equality, init, kw-only, asdict/fields/replace/is_dataclass; frozen/slots/order/hash/InitVar rejected |
 | String title casing | Portable implementation; Unicode title rules can differ from CPython |
 | UUID helpers | Browser-generated UUID strings through the compatibility helper |
@@ -60,14 +61,21 @@ semantics change incompatibly.
 
 Build-time checks reject unresolved imports, native extension wheels, unsupported
 syntax (including match/exception groups for MicroPython), custom reflection,
-computed dynamic imports, unsupported dataclass options, source escape paths,
+undeclared dynamic imports, unsupported dataclass options, source escape paths,
 stale widget asset hashes, missing package/CSS resources and oversized inputs.
-Known unsupported MicroPython APIs such as `time.perf_counter`, `time.monotonic`,
+Known unsupported MicroPython APIs such as `time.perf_counter`
 and `asyncio.to_thread` are diagnosed. Other runtime API
 differences still need application tests; the checker is not a whole-program proof.
 
-Literal dynamic imports must be declared in `dynamic-imports` and resolve to a
-bundled/native module. Computed module names are outside the static profile.
+Dynamic imports must be declared in `dynamic-imports` and resolve to a
+bundled/native module. With this explicit allowlist, `importlib.import_module(name)`
+accepts computed names on both engines. The generated guard checks the resulting
+absolute name for an exact match before importing, including for modules already
+loaded. An unlisted name raises `ImportError`; allowing a package does not allow
+all its children. Computed calls without an allowlist still fail the build.
+Normal dependencies imported by an allowed module remain subject to bundle
+discovery and profile checks. This guard covers recognized `import_module` calls
+and import aliases, not arbitrary reflection or a sandbox for untrusted Python.
 Use explicit `import-aliases` to substitute a portable registry module for a
 computed/server registry while leaving the application import unchanged. The
 selected implementation must itself pass the target profile, and the report lists

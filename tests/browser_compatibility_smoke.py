@@ -30,17 +30,32 @@ def load_assets(force=False):
 APP = '''import js
 import json
 import os as environment
+import importlib
+import time as clock
+from time import monotonic as now
 from os import getenv as setting
 from registry import label
 from oldwidgets import load_assets
 from pyodide.ffi import create_proxy
 
 def main():
+    module_name = 'providers.demo'
+    provider = importlib.import_module(module_name)
+    rejected = False
+    try:
+        module_name = 'providers.denied'
+        importlib.import_module(module_name)
+    except ImportError:
+        rejected = True
+    started = clock.monotonic()
+    assert 0 <= now() - started < 1
     load_assets()
     load_assets(force=True)
     environment.environ['BROWSER_LOCAL']='local'
     result = {
         'registry': label,
+        'provider': provider.VALUE,
+        'rejected': rejected,
         'fallback': setting('MISSING', 'fallback'),
         'local': environment.getenv('BROWSER_LOCAL'),
         'values': [0, *range(1, 3), 3, *[4]],
@@ -81,8 +96,12 @@ def main():
         (root/'app.py').write_text(APP)
         (root/'registry.py').write_text('import importlib\nvalue=importlib.import_module(input())\n')
         (root/'browser_registry.py').write_text('label="browser substitute"\n')
+        (root/'providers').mkdir()
+        (root/'providers/__init__.py').write_text('')
+        (root/'providers/demo.py').write_text('VALUE="allowed provider"\n')
+        (root/'providers/denied.py').write_text('raise RuntimeError("must not execute")\n')
         config=root/'pyproject.toml'
-        config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\nwidget-package="oldwidgets"\nwidget-wheel="'+wheel.name+'"\nimport-aliases={registry="browser_registry"}\n')
+        config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\nwidget-package="oldwidgets"\nwidget-wheel="'+wheel.name+'"\nimport-aliases={registry="browser_registry"}\ndynamic-imports=["providers.demo"]\n')
         build_browser_bundle(config)
 
         # The real legacy archive must carry the discovered installed dotenv
@@ -131,7 +150,7 @@ class ActualWindow(Intermediate):
                         expect(page.locator('#legacy-result')).to_have_text('legacy-ready')
                     else:
                         result=json.loads(page.locator('#compat-result').inner_text())
-                        assert result=={'registry':'browser substitute','fallback':'fallback','local':'local','values':[0,1,2,3,4],'tuple':[0,1,2],'set':[0,1,2]},result
+                        assert result=={'registry':'browser substitute','provider':'allowed provider','rejected':True,'fallback':'fallback','local':'local','values':[0,1,2,3,4],'tuple':[0,1,2],'set':[0,1,2]},result
                         assert page.evaluate('window.oldWidgetLoads')==1
                         assert page.evaluate('Array.from(document.querySelectorAll("style")).filter(n=>n.textContent.includes("#compat-result")).length')==0
                         expect(page.locator('#compat-result')).to_have_css('color','rgb(12, 34, 56)')

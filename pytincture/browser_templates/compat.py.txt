@@ -24,6 +24,10 @@ else:
     from pyodide.ffi import create_proxy, JsProxy
 
 
+def browser_monotonic():
+    return js.performance.now() / 1000.0
+
+
 def _expand_list(result, values):
     result.extend(values)
     return result

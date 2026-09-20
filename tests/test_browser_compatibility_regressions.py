@@ -15,6 +15,60 @@ from pytincture.backend.browser_packages import create_appcode_archive, AppcodeA
 from pytincture.backend.pages import find_main_window_subclass
 
 
+def test_computed_import_allowlist_is_bundled_and_enforced_before_execution(tmp_path, monkeypatch):
+    (tmp_path/'app.py').write_text('import importlib\nmodule_name="providers.demo"\nprovider=importlib.import_module(module_name)\ndef main(): return provider\n')
+    (tmp_path/'providers').mkdir()
+    (tmp_path/'providers/__init__.py').write_text('')
+    (tmp_path/'providers/demo.py').write_text('VALUE="allowed"\n')
+    (tmp_path/'providers/denied.py').write_text('raise RuntimeError("must not execute")\n')
+    config=tmp_path/'pyproject.toml'
+    config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\ndynamic-imports=["providers.demo"]\n')
+    result=build_browser_bundle(config)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    for name in ('sources.json','sources-pyodide.json'):
+        sources=json.loads((result.parent/name).read_text())['files']
+        assert 'providers/demo.py' in sources
+        assert 'providers/denied.py' not in sources
+        assert '_pytincture_checked_import(module_name)' in sources['app.py']
+        namespace={}
+        exec(sources['_pytincture_imports.py'],namespace)
+        assert namespace['import_module']('providers.demo').VALUE=='allowed'
+        assert namespace['import_module']('.demo','providers').VALUE=='allowed'
+        for denied in ('providers.denied','providers.demo.child','os','providers'):
+            with pytest.raises(ImportError,match='not allowlisted'):
+                namespace['import_module'](denied)
+        assert 'providers.denied' not in sys.modules
+    # Leave no synthetic package behind for another test.
+    for name in ('providers.demo','providers'):
+        sys.modules.pop(name,None)
+
+
+def test_computed_import_aliases_and_keywords_are_guarded():
+    from pytincture.browser_profile import guard_dynamic_imports
+    findings=[]
+    source='import importlib as imports\nfrom importlib import import_module as load\na=imports.import_module(name=selected)\nb=load(selected)\n'
+    converted=guard_dynamic_imports(source,engine='pyodide',report=findings,filename='app.py')
+    assert 'a = _pytincture_checked_import(name=selected)' in converted
+    assert 'b = _pytincture_checked_import(selected)' in converted
+    assert len(findings)==2
+
+
+def test_monotonic_clock_uses_browser_milliseconds_and_handles_aliases(monkeypatch):
+    source='import time as clock\nfrom time import monotonic as now\na=clock.monotonic()\nb=now()\n'
+    findings=[]
+    converted=adapt(source,report=findings,filename='app.py')
+    assert 'a = browser_monotonic()' in converted
+    assert 'browser_monotonic as now' in converted
+    helpers=ast.parse(Path('pytincture/browser_templates/compat.py.txt').read_text())
+    helpers.body=[node for node in helpers.body if isinstance(node,ast.FunctionDef) and node.name=='browser_monotonic']
+    clock=iter([1234.5,1244.5])
+    namespace={'js':types.SimpleNamespace(performance=types.SimpleNamespace(now=lambda:next(clock)))}
+    exec(compile(helpers,'clock','exec'),namespace)
+    assert namespace['browser_monotonic']()==1.2345
+    assert namespace['browser_monotonic']()==1.2445
+    assert any(f['rule']=='adapt-Attribute' for f in findings)
+
+
 def test_substitute_registry_excludes_computed_server_registry_and_preserves_relative_imports(tmp_path):
     (tmp_path/'app.py').write_text('from registry import selected\nasync def main(): return selected\n')
     (tmp_path/'registry.py').write_text('import importlib\nSERVER_SECRET="excluded"\nselected=importlib.import_module(input())\n')

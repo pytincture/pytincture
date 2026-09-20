@@ -146,6 +146,14 @@ implementation's package context. Targets must exist under `modules-path`;
 cycles and escaping paths fail the build. Each applied substitution appears in
 the compatibility report. This does not enable unrestricted computed imports.
 
+For a computed module name, declare every permitted result, for example
+`dynamic-imports = ["providers.demo"]`. A call such as
+`importlib.import_module(module_name)` then checks its resolved module name against
+that exact allowlist at runtime in both portable engines. Other results raise
+`ImportError` before loading the module. Declared local modules and their imports
+are included in the bundle; simply including a file does not authorize dynamic
+access to it. This adaptation is recorded in the compatibility report.
+
 Legacy Pyodide discovers imported/indirect MainWindow subclasses and aliases in
 the browser when static discovery cannot decide, without executing client code
 on the server. Explicit entrypoints may refer to imported or simple aliases.

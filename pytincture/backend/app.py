@@ -4441,6 +4441,14 @@ async def class_call(
             "module_path": request_identifier_with_ext,
             "request": request,
         }
+        parameters = inspect.signature(policy_hook).parameters
+        if not any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
+            policy_arguments = {
+                name: value for name, value in policy_arguments.items()
+                if name in parameters and parameters[name].kind in {
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY
+                }
+            }
         if inspect.iscoroutinefunction(policy_hook):
             policy_result = await _run_bff_async_stage(
                 request,

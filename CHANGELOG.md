@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased
 
+- Support allowlisted computed `importlib.import_module` calls with runtime
+  exact-name checks, and MicroPython `time.monotonic()` using the browser clock.
+- Preserve exact BFF policy-hook signatures by passing only accepted context
+  keywords; hooks with `**kwargs` continue receiving the complete context.
 - Restore portable registry substitutions through explicit import aliases,
   MicroPython environment defaults and ordered collection unpacking.
 - Restore legacy browser discovery of indirect MainWindow subclasses and aliases,
