@@ -307,12 +307,15 @@ def _service_content_security_policy() -> str:
             *BROWSER_CONNECT_ORIGINS,
         )
     )
+    script_sources = " ".join(_PYTINCTURE_CONFIG.browser_script_origins)
+    style_sources = " ".join(_PYTINCTURE_CONFIG.browser_style_origins)
+    font_sources = " ".join(_PYTINCTURE_CONFIG.browser_font_origins)
     return (
         "default-src 'self'; object-src 'none'; base-uri 'self'; "
         "frame-ancestors 'none'; form-action 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; "
-        "style-src 'self' 'unsafe-inline'; "
-        "font-src 'self' data:; "
+        f"script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:{' ' + script_sources if script_sources else ''}; "
+        f"style-src 'self' 'unsafe-inline'{' ' + style_sources if style_sources else ''}; "
+        f"font-src 'self' data:{' ' + font_sources if font_sources else ''}; "
         f"img-src 'self' data: https:; connect-src {connect_sources}; "
         "worker-src 'self' blob:"
     )

@@ -462,3 +462,7 @@ This only changes documentation visibility; calling methods still requires the
 same session or scoped token permissions.
 
 | `delivery_mode` | `PYTINCTURE_DELIVERY_MODE` | Application delivery: legacy-package (default) or portable-bundle; independent of the engine. |
+
+| `browser_script_origins` | `PYTINCTURE_BROWSER_SCRIPT_ORIGINS` | Exact additional HTTPS origins permitted by browser script-src; independent of other asset types. |
+| `browser_style_origins` | `PYTINCTURE_BROWSER_STYLE_ORIGINS` | Exact additional HTTPS origins permitted by browser style-src; independent of other asset types. |
+| `browser_font_origins` | `PYTINCTURE_BROWSER_FONT_ORIGINS` | Exact additional HTTPS origins permitted by browser font-src; independent of other asset types. |
