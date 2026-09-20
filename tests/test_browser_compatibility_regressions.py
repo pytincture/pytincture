@@ -15,6 +15,92 @@ from pytincture.backend.browser_packages import create_appcode_archive, AppcodeA
 from pytincture.backend.pages import find_main_window_subclass
 
 
+@pytest.mark.parametrize('statement', ['from pyodide.ffi import create_once_callable', 'from pathlib import Path', 'from html import escape'])
+def test_new_portable_imports_build_on_both_engines(tmp_path, statement):
+    (tmp_path/'app.py').write_text(statement+'\ndef main(): pass\n')
+    config=tmp_path/'pyproject.toml'
+    config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\n')
+    manifest=build_browser_bundle(config)
+    sources=json.loads((manifest.parent/'sources.json').read_text())['files']
+    pyodide=json.loads((manifest.parent/'sources-pyodide.json').read_text())['files']
+    assert statement in pyodide['app.py']
+    for name in ('pathlib','html'):
+        if 'from '+name in statement:
+            assert name+'.py' in sources and name+'.py' not in pyodide
+
+
+def test_bare_handlers_catch_base_exceptions_and_keep_nested_tracebacks():
+    source='''import traceback
+_runtime_error = 'user value'
+try:
+    raise KeyboardInterrupt('outer')
+except:
+    before = traceback.format_exc()
+    try:
+        raise ValueError('inner')
+    except:
+        inner = traceback.format_exc()
+    after = traceback.format_exc()
+'''
+    converted=adapt(source)
+    assert 'except as ' not in converted
+    tree=ast.parse(converted)
+    tree.body=[node for node in tree.body if not isinstance(node,(ast.Import,ast.ImportFrom))]
+    import traceback
+    namespace={'browser_base_exception':BaseException,'format_exception':lambda error:''.join(traceback.format_exception(error))}
+    exec(compile(tree,'converted','exec'),namespace)
+    assert 'KeyboardInterrupt: outer' in namespace['before']
+    assert namespace['before']==namespace['after']
+    assert 'ValueError: inner' in namespace['inner']
+    assert namespace['_runtime_error']=='user value'
+
+
+@pytest.mark.parametrize('path', ['', '/', 'a/b.tar.gz', '/a/./b/../c', '.hidden', 'a/b.'])
+def test_portable_path_properties_match_cpython(path):
+    namespace={}
+    exec(Path('pytincture/browser_templates/pathlib.py.txt').read_text(),namespace)
+    portable=namespace['Path'](path)
+    native=Path(path)
+    for attribute in ('name','suffix','suffixes','stem','parts'):
+        assert getattr(portable,attribute)==getattr(native,attribute)
+    assert str(portable)==str(native)
+    assert str(portable.parent)==str(native.parent)
+    assert list(map(str,portable.parents))==list(map(str,native.parents))
+    assert str(portable.joinpath('child'))==str(native.joinpath('child'))
+
+
+def test_portable_paths_read_write_and_error_behavior(tmp_path):
+    namespace={}
+    exec(Path('pytincture/browser_templates/pathlib.py.txt').read_text(),namespace)
+    directory=namespace['Path'](str(tmp_path))/'nested'/'deep'
+    directory.mkdir(parents=True)
+    file=directory/'value.txt'
+    assert file.write_text('héllo',encoding='utf-8')==5
+    assert file.read_text()=='héllo'
+    assert file.read_bytes()=='héllo'.encode()
+    assert file.is_file() and directory.is_dir()
+    assert file.stat().st_size == len('héllo'.encode())
+    assert list(directory.iterdir())==[file]
+    assert str(file.relative_to(directory))=='value.txt'
+    assert file.resolve(strict=True)==file
+    with pytest.raises(OSError): file.mkdir(exist_ok=True)
+    with pytest.raises(ValueError): file.relative_to('/unrelated')
+    file.unlink()
+    assert not file.exists()
+    with pytest.raises(OSError): file.resolve(strict=True)
+    file.unlink(missing_ok=True)
+    directory.rmdir()
+
+
+def test_portable_html_escape_matches_cpython():
+    import html
+    namespace={}
+    exec(Path('pytincture/browser_templates/html.py.txt').read_text(),namespace)
+    for value in ('', '<a title="x">&\' café', '&amp;', 'plain'):
+        for quote in (True,False):
+            assert namespace['escape'](value,quote)==html.escape(value,quote)
+
+
 def test_computed_import_allowlist_is_bundled_and_enforced_before_execution(tmp_path, monkeypatch):
     (tmp_path/'app.py').write_text('import importlib\nmodule_name="providers.demo"\nprovider=importlib.import_module(module_name)\ndef main(): return provider\n')
     (tmp_path/'providers').mkdir()

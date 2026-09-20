@@ -402,6 +402,12 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     sources['_pytincture_bootstrap.py'] = bootstrap
     vendor_modules = set()
     imports = {module.split('.')[0] for name, source in sources.items() for module, _ in imported_modules(name, source)}
+    for stdlib in (('pathlib', 'html') if engine == 'micropython' else ()):
+        if stdlib in imports and stdlib + '.py' not in sources:
+            sources[stdlib + '.py'] = (TEMPLATES / (stdlib + '.py.txt')).read_text()
+            vendor_modules.add(stdlib + '.py')
+            report['findings'].append({'file': stdlib + '.py', 'line': 0, 'rule': 'portable-stdlib',
+                                      'severity': 'supported', 'message': 'Framework subset shim; see portable-python-profile.md for supported APIs'})
     for stdlib in (('copy', 'datetime') if engine == 'micropython' else ()):
         if stdlib in imports and stdlib + '.py' not in sources:
             vendor_modules.add(stdlib + '.py')

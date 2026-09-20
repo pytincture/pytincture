@@ -35,6 +35,7 @@ findings and run application conformance before enabling the target.
 |---|---|
 | Annotations and typing-only imports | Removed from runtime evaluation; introspection of annotations is unavailable |
 | `create_proxy`, `to_js`, `to_py` | Browser callback bridge; JSON-compatible data conversion, not arbitrary object conversion |
+| `create_once_callable` | Callable JS wrapper with one invocation or explicit `.destroy()` cancellation; releases its callback reference even if invocation throws |
 | MainWindow/Layout subclass initialization | Framework/widget lifecycle initializes nested layouts after constructors |
 | Dictionary unpacking and selected class keywords | Rewritten to supported forms; custom metaclasses are rejected |
 | List, tuple and set display unpacking | Expanded with helpers that preserve expression evaluation and iterator-consumption order |
@@ -44,6 +45,9 @@ findings and run application conformance before enabling the target.
 | String title casing | Portable implementation; Unicode title rules can differ from CPython |
 | UUID helpers | Browser-generated UUID strings through the compatibility helper |
 | Exception formatting and inspect helpers | Limited browser diagnostics; no arbitrary stack/source/signature reflection |
+| Bare `except:` | Catches `BaseException`, including interrupts; generated exception bindings are distinct for nested traceback formatting |
+| `from pathlib import Path` | Optional POSIX path subset over the browser filesystem; supported methods and limits below |
+| `from html import escape` | Optional shim escapes ampersands, angle brackets and (by default) both quote characters; `quote=False` preserves quotes |
 | Task scheduling | Browser scheduler handles callbacks/awaitables; no threads |
 | `asyncio.get_running_loop()` | Scheduling view with `is_running()` and `create_task()` only; not a full asyncio loop |
 | Resources | Verified in-memory `files`, joinpath, name/suffix, is_file/is_dir, iterdir, read_bytes and UTF-8 read_text (string package names); no filesystem writes or arbitrary encodings |
@@ -56,6 +60,27 @@ come from hash-verified pinned MicroPython standard-library sources. These modul
 also have upstream limitations. Review the corresponding generated source for an
 exact transformation. This profile's version must change when its promised
 semantics change incompatibly.
+
+The framework's optional `pathlib` and `html` shims are included only when imported
+and listed in the compatibility report. Pyodide continues using its native
+standard library and native `create_once_callable` implementation.
+
+Portable `Path` supports string/Path construction, `/`, `joinpath`, `name`, `stem`,
+`suffix`, `suffixes`, `parts`, `parent`, `parents`, `with_name`, `with_suffix`,
+`as_posix`, `cwd`, `is_absolute`, `absolute`, `resolve`, `relative_to`, `stat`,
+`exists`, `is_file`, `is_dir`, `iterdir`, `open`, `read_text`, `read_bytes`,
+`write_text`, `write_bytes`, `mkdir`, `unlink`, and `rmdir`. Resolution is lexical
+over the browser's POSIX paths; `strict=True` also checks existence. `stat` exposes
+the ten basic fields, without nanosecond or platform-specific extensions. Text
+methods support UTF-8. Use Path's IO methods (or explicit `str(path)` with native
+MicroPython IO); OS-wide path-protocol support is not implied.
+
+Verified bundle resources are installed into the in-memory filesystem on both
+engines, so `Path(__file__).resolve().parent / "data.json"` can read a declared
+resource. Writes remain local to that browser runtime and are not persisted or
+sent to the server. Windows paths, symlink resolution, globbing, home expansion,
+permissions and the rest of CPython's pathlib/HTML parser APIs are outside this
+subset. Unavailable methods are not silently emulated.
 
 ## Build failures and explicit requirements
 

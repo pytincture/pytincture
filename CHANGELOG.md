@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased
 
+- Add portable `create_once_callable`, preserve valid catch-all exception handlers,
+  and provide documented MicroPython `pathlib.Path` and `html.escape` subsets.
+- Install verified resources into both portable filesystems so Path-based resource
+  reads work in MicroPython as well as Pyodide.
 - Support allowlisted computed `importlib.import_module` calls with runtime
   exact-name checks, and MicroPython `time.monotonic()` using the browser clock.
 - Preserve exact BFF policy-hook signatures by passing only accepted context

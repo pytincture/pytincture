@@ -92,6 +92,7 @@ __export(browser_runtimes_exports, {
   createBffCaller: () => createBffCaller,
   createBffStreamCaller: () => createBffStreamCaller,
   createBffSyncCaller: () => createBffSyncCaller,
+  createOnceCallable: () => createOnceCallable,
   publishLoadedAssets: () => publishLoadedAssets,
   runBrowserApplication: () => runBrowserApplication,
   sameOriginUrl: () => sameOriginUrl,
@@ -393,9 +394,23 @@ function installSources(runtime, bundle) {
     runtime.FS.writeFile(`/${path}`, source);
   }
 }
+function createOnceCallable(callback) {
+  if (typeof callback !== "function") throw new TypeError("Expected a callable");
+  const once = (...args) => {
+    if (callback === null) throw new Error("Once callable has already been called or destroyed");
+    const invoke = callback;
+    callback = null;
+    return invoke(...args);
+  };
+  once.destroy = () => {
+    callback = null;
+  };
+  return once;
+}
 async function runBrowserApplication(config, status = () => {
 }) {
   var _a;
+  globalThis.pytinctureCreateOnceCallable = createOnceCallable;
   const engine = config.runtime || "pyodide";
   if (config.deliveryMode !== "portable-bundle") throw new Error("Portable loader requires deliveryMode=portable-bundle");
   const phase = config._measurePhase || (async (_stage, _resource, callback) => callback());
@@ -522,7 +537,7 @@ output.getvalue()`;
   status("Installing application bundle\u2026");
   await phase("bundle-installation", asset(manifest.targets[engine].sources), async () => {
     installSources(runtime, decodeJson(contents.get(manifest.targets[engine].sources)));
-    if (engine === "pyodide") installResources(runtime, resourceBundle);
+    installResources(runtime, resourceBundle);
   });
   status("Importing application\u2026");
   await phase("module-import", manifest.entrypoint, () => runtime.runPythonAsync(`import sys

@@ -1,0 +1,8 @@
+"""Portable html.escape; other HTML parsing APIs are outside this profile."""
+
+
+def escape(s, quote=True):
+    s = s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    if quote:
+        s = s.replace('"', '&quot;').replace("'", '&#x27;')
+    return s

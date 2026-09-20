@@ -5,6 +5,8 @@ import json
 import sys
 import js
 
+browser_base_exception = BaseException
+
 if sys.implementation.name == 'micropython':
     from jsffi import create_proxy, JsProxy
     import os
@@ -20,8 +22,13 @@ if sys.implementation.name == 'micropython':
 
     if not hasattr(os, 'getenv'):
         os.getenv = _browser_getenv
+
+    def create_once_callable(callback):
+        if not callable(callback):
+            raise TypeError('create_once_callable requires a callable')
+        return js.pytinctureCreateOnceCallable(create_proxy(callback))
 else:
-    from pyodide.ffi import create_proxy, JsProxy
+    from pyodide.ffi import create_proxy, create_once_callable, JsProxy
 
 
 def browser_monotonic():

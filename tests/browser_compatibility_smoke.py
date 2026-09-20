@@ -36,9 +36,35 @@ from time import monotonic as now
 from os import getenv as setting
 from registry import label
 from oldwidgets import load_assets
-from pyodide.ffi import create_proxy
+from pyodide.ffi import create_proxy, create_once_callable
+from pathlib import Path
+from html import escape
+import traceback
 
 def main():
+    caught = False
+    try:
+        raise KeyboardInterrupt('bare-handler')
+    except:
+        caught = True
+        assert 'bare-handler' in traceback.format_exc()
+    assert caught
+    assets = Path(__file__).resolve().parent / 'sample'
+    assert assets.joinpath('message.txt').read_text(encoding='utf-8') == 'bundled text'
+    assert assets.is_dir()
+    assert [p.name for p in assets.iterdir()] == ['message.txt']
+    scratch = Path('/compat-output')
+    scratch.mkdir(parents=True, exist_ok=True)
+    output = scratch / 'result.txt'
+    assert output.write_text('hello') == 5
+    assert output.read_bytes() == b'hello'
+    assert output.stat().st_size == 5
+    assert output.suffix == '.txt' and output.stem == 'result'
+    assert str(output.relative_to(scratch)) == 'result.txt'
+    output.unlink()
+    scratch.rmdir()
+    assert escape('<a title="x">&') == '&lt;a title=&quot;x&quot;&gt;&amp;'
+    assert escape("'", quote=False) == "'"
     module_name = 'providers.demo'
     provider = importlib.import_module(module_name)
     rejected = False
@@ -68,6 +94,11 @@ def main():
     def click(event):
         node.setAttribute('data-clicked', 'yes')
     node.onclick=create_proxy(click)
+    def once(value):
+        node.setAttribute('data-once', str(value))
+        return value + 1
+    js.window.compatOnce = create_once_callable(once)
+    js.window.compatCancelled = create_once_callable(once)
     js.document.body.appendChild(node)
 '''
 
@@ -100,8 +131,10 @@ def main():
         (root/'providers/__init__.py').write_text('')
         (root/'providers/demo.py').write_text('VALUE="allowed provider"\n')
         (root/'providers/denied.py').write_text('raise RuntimeError("must not execute")\n')
+        (root/'sample').mkdir()
+        (root/'sample/message.txt').write_text('bundled text')
         config=root/'pyproject.toml'
-        config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\nwidget-package="oldwidgets"\nwidget-wheel="'+wheel.name+'"\nimport-aliases={registry="browser_registry"}\ndynamic-imports=["providers.demo"]\n')
+        config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\nwidget-package="oldwidgets"\nwidget-wheel="'+wheel.name+'"\nimport-aliases={registry="browser_registry"}\ndynamic-imports=["providers.demo"]\nresources=["sample/message.txt"]\n')
         build_browser_bundle(config)
 
         # The real legacy archive must carry the discovered installed dotenv
@@ -156,6 +189,11 @@ class ActualWindow(Intermediate):
                         expect(page.locator('#compat-result')).to_have_css('color','rgb(12, 34, 56)')
                         page.locator('#compat-result').click()
                         expect(page.locator('#compat-result')).to_have_attribute('data-clicked','yes')
+                        assert page.evaluate('compatOnce(41)') == 42
+                        expect(page.locator('#compat-result')).to_have_attribute('data-once','41')
+                        assert page.evaluate('() => {try {compatOnce(100); return false;} catch {return true;}}')
+                        assert page.evaluate('() => {compatCancelled.destroy(); try {compatCancelled(100); return false;} catch {return true;}}')
+                        expect(page.locator('#compat-result')).to_have_attribute('data-once','41')
                     assert not errors,errors
                     page.screenshot(path=str(args.output/(engine+'.png')))
                     results.append({'engine':engine,'status':'passed','identity':page.evaluate('pytinctureRuntime.getInfo()')})

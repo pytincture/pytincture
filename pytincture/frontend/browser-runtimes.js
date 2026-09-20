@@ -285,7 +285,20 @@ function installSources(runtime, bundle) {
     }
 }
 
+export function createOnceCallable(callback) {
+    if (typeof callback !== 'function') throw new TypeError('Expected a callable');
+    const once = (...args) => {
+        if (callback === null) throw new Error('Once callable has already been called or destroyed');
+        const invoke = callback;
+        callback = null;
+        return invoke(...args);
+    };
+    once.destroy = () => { callback = null; };
+    return once;
+}
+
 export async function runBrowserApplication(config, status = () => {}) {
+    globalThis.pytinctureCreateOnceCallable = createOnceCallable;
     const engine = config.runtime || "pyodide";
     if (config.deliveryMode !== "portable-bundle") throw new Error("Portable loader requires deliveryMode=portable-bundle");
     const phase = config._measurePhase || (async (_stage, _resource, callback) => callback());
@@ -392,7 +405,7 @@ export async function runBrowserApplication(config, status = () => {}) {
     status("Installing application bundle…");
     await phase("bundle-installation", asset(manifest.targets[engine].sources), async () => {
         installSources(runtime, decodeJson(contents.get(manifest.targets[engine].sources)));
-        if (engine === "pyodide") installResources(runtime, resourceBundle);
+        installResources(runtime, resourceBundle);
     });
     status("Importing application…");
     await phase("module-import", manifest.entrypoint, () => runtime.runPythonAsync(`import sys\nsys.path.insert(0, '/')\nimport ${manifest.entrypoint} as _pytincture_client`));

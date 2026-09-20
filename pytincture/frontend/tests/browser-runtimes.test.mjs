@@ -1,7 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {createHash} from 'node:crypto';
-import {BROWSER_RUNTIMES, createBffCaller, sameOriginUrl, validateRuntimeManifest} from '../browser-runtimes.js';
+import {BROWSER_RUNTIMES, createBffCaller, createOnceCallable, sameOriginUrl, validateRuntimeManifest} from '../browser-runtimes.js';
+
+test('once callables reject repeats, cancellation, reentry and exception retries', () => {
+    let calls = 0;
+    const once = createOnceCallable(value => { calls++; return value + 1; });
+    assert.equal(once(41), 42);
+    assert.throws(() => once(41), /already/);
+    const cancelled = createOnceCallable(() => { calls++; });
+    cancelled.destroy();
+    assert.throws(() => cancelled(), /already/);
+    const failed = createOnceCallable(() => { calls++; throw new Error('callback failed'); });
+    assert.throws(() => failed(), /callback failed/);
+    assert.throws(() => failed(), /already/);
+    const recursive = createOnceCallable(() => recursive());
+    assert.throws(() => recursive(), /already/);
+    assert.equal(calls, 2);
+});
 
 const manifest = {
     schema:2, runtimes:['pyodide','micropython'], host:'host.js',

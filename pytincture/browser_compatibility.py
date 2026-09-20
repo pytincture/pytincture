@@ -15,6 +15,7 @@ class BrowserCompatibility(ast.NodeTransformer):
         self.filename = filename
         self.additional_helpers = set()
         self.time_names = {'time'}
+        self.used_names = set()
 
     def visit(self, node):
         tracked = self.report is not None and hasattr(self, 'visit_' + type(node).__name__)
@@ -103,8 +104,8 @@ class BrowserCompatibility(ast.NodeTransformer):
                 imports.insert(0, ast.ImportFrom(module='asyncio', names=remaining, level=0))
             return imports
         if node.module == 'pyodide.ffi':
-            if any(alias.name not in {'create_proxy', 'to_js', 'JsProxy'} for alias in node.names):
-                raise ValueError('Unsupported pyodide.ffi import; supported: create_proxy, to_js, JsProxy')
+            if any(alias.name not in {'create_proxy', 'create_once_callable', 'to_js', 'JsProxy'} for alias in node.names):
+                raise ValueError('Unsupported pyodide.ffi import; supported: create_proxy, create_once_callable, to_js, JsProxy')
             node.module = '_pytincture_compat'
         if node.module == 'dataclasses':
             for alias in node.names:
@@ -219,7 +220,15 @@ class BrowserCompatibility(ast.NodeTransformer):
         return self.generic_visit(node)
 
     def visit_ExceptHandler(self, node):
-        node.name = node.name or '_runtime_error'
+        if node.type is None:
+            self.additional_helpers.add('browser_base_exception')
+            node.type = ast.Name(id='browser_base_exception', ctx=ast.Load())
+        if node.name is None:
+            name = '_runtime_error'
+            while name in self.used_names:
+                name += '_'
+            self.used_names.add(name)
+            node.name = name
         self.exception_names.append(node.name)
         self.generic_visit(node)
         self.exception_names.pop()
@@ -253,6 +262,7 @@ class BrowserCompatibility(ast.NodeTransformer):
 def adapt(source, *, widget=False, widgets=(), report=None, filename='<source>'):
     tree = ast.parse(source)
     transformer = BrowserCompatibility(widget=widget, widgets=widgets, report=report, filename=filename)
+    transformer.used_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)} | {node.name for node in ast.walk(tree) if isinstance(node, ast.ExceptHandler) and node.name}
     transformer.time_names.update(alias.asname or alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names if alias.name == 'time')
     transformer.asyncio_names.update(alias.asname or alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names if alias.name == 'asyncio')
     tree = transformer.visit(tree)
