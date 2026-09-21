@@ -6,6 +6,7 @@ import re
 
 from pytincture.dataclass import has_bff_export_class
 from pytincture.backend.browser_packages import browser_asset_path_is_safe
+from pytincture.browser_boundaries import excluded_module, excluded_import
 
 
 def relative_path(value):
@@ -101,9 +102,14 @@ def browser_source(root, name, aliases=None):
     return source, physical
 
 
-def bridge_widget_imports(source, *, package=None, report=None, filename="<widget>"):
+def bridge_widget_imports(source, *, package=None, report=None, filename="<widget>", server_only_imports=()):
     """Keep old widget loaders, but give them the host's asset-aware JS view."""
     class Bridge(ast.NodeTransformer):
+        def visit(self, node):
+            if excluded_import(node, filename, server_only_imports):
+                return node
+            return super().visit(node)
+
         def visit_Import(self, node):
             result = []
             for alias in node.names:
@@ -167,7 +173,7 @@ def main_only(test):
             and test.comparators[0].value == '__main__')
 
 
-def imported_modules(name, source):
+def imported_modules(name, source, *, server_only_imports=()):
     """Include both 'from package import child' and relative import shapes."""
     class RuntimeImports(ast.NodeTransformer):
         def visit_If(self, node):
@@ -179,9 +185,13 @@ def imported_modules(name, source):
 
     tree = RuntimeImports().visit(ast.parse(source, filename=name))
     for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and excluded_import(node, name, server_only_imports):
+            # This statement will raise before loading its parent package too.
+            continue
         if isinstance(node, ast.Import):
             for alias in node.names:
-                yield alias.name, node.lineno
+                if not excluded_module(alias.name, server_only_imports):
+                    yield alias.name, node.lineno
         elif isinstance(node, ast.ImportFrom):
             package = name.split('/')[:-node.level] if node.level else []
             base = '.'.join([*package, node.module or '']).rstrip('.')
@@ -192,7 +202,8 @@ def imported_modules(name, source):
                     yield '.'.join(filter(None, (base, alias.name))), node.lineno
 
 
-def discover_sources(root, entry, files, bff, *, discover=True, import_aliases=None, substitutions=None):
+def discover_sources(root, entry, files, bff, *, discover=True, import_aliases=None, substitutions=None,
+                     server_only_imports=()):
     selected = {}
     boundaries = set()
     explicit = set(files)
@@ -201,7 +212,8 @@ def discover_sources(root, entry, files, bff, *, discover=True, import_aliases=N
         name = pending.pop(0)
         if name in selected:
             continue
-        module_name(name)
+        if excluded_module(module_name(name), server_only_imports):
+            raise ValueError(f'{name}: explicit browser input conflicts with server-only-imports')
         if name.split('/')[0].startswith('_pytincture_') or name.startswith('dhxpyt/'):
             raise ValueError(f'Reserved browser source: {name}')
         source, physical = browser_source(root, name, import_aliases)
@@ -225,7 +237,7 @@ def discover_sources(root, entry, files, bff, *, discover=True, import_aliases=N
                     resolved = browser_source_path(root, str(parent).replace('/', '.'), import_aliases)
                     if resolved and resolved[0].endswith('/__init__.py'):
                         pending.append(resolved[0])
-            for module, _ in imported_modules(name, source):
+            for module, _ in imported_modules(name, source, server_only_imports=server_only_imports):
                 resolved = browser_source_path(root, module, import_aliases)
                 if resolved:
                     pending.append(resolved[0])
