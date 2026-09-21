@@ -7,6 +7,35 @@ every gate below has durable evidence.
 
 ## Current decision: NO-GO pending observation and edge evidence
 
+`1.0.0rc10` was published on 2026-09-21 from
+`1ceaeac5534804f30c9e3ed47422adebd4ba2e69` after PR #364 merged. All 24 PR,
+main and signed-tag checks passed, followed by all 25 release CI/attestation
+jobs. Protected PyPI publication succeeded. Both public Python artifacts match
+the retained hashes, and a fresh isolated Python 3.13 installation imports
+`1.0.0rc10` and exercises the installed server-only import boundary. The verified
+wheel, source distribution, npm tarball and checksums are attached to the release.
+
+The full pinned example/chat matrix passed across all three runtime/delivery
+modes. Shared browser fixtures validate the new guarded server-only import
+fallbacks in portable Pyodide and MicroPython. BFF generation and real client
+inputs remain intact. The build's static rule requires a local guard even inside
+deferred functions; it does not prove arbitrary startup behavior or validate the
+unavailable private Tenzyn application. See the
+[RC10 configuration guidance](browser-runtimes.md#server-only-import-boundaries-rc10).
+
+Published rc10 evidence:
+
+- [Merged release PR](https://github.com/pytincture/pytincture/pull/364).
+- [Signed-tag qualification](https://github.com/pytincture/pytincture/actions/runs/35629463850).
+- [Release CI, application conformance and attestations](https://github.com/pytincture/pytincture/actions/runs/35630591454).
+- [Successful protected PyPI publication](https://github.com/pytincture/pytincture/actions/runs/35631679849).
+- [Release artifacts and SHA256SUMS.json](https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc10).
+- [Published Python package](https://pypi.org/project/pytincture/1.0.0rc10/).
+- [npm publication awaiting independent environment approval](https://github.com/pytincture/pytincture/actions/runs/35631679926).
+
+Existing observation dates, final-release approvals and conformance-dependency
+audit limitations are unchanged by this candidate.
+
 `1.0.0rc9` was published on 2026-09-21 from
 `81c76748bac7f9d03708111138fac081851581d6` after PR #362 merged. All 24 PR and
 signed-tag checks passed, followed by all 25 release CI/attestation jobs. Protected
@@ -82,8 +111,8 @@ Published rc7 evidence:
 - [Release artifacts and SHA256SUMS.json](https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc7).
 - [Published Python package](https://pypi.org/project/pytincture/1.0.0rc7/).
 
-Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc9`, and rc4
-through rc9 are published on PyPI. Rc9 is the latest published candidate.
+Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc10`, and rc4
+through rc10 are published on PyPI. Rc10 is the latest published candidate.
 The previous rc6 evidence remains retained below. Its
 self-hosted icon asset, browser, BFF, authentication, streaming, cache, and
 capacity coverage passed the complete acceptance matrix. PyPI deliberately
