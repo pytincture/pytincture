@@ -101,7 +101,7 @@ def browser_source(root, name, aliases=None):
     return source, physical
 
 
-def bridge_widget_imports(source):
+def bridge_widget_imports(source, *, package=None, report=None, filename="<widget>"):
     """Keep old widget loaders, but give them the host's asset-aware JS view."""
     class Bridge(ast.NodeTransformer):
         def visit_Import(self, node):
@@ -114,6 +114,13 @@ def bridge_widget_imports(source):
             return result
 
         def visit_ImportFrom(self, node):
+            if node.module == 'pyodide.code' and not node.level:
+                wrapped = [ast.alias(name='widget_run_js', asname=a.asname or a.name)
+                           for a in node.names if a.name == 'run_js']
+                rest = [a for a in node.names if a.name != 'run_js']
+                if wrapped:
+                    return ([ast.ImportFrom(module=node.module, names=rest, level=0)] if rest else []) + [
+                        ast.ImportFrom(module='_pytincture_compat', names=wrapped, level=0)]
             if node.module != 'js' or node.level or any(alias.name == '*' for alias in node.names):
                 return node
             result = [ast.ImportFrom(module='js', names=[ast.alias(name='pytinctureWidgetBridge', asname='_pytincture_widget_js')], level=0)]
@@ -121,7 +128,32 @@ def bridge_widget_imports(source):
                                      value=ast.Attribute(value=ast.Name(id='_pytincture_widget_js', ctx=ast.Load()), attr=alias.name, ctx=ast.Load()))
                           for alias in node.names)
             return result
-    return ast.unparse(ast.fix_missing_locations(Bridge().visit(ast.parse(source)))) + '\n'
+    tree = ast.parse(source)
+    if package:
+        # Compatibility for conventional pre-ownership Widgetsets. Guard inside
+        # the function, before any resource reads/encoding (also covers aliases).
+        # Do not infer arbitrary application functions to be asset loaders.
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name in {
+                '_try_inject_inter_fonts', '_try_inject_icon_fonts',
+            }:
+                used = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+                used.update(n.arg for n in ast.walk(node) if isinstance(n, ast.arg))
+                helper = '_pytincture_font_host'
+                while helper in used:
+                    helper += '_'
+                guard = ast.parse(f"import js as {helper}\n"
+                                  f"if getattr({helper}, 'pytinctureAssets', None) is not None and "
+                                  f"{helper}.pytinctureAssets.isPackageReady({package!r}):\n    return\n").body
+                index = int(bool(node.body and isinstance(node.body[0], ast.Expr)
+                                 and isinstance(node.body[0].value, ast.Constant)
+                                 and isinstance(node.body[0].value.value, str)))
+                node.body[index:index] = guard
+                if report is not None:
+                    report.append({'file': filename, 'line': node.lineno, 'severity': 'transformation',
+                                   'rule': 'widget-font-ownership', 'behavior_changing': True,
+                                   'message': f'{node.name} skips resource encoding only when {package} assets are ready'})
+    return ast.unparse(ast.fix_missing_locations(Bridge().visit(tree))) + '\n'
 
 
 def main_only(test):

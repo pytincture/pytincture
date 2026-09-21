@@ -96,6 +96,9 @@ var PytinctureRuntime = (() => {
     createBffSyncCaller: () => createBffSyncCaller,
     createEventCallback: () => createEventCallback,
     createOnceCallable: () => createOnceCallable,
+    evaluatePythonJavascript: () => evaluatePythonJavascript,
+    installResources: () => installResources,
+    preparePackageResources: () => preparePackageResources,
     publishLoadedAssets: () => publishLoadedAssets,
     runBrowserApplication: () => runBrowserApplication,
     sameOriginUrl: () => sameOriginUrl,
@@ -252,14 +255,40 @@ var PytinctureRuntime = (() => {
       getInfo: () => Object.freeze({ owner: "portable-bundle", bundleId: manifest.bundleId, packages, assets: Object.freeze([...records]) })
     });
   }
-  function installResources(runtime, bundle) {
-    if (!bundle.files || typeof bundle.files !== "object" || Array.isArray(bundle.files)) throw new Error("Invalid package resources");
-    for (const [path, encoded] of Object.entries(bundle.files)) {
+  function preparePackageResources(bundle, contents) {
+    if (!bundle || !bundle.files || typeof bundle.files !== "object" || Array.isArray(bundle.files) || bundle.format !== void 0 && bundle.format !== "asset-references-v1") throw new Error("Invalid package resources");
+    const files = /* @__PURE__ */ new Map();
+    for (const [path, entry] of Object.entries(bundle.files)) {
       relativePath(path);
-      if (path.endsWith(".py") || path.endsWith(".pyc") || typeof encoded !== "string") throw new Error("Invalid package resource");
+      if (path.endsWith(".py") || path.endsWith(".pyc")) throw new Error("Invalid package resource");
+      if (typeof entry === "string" && bundle.format === void 0) files.set(path, entry);
+      else if (bundle.format === "asset-references-v1" && entry && typeof entry === "object" && !Array.isArray(entry) && Object.keys(entry).length === 1 && entry.asset === "vendor/" + path && contents.get(entry.asset) instanceof Uint8Array) files.set(path, contents.get(entry.asset));
+      else throw new Error(`Invalid or unverified package resource: ${path}`);
+    }
+    const get = (path) => {
+      if (!files.has(path)) throw new Error(`Unknown package resource: ${path}`);
+      return files.get(path);
+    };
+    return {
+      paths: [...files.keys()],
+      readBytes(path) {
+        const value = get(path);
+        return typeof value === "string" ? Uint8Array.from(atob(value), (ch) => ch.charCodeAt(0)) : value;
+      },
+      readBase64(path) {
+        const value = get(path);
+        if (typeof value === "string") return value;
+        const chunks = [];
+        for (let start = 0; start < value.length; start += 32768) chunks.push(String.fromCharCode(...value.subarray(start, start + 32768)));
+        return btoa(chunks.join(""));
+      }
+    };
+  }
+  function installResources(runtime, resources) {
+    for (const path of resources.paths) {
       const directory = path.slice(0, path.lastIndexOf("/"));
       if (path.includes("/")) runtime.FS.mkdirTree("/" + directory);
-      runtime.FS.writeFile("/" + path, Uint8Array.from(atob(encoded), (value) => value.charCodeAt(0)));
+      runtime.FS.writeFile("/" + path, resources.readBytes(path));
     }
   }
   function loadAsset(url, stylesheet = false, integrity = null, id = null) {
@@ -418,9 +447,19 @@ var PytinctureRuntime = (() => {
     };
     return listener;
   }
+  function evaluatePythonJavascript(code, widget = false) {
+    try {
+      if (typeof code !== "string") throw new TypeError("run_js requires a string");
+      const scope = widget ? globalThis.pytinctureWidgetBridge : globalThis;
+      return { ok: true, value: scope.eval(code) };
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
+  }
   async function runBrowserApplication(config, status = () => {
   }) {
     var _a;
+    globalThis.pytinctureRunJavascript = evaluatePythonJavascript;
     globalThis.pytinctureCreateOnceCallable = createOnceCallable;
     globalThis.pytinctureCreateEventCallback = createEventCallback;
     const engine = config.runtime || "pyodide";
@@ -489,12 +528,9 @@ var PytinctureRuntime = (() => {
       invoke: handle.call,
       assetUrl: asset
     });
-    const resourceBundle = decodeJson(contents.get(manifest.resources));
-    globalThis.pytinctureResourcePaths = JSON.stringify(Object.keys(resourceBundle.files));
-    globalThis.pytinctureReadResourceBytes = (path) => {
-      if (!Object.hasOwn(resourceBundle.files, path)) throw new Error(`Unknown package resource: ${path}`);
-      return resourceBundle.files[path];
-    };
+    const resourceBundle = preparePackageResources(decodeJson(contents.get(manifest.resources)), contents);
+    globalThis.pytinctureResourcePaths = JSON.stringify(resourceBundle.paths);
+    globalThis.pytinctureReadResourceBytes = (path) => resourceBundle.readBase64(path);
     status(`Loading ${engine}\u2026`);
     let runtime;
     if (engine === "micropython") {

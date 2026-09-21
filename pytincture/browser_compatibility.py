@@ -103,6 +103,10 @@ class BrowserCompatibility(ast.NodeTransformer):
             if remaining:
                 imports.insert(0, ast.ImportFrom(module='asyncio', names=remaining, level=0))
             return imports
+        if node.module == 'pyodide.code' and not node.level:
+            if any(alias.name != 'run_js' for alias in node.names):
+                raise ValueError('Portable pyodide.code supports only run_js')
+            node.module = '_pytincture_compat'
         if node.module == 'pyodide.ffi':
             if any(alias.name not in {'create_proxy', 'create_once_callable', 'to_js', 'JsProxy'} for alias in node.names):
                 raise ValueError('Unsupported pyodide.ffi import; supported: create_proxy, create_once_callable, to_js, JsProxy')

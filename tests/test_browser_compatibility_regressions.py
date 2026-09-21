@@ -15,7 +15,7 @@ from pytincture.backend.browser_packages import create_appcode_archive, AppcodeA
 from pytincture.backend.pages import find_main_window_subclass
 
 
-@pytest.mark.parametrize('statement', ['from pyodide.ffi import create_once_callable', 'from pathlib import Path', 'from html import escape'])
+@pytest.mark.parametrize('statement', ['from pyodide.ffi import create_once_callable', 'from pathlib import Path', 'from html import escape', 'from pyodide.code import run_js', 'from pyodide.code import run_js as evaluate'])
 def test_new_portable_imports_build_on_both_engines(tmp_path, statement):
     (tmp_path/'app.py').write_text(statement+'\ndef main(): pass\n')
     config=tmp_path/'pyproject.toml'
@@ -273,3 +273,56 @@ def test_legacy_archive_discovers_installed_pure_python_dependencies_without_imp
     (installed/'dotenv/__init__.py').write_text('updated=True\n')
     with zipfile.ZipFile(create_appcode_archive('localhost','http','app',str(root),parser,cache=cache)) as bundle:
         assert bundle.read('dotenv/__init__.py')==b'updated=True\n'
+
+
+@pytest.mark.parametrize('ready', [False, True, None])
+def test_widget_font_guards_skip_work_only_for_the_ready_package(monkeypatch, ready):
+    from pytincture.browser_sources import bridge_widget_imports
+    reads = []
+    host = types.SimpleNamespace()
+    if ready is not None:
+        host.pytinctureAssets = types.SimpleNamespace(isPackageReady=lambda package: ready and package == 'widgets')
+    monkeypatch.setitem(sys.modules, 'js', types.SimpleNamespace(pytinctureWidgetBridge=host))
+    source = """def _try_inject_inter_fonts():
+    'Keep my docstring'
+    reads.append('inter')
+def _try_inject_icon_fonts():
+    reads.append('icons')
+def unrelated_initializer():
+    reads.append('other')
+alias = _try_inject_inter_fonts
+alias()
+_try_inject_icon_fonts()
+unrelated_initializer()
+"""
+    findings = []
+    converted = bridge_widget_imports(source, package='widgets', report=findings, filename='widgets/__init__.py')
+    namespace = {'reads': reads}
+    exec(converted, namespace)
+    assert reads == (['other'] if ready else ['inter', 'icons', 'other'])
+    assert namespace['_try_inject_inter_fonts'].__doc__ == 'Keep my docstring'
+    assert [item['rule'] for item in findings] == ['widget-font-ownership'] * 2
+    # Source outside the Widgetset is not given a package ownership guard.
+    reads.clear()
+    exec(bridge_widget_imports(source), namespace)
+    assert reads == ['inter', 'icons', 'other']
+
+
+def test_run_js_preserves_result_type_check_and_errors():
+    helpers = ast.parse(Path('pytincture/browser_templates/compat.py.txt').read_text())
+    helpers.body = [n for n in helpers.body if isinstance(n, ast.FunctionDef) and n.name == 'run_js']
+    values = []
+    def evaluate(code, widget):
+        assert not widget
+        values.append(code)
+        if code == 'throw':
+            return types.SimpleNamespace(ok=False, error='JS error')
+        return types.SimpleNamespace(ok=True, value=42)
+    namespace = {'js': types.SimpleNamespace(pytinctureRunJavascript=evaluate)}
+    exec(compile(helpers, 'helpers', 'exec'), namespace)
+    call = namespace['run_js']
+    assert call('6 * 7') == 42
+    with pytest.raises(TypeError): call(42)
+    with pytest.raises(TypeError): call(code='6 * 7')
+    with pytest.raises(RuntimeError, match='JS error'): call('throw')
+    assert values == ['6 * 7', 'throw']

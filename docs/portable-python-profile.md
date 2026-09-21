@@ -104,6 +104,14 @@ sent to the server. Windows paths, symlink resolution, globbing, home expansion,
 permissions and pathlib APIs beyond those listed are outside this
 subset. Unavailable methods are not silently emulated.
 
+`from pyodide.code import run_js` (including import aliases) is supported in
+MicroPython. Like [Pyodide's API](https://pyodide.org/en/0.29.3/usage/api/python-api/code.html#pyodide.code.run_js),
+it accepts a positional JavaScript string, returns the browser result, rejects
+non-strings, and raises `RuntimeError` with the JavaScript error text when evaluation
+fails, so Python handlers can catch it in MicroPython. Native Pyodide application
+imports remain native. This does not add other `pyodide.code` APIs or change CSP;
+JavaScript evaluation remains subject to the application's browser policy.
+
 ## Build failures and explicit requirements
 
 Build-time checks reject unresolved imports, native extension wheels, unsupported

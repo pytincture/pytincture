@@ -31,6 +31,31 @@ else:
     from pyodide.ffi import create_proxy, create_once_callable, JsProxy
 
 
+def run_js(*args):
+    """Match pyodide.code.run_js; browser CSP still governs evaluation."""
+    if len(args) != 1:
+        raise TypeError("run_js requires one positional argument")
+    code = args[0]
+    if not isinstance(code, str):
+        raise TypeError('run_js requires a string')
+    result = js.pytinctureRunJavascript(code, False)
+    if not result.ok:
+        raise RuntimeError(str(result.error))
+    return result.value
+
+
+def widget_run_js(*args):
+    if len(args) != 1:
+        raise TypeError("run_js requires one positional argument")
+    code = args[0]
+    if not isinstance(code, str):
+        raise TypeError('run_js requires a string')
+    result = js.pytinctureRunJavascript(code, True)
+    if not result.ok:
+        raise RuntimeError(str(result.error))
+    return result.value
+
+
 def browser_monotonic():
     return js.performance.now() / 1000.0
 

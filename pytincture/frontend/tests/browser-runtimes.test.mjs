@@ -223,3 +223,41 @@ test('synchronous compatibility requests enforce the same target, session and CS
         assert.throws(()=>call('../data','Data','lookup'),/Invalid BFF target/);
     } finally {globalThis.XMLHttpRequest=priorXhr;globalThis.document=priorDocument;}
 });
+
+test('resources reuse verified asset bytes and preserve old base64 bundles', async () => {
+    const {preparePackageResources, installResources} = await import('../browser-runtimes.js');
+    const bytes = Uint8Array.from({length: 100000}, (_, index) => index % 256);
+    const contents = new Map([['vendor/widget/font.bin', bytes]]);
+    const resources = preparePackageResources({format:'asset-references-v1', files:{'widget/font.bin':{asset:'vendor/widget/font.bin'}}}, contents);
+    assert.equal(resources.readBytes('widget/font.bin'), bytes);
+    assert.equal(resources.readBase64('widget/font.bin'), Buffer.from(bytes).toString('base64'));
+    const writes = [];
+    installResources({FS:{mkdirTree:path => writes.push(path), writeFile:(path, value) => writes.push([path, value])}}, resources);
+    assert.deepEqual(writes, ['/widget', ['/widget/font.bin', bytes]]);
+    const legacy = preparePackageResources({files:{'app/data.txt':btoa('hello')}}, new Map());
+    assert.equal(new TextDecoder().decode(legacy.readBytes('app/data.txt')), 'hello');
+    assert.equal(legacy.readBase64('app/data.txt'), btoa('hello'));
+    assert.throws(() => resources.readBytes('unknown'), /Unknown/);
+    for (const [path, entry] of [
+        ['widget/font.bin', {asset:'unverified'}],
+        ['widget/font.bin', {asset:'vendor/widget/missing'}],
+        ['widget/../secret', {asset:'vendor/widget/font.bin'}],
+        ['widget/code.py', {asset:'vendor/widget/font.bin'}],
+        ['widget/font.bin', {asset:'vendor/widget/font.bin', extra:true}],
+    ]) assert.throws(() => preparePackageResources({format:'asset-references-v1', files:{[path]:entry}}, contents), /resource|path/);
+    assert.throws(() => preparePackageResources({format:'future',files:{}}, contents), /resource/);
+});
+
+test('run_js keeps browser values and catches JS and CSP evaluation failures', async () => {
+    const {evaluatePythonJavascript} = await import('../browser-runtimes.js');
+    assert.deepEqual(evaluatePythonJavascript('6 * 7'), {ok:true, value:42});
+    assert.deepEqual(evaluatePythonJavascript('({answer:42})').value, {answer:42});
+    assert.equal(evaluatePythonJavascript('undefined').value, undefined);
+    assert.equal(evaluatePythonJavascript('throw new Error("probe")').error, 'Error: probe');
+    assert.equal(evaluatePythonJavascript(42).ok, false);
+    const previous = globalThis.pytinctureWidgetBridge;
+    try {
+        globalThis.pytinctureWidgetBridge = {eval:() => {throw new EvalError('Blocked by CSP');}};
+        assert.deepEqual(evaluatePythonJavascript('code', true), {ok:false, error:'EvalError: Blocked by CSP'});
+    } finally { globalThis.pytinctureWidgetBridge = previous; }
+});

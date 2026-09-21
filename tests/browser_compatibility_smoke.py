@@ -16,8 +16,23 @@ from pytincture.backend.browser_packages import create_appcode_archive
 
 WIDGET_SOURCE = '''import js
 from js import document as dom
-from js import eval as evaluate
+from pyodide.code import run_js as evaluate
 from importlib import resources
+import base64
+
+def _try_inject_inter_fonts():
+    data = resources.files('oldwidgets').joinpath('assets/font.bin').read_bytes()
+    encoded = base64.b64encode(data).decode('ascii')
+    style = dom.createElement('style')
+    style.id = 'duplicate-font-work'
+    style.textContent = '/*' + encoded + '*/'
+    dom.head.appendChild(style)
+
+def _try_inject_icon_fonts():
+    _try_inject_inter_fonts()
+
+_try_inject_inter_fonts()
+_try_inject_icon_fonts()
 
 def load_assets(force=False):
     content = resources.files('oldwidgets').joinpath('assets/ui.js').read_text()
@@ -37,6 +52,7 @@ from os import getenv as setting
 from registry import label
 from oldwidgets import load_assets
 from pyodide.ffi import create_proxy, create_once_callable
+from pyodide.code import run_js as evaluate_js
 from pathlib import Path
 from html import escape
 import traceback
@@ -44,6 +60,23 @@ from stdlib_probe import validate
 
 def main():
     validate()
+    assert evaluate_js('6 * 7') == 42
+    assert evaluate_js('({answer: 42})').answer == 42
+    rejected_js = False
+    try:
+        evaluate_js(42)
+    except TypeError:
+        rejected_js = True
+    assert rejected_js
+    failed_js = False
+    try:
+        evaluate_js("throw new Error('run-js-probe')")
+    except Exception:
+        failed_js = True
+    assert failed_js
+    # Binary resource paths still work; avoiding duplicate transfer must not
+    # make assets disappear from the interpreter filesystem.
+    assert len(Path('/oldwidgets/assets/font.bin').read_bytes()) == 2 * 1024 * 1024
     caught = False
     try:
         raise KeyboardInterrupt('bare-handler')
@@ -119,6 +152,7 @@ def main():
         wheel=root/'oldwidgets-1.0.0-py3-none-any.whl'
         with zipfile.ZipFile(wheel,'w') as archive:
             files={'oldwidgets/__init__.py':WIDGET_SOURCE,**assets,
+                   'oldwidgets/assets/font.bin':b'F' * (2 * 1024 * 1024),
                    'oldwidgets-1.0.0.dist-info/METADATA':'Metadata-Version: 2.1\nName: oldwidgets\nVersion: 1.0.0\n',
                    'oldwidgets-1.0.0.dist-info/WHEEL':'Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n'}
             files['oldwidgets/pytincture-assets.json']=json.dumps({'schema':1,'package':'oldwidgets','version':'1.0.0','assets':[
@@ -140,7 +174,12 @@ def main():
             archive.writestr('data.txt', 'portable archive')
         config=root/'pyproject.toml'
         config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\nwidget-package="oldwidgets"\nwidget-wheel="'+wheel.name+'"\nimport-aliases={registry="browser_registry"}\ndynamic-imports=["providers.demo"]\nresources=["sample/message.txt", "sample/archive.zip"]\n')
-        build_browser_bundle(config)
+        manifest_path = build_browser_bundle(config)
+        manifest = json.loads(manifest_path.read_text())
+        # Resources are references, not a second base64 copy of the large font.
+        assert manifest['integrity']['resources.json']['bytes'] < 10000
+        report = json.loads((manifest_path.parent/'compatibility.json').read_text())
+        assert 'widget-font-ownership' in json.dumps(report)
 
         # The real legacy archive must carry the discovered installed dotenv
         # package. Browser entry discovery must follow imported aliases and MRO.
@@ -190,6 +229,7 @@ class ActualWindow(Intermediate):
                         result=json.loads(page.locator('#compat-result').inner_text())
                         assert result=={'registry':'browser substitute','provider':'allowed provider','rejected':True,'fallback':'fallback','local':'local','values':[0,1,2,3,4],'tuple':[0,1,2],'set':[0,1,2]},result
                         assert page.evaluate('window.oldWidgetLoads')==1
+                        assert page.locator('#duplicate-font-work').count() == 0
                         assert page.evaluate('Array.from(document.querySelectorAll("style")).filter(n=>n.textContent.includes("#compat-result")).length')==0
                         expect(page.locator('#compat-result')).to_have_css('color','rgb(12, 34, 56)')
                         page.locator('#compat-result').click()

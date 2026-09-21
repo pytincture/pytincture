@@ -5,7 +5,6 @@ Application and backend modules are parsed, never imported or executed.
 from __future__ import annotations
 
 import argparse
-import base64
 import ast
 import hashlib
 import importlib.metadata
@@ -210,7 +209,7 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
         raise ValueError('entry-kind must be mainwindow, callable or async')
     def convert(name, source, *, widget=False, widgets=()):
         if widget:
-            source = bridge_widget_imports(source)
+            source = bridge_widget_imports(source, package=widget_package, report=report['findings'], filename=name)
             report['findings'].append({'file': name, 'line': 0, 'severity': 'transformation',
                                       'rule': 'widget-asset-bridge', 'behavior_changing': True,
                                       'message': 'Widget JS imports use the scoped bridge; verified loaded asset bytes are not executed/injected twice'})
@@ -503,7 +502,7 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     artifacts['host.js'] = (TEMPLATES / 'host.js.txt').read_text().replace(
         '__PYTINCTURE_APP_TITLE__', json.dumps(title),
     ).encode()
-    resources = {name.removeprefix('vendor/'): base64.b64encode(content).decode()
+    resources = {name.removeprefix('vendor/'): {'asset': name}
                  for name, content in sorted(artifacts.items())
                  if name.startswith('vendor/' + widget_package + '/') or
                     (name.startswith('vendor/') and name.removeprefix('vendor/') in config.get('resources', [])) or
@@ -511,7 +510,7 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     source_name = 'sources.json' if engine == 'micropython' else 'sources-pyodide.json'
     artifacts[source_name] = canonical_json({'files': sources})
     # CPython resources are installed in its real filesystem, preserving importlib.resources.
-    artifacts['resources.json'] = canonical_json({'files': resources})
+    artifacts['resources.json'] = canonical_json({'format': 'asset-references-v1', 'files': resources})
     manifest['sources'] = source_name
     manifest['resources'] = 'resources.json'
     manifest['requiredBrowserApis'] = ['fetch', 'WebAssembly', 'crypto.subtle', *config.get('required-browser-apis', [])]

@@ -5,6 +5,13 @@ set when a release is published.
 
 ## Unreleased
 
+- Guard conventional Widgetset font initializers before resource reading/encoding
+  when portable package assets are ready, with per-function build diagnostics.
+- Reference verified assets from package-resource manifests instead of shipping a
+  duplicate Base64 payload; preserve file reads and older bundle loading.
+- Support named `pyodide.code.run_js` imports in MicroPython and route Widgetset
+  calls through asset ownership checks without changing application CSP.
+
 - Add profile-2 MicroPython string, UUID, Base64, HTML parser/entity, context-manager,
   CSV, ZIP-reader, and managed event-listener support with recursive shim discovery.
   UUID4 now returns UUID values consistently; existing profile-1 bundles remain loadable.

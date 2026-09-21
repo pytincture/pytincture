@@ -248,6 +248,26 @@ owned script/stylesheet URLs. It preserves loader completion events, and unrelat
 JavaScript/CSS continues normally. Application JS imports and global browser APIs
 are unchanged. The build report identifies this adaptation in both engines.
 
+The bridge also covers named `from pyodide.code import run_js` imports (including
+aliases). For older Widgetsets with top-level `_try_inject_inter_fonts()` or
+`_try_inject_icon_fonts()` helpers, the builder adds an early package-readiness
+check inside each helper. This skips resource reading, Base64 encoding and CSS
+construction before they block the interpreter. The original helper runs when
+that package is not ready. The `widget-font-ownership` transformation is reported
+per function for both portable engines; it is never applied to application code.
+A ready package means its declared manifest assets loaded successfully. Its
+manifest must include the font CSS and dependencies these helpers would supply.
+Different initializer names still need the explicit readiness check or ownership
+hook; Pytincture does not guess which arbitrary functions are safe to skip.
+
+New `resources.json` files use `format = "asset-references-v1"` and reference the
+already-verified `vendor/` assets. They no longer transfer a second Base64 copy of
+fonts, scripts or package data. Both interpreters still receive resource files,
+and MicroPython resource reads convert bytes to Base64 only on demand. This is
+not a lazy filesystem or a guarantee that a particular heap will fit an app.
+Rebuild and serve the matching framework browser runtime with new bundles. The
+updated loader also accepts older inline-Base64 resource bundles.
+
 This supports conventional old resource-based loaders without a Widgetset source
 change. Loaders that rewrite asset contents, use star imports from `js`, or obtain
 browser APIs through an unrelated bridge still need the explicit ownership hook
