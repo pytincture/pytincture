@@ -108,6 +108,19 @@
       },
       "status": "passed",
       "notes": "Signed tag qualification (35510250996), complete release CI and attestations (35510694984), and protected PyPI publication (35511220297) passed. The exact wheel, source distribution, npm tarball and SHA256SUMS.json are attached to the GitHub prerelease. Public PyPI wheel and sdist bytes match the attested hashes; a fresh Python 3.13 public-index installation imports pytincture and reports 1.0.0rc8. Full pinned Book Library and Wawesome Chat conformance passed for legacy Pyodide, portable Pyodide and portable MicroPython, including voice. npm publisher 35511220284 is waiting for its required independent environment approval; the attested npm artifact remains retained. Companion widget/app changes are conformance patches, not separately published releases. Final 1.0 observation and production-edge approval remain pending."
+    },
+    {
+      "version": "1.0.0rc9",
+      "published_at": "2026-09-21T14:24:47Z",
+      "commit_sha": "81c76748bac7f9d03708111138fac081851581d6",
+      "ci_url": "https://github.com/pytincture/pytincture/actions/runs/35611986858",
+      "artifacts": {
+        "wheel": "b8f9ac0c0eb5c0949454b58b879248e21f9ef5ecaaf0373eaf2c583346afe7a0",
+        "sdist": "e6fd6b5b267fe1ca86b1d4807f7d247bc70386efa99ce895354e03013a7e15ab",
+        "npm": "71b4156d044dd02f39e56351b6ca1b05bd4acd88dd929454ace8c913db18a7ba"
+      },
+      "status": "passed",
+      "notes": "Release PR #362, signed-tag qualification (35610728524), all 25 release CI/attestation jobs (35611986858), and protected PyPI publication (35613132108) passed. The wheel, source distribution, npm tarball and SHA256SUMS.json are attached to the GitHub prerelease. Public PyPI wheel/sdist bytes match the attested hashes; a fresh isolated Python 3.13 public-index installation imports version 1.0.0rc9. Full pinned example/chat conformance passed across legacy Pyodide, portable Pyodide and MicroPython. Shared browser fixtures verify nested f-string parity; the unavailable private Tenzyn app is not claimed as validated. npm publisher 35613131751 awaits environment approval. Portable delivery remains opt-in; profile-2 UUID behavior and matching-runtime bundle rebuild requirements are documented. Final 1.0 approvals and observation dates are unchanged."
     }
   ],
   "representative_applications": {
@@ -724,6 +737,6 @@
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1 through RC8 release evidence is recorded, and rc4 through rc8 are published on PyPI. Rc8 passed the complete framework release CI, full pinned application conformance across all three runtime/delivery profiles, attestation and a clean public-index install. Portable delivery remains opt-in and legacy Pyodide remains the default. The optional application-credential registry and new portable runtime targets still need observation-scope review; these checks do not establish production-edge qualification or arbitrary Python compatibility. Final 1.0 remains NO-GO pending the approved observation period, production-edge evidence, remaining registry distribution and final release-manager approval. Existing observation dates have not been changed."
+    "notes": "RC1 through RC9 release evidence is recorded, and rc4 through rc9 are published on PyPI. Rc9 passed complete framework release CI, pinned application conformance across all three runtime/delivery profiles, artifact attestation, public artifact hash verification and a clean public-index install. Legacy Pyodide remains the default. Portable profile fixes do not establish arbitrary CPython or unavailable private-application compatibility. The optional application-credential registry and portable runtime targets still need observation-scope review. Final 1.0 remains NO-GO pending the approved observation period, production-edge evidence, remaining registry distribution and final release-manager approval. Existing observation dates have not been changed."
   }
 }
