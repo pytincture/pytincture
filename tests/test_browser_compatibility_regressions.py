@@ -337,22 +337,23 @@ def main():
 
 @pytest.mark.parametrize('runtimes', [['micropython'], ['pyodide', 'micropython']])
 @pytest.mark.parametrize('check', [False, True])
-def test_nested_fstring_build_fails_before_publishing_with_runtime_report(tmp_path, runtimes, check):
-    from pytincture.browser_profile import CompatibilityError
+def test_nested_fstring_build_supports_both_targets_with_transform_report(tmp_path, runtimes, check):
     (tmp_path/'app.py').write_text(NESTED_FSTRING_APP)
     config = tmp_path/'pyproject.toml'
     config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\nruntimes=' + json.dumps(runtimes) + '\n')
     report_path = tmp_path/'report.json'
-    with pytest.raises(CompatibilityError, match='Nested f-strings') as error:
-        build_browser_bundle(config, check=check, report_path=report_path)
+    result = build_browser_bundle(config, check=check, report_path=report_path)
     report = json.loads(report_path.read_text())
-    assert report == error.value.report
-    assert report['runtimes']['pyodide']['status'] == 'supported'
-    micro = report['runtimes']['micropython']
-    assert micro['status'] == 'unsupported'
-    finding = next(f for f in micro['findings'] if f['rule'] == 'nested-fstring')
+    assert all(target['status'] == 'supported' for target in report['runtimes'].values())
+    findings = report['runtimes']['micropython']['findings']
+    assert any(f['rule'] == 'adapt-JoinedStr' and f['severity'] == 'transformation' for f in findings)
+    finding = next(f for f in findings if f['rule'] == 'nested-fstring')
     assert finding['file'] == 'app.py' and finding['line'] == 2
-    assert not (tmp_path/'browser').exists()
+    if check:
+        assert not (tmp_path/'browser').exists()
+    else:
+        source = json.loads((result.parent/'sources.json').read_text())['files']['app.py']
+        assert not any(isinstance(n, ast.JoinedStr) for n in ast.walk(ast.parse(source)))
 
 
 def test_nested_fstrings_keep_both_conditional_results_in_portable_pyodide(tmp_path):
@@ -365,3 +366,36 @@ def test_nested_fstrings_keep_both_conditional_results_in_portable_pyodide(tmp_p
     exec(sources['app.py'], namespace)
     assert namespace['render'](True) == 'before  after'
     assert namespace['render'](False) == 'before nested False after'
+
+
+def test_nested_fstrings_preserve_side_effects_formats_exceptions_and_await():
+    import asyncio
+    source = Path('tests/fixtures/portable_fstrings/probe.py').read_text()
+    # Execute both the original CPython source and exactly the transformed AST.
+    native = {}
+    exec(source, native)
+    native['validate']()
+    asyncio.run(native['validate_async']())
+    helpers = ast.parse(Path('pytincture/browser_templates/compat.py.txt').read_text())
+    helpers.body = [n for n in helpers.body if isinstance(n, ast.FunctionDef) and n.name.startswith('fstring_')]
+    namespace = {'initialize_layout': lambda cls: cls}
+    exec(compile(helpers, 'helpers', 'exec'), namespace)
+    converted = ast.parse(adapt(source))
+    for node in converted.body:
+        if isinstance(node, ast.ImportFrom) and node.module == '_pytincture_compat':
+            for alias in node.names:
+                if alias.name.startswith('fstring_'):
+                    namespace[alias.asname or alias.name] = namespace[alias.name]
+    converted.body = [n for n in converted.body if not isinstance(n, (ast.Import, ast.ImportFrom))]
+    assert not any(isinstance(n, ast.JoinedStr) for n in ast.walk(converted))
+    exec(compile(converted, 'converted', 'exec'), namespace)
+    namespace['validate']()
+    asyncio.run(namespace['validate_async']())
+
+
+def test_fstring_helpers_do_not_shadow_application_bindings():
+    source = '_pytincture_fstring_format = 99\ndef render(_pytincture_fstring_convert):\n return f"{f\'value {1}\'!r}"\n'
+    converted = adapt(source)
+    assert 'fstring_format as _pytincture_fstring_format_' in converted
+    assert 'fstring_convert as _pytincture_fstring_convert_' in converted
+    assert '_pytincture_fstring_format = 99' in converted

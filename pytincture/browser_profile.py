@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import zipfile
 
-from pytincture.browser_sources import main_only, has_nested_fstring, NESTED_FSTRING_ERROR
+from pytincture.browser_sources import main_only, has_nested_fstring
 
 PROFILE = 'pytincture-portable-2'
 MICROPYTHON_MODULES = frozenset('js jsffi asyncio array binascii builtins cmath collections gc hashlib heapq io json math micropython os random re select struct sys time errno deflate __main__'.split())
@@ -104,7 +104,7 @@ def inspect_source(name, source, engine, *, explicit_dynamic=()):
             aliases.update({a.asname or a.name: (node.module or '')+'.'+a.name for a in node.names})
     for node in ast.walk(tree):
         if engine == 'micropython' and has_nested_fstring(node):
-            add(node, 'nested-fstring', NESTED_FSTRING_ERROR)
+            add(node, 'nested-fstring', 'Nested f-strings are lowered to ordered formatting expressions for MicroPython', 'supported')
         if isinstance(node, ast.Call):
             call = ast.unparse(node.func)
             first, _, tail = call.partition('.')

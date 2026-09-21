@@ -5,8 +5,9 @@ set when a release is published.
 
 ## Unreleased
 
-- Reject nested f-strings during MicroPython compatibility checks and direct
-  adaptation, with source locations and guidance; retain Pyodide support.
+- Lower nested f-strings into MicroPython-compatible formatting expressions,
+  preserving lazy branches, conversion/formatting order, custom formatters and
+  await without application changes; retain native Pyodide behavior.
 
 - Guard conventional Widgetset font initializers before resource reading/encoding
   when portable package assets are ready, with per-function build diagnostics.

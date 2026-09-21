@@ -119,12 +119,16 @@ syntax (including match/exception groups for MicroPython), custom reflection,
 undeclared dynamic imports, unsupported dataclass options, source escape paths,
 stale widget asset hashes, missing package/CSS resources and oversized inputs.
 Nested f-strings inside replacement expressions (including PEP 701 nesting with
-reused quotes) are rejected for MicroPython with a `nested-fstring` diagnostic.
-Compute the inner string separately, keeping conditional work in the appropriate
-branch, then interpolate its value. This conservative check does not rewrite
-formatting or evaluate expressions earlier. Pyodide retains nested f-string
-support. Ordinary f-strings and format specifications are not rejected by this
-nesting check; broader runtime formatting limitations still apply.
+reused quotes) are lowered for MicroPython into ordinary formatting calls and
+string joins. The application source does not need rewriting. Expressions stay
+in place: conditional branches remain lazy, values are evaluated once in field
+order, and `await` retains its scope. Conversion (`!s`, `!r`, `!a`) happens before
+format-spec evaluation, matching the pinned CPython 3.13 reference. Custom
+`__format__` methods run after their spec is evaluated; non-string results and
+formatting exceptions propagate. Built-in formatting uses MicroPython's formatter,
+with explicit boolean numeric conversion and Unicode ASCII escaping for `!a`.
+The build report marks each affected `JoinedStr` as a transformation. Unaffected
+f-strings keep their existing path, and Pyodide retains native CPython f-strings.
 
 Known unsupported MicroPython APIs such as `time.perf_counter`
 and `asyncio.to_thread` are diagnosed. Other runtime API

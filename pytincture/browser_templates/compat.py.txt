@@ -165,3 +165,42 @@ def string_title(value):
         result.append(char.lower() if previous_cased else char.upper())
         previous_cased = char.lower() != char.upper()
     return ''.join(result)
+
+
+def fstring_convert(value, conversion):
+    if conversion == 115:  # !s
+        return str(value)
+    text = repr(value)  # !r or !a
+    if conversion != 97:
+        return text
+    parts = []
+    for character in text:
+        point = ord(character)
+        if point < 128:
+            parts.append(character)
+        elif point < 256:
+            parts.append('\\x%02x' % point)
+        elif point < 65536:
+            parts.append('\\u%04x' % point)
+        else:
+            parts.append('\\U%08x' % point)
+    return ''.join(parts)
+
+
+def fstring_format(value, spec):
+    # Special methods are resolved on the type, as with CPython FORMAT_VALUE.
+    formatter = getattr(type(value), '__format__', None)
+    if formatter is not None:
+        result = formatter(value, spec)
+    elif not spec:
+        result = str(value)
+    elif isinstance(value, (str, int, float, bool)):
+        # MicroPython has native built-in formatting but no format() builtin.
+        if isinstance(value, bool):
+            value = int(value)
+        result = ('{0:' + spec + '}').format(value)
+    else:
+        raise TypeError('unsupported format string passed to ' + type(value).__name__ + '.__format__')
+    if not isinstance(result, str):
+        raise TypeError('__format__ must return a str')
+    return result

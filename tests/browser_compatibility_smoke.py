@@ -11,7 +11,6 @@ import zipfile
 from playwright.sync_api import expect, sync_playwright
 
 from pytincture.browser_build import build_browser_bundle
-from pytincture.browser_profile import import_source
 from pytincture.backend.browser_packages import create_appcode_archive
 
 
@@ -58,9 +57,12 @@ from pathlib import Path
 from html import escape
 import traceback
 from stdlib_probe import validate
+from fstring_probe import validate as validate_fstrings, validate_async as validate_async_fstrings
 
-def main():
+async def main():
     validate()
+    validate_fstrings()
+    await validate_async_fstrings()
     assert evaluate_js('6 * 7') == 42
     assert evaluate_js('({answer: 42})').answer == 42
     rejected_js = False
@@ -163,6 +165,7 @@ def main():
             for name,text in files.items(): archive.writestr(name,text)
         (root/'app.py').write_text(APP)
         (root/'stdlib_probe.py').write_text((repo/'tests/fixtures/portable_stdlib/probe.py').read_text())
+        (root/'fstring_probe.py').write_text((repo/'tests/fixtures/portable_fstrings/probe.py').read_text())
         (root/'registry.py').write_text('import importlib\nvalue=importlib.import_module(input())\n')
         (root/'browser_registry.py').write_text('label="browser substitute"\n')
         (root/'providers').mkdir()
@@ -227,11 +230,6 @@ class ActualWindow(Intermediate):
                     if engine=='legacy':
                         expect(page.locator('#legacy-result')).to_have_text('legacy-ready')
                     else:
-                        if engine == 'pyodide':
-                            source = 'def _pep701_render(value):\n    return f"""before {("" if value else f"""nested {value}""")} after"""\n'
-                            page.evaluate('source => pytinctureBrowserRuntime.runtime.runPython(source)', import_source(source))
-                            for value, expected in [('True', 'before  after'), ('False', 'before nested False after')]:
-                                assert page.evaluate('source => pytinctureBrowserRuntime.runtime.runPython(source)', '_pep701_render('+value+')') == expected
                         result=json.loads(page.locator('#compat-result').inner_text())
                         assert result=={'registry':'browser substitute','provider':'allowed provider','rejected':True,'fallback':'fallback','local':'local','values':[0,1,2,3,4],'tuple':[0,1,2],'set':[0,1,2]},result
                         assert page.evaluate('window.oldWidgetLoads')==1

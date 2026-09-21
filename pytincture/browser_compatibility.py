@@ -1,6 +1,6 @@
 """Build-time compatibility transforms for experimental MicroPython clients."""
 import ast
-from pytincture.browser_sources import main_only, has_nested_fstring, NESTED_FSTRING_ERROR
+from pytincture.browser_sources import main_only, has_nested_fstring
 
 
 class BrowserCompatibility(ast.NodeTransformer):
@@ -16,6 +16,8 @@ class BrowserCompatibility(ast.NodeTransformer):
         self.additional_helpers = set()
         self.time_names = {'time'}
         self.used_names = set()
+        self.fstring_helpers = {}
+        self.lower_fstrings = 0
 
     def visit(self, node):
         tracked = self.report is not None and hasattr(self, 'visit_' + type(node).__name__)
@@ -43,10 +45,44 @@ class BrowserCompatibility(ast.NodeTransformer):
             return [self.visit(child) for child in node.orelse]
         return self.generic_visit(node)
 
-    def visit_FormattedValue(self, node):
-        if has_nested_fstring(node):
-            raise ValueError(f'line {node.lineno}: {NESTED_FSTRING_ERROR}')
-        return self.generic_visit(node)
+    def _fstring_helper(self, name):
+        if name not in self.fstring_helpers:
+            alias = '_pytincture_' + name
+            while alias in self.used_names:
+                alias += '_'
+            self.used_names.add(alias)
+            self.fstring_helpers[name] = alias
+        return ast.Name(id=self.fstring_helpers[name], ctx=ast.Load())
+
+    def visit_JoinedStr(self, node):
+        if not self.lower_fstrings and not any(has_nested_fstring(child) for child in ast.walk(node)):
+            return self.generic_visit(node)
+        # Lower the whole affected string, including specs/inner strings. Keeping
+        # expressions in place preserves lazy branches, await/yield and scope.
+        self.lower_fstrings += 1
+        try:
+            parts = []
+            for part in node.values:
+                if isinstance(part, ast.Constant):
+                    parts.append(part)
+                    continue
+                value = self.visit(part.value)
+                if part.conversion != -1:
+                    # CPython 3.13 converts before evaluating the format spec.
+                    value = ast.Call(func=self._fstring_helper('fstring_convert'),
+                                     args=[value, ast.Constant(part.conversion)], keywords=[])
+                spec = self.visit(part.format_spec) if part.format_spec else ast.Constant('')
+                parts.append(ast.Call(func=self._fstring_helper('fstring_format'), args=[value, spec], keywords=[]))
+            if not parts:
+                result = ast.Constant('')
+            elif len(parts) == 1:
+                result = parts[0]
+            else:
+                result = ast.Call(func=ast.Attribute(value=ast.Constant(''), attr='join', ctx=ast.Load()),
+                                  args=[ast.List(elts=parts, ctx=ast.Load())], keywords=[])
+            return ast.copy_location(result, node)
+        finally:
+            self.lower_fstrings -= 1
 
     def visit_Match(self, node):
         raise ValueError(f'line {node.lineno}: match statements require CPython; use if/elif for MicroPython')
@@ -272,11 +308,14 @@ def adapt(source, *, widget=False, widgets=(), report=None, filename='<source>')
     tree = ast.parse(source)
     transformer = BrowserCompatibility(widget=widget, widgets=widgets, report=report, filename=filename)
     transformer.used_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)} | {node.name for node in ast.walk(tree) if isinstance(node, ast.ExceptHandler) and node.name}
+    transformer.used_names.update(n.arg for n in ast.walk(tree) if isinstance(n, ast.arg))
+    transformer.used_names.update(n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))
+    transformer.used_names.update(a.asname or a.name.split('.')[0] for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names)
     transformer.time_names.update(alias.asname or alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names if alias.name == 'time')
     transformer.asyncio_names.update(alias.asname or alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names if alias.name == 'asyncio')
     tree = transformer.visit(tree)
     tree.body.insert(0, ast.ImportFrom(module='_pytincture_compat',names=[
         ast.alias(name=name) for name in ('to_python','spawn','format_exception','merge_dicts','initialize_layout','can_to_python','string_title','browser_event_loop', *sorted(transformer.additional_helpers))
-    ],level=0))
+    ] + [ast.alias(name=name, asname=alias) for name, alias in sorted(transformer.fstring_helpers.items())],level=0))
     tree.body.insert(0, ast.Import(names=[ast.alias(name='_pytincture_dataclasses',asname='_pytincture_dc')]))
     return ast.unparse(ast.fix_missing_locations(tree))+'\n'

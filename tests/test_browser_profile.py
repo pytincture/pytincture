@@ -48,16 +48,18 @@ def test_micropython_reports_iterable_display_adaptation_and_allows_assignment()
     'f"outer {str(f\'inner {value}\')}"',
     'f"{value:{f\'{width}\'}}"',
 ])
-def test_nested_fstrings_fail_micro_validation_and_direct_adaptation(expression):
+def test_nested_fstrings_are_lowered_with_source_diagnostics(expression):
     # Keep original source positions despite blank lines and stripped guards.
     source = '\n\nif __name__ == "__main__":\n    desktop_only()\nhtml = ' + expression + '\n'
     findings = inspect_source('ui.py', source, 'micropython')
     errors = [f for f in findings if f['rule'] == 'nested-fstring']
     assert errors
-    assert all(f['severity'] == 'error' and f['line'] == 5 and f['file'] == 'ui.py' for f in errors)
+    assert all(f['severity'] == 'supported' and f['line'] == 5 and f['file'] == 'ui.py' for f in errors)
     assert not inspect_source('ui.py', source, 'pyodide')
-    with pytest.raises(ValueError, match='Nested f-strings.*compute the inner string separately'):
-        adapt(source)
+    import ast
+    converted = adapt(source)
+    assert not any(isinstance(n, ast.JoinedStr) for n in ast.walk(ast.parse(converted)))
+    assert '_pytincture_fstring_format' in converted
 
 
 @pytest.mark.parametrize('source', [

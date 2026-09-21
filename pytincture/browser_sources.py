@@ -237,10 +237,3 @@ def has_nested_fstring(node):
     return isinstance(node, ast.FormattedValue) and any(
         isinstance(child, ast.JoinedStr) for child in ast.walk(node.value)
     )
-
-
-NESTED_FSTRING_ERROR = (
-    'Nested f-strings in replacement expressions are unsupported by the portable '
-    'MicroPython profile; compute the inner string separately before the outer '
-    'f-string, or select Pyodide'
-)
