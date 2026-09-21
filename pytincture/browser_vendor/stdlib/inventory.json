@@ -4,6 +4,18 @@
   "modules": {
     "copy": "a43afced52dea40b36d4c5bbf7489bc11969652f43a3be894c15a7ecefc5c6dc",
     "types": "c28317723450d452283ab9e4222056431b235db26823a2b7e6f4733e4aefabfc",
-    "datetime": "cbd71be341c690e81809ddb18df365989b9d355ffdee07febfc694c2a94e72d3"
+    "datetime": "cbd71be341c690e81809ddb18df365989b9d355ffdee07febfc694c2a94e72d3",
+    "string": "b172526030d482c6fda2915b7089ae86e38af6c4464d5053c46c6964b0573e02",
+    "base64": "eb9523d52d7d47262462338201510be16e4b9ed420fd78caf0716cf6a1142147",
+    "zipfile": "306492220df8e822b23f349abc71bbf8a42041c031d6e3b68bfe42be0e57a657",
+    "html_entities": "d9c65fb2828dbc1f3e399058a341d51e9375ec5bca95a8e92599c41bd5b78bde"
+  },
+  "module_sources": {
+    "html_entities": {
+      "repository": "https://github.com/python/cpython",
+      "ref": "v3.13.0",
+      "path": "Lib/html/entities.py",
+      "license": "CPYTHON-LICENSE"
+    }
   }
 }

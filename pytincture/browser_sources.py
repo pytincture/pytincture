@@ -38,6 +38,124 @@ def module_name(name):
     return '.'.join(parts[:-1] if parts[-1] == '__init__' else parts)
 
 
+def validate_import_aliases(aliases):
+    if not isinstance(aliases, dict):
+        raise ValueError('import-aliases must map Python module names to browser module names')
+    for original, target in aliases.items():
+        for name in (original, target):
+            if not isinstance(name, str) or not name or any(not p.isidentifier() or keyword.iskeyword(p) for p in name.split('.')):
+                raise ValueError('import-aliases must contain Python module names')
+            if name.split('.')[0].startswith('_pytincture_'):
+                raise ValueError('import-aliases cannot use reserved framework modules')
+        if original == target or target.startswith(original + '.'):
+            raise ValueError('import-aliases cannot map a module to itself or its descendants')
+    for name in aliases:
+        aliased_module(name, aliases)
+    return aliases
+
+
+def aliased_module(name, aliases):
+    seen = set()
+    while True:
+        key = next((key for key in sorted(aliases, key=len, reverse=True)
+                    if name == key or name.startswith(key + '.')), None)
+        if key is None:
+            return name
+        if key in seen:
+            raise ValueError('Cyclic import-aliases are unsupported')
+        seen.add(key)
+        name = aliases[key] + name[len(key):]
+
+
+def browser_source_path(root, module, aliases=None):
+    target = aliased_module(module, aliases or {}).replace('.', '/')
+    for suffix in ('.py', '/__init__.py'):
+        if (root / (target + suffix)).is_file():
+            return module.replace('.', '/') + suffix, target + suffix
+    return None
+
+
+def browser_source(root, name, aliases=None):
+    resolved = browser_source_path(root, module_name(name), aliases)
+    physical = resolved[1] if resolved else name
+    source = read_source(root, physical).decode('utf-8')
+    if physical != name:
+        # A substitute executes under the requested module name. Make its
+        # relative imports absolute first, preserving the implementation's
+        # own package context without importing the original server module.
+        tree = ast.parse(source, filename=physical)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level:
+                package = physical.split('/')[:-node.level]
+                if not package:
+                    raise ValueError(f'{physical}: relative import escapes its package')
+                node.module = '.'.join([*package, node.module or '']).rstrip('.')
+                for original in sorted(aliases or {}, key=len, reverse=True):
+                    if module_name(name) == original or module_name(name).startswith(original + '.'):
+                        implementation = aliased_module(original, aliases)
+                        if node.module == implementation or node.module.startswith(implementation + '.'):
+                            node.module = original + node.module[len(implementation):]
+                            break
+                node.level = 0
+        source = ast.unparse(tree) + '\n'
+    return source, physical
+
+
+def bridge_widget_imports(source, *, package=None, report=None, filename="<widget>"):
+    """Keep old widget loaders, but give them the host's asset-aware JS view."""
+    class Bridge(ast.NodeTransformer):
+        def visit_Import(self, node):
+            result = []
+            for alias in node.names:
+                if alias.name == 'js':
+                    result.append(ast.ImportFrom(module='js', names=[ast.alias(name='pytinctureWidgetBridge', asname=alias.asname or 'js')], level=0))
+                else:
+                    result.append(ast.Import(names=[alias]))
+            return result
+
+        def visit_ImportFrom(self, node):
+            if node.module == 'pyodide.code' and not node.level:
+                wrapped = [ast.alias(name='widget_run_js', asname=a.asname or a.name)
+                           for a in node.names if a.name == 'run_js']
+                rest = [a for a in node.names if a.name != 'run_js']
+                if wrapped:
+                    return ([ast.ImportFrom(module=node.module, names=rest, level=0)] if rest else []) + [
+                        ast.ImportFrom(module='_pytincture_compat', names=wrapped, level=0)]
+            if node.module != 'js' or node.level or any(alias.name == '*' for alias in node.names):
+                return node
+            result = [ast.ImportFrom(module='js', names=[ast.alias(name='pytinctureWidgetBridge', asname='_pytincture_widget_js')], level=0)]
+            result.extend(ast.Assign(targets=[ast.Name(id=alias.asname or alias.name, ctx=ast.Store())],
+                                     value=ast.Attribute(value=ast.Name(id='_pytincture_widget_js', ctx=ast.Load()), attr=alias.name, ctx=ast.Load()))
+                          for alias in node.names)
+            return result
+    tree = ast.parse(source)
+    if package:
+        # Compatibility for conventional pre-ownership Widgetsets. Guard inside
+        # the function, before any resource reads/encoding (also covers aliases).
+        # Do not infer arbitrary application functions to be asset loaders.
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name in {
+                '_try_inject_inter_fonts', '_try_inject_icon_fonts',
+            }:
+                used = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+                used.update(n.arg for n in ast.walk(node) if isinstance(n, ast.arg))
+                helper = '_pytincture_font_host'
+                while helper in used:
+                    helper += '_'
+                guard = ast.parse(f"import js as {helper}\n"
+                                  f"if getattr({helper}, 'pytinctureAssets', None) is not None and "
+                                  f"{helper}.pytinctureAssets.isPackageReady({package!r}):\n    return\n").body
+                index = int(bool(node.body and isinstance(node.body[0], ast.Expr)
+                                 and isinstance(node.body[0].value, ast.Constant)
+                                 and isinstance(node.body[0].value.value, str)))
+                node.body[index:index] = guard
+                if report is not None:
+                    report.append({'file': filename, 'line': node.lineno, 'severity': 'transformation',
+                                   'rule': 'widget-font-ownership', 'behavior_changing': True,
+                                   'message': f'{node.name} skips resource encoding only when {package} assets are ready'})
+    return ast.unparse(ast.fix_missing_locations(Bridge().visit(tree))) + '\n'
+
+
 def main_only(test):
     """An imported module cannot enter a conventional __main__ guard."""
     if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And):
@@ -74,7 +192,7 @@ def imported_modules(name, source):
                     yield '.'.join(filter(None, (base, alias.name))), node.lineno
 
 
-def discover_sources(root, entry, files, bff, *, discover=True):
+def discover_sources(root, entry, files, bff, *, discover=True, import_aliases=None, substitutions=None):
     selected = {}
     boundaries = set()
     explicit = set(files)
@@ -86,7 +204,9 @@ def discover_sources(root, entry, files, bff, *, discover=True):
         module_name(name)
         if name.split('/')[0].startswith('_pytincture_') or name.startswith('dhxpyt/'):
             raise ValueError(f'Reserved browser source: {name}')
-        source = read_source(root, name).decode('utf-8')
+        source, physical = browser_source(root, name, import_aliases)
+        if physical != name and substitutions is not None:
+            substitutions[name] = physical
         selected[name] = source
         if len(selected) > 256:
             raise ValueError('Browser source bundle exceeds 256 files')
@@ -101,12 +221,19 @@ def discover_sources(root, entry, files, bff, *, discover=True):
         if discover:
             for parent in PurePosixPath(name).parents:
                 marker = str(parent / '__init__.py')
-                if str(parent) != '.' and (root / marker).is_file():
-                    pending.append(marker)
+                if str(parent) != '.':
+                    resolved = browser_source_path(root, str(parent).replace('/', '.'), import_aliases)
+                    if resolved and resolved[0].endswith('/__init__.py'):
+                        pending.append(resolved[0])
             for module, _ in imported_modules(name, source):
-                path = module.replace('.', '/')
-                for candidate in (path + '.py', path + '/__init__.py'):
-                    if (root / candidate).is_file():
-                        pending.append(candidate)
-                        break
+                resolved = browser_source_path(root, module, import_aliases)
+                if resolved:
+                    pending.append(resolved[0])
     return selected, boundaries
+
+
+def has_nested_fstring(node):
+    """Check expressions, not the JoinedStr used for an ordinary format spec."""
+    return isinstance(node, ast.FormattedValue) and any(
+        isinstance(child, ast.JoinedStr) for child in ast.walk(node.value)
+    )

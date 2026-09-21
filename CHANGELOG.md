@@ -3,6 +3,43 @@
 This project follows semantic versioning from 1.0. Dates and final entries are
 set when a release is published.
 
+## Unreleased
+
+## 1.0.0rc9 — 2026-09-21
+
+- Lower nested f-strings into MicroPython-compatible formatting expressions,
+  preserving lazy branches, conversion/formatting order, custom formatters and
+  await without application changes; retain native Pyodide behavior.
+
+- Guard conventional Widgetset font initializers before resource reading/encoding
+  when portable package assets are ready, with per-function build diagnostics.
+- Reference verified assets from package-resource manifests instead of shipping a
+  duplicate Base64 payload; preserve file reads and older bundle loading.
+- Support named `pyodide.code.run_js` imports in MicroPython and route Widgetset
+  calls through asset ownership checks without changing application CSP.
+
+- Add profile-2 MicroPython string, UUID, Base64, HTML parser/entity, context-manager,
+  CSV, ZIP-reader, and managed event-listener support with recursive shim discovery.
+  UUID4 now returns UUID values consistently; existing profile-1 bundles remain loadable.
+- Pin portable Path suffix tests to the browser's CPython 3.13 semantics so Python
+  3.14 build hosts do not produce false parity failures.
+- Add portable `create_once_callable`, preserve valid catch-all exception handlers,
+  and provide documented MicroPython `pathlib.Path` and `html.escape` subsets.
+- Install verified resources into both portable filesystems so Path-based resource
+  reads work in MicroPython as well as Pyodide.
+- Support allowlisted computed `importlib.import_module` calls with runtime
+  exact-name checks, and MicroPython `time.monotonic()` using the browser clock.
+- Preserve exact BFF policy-hook signatures by passing only accepted context
+  keywords; hooks with `**kwargs` continue receiving the complete context.
+- Restore portable registry substitutions through explicit import aliases,
+  MicroPython environment defaults and ordered collection unpacking.
+- Restore legacy browser discovery of indirect MainWindow subclasses and aliases,
+  and include discovered installed pure-Python client dependencies in appcode.
+- Add a widget-scoped bridge so conventional existing Widgetset loaders adopt
+  already-loaded portable assets without requiring immediate Widgetset changes.
+- Add private-application pattern fixtures across both portable engines and legacy
+  Pyodide. These fixtures do not claim validation of unavailable client source.
+
 ## 1.0.0rc8 — 2026-09-20
 
 - Separate browser engine from explicit legacy-package/portable-bundle delivery;

@@ -12,6 +12,7 @@ does not yet have automated qualification.
 | CPython | 3.13 | CI | Unit tests, package build, and wheel smoke test. |
 | CPython | 3.14 | CI | Unit tests and editable installation. |
 | Pyodide | 0.29.3 browser distribution | CI | Bundled service/standalone runtime; Python 3.13. `pyodide-py` is not a backend dependency. |
+| MicroPython | 1.29.0-6 browser WASM | Experimental CI | Opt-in portable delivery; defined portable Python profile, not arbitrary CPython compatibility. |
 | dhxpyt | 0.9.18 browser fixture | CI | Complete PyPI wheel hash lock first, matching backend wheel second, `99.99.99` development wheel last. Applications may declare another compatible widgetset version or widgetset. |
 | Chromium | current Playwright build | CI | Authenticated service and standalone modes. |
 | Firefox | current Playwright build | CI | Authenticated service and standalone modes. |

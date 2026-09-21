@@ -104,6 +104,7 @@ def test_browser_asset_integrity_manifest_covers_runtime_dependencies():
     }
     expected = {
         "browser-runtimes.js",
+        "widget-assets.js",
         "pytincture.js",
         "sw.js",
         "dist/pytincture.js",

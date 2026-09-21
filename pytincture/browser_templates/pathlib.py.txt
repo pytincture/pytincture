@@ -1,0 +1,199 @@
+"""Portable POSIX paths over the browser's in-memory filesystem.
+
+This is a subset of pathlib, not access to the host filesystem. Symlinks,
+permissions, Windows paths, globbing and user-home expansion are not supported.
+"""
+import errno
+import os
+from collections import namedtuple
+
+_StatResult = namedtuple('stat_result', ('st_mode', 'st_ino', 'st_dev', 'st_nlink', 'st_uid',
+                                       'st_gid', 'st_size', 'st_atime', 'st_mtime', 'st_ctime'))
+
+
+class Path:
+    def __init__(self, *segments):
+        value = ''
+        for segment in segments:
+            if isinstance(segment, Path):
+                segment = str(segment)
+            elif not isinstance(segment, str):
+                raise TypeError('path segments must be strings or Path objects')
+            value = segment if segment.startswith('/') else value + '/' + segment if value else segment
+        parts = [part for part in value.split('/') if part not in ('', '.')]
+        self._path = ('/' if value.startswith('/') else '') + '/'.join(parts) or '.'
+
+    def __str__(self):
+        return self._path
+
+    def __repr__(self):
+        return 'Path(' + repr(self._path) + ')'
+
+    def __fspath__(self):
+        return self._path
+
+    def __hash__(self):
+        return hash(self._path)
+
+    def __eq__(self, other):
+        return isinstance(other, Path) and self._path == other._path
+
+    def __truediv__(self, other):
+        return self.joinpath(other)
+
+    def __rtruediv__(self, other):
+        return Path(other, self)
+
+    def as_posix(self):
+        return self._path
+
+    def joinpath(self, *parts):
+        return Path(self, *parts)
+
+    @property
+    def parts(self):
+        return (('/',) if self.is_absolute() else ()) + tuple(part for part in self._path.split('/') if part not in ('', '.'))
+
+    @property
+    def name(self):
+        return '' if self._path in ('.', '/') else self._path.rsplit('/', 1)[-1]
+
+    @property
+    def parent(self):
+        parts = self.parts
+        return Path(*parts[:-1]) if len(parts) > 1 else Path('/' if self.is_absolute() else '.')
+
+    @property
+    def parents(self):
+        result = []
+        current = self
+        while current != current.parent:
+            current = current.parent
+            result.append(current)
+        return tuple(result)
+
+    @property
+    def suffix(self):
+        name = self.name
+        index = name.rfind('.')
+        return name[index:] if 0 < index < len(name) - 1 else ''
+
+    @property
+    def suffixes(self):
+        name = self.name.lstrip('.')
+        return ['.' + part for part in name.split('.')[1:]] if not name.endswith('.') else []
+
+    @property
+    def stem(self):
+        return self.name[:-len(self.suffix)] if self.suffix else self.name
+
+    def with_name(self, name):
+        if not self.name or not isinstance(name, str) or name in ('', '.') or '/' in name:
+            raise ValueError('invalid path name')
+        return self.parent / name
+
+    def with_suffix(self, suffix):
+        if not isinstance(suffix, str) or '/' in suffix or suffix == '.' or suffix and not suffix.startswith('.'):
+            raise ValueError('invalid suffix')
+        return self.with_name(self.stem + suffix)
+
+    def is_absolute(self):
+        return self._path.startswith('/')
+
+    @classmethod
+    def cwd(cls):
+        return cls(os.getcwd())
+
+    def absolute(self):
+        return Path(self) if self.is_absolute() else self.cwd() / self
+
+    def resolve(self, strict=False):
+        parts = []
+        for part in str(self.absolute()).split('/'):
+            if part == '..':
+                if parts:
+                    parts.pop()
+            elif part and part != '.':
+                parts.append(part)
+        result = Path('/' + '/'.join(parts))
+        if strict:
+            result.stat()
+        return result
+
+    def relative_to(self, other):
+        base = Path(other).parts
+        parts = self.parts
+        if parts[:len(base)] != base:
+            raise ValueError('path is not relative to the requested base')
+        return Path(*parts[len(base):])
+
+    def stat(self):
+        return _StatResult(*os.stat(str(self))[:10])
+
+    def _mode(self):
+        try:
+            return self.stat()[0]
+        except OSError as error:
+            if error.args[0] in (errno.ENOENT, errno.ENOTDIR):
+                return 0
+            raise
+
+    def exists(self):
+        return bool(self._mode())
+
+    def is_file(self):
+        return self._mode() & 0o170000 == 0o100000
+
+    def is_dir(self):
+        return self._mode() & 0o170000 == 0o040000
+
+    def iterdir(self):
+        for name in os.listdir(str(self)):
+            yield self / name
+
+    def open(self, mode='r', encoding=None):
+        if encoding is not None and encoding.lower().replace('_', '-') not in ('utf-8', 'utf8'):
+            raise ValueError('portable paths support UTF-8 text only')
+        return open(str(self), mode) if encoding is None else open(str(self), mode, encoding='utf-8')
+
+    def read_text(self, encoding=None):
+        with self.open('r', encoding=encoding) as stream:
+            return stream.read()
+
+    def read_bytes(self):
+        with self.open('rb') as stream:
+            return stream.read()
+
+    def write_text(self, data, encoding=None):
+        if not isinstance(data, str):
+            raise TypeError('text data must be a string')
+        with self.open('w', encoding=encoding) as stream:
+            stream.write(data)
+        return len(data)
+
+    def write_bytes(self, data):
+        with self.open('wb') as stream:
+            return stream.write(data)
+
+    def mkdir(self, mode=0o777, parents=False, exist_ok=False):
+        if mode != 0o777:
+            raise NotImplementedError('filesystem permissions are not portable')
+        try:
+            os.mkdir(str(self))
+        except OSError as error:
+            if exist_ok and self.is_dir():
+                return
+            if not parents or error.args[0] != errno.ENOENT or self == self.parent:
+                raise
+            self.parent.mkdir(parents=True, exist_ok=True)
+            self.mkdir(exist_ok=exist_ok)
+
+    def unlink(self, missing_ok=False):
+        try:
+            os.remove(str(self))
+        except OSError as error:
+            if not missing_ok or error.args[0] != errno.ENOENT:
+                raise
+
+    def rmdir(self):
+        os.rmdir(str(self))

@@ -39,7 +39,7 @@ export function validateRuntimeManifest(manifest, engine) {
     if (manifest.styleIds && (typeof manifest.styleIds !== 'object' || Array.isArray(manifest.styleIds)
         || Object.entries(manifest.styleIds).some(([path, id]) => !manifest.styles.includes(path) || typeof id !== 'string' || !/^[A-Za-z][\w-]*$/.test(id)))) throw new Error('Invalid stylesheet identifiers');
     if (!/^[a-f0-9]{64}$/.test(manifest.bundleId || "") || manifest.assetBase !== `releases/${manifest.bundleId}/`) throw new Error("Invalid immutable bundle identifier");
-    if (manifest.profile !== "pytincture-portable-1") throw new Error("Unsupported portable Python profile");
+    if (!["pytincture-portable-1", "pytincture-portable-2"].includes(manifest.profile)) throw new Error("Unsupported portable Python profile");
     const target = manifest.targets?.[engine];
     relativePath(target?.sources);
     relativePath(manifest.resources);
@@ -155,14 +155,46 @@ export function publishLoadedAssets(manifest, asset) {
     });
 }
 
-function installResources(runtime, bundle) {
-    if (!bundle.files || typeof bundle.files !== "object" || Array.isArray(bundle.files)) throw new Error("Invalid package resources");
-    for (const [path, encoded] of Object.entries(bundle.files)) {
+// New bundles reference bytes already downloaded and integrity-checked as assets.
+// Keep legacy base64 bundles readable; only encode on demand for Python resources.
+export function preparePackageResources(bundle, contents) {
+    if (!bundle || !bundle.files || typeof bundle.files !== "object" || Array.isArray(bundle.files)
+        || (bundle.format !== undefined && bundle.format !== 'asset-references-v1')) throw new Error("Invalid package resources");
+    const files = new Map();
+    for (const [path, entry] of Object.entries(bundle.files)) {
         relativePath(path);
-        if (path.endsWith('.py') || path.endsWith('.pyc') || typeof encoded !== 'string') throw new Error("Invalid package resource");
+        if (path.endsWith('.py') || path.endsWith('.pyc')) throw new Error("Invalid package resource");
+        if (typeof entry === 'string' && bundle.format === undefined) files.set(path, entry);
+        else if (bundle.format === 'asset-references-v1' && entry && typeof entry === 'object'
+            && !Array.isArray(entry) && Object.keys(entry).length === 1 && entry.asset === 'vendor/' + path
+            && contents.get(entry.asset) instanceof Uint8Array) files.set(path, contents.get(entry.asset));
+        else throw new Error(`Invalid or unverified package resource: ${path}`);
+    }
+    const get = path => {
+        if (!files.has(path)) throw new Error(`Unknown package resource: ${path}`);
+        return files.get(path);
+    };
+    return {
+        paths: [...files.keys()],
+        readBytes(path) {
+            const value = get(path);
+            return typeof value === 'string' ? Uint8Array.from(atob(value), ch => ch.charCodeAt(0)) : value;
+        },
+        readBase64(path) {
+            const value = get(path);
+            if (typeof value === 'string') return value;
+            const chunks = [];
+            for (let start = 0; start < value.length; start += 32768) chunks.push(String.fromCharCode(...value.subarray(start, start + 32768)));
+            return btoa(chunks.join(''));
+        },
+    };
+}
+
+export function installResources(runtime, resources) {
+    for (const path of resources.paths) {
         const directory = path.slice(0, path.lastIndexOf('/'));
         if (path.includes('/')) runtime.FS.mkdirTree('/'+directory);
-        runtime.FS.writeFile('/'+path, Uint8Array.from(atob(encoded), value => value.charCodeAt(0)));
+        runtime.FS.writeFile('/'+path, resources.readBytes(path));
     }
 }
 
@@ -285,7 +317,41 @@ function installSources(runtime, bundle) {
     }
 }
 
+export function createOnceCallable(callback) {
+    if (typeof callback !== 'function') throw new TypeError('Expected a callable');
+    const once = (...args) => {
+        if (callback === null) throw new Error('Once callable has already been called or destroyed');
+        const invoke = callback;
+        callback = null;
+        return invoke(...args);
+    };
+    once.destroy = () => { callback = null; };
+    return once;
+}
+
+export function createEventCallback(callback) {
+    if (typeof callback !== 'function') throw new TypeError('Expected a callable');
+    const listener = (...args) => callback === null ? undefined : callback(...args);
+    listener.destroy = () => { callback = null; };
+    return listener;
+}
+
+export function evaluatePythonJavascript(code, widget = false) {
+    try {
+        if (typeof code !== 'string') throw new TypeError('run_js requires a string');
+        const scope = widget ? globalThis.pytinctureWidgetBridge : globalThis;
+        return {ok: true, value: scope.eval(code)};
+    } catch (error) {
+        // A thrown JS exception can bypass Python handlers in MicroPython's FFI.
+        // Return an envelope so Python can raise an ordinary catchable exception.
+        return {ok: false, error: String(error)};
+    }
+}
+
 export async function runBrowserApplication(config, status = () => {}) {
+    globalThis.pytinctureRunJavascript = evaluatePythonJavascript;
+    globalThis.pytinctureCreateOnceCallable = createOnceCallable;
+    globalThis.pytinctureCreateEventCallback = createEventCallback;
     const engine = config.runtime || "pyodide";
     if (config.deliveryMode !== "portable-bundle") throw new Error("Portable loader requires deliveryMode=portable-bundle");
     const phase = config._measurePhase || (async (_stage, _resource, callback) => callback());
@@ -309,6 +375,12 @@ export async function runBrowserApplication(config, status = () => {}) {
     });
     // Publish only after every asset succeeded; widget hooks must not infer readiness from a partial load.
     publishLoadedAssets(manifest, asset);
+    const {createWidgetAssetBridge} = await import('./widget-assets.js');
+    globalThis.pytinctureWidgetBridge = createWidgetAssetBridge(globalThis,
+        [...manifest.scripts.map(path => ({path, type: 'script'})),
+            ...manifest.styles.map(path => ({path, type: 'style'}))].map(item => ({
+                ...item, url: asset(item.path), text: new TextDecoder().decode(contents.get(item.path)),
+            })));
 
     let invoke;
     let capturedOutput = null;
@@ -332,12 +404,9 @@ export async function runBrowserApplication(config, status = () => {}) {
         callBff: createBffCaller(config), callBffSync: createBffSyncCaller(config),
         streamBff: createBffStreamCaller(config), invoke: handle.call, assetUrl: asset,
     });
-    const resourceBundle = decodeJson(contents.get(manifest.resources));
-    globalThis.pytinctureResourcePaths = JSON.stringify(Object.keys(resourceBundle.files));
-    globalThis.pytinctureReadResourceBytes = path => {
-        if (!Object.hasOwn(resourceBundle.files, path)) throw new Error(`Unknown package resource: ${path}`);
-        return resourceBundle.files[path];
-    };
+    const resourceBundle = preparePackageResources(decodeJson(contents.get(manifest.resources)), contents);
+    globalThis.pytinctureResourcePaths = JSON.stringify(resourceBundle.paths);
+    globalThis.pytinctureReadResourceBytes = path => resourceBundle.readBase64(path);
 
     status(`Loading ${engine}…`);
     let runtime;
@@ -386,7 +455,7 @@ export async function runBrowserApplication(config, status = () => {}) {
     status("Installing application bundle…");
     await phase("bundle-installation", asset(manifest.targets[engine].sources), async () => {
         installSources(runtime, decodeJson(contents.get(manifest.targets[engine].sources)));
-        if (engine === "pyodide") installResources(runtime, resourceBundle);
+        installResources(runtime, resourceBundle);
     });
     status("Importing application…");
     await phase("module-import", manifest.entrypoint, () => runtime.runPythonAsync(`import sys\nsys.path.insert(0, '/')\nimport ${manifest.entrypoint} as _pytincture_client`));

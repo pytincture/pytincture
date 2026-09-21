@@ -28,6 +28,7 @@ if (!versionMatch) {
 const frameworkVersion = versionMatch[1];
 const assetPaths = [
     "browser-runtimes.js",
+    "widget-assets.js",
     "pytincture.js",
     "sw.js",
     "dist/pytincture.js",

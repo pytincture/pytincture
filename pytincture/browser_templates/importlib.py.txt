@@ -1,0 +1,3 @@
+"""Portable import_module is guarded by the bundle's exact allowlist."""
+from _pytincture_imports import import_module
+import _pytincture_resources as resources

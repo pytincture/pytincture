@@ -13,6 +13,78 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// widget-assets.js
+var widget_assets_exports = {};
+__export(widget_assets_exports, {
+  createWidgetAssetBridge: () => createWidgetAssetBridge
+});
+function createWidgetAssetBridge(root, assets) {
+  const scripts = new Set(assets.filter((item) => item.type === "script").map((item) => item.text.trim()));
+  const styles = new Set(assets.filter((item) => item.type === "style").map((item) => item.text.trim()));
+  const scriptUrls = new Set(assets.filter((item) => item.type === "script").map((item) => item.url));
+  const styleUrls = new Set(assets.filter((item) => item.type === "style").map((item) => item.url));
+  const proxies = /* @__PURE__ */ new WeakMap();
+  const unwrap = /* @__PURE__ */ new WeakMap();
+  const duplicate = (node) => {
+    var _a;
+    const tag = (_a = node == null ? void 0 : node.tagName) == null ? void 0 : _a.toLowerCase();
+    if (tag === "script") return node.src ? scriptUrls.has(node.src) : scripts.has((node.textContent || "").trim());
+    if (tag === "style") return styles.has((node.textContent || "").trim());
+    return tag === "link" && node.rel === "stylesheet" && styleUrls.has(node.href);
+  };
+  const completed = (node) => {
+    root.queueMicrotask(() => node.dispatchEvent(new root.Event("load")));
+    return node;
+  };
+  const wrap = (target) => {
+    if (!target || !["object", "function"].includes(typeof target)) return target;
+    if (proxies.has(target)) return proxies.get(target);
+    const proxy = new Proxy(target, {
+      get(object, key) {
+        var _a, _b, _c;
+        if (object === root && key === "eval") return (code) => {
+          if (typeof code === "string" && scripts.has(code.trim())) return void 0;
+          return root.eval(code);
+        };
+        const value = Reflect.get(object, key, object);
+        if (value === root || value === root.document || value === ((_a = root.document) == null ? void 0 : _a.head) || value === ((_b = root.document) == null ? void 0 : _b.body) || value === ((_c = root.document) == null ? void 0 : _c.documentElement)) return wrap(value);
+        if (typeof value !== "function") return value;
+        return new Proxy(value, {
+          apply(fn, receiver, args) {
+            var _a2, _b2;
+            receiver = unwrap.get(receiver) || receiver;
+            if (["appendChild", "insertBefore", "replaceChild"].includes(key) && duplicate(args[0])) {
+              completed(args[0]);
+              return key === "replaceChild" ? receiver.removeChild(args[1]) : args[0];
+            }
+            if (["append", "prepend"].includes(key)) {
+              args = args.filter((node) => {
+                if (!duplicate(node)) return true;
+                completed(node);
+                return false;
+              });
+            }
+            const result = Reflect.apply(fn, receiver, args.map((arg) => unwrap.get(arg) || arg));
+            if (result === ((_a2 = root.document) == null ? void 0 : _a2.head) || result === ((_b2 = root.document) == null ? void 0 : _b2.body)) return wrap(result);
+            return result;
+          }
+        });
+      },
+      set(object, key, value) {
+        return Reflect.set(object, key, value, object);
+      }
+    });
+    proxies.set(target, proxy);
+    unwrap.set(proxy, target);
+    return proxy;
+  };
+  return wrap(root);
+}
+var init_widget_assets = __esm({
+  "widget-assets.js"() {
+  }
+});
+
 // browser-runtimes.js
 var browser_runtimes_exports = {};
 __export(browser_runtimes_exports, {
@@ -20,6 +92,11 @@ __export(browser_runtimes_exports, {
   createBffCaller: () => createBffCaller,
   createBffStreamCaller: () => createBffStreamCaller,
   createBffSyncCaller: () => createBffSyncCaller,
+  createEventCallback: () => createEventCallback,
+  createOnceCallable: () => createOnceCallable,
+  evaluatePythonJavascript: () => evaluatePythonJavascript,
+  installResources: () => installResources,
+  preparePackageResources: () => preparePackageResources,
   publishLoadedAssets: () => publishLoadedAssets,
   runBrowserApplication: () => runBrowserApplication,
   sameOriginUrl: () => sameOriginUrl,
@@ -57,7 +134,7 @@ function validateRuntimeManifest(manifest, engine) {
   }
   if (manifest.styleIds && (typeof manifest.styleIds !== "object" || Array.isArray(manifest.styleIds) || Object.entries(manifest.styleIds).some(([path, id]) => !manifest.styles.includes(path) || typeof id !== "string" || !/^[A-Za-z][\w-]*$/.test(id)))) throw new Error("Invalid stylesheet identifiers");
   if (!/^[a-f0-9]{64}$/.test(manifest.bundleId || "") || manifest.assetBase !== `releases/${manifest.bundleId}/`) throw new Error("Invalid immutable bundle identifier");
-  if (manifest.profile !== "pytincture-portable-1") throw new Error("Unsupported portable Python profile");
+  if (!["pytincture-portable-1", "pytincture-portable-2"].includes(manifest.profile)) throw new Error("Unsupported portable Python profile");
   const target = (_b = manifest.targets) == null ? void 0 : _b[engine];
   relativePath(target == null ? void 0 : target.sources);
   relativePath(manifest.resources);
@@ -176,14 +253,40 @@ function publishLoadedAssets(manifest, asset) {
     getInfo: () => Object.freeze({ owner: "portable-bundle", bundleId: manifest.bundleId, packages, assets: Object.freeze([...records]) })
   });
 }
-function installResources(runtime, bundle) {
-  if (!bundle.files || typeof bundle.files !== "object" || Array.isArray(bundle.files)) throw new Error("Invalid package resources");
-  for (const [path, encoded] of Object.entries(bundle.files)) {
+function preparePackageResources(bundle, contents) {
+  if (!bundle || !bundle.files || typeof bundle.files !== "object" || Array.isArray(bundle.files) || bundle.format !== void 0 && bundle.format !== "asset-references-v1") throw new Error("Invalid package resources");
+  const files = /* @__PURE__ */ new Map();
+  for (const [path, entry] of Object.entries(bundle.files)) {
     relativePath(path);
-    if (path.endsWith(".py") || path.endsWith(".pyc") || typeof encoded !== "string") throw new Error("Invalid package resource");
+    if (path.endsWith(".py") || path.endsWith(".pyc")) throw new Error("Invalid package resource");
+    if (typeof entry === "string" && bundle.format === void 0) files.set(path, entry);
+    else if (bundle.format === "asset-references-v1" && entry && typeof entry === "object" && !Array.isArray(entry) && Object.keys(entry).length === 1 && entry.asset === "vendor/" + path && contents.get(entry.asset) instanceof Uint8Array) files.set(path, contents.get(entry.asset));
+    else throw new Error(`Invalid or unverified package resource: ${path}`);
+  }
+  const get = (path) => {
+    if (!files.has(path)) throw new Error(`Unknown package resource: ${path}`);
+    return files.get(path);
+  };
+  return {
+    paths: [...files.keys()],
+    readBytes(path) {
+      const value = get(path);
+      return typeof value === "string" ? Uint8Array.from(atob(value), (ch) => ch.charCodeAt(0)) : value;
+    },
+    readBase64(path) {
+      const value = get(path);
+      if (typeof value === "string") return value;
+      const chunks = [];
+      for (let start = 0; start < value.length; start += 32768) chunks.push(String.fromCharCode(...value.subarray(start, start + 32768)));
+      return btoa(chunks.join(""));
+    }
+  };
+}
+function installResources(runtime, resources) {
+  for (const path of resources.paths) {
     const directory = path.slice(0, path.lastIndexOf("/"));
     if (path.includes("/")) runtime.FS.mkdirTree("/" + directory);
-    runtime.FS.writeFile("/" + path, Uint8Array.from(atob(encoded), (value) => value.charCodeAt(0)));
+    runtime.FS.writeFile("/" + path, resources.readBytes(path));
   }
 }
 function loadAsset(url, stylesheet = false, integrity = null, id = null) {
@@ -321,9 +424,42 @@ function installSources(runtime, bundle) {
     runtime.FS.writeFile(`/${path}`, source);
   }
 }
+function createOnceCallable(callback) {
+  if (typeof callback !== "function") throw new TypeError("Expected a callable");
+  const once = (...args) => {
+    if (callback === null) throw new Error("Once callable has already been called or destroyed");
+    const invoke = callback;
+    callback = null;
+    return invoke(...args);
+  };
+  once.destroy = () => {
+    callback = null;
+  };
+  return once;
+}
+function createEventCallback(callback) {
+  if (typeof callback !== "function") throw new TypeError("Expected a callable");
+  const listener = (...args) => callback === null ? void 0 : callback(...args);
+  listener.destroy = () => {
+    callback = null;
+  };
+  return listener;
+}
+function evaluatePythonJavascript(code, widget = false) {
+  try {
+    if (typeof code !== "string") throw new TypeError("run_js requires a string");
+    const scope = widget ? globalThis.pytinctureWidgetBridge : globalThis;
+    return { ok: true, value: scope.eval(code) };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  }
+}
 async function runBrowserApplication(config, status = () => {
 }) {
   var _a;
+  globalThis.pytinctureRunJavascript = evaluatePythonJavascript;
+  globalThis.pytinctureCreateOnceCallable = createOnceCallable;
+  globalThis.pytinctureCreateEventCallback = createEventCallback;
   const engine = config.runtime || "pyodide";
   if (config.deliveryMode !== "portable-bundle") throw new Error("Portable loader requires deliveryMode=portable-bundle");
   const phase = config._measurePhase || (async (_stage, _resource, callback) => callback());
@@ -349,6 +485,18 @@ async function runBrowserApplication(config, status = () => {
     for (const path of manifest.scripts) await loadAsset(asset(path), false, sri(manifest.integrity[path]));
   });
   publishLoadedAssets(manifest, asset);
+  const { createWidgetAssetBridge: createWidgetAssetBridge2 } = await Promise.resolve().then(() => (init_widget_assets(), widget_assets_exports));
+  globalThis.pytinctureWidgetBridge = createWidgetAssetBridge2(
+    globalThis,
+    [
+      ...manifest.scripts.map((path) => ({ path, type: "script" })),
+      ...manifest.styles.map((path) => ({ path, type: "style" }))
+    ].map((item) => ({
+      ...item,
+      url: asset(item.path),
+      text: new TextDecoder().decode(contents.get(item.path))
+    }))
+  );
   let invoke;
   let capturedOutput = null;
   let consoleOutput = [];
@@ -378,12 +526,9 @@ async function runBrowserApplication(config, status = () => {
     invoke: handle.call,
     assetUrl: asset
   });
-  const resourceBundle = decodeJson(contents.get(manifest.resources));
-  globalThis.pytinctureResourcePaths = JSON.stringify(Object.keys(resourceBundle.files));
-  globalThis.pytinctureReadResourceBytes = (path) => {
-    if (!Object.hasOwn(resourceBundle.files, path)) throw new Error(`Unknown package resource: ${path}`);
-    return resourceBundle.files[path];
-  };
+  const resourceBundle = preparePackageResources(decodeJson(contents.get(manifest.resources)), contents);
+  globalThis.pytinctureResourcePaths = JSON.stringify(resourceBundle.paths);
+  globalThis.pytinctureReadResourceBytes = (path) => resourceBundle.readBase64(path);
   status(`Loading ${engine}\u2026`);
   let runtime;
   if (engine === "micropython") {
@@ -438,7 +583,7 @@ output.getvalue()`;
   status("Installing application bundle\u2026");
   await phase("bundle-installation", asset(manifest.targets[engine].sources), async () => {
     installSources(runtime, decodeJson(contents.get(manifest.targets[engine].sources)));
-    if (engine === "pyodide") installResources(runtime, resourceBundle);
+    installResources(runtime, resourceBundle);
   });
   status("Importing application\u2026");
   await phase("module-import", manifest.entrypoint, () => runtime.runPythonAsync(`import sys
@@ -464,7 +609,7 @@ var init_browser_runtimes = __esm({
 
 // pytincture.js
 var FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
-var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc8";
+var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc9";
 var BUILTIN_WIDGET_WHEEL_LOCKS = Object.freeze({
   "dhxpyt==0.9.18": "https://files.pythonhosted.org/packages/0c/e7/b48e045156c7b4bf20778597991d7dfe591fd46ada5267b747e2d5977244/dhxpyt-0.9.18-py3-none-any.whl#sha256=acd8db34547c6b61c83a01958e9545ee724564859e5bcb53713ae3c872234fbe"
 });
@@ -683,6 +828,7 @@ function initializeRuntimeDiagnostics(config) {
   };
   runtimeDiagnostics.set(config, state);
   delete globalThis.pytinctureAssets;
+  delete globalThis.pytinctureWidgetBridge;
   delete globalThis.pytinctureBrowserRuntime;
   const snapshot = () => Object.freeze({
     ...state,
@@ -1586,9 +1732,33 @@ function unpackPackagedApp(pyodide, downloaded) {
   pyodide.unpackArchive(downloaded.binary, "zip");
 }
 async function executePackagedApp(pyodide, config) {
-  const entrypoint = config.entrypoint || config.application;
-  await pyodide.runPythonAsync(`from ${config.application} import ${entrypoint} as app
-app()`);
+  await pyodide.runPythonAsync(`
+import importlib as _pytincture_importlib
+import inspect as _pytincture_inspect
+_pytincture_module = _pytincture_importlib.import_module(${JSON.stringify(config.application)})
+_pytincture_entry_name = ${JSON.stringify(config.entrypoint || "")}
+if _pytincture_entry_name == ${JSON.stringify(config.application)} and not hasattr(_pytincture_module, _pytincture_entry_name):
+    _pytincture_entry_name = ''
+if not _pytincture_entry_name:
+    _pytincture_conventional = getattr(_pytincture_module, ${JSON.stringify(config.application)}, None)
+    if callable(_pytincture_conventional):
+        _pytincture_entry_name = ${JSON.stringify(config.application)}
+    else:
+        _pytincture_candidates = []
+        for _name, _value in vars(_pytincture_module).items():
+            if _pytincture_inspect.isclass(_value) and any(
+                _base.__name__ == 'MainWindow' for _base in getattr(_value, '__mro__', ())[1:]
+            ):
+                _pytincture_candidates.append((_name, _value))
+        _pytincture_local = [item for item in _pytincture_candidates if item[1].__module__ == _pytincture_module.__name__]
+        if _pytincture_local or _pytincture_candidates:
+            _pytincture_entry_name = (_pytincture_local or _pytincture_candidates)[0][0]
+if not _pytincture_entry_name:
+    raise RuntimeError('No MainWindow subclass, alias, or application entrypoint found')
+_pytincture_result = getattr(_pytincture_module, _pytincture_entry_name)()
+if _pytincture_inspect.isawaitable(_pytincture_result):
+    await _pytincture_result
+`);
 }
 async function runInlineApp(pyodide, config) {
   const scripts = Array.from(document.querySelectorAll(config.inlineSelector));
@@ -1623,7 +1793,7 @@ def find_main_window(module):
                 bases = getattr(obj, '__bases__', ())
             except Exception:
                 bases = ()
-            if any(base.__name__ == 'MainWindow' for base in bases):
+            if any(base.__name__ == 'MainWindow' for base in getattr(obj, '__mro__', ())[1:]):
                 return name
     return None
 

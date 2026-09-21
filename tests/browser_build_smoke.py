@@ -93,7 +93,7 @@ def main():
                         identity = page.evaluate('pytinctureRuntime.getInfo()')
                         assert identity['engine'] == runtime and identity['deliveryMode'] == 'portable-bundle'
                         assert identity['pythonImplementation'] == ('micropython' if runtime == 'micropython' else 'cpython'), identity
-                        assert identity['bundleId'] and identity['compatibilityProfile'] == 'pytincture-portable-1'
+                        assert identity['bundleId'] and identity['compatibilityProfile'] == 'pytincture-portable-2'
                         assert any(t['stage'] == 'module-import' and t['durationMs'] >= 0 for t in identity['startupTimings'])
                         page.get_by_role('button', name='Use the DOM', exact=True).click()
                         expect(page.get_by_role('button')).to_have_text('DOM callback worked')

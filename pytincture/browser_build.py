@@ -5,7 +5,6 @@ Application and backend modules are parsed, never imported or executed.
 from __future__ import annotations
 
 import argparse
-import base64
 import ast
 import hashlib
 import importlib.metadata
@@ -20,11 +19,12 @@ import zipfile
 
 from pytincture.browser_compatibility import adapt
 from pytincture.browser_profile import (PROFILE, MICROPYTHON_MODULES, pyodide_modules,
-                                        import_source, inspect_source, verified_stdlib, CompatibilityError)
+                                        import_source, inspect_source, verified_stdlib, CompatibilityError, guard_dynamic_imports)
 from pytincture.browser_assets import canonical_json, audit_assets, seal_manifest, inspect_bundle
-from pytincture.backend.pages import find_app_string_setting, find_main_window_subclass
+from pytincture.backend.pages import find_app_string_setting, find_main_window_subclass, entrypoint_definitions
 from pytincture.browser_sources import (relative_path as _relative, read_source as _read,
-                                        module_name as _module, discover_sources, imported_modules)
+                                        module_name as _module, discover_sources, imported_modules,
+                                        validate_import_aliases, browser_source_path, browser_source, bridge_widget_imports)
 from pytincture.dataclass import get_bff_manifest, has_bff_export_class
 
 TEMPLATES = Path(__file__).with_name('browser_templates')
@@ -164,7 +164,7 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     allowed = {'application', 'modules-path', 'output', 'entrypoint', 'entry-kind',
                'files', 'bff', 'widget-wheel', 'micropython-assets', 'wheels',
                'assets', 'scripts', 'styles', 'heap-bytes', 'discover-imports', 'widget-package',
-               'runtimes', 'resources', 'dynamic-imports', 'external-origins', 'required-browser-apis'}
+               'runtimes', 'resources', 'dynamic-imports', 'external-origins', 'required-browser-apis', 'import-aliases'}
     if set(config) - allowed:
         raise ValueError(f'Unknown browser build settings: {sorted(set(config) - allowed)}')
     for key in ('files', 'bff', 'wheels', 'assets', 'scripts', 'styles', 'resources', 'dynamic-imports', 'required-browser-apis'):
@@ -174,6 +174,10 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     if type(config.get('discover-imports', True)) is not bool:
         raise ValueError('discover-imports must be a boolean')
     root = (config_file.parent / config.get('modules-path', '.')).resolve()
+    import_aliases = validate_import_aliases(config.get('import-aliases', {}))
+    for target in import_aliases.values():
+        if browser_source_path(root, target, import_aliases) is None:
+            raise ValueError(f'Browser import substitute is missing: {target}')
     app_name = config.get('application') or application or config.get('entrypoint', '').split(':')[0].split('.')[0]
     output = root / _relative(config.get('output', f'browser/{app_name}'))
     if not output.resolve().is_relative_to(root):
@@ -183,7 +187,7 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
         app_name = config.get('application') or application
         if not app_name:
             raise ValueError('Set application or entrypoint in the browser build configuration')
-        source = _read(root, app_name + '.py').decode()
+        source, _ = browser_source(root, app_name + '.py', import_aliases)
         entry_name = find_app_string_setting(app_name + '.py', ('APP_ENTRYPOINT',), ('entrypoint',), source_code=source) or find_main_window_subclass(app_name + '.py', source_code=source)
         if not entry_name:
             raise ValueError(f'Cannot find an entrypoint for {app_name}')
@@ -191,10 +195,12 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     module, separator, entry_name = entry.partition(':')
     if not separator or any(not part.isidentifier() or keyword.iskeyword(part) for part in [*module.split('.'), entry_name]):
         raise ValueError('entrypoint must be module:ClassName or module:async_function')
-    entry_path = module.replace('.', '/') + '.py'
-    if not (root / entry_path).is_file():
-        entry_path = module.replace('.', '/') + '/__init__.py'
-    definition = next((n for n in ast.parse(_read(root, entry_path).decode()).body if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == entry_name), None)
+    resolved_entry = browser_source_path(root, module, import_aliases)
+    if resolved_entry is None:
+        raise ValueError(f'Entrypoint module is missing: {module}')
+    entry_path = resolved_entry[0]
+    entry_source, _ = browser_source(root, entry_path, import_aliases)
+    definition = entrypoint_definitions(ast.parse(entry_source)).get(entry_name)
     if definition is None:
         raise ValueError(f'Entrypoint {entry} must name a top-level class or function')
     inferred_kind = 'async' if isinstance(definition, ast.AsyncFunctionDef) else 'callable'
@@ -202,10 +208,17 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     if entry_kind not in {'mainwindow', 'async', 'callable'}:
         raise ValueError('entry-kind must be mainwindow, callable or async')
     def convert(name, source, *, widget=False, widgets=()):
+        if widget:
+            source = bridge_widget_imports(source, package=widget_package, report=report['findings'], filename=name)
+            report['findings'].append({'file': name, 'line': 0, 'severity': 'transformation',
+                                      'rule': 'widget-asset-bridge', 'behavior_changing': True,
+                                      'message': 'Widget JS imports use the scoped bridge; verified loaded asset bytes are not executed/injected twice'})
         findings = inspect_source(name, source, engine, explicit_dynamic=config.get('dynamic-imports', []))
         report['findings'].extend(findings)
         if any(f['severity'] == 'error' for f in findings):
             raise ValueError(f"{name}: " + '; '.join(f['message'] for f in findings if f['severity'] == 'error'))
+        if config.get('dynamic-imports'):
+            source = guard_dynamic_imports(source, engine=engine, report=report['findings'], filename=name)
         if engine == 'pyodide':
             result = import_source(source)
             report['findings'].append({'file': name, 'line': 0, 'severity': 'supported',
@@ -222,14 +235,20 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     for name in config.get('dynamic-imports', []):
         if not all(part.isidentifier() for part in name.split('.')):
             raise ValueError('dynamic-imports entries must be literal module names')
-        for candidate in (name.replace('.', '/')+'.py', name.replace('.', '/')+'/__init__.py'):
-            if (root/candidate).is_file():
-                dynamic_files.append(candidate)
-                break
+        resolved = browser_source_path(root, name, import_aliases)
+        if resolved:
+            dynamic_files.append(resolved[0])
+    substitutions = {}
     raw_sources, boundaries = discover_sources(
         root, entry_path, [*config.get('files', []), *dynamic_files], config.get('bff', []),
         discover=config.get('discover-imports', True),
+        import_aliases=import_aliases, substitutions=substitutions,
     )
+    report['import_substitutions'] = substitutions
+    report['findings'].extend({'file': name, 'line': 0, 'severity': 'transformation',
+                              'rule': 'import-substitution', 'behavior_changing': True,
+                              'message': f'Explicit browser implementation: {physical} (module identity remains {_module(name)})'}
+                             for name, physical in sorted(substitutions.items()))
     for name, source in raw_sources.items():
         if name in boundaries:
             sources[name] = _bff_stub(name, source)
@@ -356,6 +375,9 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
         if any(f['severity'] == 'error' for f in findings):
             raise ValueError('Framework shim failed profile validation: ' + template + ': ' + '; '.join(f['message'] for f in findings))
     hook_source = ''
+    if config.get('dynamic-imports'):
+        sources['_pytincture_imports.py'] = ('ALLOWED_MODULES = ' + repr(tuple(sorted(set(config['dynamic-imports'])))) + '\n'
+                                            + (TEMPLATES / 'imports.py.txt').read_text())
     if asset_hook is not None:
         if (not isinstance(asset_hook, dict) or set(asset_hook) != {'module', 'function'}
                 or not all(isinstance(value, str) for value in asset_hook.values())
@@ -378,7 +400,52 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     bootstrap += '    await finish_startup()\n    js.window.pytinctureAppReady = True\n'
     sources['_pytincture_bootstrap.py'] = bootstrap
     vendor_modules = set()
-    imports = {module.split('.')[0] for name, source in sources.items() for module, _ in imported_modules(name, source)}
+    imports = {module for name, source in sources.items() for module, _ in imported_modules(name, source)}
+    imports.update(config.get('dynamic-imports', ()))
+    if engine == 'micropython':
+        optional = {
+            'pathlib': ('pathlib.py', 'pathlib', False),
+            'html': ('html/__init__.py', 'html', False),
+            'html.parser': ('html/parser.py', 'html_parser', False),
+            'html.entities': ('html/entities.py', 'html_entities', True),
+            'uuid': ('uuid.py', 'uuid', False),
+            'string': ('string.py', 'string', True),
+            'base64': ('base64.py', 'base64', True),
+            'zipfile': ('zipfile.py', 'zipfile', True),
+            'contextlib': ('contextlib.py', 'contextlib', False),
+            'csv': ('csv.py', 'csv', False),
+            'importlib': ('importlib/__init__.py', 'importlib', False),
+            'importlib.resources': ('importlib/resources.py', 'resources', False),
+            '_pytincture_events': ('_pytincture_events.py', 'events', False),
+        }
+        # Follow dependencies of optional shims too, including package parents.
+        while True:
+            available = {_module(name) for name in sources}
+            requested = imports | {name.split('.')[0] for name in imports}
+            missing = sorted((requested & optional.keys()) - available)
+            if not missing:
+                break
+            for module in missing:
+                name, template, upstream = optional[module]
+                source = verified_stdlib(template) if upstream else (TEMPLATES / (template + '.py.txt')).read_text()
+                if module == 'zipfile':
+                    source = 'from micropython import const\n' + source
+                    source = source.replace('stream = _ZipIO(self._f, info.file_size)', 'stream = _ZipIO(self._f, info.compress_size)')
+                    report['findings'].append({'file': name, 'line': 0, 'rule': 'portable-stdlib-extension',
+                                              'severity': 'transformation', 'behavior_changing': True,
+                                              'message': 'Bound ZIP input streams by compressed size, avoiding truncated deflate data'})
+                if module == 'base64':
+                    source += '\n' + (TEMPLATES / 'base64_extensions.py.txt').read_text()
+                    report['findings'].append({'file': name, 'line': 0, 'rule': 'portable-stdlib-extension',
+                                              'severity': 'transformation', 'behavior_changing': True,
+                                              'message': 'Add URL-safe Base64 decoding and a portable binascii.Error alias'})
+                sources[name] = source
+                if module == 'importlib' and '_pytincture_imports.py' not in sources:
+                    sources['_pytincture_imports.py'] = 'ALLOWED_MODULES = ()\n' + (TEMPLATES / 'imports.py.txt').read_text()
+                vendor_modules.add(name)
+                imports.update(module for module, _ in imported_modules(name, source))
+                report['findings'].append({'file': name, 'line': 0, 'rule': 'portable-stdlib',
+                                          'severity': 'supported', 'message': 'Optional portable shim; see portable-python-profile.md for supported APIs'})
     for stdlib in (('copy', 'datetime') if engine == 'micropython' else ()):
         if stdlib in imports and stdlib + '.py' not in sources:
             vendor_modules.add(stdlib + '.py')
@@ -387,8 +454,10 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
         if 'types.py' not in sources:
             vendor_modules.add('types.py')
         sources.setdefault('types.py', verified_stdlib('types'))
-    if 'copy' in imports or 'datetime' in imports:
+    if {'copy', 'datetime', 'string', 'base64', 'zipfile'} & imports:
         artifacts['vendor/micropython-lib/LICENSE'] = (VENDOR / 'stdlib/LICENSE').read_bytes()
+    if {'html/entities.py', 'html/__init__.py', 'base64.py'} & vendor_modules:
+        artifacts['vendor/cpython/LICENSE'] = (VENDOR / 'stdlib/CPYTHON-LICENSE').read_bytes()
     report['shims'] = sorted(vendor_modules | {name for name in sources if name.startswith('_pytincture_') and name not in {'_pytincture_bootstrap.py', '_pytincture_bff.py'}}) if engine == 'micropython' else []
     _check_imports({**sources, 'declared_dynamic_imports.py': '\n'.join('import '+name for name in config.get('dynamic-imports', []))}, root, vendor_modules, engine)
     if len(sources) > 256 or sum(len(value.encode()) for value in sources.values()) > 8 * 1024 * 1024:
@@ -433,7 +502,7 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     artifacts['host.js'] = (TEMPLATES / 'host.js.txt').read_text().replace(
         '__PYTINCTURE_APP_TITLE__', json.dumps(title),
     ).encode()
-    resources = {name.removeprefix('vendor/'): base64.b64encode(content).decode()
+    resources = {name.removeprefix('vendor/'): {'asset': name}
                  for name, content in sorted(artifacts.items())
                  if name.startswith('vendor/' + widget_package + '/') or
                     (name.startswith('vendor/') and name.removeprefix('vendor/') in config.get('resources', [])) or
@@ -441,7 +510,7 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     source_name = 'sources.json' if engine == 'micropython' else 'sources-pyodide.json'
     artifacts[source_name] = canonical_json({'files': sources})
     # CPython resources are installed in its real filesystem, preserving importlib.resources.
-    artifacts['resources.json'] = canonical_json({'files': resources})
+    artifacts['resources.json'] = canonical_json({'format': 'asset-references-v1', 'files': resources})
     manifest['sources'] = source_name
     manifest['resources'] = 'resources.json'
     manifest['requiredBrowserApis'] = ['fetch', 'WebAssembly', 'crypto.subtle', *config.get('required-browser-apis', [])]

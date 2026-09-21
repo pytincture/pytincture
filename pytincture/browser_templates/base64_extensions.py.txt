@@ -1,0 +1,7 @@
+# Extensions to the pinned micropython-lib base64 implementation.
+if not hasattr(binascii, 'Error'):
+    binascii.Error = ValueError
+
+
+def urlsafe_b64decode(s):
+    return b64decode(s, b'-_')

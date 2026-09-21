@@ -104,11 +104,32 @@ def _main_window_base_names(tree: ast.Module) -> set[str]:
     return names
 
 
+def entrypoint_definitions(tree: ast.Module) -> dict[str, ast.AST]:
+    """Find top-level callable bindings and static aliases without execution."""
+    definitions = {}
+    for node in tree.body:
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            definitions[node.name] = node
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name != '*':
+                    definitions[alias.asname or alias.name] = node
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = _dotted_name(node.value)
+            if value in definitions or (value and '.' in value):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        definitions[target.id] = definitions.get(value, node.value)
+    return definitions
+
+
 def find_main_window_subclass(
     file_path: str,
     _legacy_loader=None,
     *,
     source_code: str | None = None,
+    allow_browser_discovery: bool = False,
 ) -> str | None:
     """Discover a browser entrypoint using source syntax only.
 
@@ -124,11 +145,7 @@ def find_main_window_subclass(
             with open(file_path, encoding="utf-8") as source_file:
                 source_code = source_file.read()
         tree = ast.parse(source_code, filename=file_path)
-        declared = {
-            node.name
-            for node in tree.body
-            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-        }
+        declared = entrypoint_definitions(tree)
         explicit = _literal_entrypoint(tree)
         if explicit is not None:
             if not explicit.isascii() or not explicit.isidentifier():
@@ -155,7 +172,7 @@ def find_main_window_subclass(
         if conventional_name in declared:
             return conventional_name
 
-        if declared:
+        if declared and not allow_browser_discovery:
             raise EntryPointDiscoveryError(
                 "Unable to determine the browser entrypoint statically; declare "
                 "APP_ENTRYPOINT = 'Name' using a top-level class or function"

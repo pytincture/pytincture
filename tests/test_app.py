@@ -1168,9 +1168,9 @@ def test_main_page_revocation_lookup_runs_off_the_event_loop(
     )
 
     response = fresh_client.get("/example", follow_redirects=False)
-    # Authentication completes before this fixture's intentionally missing UI
-    # entrypoint is reported.
-    assert response.status_code == 422
+    # Authentication completes before unresolved UI entrypoint discovery is
+    # deferred to the browser (client modules are never executed here).
+    assert response.status_code == 200
     assert store_threads[0] != event_loop_threads[0]
 
 
@@ -2429,11 +2429,14 @@ def test_appcode_bff_and_public_assets_reject_symlinks(
     assert asset.status_code == 404
 
 
-def test_class_call_policy_hook(monkeypatch, fresh_client, tmp_path):
+@pytest.mark.parametrize('hook_style', ['kwargs', 'exact-sync', 'exact-async'])
+@pytest.mark.parametrize('execution_mode', ['worker-thread', 'event-loop'])
+def test_class_call_policy_hook(monkeypatch, fresh_client, tmp_path, hook_style, execution_mode):
     """
     Custom policy hooks can inspect metadata and user context before allowing a call.
     """
     import pytincture.backend.app as backend_app
+    monkeypatch.setattr(backend_app, 'BFF_ASYNC_EXECUTION_MODE', execution_mode)
 
     modules_dir = tmp_path / "policy_modules"
     modules_dir.mkdir()
@@ -2458,12 +2461,26 @@ def test_class_call_policy_hook(monkeypatch, fresh_client, tmp_path):
     monkeypatch.setattr(backend_app, "require_auth", fake_require_auth)
 
     def policy_hook(user, policy, **kwargs):
+        assert kwargs['class_name'] == 'Restricted'
+        assert kwargs['function_name'] == 'secret'
+        assert kwargs['module_path'] == 'restricted.py'
+        assert kwargs['request'].method == 'POST'
+        if hook_style == 'kwargs':
+            assert kwargs['application'] == 'restricted'
         required_role = policy.get("role")
         roles = set(user.get("roles", []))
         if required_role and required_role not in roles:
             raise HTTPException(status_code=403, detail="Forbidden")
 
-    set_bff_policy_hook(policy_hook)
+    def exact_hook(*, user, policy, class_name, function_name, module_path, request):
+        return policy_hook(user, policy, class_name=class_name, function_name=function_name,
+                           module_path=module_path, request=request)
+
+    async def exact_async_hook(*, user, policy, class_name, function_name, module_path, request):
+        return exact_hook(user=user, policy=policy, class_name=class_name, function_name=function_name,
+                          module_path=module_path, request=request)
+
+    set_bff_policy_hook({'kwargs': policy_hook, 'exact-sync': exact_hook, 'exact-async': exact_async_hook}[hook_style])
     try:
         response = fresh_client.post(
             "/restricted/classcall/restricted.py/Restricted/secret",

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pytincture"
 
-version = "1.0.0rc8"
+version = "1.0.0rc9"
 
 description = "UI Builder"
 readme = "README.md"
@@ -95,6 +95,7 @@ pytincture = [
     "frontend/index.html",
     "frontend/pytincture.js",
     "frontend/browser-runtimes.js",
+    "frontend/widget-assets.js",
     "frontend/sw.js",
     "frontend/bff-docs.js",
     "frontend/dist/*",

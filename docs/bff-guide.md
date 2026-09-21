@@ -77,6 +77,12 @@ config = PytinctureConfig(
 
 The dotted callable is recommended for reproducible service startup. The
 compatibility `set_bff_policy_hook()` API is public through 1.x.
+Sync and async hooks may declare only the context parameters they use. Pytincture
+passes accepted keyword parameters from `user`, `policy`, `application`,
+`class_name`, `function_name`, `module_path`, and `request`. Existing hooks with
+the six original parameters (without `application`) continue to work; hooks with
+`**kwargs` receive all available context. Exceptions from the hook are propagated
+without retrying it with another signature.
 Pytincture enforces standard application, provider, issuer, tenant, role, and
 operation predicates before the hook runs; the hook owns application-specific
 metadata such as scopes or account entitlements.

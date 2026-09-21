@@ -1,0 +1,20 @@
+"""Exact-name dynamic imports for portable bundles (not a Python sandbox)."""
+import sys
+import _pytincture_resources as resources
+
+
+def import_module(name, package=None):
+    if not isinstance(name, str):
+        raise TypeError('module name must be a string')
+    if name.startswith('.'):
+        if not isinstance(package, str) or not package:
+            raise TypeError('relative imports require a package')
+        level = len(name) - len(name.lstrip('.'))
+        parts = package.split('.')
+        if level > len(parts):
+            raise ImportError('relative import beyond top-level package')
+        name = '.'.join(parts[:len(parts) - level + 1] + ([name[level:]] if name[level:] else []))
+    if name not in ALLOWED_MODULES:
+        raise ImportError('Dynamic import is not allowlisted: ' + name)
+    __import__(name)
+    return sys.modules[name]

@@ -1,0 +1,30 @@
+"""Managed event callbacks for portable MicroPython; native Pyodide is unchanged."""
+from jsffi import create_proxy
+import js
+
+_listeners = []
+
+
+def add_event_listener(element, event, listener):
+    if not callable(listener):
+        raise TypeError('event listener must be callable')
+    for target, name, callback, proxy in _listeners:
+        if target == element and name == event and callback == listener:
+            return
+    # The JS wrapper can release its Python callback explicitly on removal.
+    proxy = js.pytinctureCreateEventCallback(create_proxy(listener))
+    try:
+        element.addEventListener(event, proxy)
+    except BaseException:
+        proxy.destroy()
+        raise
+    _listeners.append((element, event, listener, proxy))
+
+
+def remove_event_listener(element, event, listener):
+    for index, (target, name, callback, proxy) in enumerate(_listeners):
+        if target == element and name == event and callback == listener:
+            target.removeEventListener(name, proxy)
+            proxy.destroy()
+            del _listeners[index]
+            return

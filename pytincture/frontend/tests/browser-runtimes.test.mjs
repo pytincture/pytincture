@@ -1,7 +1,33 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {createHash} from 'node:crypto';
-import {BROWSER_RUNTIMES, createBffCaller, sameOriginUrl, validateRuntimeManifest} from '../browser-runtimes.js';
+import {BROWSER_RUNTIMES, createBffCaller, createOnceCallable, createEventCallback, sameOriginUrl, validateRuntimeManifest} from '../browser-runtimes.js';
+
+test('managed event callbacks remain callable until released', () => {
+    let calls = 0;
+    const listener = createEventCallback(value => { calls++; return value + 1; });
+    assert.equal(listener(1), 2);
+    assert.equal(listener(2), 3);
+    listener.destroy();
+    assert.equal(listener(3), undefined);
+    assert.equal(calls, 2);
+});
+
+test('once callables reject repeats, cancellation, reentry and exception retries', () => {
+    let calls = 0;
+    const once = createOnceCallable(value => { calls++; return value + 1; });
+    assert.equal(once(41), 42);
+    assert.throws(() => once(41), /already/);
+    const cancelled = createOnceCallable(() => { calls++; });
+    cancelled.destroy();
+    assert.throws(() => cancelled(), /already/);
+    const failed = createOnceCallable(() => { calls++; throw new Error('callback failed'); });
+    assert.throws(() => failed(), /callback failed/);
+    assert.throws(() => failed(), /already/);
+    const recursive = createOnceCallable(() => recursive());
+    assert.throws(() => recursive(), /already/);
+    assert.equal(calls, 2);
+});
 
 const manifest = {
     schema:2, runtimes:['pyodide','micropython'], host:'host.js',
@@ -54,6 +80,10 @@ test('widget asset ownership registry identifies exact successfully loaded asset
 test('each built-in runtime validates its required assets', () => {
     assert.deepEqual(BROWSER_RUNTIMES, ['pyodide', 'micropython']);
     for (const engine of manifest.runtimes) assert.equal(validateRuntimeManifest(manifest,engine),manifest);
+    for (const profile of ['pytincture-portable-1', 'pytincture-portable-2']) {
+        assert.equal(validateRuntimeManifest({...manifest, profile}, 'micropython').profile, profile);
+    }
+    assert.throws(()=>validateRuntimeManifest({...manifest,profile:'pytincture-portable-3'},'micropython'),/profile/);
     assert.throws(()=>validateRuntimeManifest(manifest,'other'),/Unknown/);
     assert.throws(()=>validateRuntimeManifest({...manifest,runtimes:['pyodide']},'micropython'),/does not support/);
     assert.throws(()=>validateRuntimeManifest(manifest,'transcrypt'),/Unknown/);
@@ -192,4 +222,42 @@ test('synchronous compatibility requests enforce the same target, session and CS
         assert.equal(request.body,'{"id":7}');
         assert.throws(()=>call('../data','Data','lookup'),/Invalid BFF target/);
     } finally {globalThis.XMLHttpRequest=priorXhr;globalThis.document=priorDocument;}
+});
+
+test('resources reuse verified asset bytes and preserve old base64 bundles', async () => {
+    const {preparePackageResources, installResources} = await import('../browser-runtimes.js');
+    const bytes = Uint8Array.from({length: 100000}, (_, index) => index % 256);
+    const contents = new Map([['vendor/widget/font.bin', bytes]]);
+    const resources = preparePackageResources({format:'asset-references-v1', files:{'widget/font.bin':{asset:'vendor/widget/font.bin'}}}, contents);
+    assert.equal(resources.readBytes('widget/font.bin'), bytes);
+    assert.equal(resources.readBase64('widget/font.bin'), Buffer.from(bytes).toString('base64'));
+    const writes = [];
+    installResources({FS:{mkdirTree:path => writes.push(path), writeFile:(path, value) => writes.push([path, value])}}, resources);
+    assert.deepEqual(writes, ['/widget', ['/widget/font.bin', bytes]]);
+    const legacy = preparePackageResources({files:{'app/data.txt':btoa('hello')}}, new Map());
+    assert.equal(new TextDecoder().decode(legacy.readBytes('app/data.txt')), 'hello');
+    assert.equal(legacy.readBase64('app/data.txt'), btoa('hello'));
+    assert.throws(() => resources.readBytes('unknown'), /Unknown/);
+    for (const [path, entry] of [
+        ['widget/font.bin', {asset:'unverified'}],
+        ['widget/font.bin', {asset:'vendor/widget/missing'}],
+        ['widget/../secret', {asset:'vendor/widget/font.bin'}],
+        ['widget/code.py', {asset:'vendor/widget/font.bin'}],
+        ['widget/font.bin', {asset:'vendor/widget/font.bin', extra:true}],
+    ]) assert.throws(() => preparePackageResources({format:'asset-references-v1', files:{[path]:entry}}, contents), /resource|path/);
+    assert.throws(() => preparePackageResources({format:'future',files:{}}, contents), /resource/);
+});
+
+test('run_js keeps browser values and catches JS and CSP evaluation failures', async () => {
+    const {evaluatePythonJavascript} = await import('../browser-runtimes.js');
+    assert.deepEqual(evaluatePythonJavascript('6 * 7'), {ok:true, value:42});
+    assert.deepEqual(evaluatePythonJavascript('({answer:42})').value, {answer:42});
+    assert.equal(evaluatePythonJavascript('undefined').value, undefined);
+    assert.equal(evaluatePythonJavascript('throw new Error("probe")').error, 'Error: probe');
+    assert.equal(evaluatePythonJavascript(42).ok, false);
+    const previous = globalThis.pytinctureWidgetBridge;
+    try {
+        globalThis.pytinctureWidgetBridge = {eval:() => {throw new EvalError('Blocked by CSP');}};
+        assert.deepEqual(evaluatePythonJavascript('code', true), {ok:false, error:'EvalError: Blocked by CSP'});
+    } finally { globalThis.pytinctureWidgetBridge = previous; }
 });

@@ -55,7 +55,7 @@ def test_resource_wheel_data_fonts_hashes_and_reproducibility(tmp_path):
     manifest = json.loads(before)
     revision = manifest_path.parent/manifest['assetBase']
     resources = json.loads((revision/'resources.json').read_text())['files']
-    assert json.loads(base64.b64decode(resources['helper/defaults.json'])) == {'color': 'blue'}
+    assert json.loads((revision/resources['helper/defaults.json']['asset']).read_text()) == {'color': 'blue'}
     assert inspect_bundle(manifest_path)['bundle_id'] == manifest['bundleId']
     build_browser_bundle(config)
     assert manifest_path.read_bytes() == before

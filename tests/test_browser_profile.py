@@ -35,8 +35,41 @@ def test_alias_scheduler_adaptation_is_visible_in_the_build_report():
     assert all(f['file']=='app.py' for f in findings)
 
 
-def test_micropython_rejects_iterable_display_unpacking_but_allows_assignment():
+def test_micropython_reports_iterable_display_adaptation_and_allows_assignment():
     source = 'values=[0,*items]\nfirst,*rest=items\n'
     assert not inspect_source('app.py',source,'pyodide')
     findings = inspect_source('app.py',source,'micropython')
-    assert len(findings)==1 and findings[0]['rule']=='runtime-syntax'
+    assert len(findings)==1 and findings[0]['rule']=='iterable-display' and findings[0]['severity']=='supported'
+
+
+@pytest.mark.parametrize('expression', [
+    'f"""before {("" if value else f"""nested {value}""")} after"""',
+    'f"outer {f\'inner {value}\'}"',
+    'f"outer {str(f\'inner {value}\')}"',
+    'f"{value:{f\'{width}\'}}"',
+])
+def test_nested_fstrings_are_lowered_with_source_diagnostics(expression):
+    # Keep original source positions despite blank lines and stripped guards.
+    source = '\n\nif __name__ == "__main__":\n    desktop_only()\nhtml = ' + expression + '\n'
+    findings = inspect_source('ui.py', source, 'micropython')
+    errors = [f for f in findings if f['rule'] == 'nested-fstring']
+    assert errors
+    assert all(f['severity'] == 'supported' and f['line'] == 5 and f['file'] == 'ui.py' for f in errors)
+    assert not inspect_source('ui.py', source, 'pyodide')
+    import ast
+    converted = adapt(source)
+    assert not any(isinstance(n, ast.JoinedStr) for n in ast.walk(ast.parse(converted)))
+    assert '_pytincture_fstring_format' in converted
+
+
+@pytest.mark.parametrize('source', [
+    'html = f"value: {value!r}"',
+    'html = f"{value:>10}"',
+    'html = f"{value:{width}.{precision}f}"',
+    'html = f"left {value}" f"right {value}"',
+    'html = f"literal {{value}}"',
+    'if __name__ == "__main__":\n    html = f"outer {f\'inner {value}\'}"',
+])
+def test_nested_fstring_check_does_not_reject_ordinary_strings_or_unreachable_code(source):
+    assert not inspect_source('ui.py', source, 'micropython')
+    adapt(source)

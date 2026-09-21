@@ -1,5 +1,5 @@
 const FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
-const PYTINCTURE_RUNTIME_VERSION = "1.0.0rc8";
+const PYTINCTURE_RUNTIME_VERSION = "1.0.0rc9";
 
 // Complete-wheel locks for compatibility releases maintained by Pytincture.
 // These remain PyPI installs (and therefore never receive the backend instance
@@ -237,6 +237,7 @@ function initializeRuntimeDiagnostics(config) {
         compatibilityProfile: null, startupTimings: []};
     runtimeDiagnostics.set(config, state);
     delete globalThis.pytinctureAssets;
+    delete globalThis.pytinctureWidgetBridge;
     delete globalThis.pytinctureBrowserRuntime;
     const snapshot = () => Object.freeze({...state,
         startupTimings: Object.freeze(state.startupTimings.map(entry => Object.freeze({...entry})))});
@@ -1218,8 +1219,33 @@ function unpackPackagedApp(pyodide, downloaded) {
 }
 
 async function executePackagedApp(pyodide, config) {
-    const entrypoint = config.entrypoint || config.application;
-    await pyodide.runPythonAsync(`from ${config.application} import ${entrypoint} as app\napp()`);
+    await pyodide.runPythonAsync(`
+import importlib as _pytincture_importlib
+import inspect as _pytincture_inspect
+_pytincture_module = _pytincture_importlib.import_module(${JSON.stringify(config.application)})
+_pytincture_entry_name = ${JSON.stringify(config.entrypoint || '')}
+if _pytincture_entry_name == ${JSON.stringify(config.application)} and not hasattr(_pytincture_module, _pytincture_entry_name):
+    _pytincture_entry_name = ''
+if not _pytincture_entry_name:
+    _pytincture_conventional = getattr(_pytincture_module, ${JSON.stringify(config.application)}, None)
+    if callable(_pytincture_conventional):
+        _pytincture_entry_name = ${JSON.stringify(config.application)}
+    else:
+        _pytincture_candidates = []
+        for _name, _value in vars(_pytincture_module).items():
+            if _pytincture_inspect.isclass(_value) and any(
+                _base.__name__ == 'MainWindow' for _base in getattr(_value, '__mro__', ())[1:]
+            ):
+                _pytincture_candidates.append((_name, _value))
+        _pytincture_local = [item for item in _pytincture_candidates if item[1].__module__ == _pytincture_module.__name__]
+        if _pytincture_local or _pytincture_candidates:
+            _pytincture_entry_name = (_pytincture_local or _pytincture_candidates)[0][0]
+if not _pytincture_entry_name:
+    raise RuntimeError('No MainWindow subclass, alias, or application entrypoint found')
+_pytincture_result = getattr(_pytincture_module, _pytincture_entry_name)()
+if _pytincture_inspect.isawaitable(_pytincture_result):
+    await _pytincture_result
+`);
 }
 
 async function runInlineApp(pyodide, config) {
@@ -1258,7 +1284,7 @@ def find_main_window(module):
                 bases = getattr(obj, '__bases__', ())
             except Exception:
                 bases = ()
-            if any(base.__name__ == 'MainWindow' for base in bases):
+            if any(base.__name__ == 'MainWindow' for base in getattr(obj, '__mro__', ())[1:]):
                 return name
     return None
 
