@@ -154,6 +154,58 @@ that exact allowlist at runtime in both portable engines. Other results raise
 are included in the bundle; simply including a file does not authorize dynamic
 access to it. This adaptation is recorded in the compatibility report.
 
+### Server-only import boundaries (RC10)
+
+Use `server-only-imports` when shared source already has browser fallbacks and
+the server implementation should never enter a portable bundle:
+
+```toml
+[tool.pytincture.browser]
+entrypoint = "app:main"
+server-only-imports = ["yaml", "app_settings", "apps.manifest_loader", "fastapi"]
+```
+
+```python
+try:
+    from app_settings import settings
+except ImportError:
+    settings = {"theme": "system"}
+```
+
+Names match an exact module and its descendants: `fastapi` excludes
+`fastapi.responses`, while `apps.manifest_loader` leaves `apps.client` alone.
+The builder skips excluded source discovery, dependency-wheel modules and their
+package data. It never reads excluded local module bodies. Real client sources
+provided by `files`, import discovery, or dependency wheels remain real inputs;
+no replacement modules or `browser_runtime` module are needed for these fallbacks.
+
+Both portable engines retain the import statements and insert a reported
+`ImportError` immediately before an excluded import. This makes the fallback
+deterministic even if Pyodide already supplies the module. No process-wide import
+hook or fake module is installed. Other missing dependencies still fail normal
+validation. This setting does not change legacy Pyodide or server imports and is
+not a Python security sandbox.
+
+The build fails with a file and line number if an excluded import has no local
+`try/except ImportError` fallback. Bare handlers and handlers for `Exception` or
+`BaseException` also catch the boundary. Validation is conservative: deferred
+functions and callbacks need their own guard because the builder cannot prove
+which ones run during startup. A handler around a function's definition or only
+around its caller is insufficient for this static check. `else`, `finally` and
+handler bodies need an outer guard; the handlers of their own `try` do not catch
+their exceptions. The application remains responsible for a usable fallback and
+for testing subsequent code; static validation cannot prove arbitrary control
+flow, shadowed exception types or dynamic calls.
+
+BFF modules continue to generate stubs before client-source validation. Their
+server implementation imports need no browser guards. Keep the BFF module itself
+in discovery or `bff`; exclude its server dependencies, not the callable module.
+Conflicts with explicit `files`, `bff`, entrypoints, resources, import aliases or
+dynamic-import declarations fail instead of silently discarding inputs. Boundary
+names and per-import transformations appear separately for each runtime in the
+compatibility report and in `build.json`. Rebuild portable bundles after changing
+the boundary configuration.
+
 Legacy Pyodide discovers imported/indirect MainWindow subclasses and aliases in
 the browser when static discovery cannot decide, without executing client code
 on the server. Explicit entrypoints may refer to imported or simple aliases.

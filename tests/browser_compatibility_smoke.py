@@ -58,8 +58,10 @@ from html import escape
 import traceback
 from stdlib_probe import validate
 from fstring_probe import validate as validate_fstrings, validate_async as validate_async_fstrings
+from server_only_probe import validate as validate_server_only
 
 async def main():
+    validate_server_only()
     validate()
     validate_fstrings()
     await validate_async_fstrings()
@@ -166,6 +168,11 @@ def main():
         (root/'app.py').write_text(APP)
         (root/'stdlib_probe.py').write_text((repo/'tests/fixtures/portable_stdlib/probe.py').read_text())
         (root/'fstring_probe.py').write_text((repo/'tests/fixtures/portable_fstrings/probe.py').read_text())
+        (root/'server_only_probe.py').write_text((repo/'tests/fixtures/portable_server_only/probe.py').read_text())
+        (root/'app_settings.py').write_text('invalid server Python: never parse, bundle or execute!')
+        (root/'server_package').mkdir()
+        (root/'server_package/__init__.py').write_text('invalid server Python: never parse parent!')
+        (root/'server_package/config.py').write_text('invalid server Python: never parse!')
         (root/'registry.py').write_text('import importlib\nvalue=importlib.import_module(input())\n')
         (root/'browser_registry.py').write_text('label="browser substitute"\n')
         (root/'providers').mkdir()
@@ -178,6 +185,7 @@ def main():
             archive.writestr('data.txt', 'portable archive')
         config=root/'pyproject.toml'
         config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\nwidget-package="oldwidgets"\nwidget-wheel="'+wheel.name+'"\nimport-aliases={registry="browser_registry"}\ndynamic-imports=["providers.demo"]\nresources=["sample/message.txt", "sample/archive.zip"]\n')
+        config.write_text(config.read_text()+'server-only-imports=["app_settings", "server_package.config", "decimal", "yaml", "fastapi"]\n')
         manifest_path = build_browser_bundle(config)
         manifest = json.loads(manifest_path.read_text())
         # Resources are references, not a second base64 copy of the large font.

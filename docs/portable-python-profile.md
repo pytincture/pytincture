@@ -143,6 +143,16 @@ all its children. Computed calls without an allowlist still fail the build.
 Normal dependencies imported by an allowed module remain subject to bundle
 discovery and profile checks. This guard covers recognized `import_module` calls
 and import aliases, not arbitrary reflection or a sandbox for untrusted Python.
+Use `server-only-imports` for server dependencies that already have local
+`try/except ImportError` browser fallbacks. Excluded modules and their package
+data are not bundled; preserved import statements receive an explicit
+`ImportError` guard in both portable runtimes, even for a Pyodide-native module.
+Every retained excluded import must be guarded, including deferred functions;
+unguarded imports fail the build with source locations. BFF implementation
+imports are removed by stub generation and need no guards. See
+[server-only import boundaries](browser-runtimes.md#server-only-import-boundaries-rc10)
+for scope, conflicts and static-analysis limits.
+
 Use explicit `import-aliases` to substitute a portable registry module for a
 computed/server registry while leaving the application import unchanged. The
 selected implementation must itself pass the target profile, and the report lists

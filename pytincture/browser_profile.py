@@ -6,6 +6,7 @@ from pathlib import Path
 import zipfile
 
 from pytincture.browser_sources import main_only, has_nested_fstring
+from pytincture.browser_boundaries import excluded_import
 
 PROFILE = 'pytincture-portable-2'
 MICROPYTHON_MODULES = frozenset('js jsffi asyncio array binascii builtins cmath collections gc hashlib heapq io json math micropython os random re select struct sys time errno deflate __main__'.split())
@@ -36,7 +37,7 @@ def import_source(source):
     return ast.unparse(_import_tree(source))+'\n'
 
 
-def guard_dynamic_imports(source, *, engine, report, filename):
+def guard_dynamic_imports(source, *, engine, report, filename, server_only_imports=()):
     """Guard recognized import_module calls; preserve other CPython importlib APIs."""
     tree = ast.parse(source)
     aliases = {}
@@ -64,6 +65,8 @@ def guard_dynamic_imports(source, *, engine, report, filename):
             return node
 
         def visit_Import(self, node):
+            if excluded_import(node, filename, server_only_imports):
+                return node
             if engine == 'micropython':
                 for alias in node.names:
                     if alias.name == 'importlib':
@@ -72,6 +75,8 @@ def guard_dynamic_imports(source, *, engine, report, filename):
             return node
 
         def visit_ImportFrom(self, node):
+            if excluded_import(node, filename, server_only_imports):
+                return node
             if engine == 'micropython' and node.module == 'importlib' and not node.level:
                 guarded = [a for a in node.names if a.name == 'import_module']
                 others = [a for a in node.names if a.name != 'import_module']

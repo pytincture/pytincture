@@ -18,6 +18,8 @@ import tomllib
 import zipfile
 
 from pytincture.browser_compatibility import adapt
+from pytincture.browser_boundaries import (excluded_module, excluded_path, excluded_import,
+                                           validate_server_only_imports, guard_server_only_imports)
 from pytincture.browser_profile import (PROFILE, MICROPYTHON_MODULES, pyodide_modules,
                                         import_source, inspect_source, verified_stdlib, CompatibilityError, guard_dynamic_imports)
 from pytincture.browser_assets import canonical_json, audit_assets, seal_manifest, inspect_bundle
@@ -122,7 +124,8 @@ def _bff_stub(name: str, source: str) -> str:
         f'class {name}:\n' + ('\n\n'.join(methods) or '    pass') for name, methods in classes.items()) + '\n'
 
 
-def _check_imports(sources: dict[str, str], root: Path, vendor_modules=(), engine="micropython") -> None:
+def _check_imports(sources: dict[str, str], root: Path, vendor_modules=(), engine="micropython",
+                   server_only_imports=()) -> None:
     """Catch missing local sources and known unsupported imports before serving."""
     native = MICROPYTHON_MODULES if engine == 'micropython' else pyodide_modules()
     available = {_module(name) for name in sources}
@@ -130,6 +133,8 @@ def _check_imports(sources: dict[str, str], root: Path, vendor_modules=(), engin
         if name.startswith('_pytincture_') or name in vendor_modules:
             continue
         for node in ast.walk(ast.parse(source, filename=name)):
+            if excluded_import(node, name, server_only_imports):
+                continue
             if isinstance(node, ast.Import):
                 modules = [alias.name for alias in node.names]
             elif isinstance(node, ast.ImportFrom):
@@ -164,7 +169,8 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     allowed = {'application', 'modules-path', 'output', 'entrypoint', 'entry-kind',
                'files', 'bff', 'widget-wheel', 'micropython-assets', 'wheels',
                'assets', 'scripts', 'styles', 'heap-bytes', 'discover-imports', 'widget-package',
-               'runtimes', 'resources', 'dynamic-imports', 'external-origins', 'required-browser-apis', 'import-aliases'}
+               'runtimes', 'resources', 'dynamic-imports', 'external-origins', 'required-browser-apis', 'import-aliases',
+               'server-only-imports'}
     if set(config) - allowed:
         raise ValueError(f'Unknown browser build settings: {sorted(set(config) - allowed)}')
     for key in ('files', 'bff', 'wheels', 'assets', 'scripts', 'styles', 'resources', 'dynamic-imports', 'required-browser-apis'):
@@ -174,7 +180,15 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     if type(config.get('discover-imports', True)) is not bool:
         raise ValueError('discover-imports must be a boolean')
     root = (config_file.parent / config.get('modules-path', '.')).resolve()
+    server_only = validate_server_only_imports(config.get('server-only-imports', []))
+    report['server_only_imports'] = list(server_only)
     import_aliases = validate_import_aliases(config.get('import-aliases', {}))
+    for name in (*import_aliases, *import_aliases.values(), *config.get('dynamic-imports', [])):
+        if excluded_module(name, server_only) or any(excluded_module(boundary, [name]) for boundary in server_only):
+            raise ValueError(f'{name}: import-aliases/dynamic-imports conflicts with server-only-imports')
+    for name in (*config.get('files', []), *config.get('bff', []), *config.get('resources', []), *config.get('assets', [])):
+        if excluded_path(name, server_only):
+            raise ValueError(f'{name}: explicit browser input conflicts with server-only-imports')
     for target in import_aliases.values():
         if browser_source_path(root, target, import_aliases) is None:
             raise ValueError(f'Browser import substitute is missing: {target}')
@@ -187,6 +201,8 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
         app_name = config.get('application') or application
         if not app_name:
             raise ValueError('Set application or entrypoint in the browser build configuration')
+        if excluded_module(app_name, server_only):
+            raise ValueError(f'{app_name}: entrypoint conflicts with server-only-imports')
         source, _ = browser_source(root, app_name + '.py', import_aliases)
         entry_name = find_app_string_setting(app_name + '.py', ('APP_ENTRYPOINT',), ('entrypoint',), source_code=source) or find_main_window_subclass(app_name + '.py', source_code=source)
         if not entry_name:
@@ -195,6 +211,8 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     module, separator, entry_name = entry.partition(':')
     if not separator or any(not part.isidentifier() or keyword.iskeyword(part) for part in [*module.split('.'), entry_name]):
         raise ValueError('entrypoint must be module:ClassName or module:async_function')
+    if excluded_module(module, server_only):
+        raise ValueError(f'{module}: entrypoint conflicts with server-only-imports')
     resolved_entry = browser_source_path(root, module, import_aliases)
     if resolved_entry is None:
         raise ValueError(f'Entrypoint module is missing: {module}')
@@ -208,8 +226,12 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     if entry_kind not in {'mainwindow', 'async', 'callable'}:
         raise ValueError('entry-kind must be mainwindow, callable or async')
     def convert(name, source, *, widget=False, widgets=()):
+        if server_only:
+            source = guard_server_only_imports(source, filename=name, boundaries=server_only,
+                                                report=report['findings'])
         if widget:
-            source = bridge_widget_imports(source, package=widget_package, report=report['findings'], filename=name)
+            source = bridge_widget_imports(source, package=widget_package, report=report['findings'], filename=name,
+                                           server_only_imports=server_only)
             report['findings'].append({'file': name, 'line': 0, 'severity': 'transformation',
                                       'rule': 'widget-asset-bridge', 'behavior_changing': True,
                                       'message': 'Widget JS imports use the scoped bridge; verified loaded asset bytes are not executed/injected twice'})
@@ -218,13 +240,15 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
         if any(f['severity'] == 'error' for f in findings):
             raise ValueError(f"{name}: " + '; '.join(f['message'] for f in findings if f['severity'] == 'error'))
         if config.get('dynamic-imports'):
-            source = guard_dynamic_imports(source, engine=engine, report=report['findings'], filename=name)
+            source = guard_dynamic_imports(source, engine=engine, report=report['findings'], filename=name,
+                                           server_only_imports=server_only)
         if engine == 'pyodide':
             result = import_source(source)
             report['findings'].append({'file': name, 'line': 0, 'severity': 'supported',
                                       'rule': 'cpython-source', 'message': 'CPython syntax/stdlib preserved; unreachable __main__ launch blocks removed'})
             return result
-        return adapt(source, widget=widget, widgets=widgets, report=report['findings'], filename=name)
+        return adapt(source, widget=widget, widgets=widgets, report=report['findings'], filename=name,
+                     server_only_imports=server_only)
     sources: dict[str, str] = {}
     hashes = {}
     widgets = set()
@@ -243,6 +267,7 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
         root, entry_path, [*config.get('files', []), *dynamic_files], config.get('bff', []),
         discover=config.get('discover-imports', True),
         import_aliases=import_aliases, substitutions=substitutions,
+        server_only_imports=server_only,
     )
     report['import_substitutions'] = substitutions
     report['findings'].extend({'file': name, 'line': 0, 'severity': 'transformation',
@@ -253,7 +278,7 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
         if name in boundaries:
             sources[name] = _bff_stub(name, source)
             continue
-        for imported, _ in imported_modules(name, source):
+        for imported, _ in imported_modules(name, source, server_only_imports=server_only):
             if imported == widget_package or imported.startswith(widget_package + '.'):
                 widgets.add(imported.split('.')[1] if '.' in imported else 'layout')
         try:
@@ -285,6 +310,8 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
                 if name.endswith('/') or any(part.startswith('.') for part in name.split('/')):
                     continue
                 _relative(name)
+                if excluded_path(name, server_only):
+                    continue
                 parts = name.split('/')
                 if name.startswith(widget_package + '/') and name.endswith('.py'):
                     if name in sources:
@@ -344,6 +371,8 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
                 if info.is_dir():
                     continue
                 _relative(name)
+                if excluded_path(name, server_only):
+                    continue
                 if name.endswith(('.so', '.pyd', '.dylib')):
                     raise ValueError(f'{wheel_path.name}: native extensions require a compatible legacy browser package installation')
                 if name.endswith('.py') and '.dist-info/' not in name:
@@ -400,7 +429,9 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     bootstrap += '    await finish_startup()\n    js.window.pytinctureAppReady = True\n'
     sources['_pytincture_bootstrap.py'] = bootstrap
     vendor_modules = set()
-    imports = {module for name, source in sources.items() for module, _ in imported_modules(name, source)}
+    imports = {module for name, source in sources.items()
+               for module, _ in imported_modules(name, source, server_only_imports=server_only)}
+    imports = {module for module in imports if not excluded_module(module, server_only)}
     imports.update(config.get('dynamic-imports', ()))
     if engine == 'micropython':
         optional = {
@@ -422,7 +453,8 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
         while True:
             available = {_module(name) for name in sources}
             requested = imports | {name.split('.')[0] for name in imports}
-            missing = sorted((requested & optional.keys()) - available)
+            missing = sorted(module for module in (requested & optional.keys()) - available
+                             if not excluded_module(module, server_only))
             if not missing:
                 break
             for module in missing:
@@ -458,8 +490,19 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
         artifacts['vendor/micropython-lib/LICENSE'] = (VENDOR / 'stdlib/LICENSE').read_bytes()
     if {'html/entities.py', 'html/__init__.py', 'base64.py'} & vendor_modules:
         artifacts['vendor/cpython/LICENSE'] = (VENDOR / 'stdlib/CPYTHON-LICENSE').read_bytes()
+    # A generated shim can itself require an excluded pure-Python module.
+    # Reject that conflict instead of shipping the dependency or deferring an
+    # unavoidable missing-import error to browser startup.
+    native = MICROPYTHON_MODULES if engine == 'micropython' else pyodide_modules()
+    for name, source in (sources.items() if server_only else ()):
+        if excluded_path(name, server_only):
+            raise ValueError(f'{name}: required browser support conflicts with server-only-imports')
+        if name in vendor_modules or name.startswith('_pytincture_'):
+            for imported, line in imported_modules(name, source):
+                if excluded_module(imported, server_only) and imported.split('.')[0] not in native:
+                    raise ValueError(f'{name}:{line}: required browser support imports server-only module {imported}')
     report['shims'] = sorted(vendor_modules | {name for name in sources if name.startswith('_pytincture_') and name not in {'_pytincture_bootstrap.py', '_pytincture_bff.py'}}) if engine == 'micropython' else []
-    _check_imports({**sources, 'declared_dynamic_imports.py': '\n'.join('import '+name for name in config.get('dynamic-imports', []))}, root, vendor_modules, engine)
+    _check_imports({**sources, 'declared_dynamic_imports.py': '\n'.join('import '+name for name in config.get('dynamic-imports', []))}, root, vendor_modules, engine, server_only)
     if len(sources) > 256 or sum(len(value.encode()) for value in sources.values()) > 8 * 1024 * 1024:
         raise ValueError('Browser source bundle exceeds 256 files or 8 MiB')
     micropython = (config_file.parent / config['micropython-assets']).resolve() if config.get('micropython-assets') else VENDOR
@@ -524,7 +567,8 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     report['findings'].extend(report['asset_audit']['findings'])
     artifacts['build.json'] = canonical_json({'entrypoint': entry, 'source_files': len(sources),
         'application_sources': hashes, 'widget_wheel_sha256': wheel_digest,
-        'dependency_wheels': dependency_hashes, 'bff_modules': sorted(boundaries)})
+        'dependency_wheels': dependency_hashes, 'bff_modules': sorted(boundaries),
+        'server_only_imports': list(server_only)})
     return output, manifest, artifacts
 
 

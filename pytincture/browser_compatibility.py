@@ -1,10 +1,12 @@
 """Build-time compatibility transforms for experimental MicroPython clients."""
 import ast
 from pytincture.browser_sources import main_only, has_nested_fstring
+from pytincture.browser_boundaries import excluded_import
 
 
 class BrowserCompatibility(ast.NodeTransformer):
-    def __init__(self, *, widget=False, widgets=(), report=None, filename='<source>'):
+    def __init__(self, *, widget=False, widgets=(), report=None, filename='<source>', server_only_imports=()):
+        self.server_only_imports = server_only_imports
         self.widget = widget
         self.widgets = widgets
         self.exception_names = []
@@ -20,6 +22,8 @@ class BrowserCompatibility(ast.NodeTransformer):
         self.lower_fstrings = 0
 
     def visit(self, node):
+        if excluded_import(node, self.filename, self.server_only_imports):
+            return node
         tracked = self.report is not None and hasattr(self, 'visit_' + type(node).__name__)
         before = ast.dump(node, include_attributes=False) if tracked else None
         line = getattr(node, 'lineno', 0)
@@ -304,9 +308,10 @@ class BrowserCompatibility(ast.NodeTransformer):
         return node
 
 
-def adapt(source, *, widget=False, widgets=(), report=None, filename='<source>'):
+def adapt(source, *, widget=False, widgets=(), report=None, filename='<source>', server_only_imports=()):
     tree = ast.parse(source)
-    transformer = BrowserCompatibility(widget=widget, widgets=widgets, report=report, filename=filename)
+    transformer = BrowserCompatibility(widget=widget, widgets=widgets, report=report, filename=filename,
+                                       server_only_imports=server_only_imports)
     transformer.used_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)} | {node.name for node in ast.walk(tree) if isinstance(node, ast.ExceptHandler) and node.name}
     transformer.used_names.update(n.arg for n in ast.walk(tree) if isinstance(n, ast.arg))
     transformer.used_names.update(n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))

@@ -5,6 +5,11 @@ set when a release is published.
 
 ## Unreleased
 
+- Add explicit `server-only-imports` to portable builds: skip server dependency
+  discovery and packaging, preserve guarded imports and browser fallbacks in
+  both engines, reject unguarded imports with source locations, and keep normal
+  BFF stub generation and real client inputs.
+
 ## 1.0.0rc9 — 2026-09-21
 
 - Lower nested f-strings into MicroPython-compatible formatting expressions,
