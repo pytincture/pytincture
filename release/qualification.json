@@ -121,6 +121,19 @@
       },
       "status": "passed",
       "notes": "Release PR #362, signed-tag qualification (35610728524), all 25 release CI/attestation jobs (35611986858), and protected PyPI publication (35613132108) passed. The wheel, source distribution, npm tarball and SHA256SUMS.json are attached to the GitHub prerelease. Public PyPI wheel/sdist bytes match the attested hashes; a fresh isolated Python 3.13 public-index installation imports version 1.0.0rc9. Full pinned example/chat conformance passed across legacy Pyodide, portable Pyodide and MicroPython. Shared browser fixtures verify nested f-string parity; the unavailable private Tenzyn app is not claimed as validated. npm publisher 35613131751 awaits environment approval. Portable delivery remains opt-in; profile-2 UUID behavior and matching-runtime bundle rebuild requirements are documented. Final 1.0 approvals and observation dates are unchanged."
+    },
+    {
+      "version": "1.0.0rc10",
+      "published_at": "2026-09-21T17:13:06Z",
+      "commit_sha": "1ceaeac5534804f30c9e3ed47422adebd4ba2e69",
+      "ci_url": "https://github.com/pytincture/pytincture/actions/runs/35630591454",
+      "artifacts": {
+        "wheel": "61cef0b9518a0d36157aeda38dfa87ae777ca65f5fe49aab778c130eb9596d7a",
+        "sdist": "923cce7f1e00cf46207e0236210a433546c6a53c116fee66ea8f896ae2b929e9",
+        "npm": "4e9ae5d8f38adb9c65d749c8cbb8c2685be3dc0791273650a5950025801d8210"
+      },
+      "status": "passed",
+      "notes": "Release PR #364, all 24 signed-tag checks (35629463850), all 25 release CI/attestation jobs (35630591454), and protected PyPI publication (35631679849) passed. Exact retained wheel, source distribution, npm tarball and SHA256SUMS.json are attached to the GitHub prerelease. Public PyPI wheel/sdist bytes match the attested hashes; a fresh isolated Python 3.13 installation imports version 1.0.0rc10 and exercises the installed server-only import boundary. Full pinned example/chat conformance passed across all three runtime/delivery modes. Guarded server-only imports are covered in both portable engines; static validation requires local guards inside deferred functions too. Real client inputs and BFF generation remain intact. No direct validation of the unavailable private Tenzyn app is claimed. npm publisher 35631679926 awaits independent environment approval. Existing observation dates and final 1.0 approvals are unchanged."
     }
   ],
   "representative_applications": {
@@ -737,6 +750,6 @@
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1 through RC9 release evidence is recorded, and rc4 through rc9 are published on PyPI. Rc9 passed complete framework release CI, pinned application conformance across all three runtime/delivery profiles, artifact attestation, public artifact hash verification and a clean public-index install. Legacy Pyodide remains the default. Portable profile fixes do not establish arbitrary CPython or unavailable private-application compatibility. The optional application-credential registry and portable runtime targets still need observation-scope review. Final 1.0 remains NO-GO pending the approved observation period, production-edge evidence, remaining registry distribution and final release-manager approval. Existing observation dates have not been changed."
+    "notes": "RC1 through RC10 release evidence is recorded, and rc4 through rc10 are published on PyPI. Rc10 passed complete framework release CI, pinned application conformance across all three runtime/delivery profiles, artifact attestation, public artifact hash verification and a clean public-index install. Legacy Pyodide remains the default. Portable profile fixes do not establish arbitrary CPython or unavailable private-application compatibility. The optional application-credential registry and portable runtime targets still need observation-scope review. Final 1.0 remains NO-GO pending the approved observation period, production-edge evidence, remaining registry distribution and final release-manager approval. Existing observation dates have not been changed."
   }
 }
