@@ -7,6 +7,33 @@ every gate below has durable evidence.
 
 ## Current decision: NO-GO pending observation and edge evidence
 
+`1.0.0rc9` was published on 2026-09-21 from
+`81c76748bac7f9d03708111138fac081851581d6` after PR #362 merged. All 24 PR and
+signed-tag checks passed, followed by all 25 release CI/attestation jobs. Protected
+PyPI publication succeeded. Both public Python artifacts match the retained hashes,
+and an isolated Python 3.13 installation from PyPI imports Pytincture and reports
+`1.0.0rc9`. Verified artifacts and `SHA256SUMS.json` are attached to the prerelease.
+
+The complete pinned example/chat matrix passed in all three runtime/delivery
+modes. Shared browser regressions verify the reported nested f-string expression,
+formatting order, custom formatters, Unicode conversions and `await`; they do not
+claim validation of the unavailable private Tenzyn application. See the
+[RC9 migration guidance](browser-runtimes.md#upgrading-portable-applications-to-rc9)
+for matching-runtime bundle rebuilds and profile-2 UUID behavior.
+
+Published rc9 evidence:
+
+- [Merged release PR](https://github.com/pytincture/pytincture/pull/362).
+- [Signed-tag qualification](https://github.com/pytincture/pytincture/actions/runs/35610728524).
+- [Release CI, application conformance and attestations](https://github.com/pytincture/pytincture/actions/runs/35611986858).
+- [Successful protected PyPI publication](https://github.com/pytincture/pytincture/actions/runs/35613132108).
+- [Release artifacts and SHA256SUMS.json](https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc9).
+- [Published Python package](https://pypi.org/project/pytincture/1.0.0rc9/).
+- [npm publication awaiting environment approval](https://github.com/pytincture/pytincture/actions/runs/35613131751).
+
+No observation dates, final-release approvals or existing conformance-dependency
+audit limitations have been changed by this candidate.
+
 `1.0.0rc8` was published on 2026-09-20 from
 `bb59bd2b73fc356c13a2ed4ae36bb06acc66f047`. Signed-tag qualification, complete
 release CI and artifact attestation passed. PyPI publication succeeded, public
@@ -55,8 +82,8 @@ Published rc7 evidence:
 - [Release artifacts and SHA256SUMS.json](https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc7).
 - [Published Python package](https://pypi.org/project/pytincture/1.0.0rc7/).
 
-Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc8`, and rc4
-through rc8 are published on PyPI. Rc8 is the latest published candidate.
+Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc9`, and rc4
+through rc9 are published on PyPI. Rc9 is the latest published candidate.
 The previous rc6 evidence remains retained below. Its
 self-hosted icon asset, browser, BFF, authentication, streaming, cache, and
 capacity coverage passed the complete acceptance matrix. PyPI deliberately
