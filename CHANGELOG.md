@@ -5,6 +5,8 @@ set when a release is published.
 
 ## Unreleased
 
+## 1.0.0rc10 — 2026-09-21
+
 - Add explicit `server-only-imports` to portable builds: skip server dependency
   discovery and packaging, preserve guarded imports and browser fallbacks in
   both engines, reject unguarded imports with source locations, and keep normal
