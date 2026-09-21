@@ -5,6 +5,8 @@ set when a release is published.
 
 ## Unreleased
 
+## 1.0.0rc9 — 2026-09-21
+
 - Lower nested f-strings into MicroPython-compatible formatting expressions,
   preserving lazy branches, conversion/formatting order, custom formatters and
   await without application changes; retain native Pyodide behavior.

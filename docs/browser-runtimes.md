@@ -323,3 +323,21 @@ legacy Pyodide with installed `python-dotenv` and an imported alias of an indire
 MainWindow subclass. CI runs this alongside the existing portable fixtures.
 These self-contained cases reproduce reported private-app patterns; they do not
 claim validation of an unavailable client application.
+
+
+## Upgrading portable applications to RC9
+
+Legacy Pyodide remains the default and requires no runtime-selection change.
+For portable applications, rebuild the bundle and serve the RC9 framework/browser
+runtime together. RC9 resource manifests reference verified asset bytes instead
+of duplicating them as Base64; older loaders cannot read this new representation.
+The updated loader continues accepting older inline-Base64 bundles.
+
+Remove temporary substitutes for the standard-library and FFI features now
+provided by the framework before testing those implementations. Keep explicit
+substitutes for application-specific server-only modules. New bundles use portable
+profile 2: `uuid4()` returns a UUID object, so use `str(uuid4())` where a string is
+required. Existing profile-1 bundles keep their own embedded implementation.
+Nested f-strings now run through the MicroPython compatibility transformation;
+no application rewrite is needed. See [the portable profile](portable-python-profile.md)
+for the supported API subsets and per-runtime build report.
