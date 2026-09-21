@@ -40,3 +40,34 @@ def test_micropython_reports_iterable_display_adaptation_and_allows_assignment()
     assert not inspect_source('app.py',source,'pyodide')
     findings = inspect_source('app.py',source,'micropython')
     assert len(findings)==1 and findings[0]['rule']=='iterable-display' and findings[0]['severity']=='supported'
+
+
+@pytest.mark.parametrize('expression', [
+    'f"""before {("" if value else f"""nested {value}""")} after"""',
+    'f"outer {f\'inner {value}\'}"',
+    'f"outer {str(f\'inner {value}\')}"',
+    'f"{value:{f\'{width}\'}}"',
+])
+def test_nested_fstrings_fail_micro_validation_and_direct_adaptation(expression):
+    # Keep original source positions despite blank lines and stripped guards.
+    source = '\n\nif __name__ == "__main__":\n    desktop_only()\nhtml = ' + expression + '\n'
+    findings = inspect_source('ui.py', source, 'micropython')
+    errors = [f for f in findings if f['rule'] == 'nested-fstring']
+    assert errors
+    assert all(f['severity'] == 'error' and f['line'] == 5 and f['file'] == 'ui.py' for f in errors)
+    assert not inspect_source('ui.py', source, 'pyodide')
+    with pytest.raises(ValueError, match='Nested f-strings.*compute the inner string separately'):
+        adapt(source)
+
+
+@pytest.mark.parametrize('source', [
+    'html = f"value: {value!r}"',
+    'html = f"{value:>10}"',
+    'html = f"{value:{width}.{precision}f}"',
+    'html = f"left {value}" f"right {value}"',
+    'html = f"literal {{value}}"',
+    'if __name__ == "__main__":\n    html = f"outer {f\'inner {value}\'}"',
+])
+def test_nested_fstring_check_does_not_reject_ordinary_strings_or_unreachable_code(source):
+    assert not inspect_source('ui.py', source, 'micropython')
+    adapt(source)

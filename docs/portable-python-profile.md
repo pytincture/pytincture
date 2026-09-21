@@ -118,6 +118,14 @@ Build-time checks reject unresolved imports, native extension wheels, unsupporte
 syntax (including match/exception groups for MicroPython), custom reflection,
 undeclared dynamic imports, unsupported dataclass options, source escape paths,
 stale widget asset hashes, missing package/CSS resources and oversized inputs.
+Nested f-strings inside replacement expressions (including PEP 701 nesting with
+reused quotes) are rejected for MicroPython with a `nested-fstring` diagnostic.
+Compute the inner string separately, keeping conditional work in the appropriate
+branch, then interpolate its value. This conservative check does not rewrite
+formatting or evaluate expressions earlier. Pyodide retains nested f-string
+support. Ordinary f-strings and format specifications are not rejected by this
+nesting check; broader runtime formatting limitations still apply.
+
 Known unsupported MicroPython APIs such as `time.perf_counter`
 and `asyncio.to_thread` are diagnosed. Other runtime API
 differences still need application tests; the checker is not a whole-program proof.

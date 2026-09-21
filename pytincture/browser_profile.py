@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import zipfile
 
-from pytincture.browser_sources import main_only
+from pytincture.browser_sources import main_only, has_nested_fstring, NESTED_FSTRING_ERROR
 
 PROFILE = 'pytincture-portable-2'
 MICROPYTHON_MODULES = frozenset('js jsffi asyncio array binascii builtins cmath collections gc hashlib heapq io json math micropython os random re select struct sys time errno deflate __main__'.split())
@@ -20,15 +20,20 @@ def pyodide_modules():
     return names | set('js pyodide _pyodide sys builtins math cmath time gc errno array binascii hashlib struct itertools functools operator _thread _io _ast _abc _collections _functools _operator _sre _string _weakref _random _sha2 _socket zlib unicodedata'.split())
 
 
-def import_source(source):
-    """Keep CPython semantics, removing only unreachable server launch guards."""
+def _import_tree(source):
+    """Remove unreachable import branches while retaining source locations."""
     class ImportsOnly(ast.NodeTransformer):
         def visit_If(self, node):
             if main_only(node.test) or ast.unparse(node.test) in {"TYPE_CHECKING", "typing.TYPE_CHECKING"}:
                 module = ast.Module(body=node.orelse, type_ignores=[])
                 return self.visit(module).body
             return self.generic_visit(node)
-    return ast.unparse(ast.fix_missing_locations(ImportsOnly().visit(ast.parse(source))))+'\n'
+    return ast.fix_missing_locations(ImportsOnly().visit(ast.parse(source)))
+
+
+def import_source(source):
+    """Keep CPython semantics, removing only unreachable server launch guards."""
+    return ast.unparse(_import_tree(source))+'\n'
 
 
 def guard_dynamic_imports(source, *, engine, report, filename):
@@ -86,7 +91,7 @@ def guard_dynamic_imports(source, *, engine, report, filename):
 
 
 def inspect_source(name, source, engine, *, explicit_dynamic=()):
-    tree = ast.parse(import_source(source))
+    tree = _import_tree(source)
     findings = []
     def add(node, rule, message, severity='error'):
         findings.append({'file': name, 'line': node.lineno, 'rule': rule,
@@ -98,6 +103,8 @@ def inspect_source(name, source, engine, *, explicit_dynamic=()):
         elif isinstance(node, ast.ImportFrom):
             aliases.update({a.asname or a.name: (node.module or '')+'.'+a.name for a in node.names})
     for node in ast.walk(tree):
+        if engine == 'micropython' and has_nested_fstring(node):
+            add(node, 'nested-fstring', NESTED_FSTRING_ERROR)
         if isinstance(node, ast.Call):
             call = ast.unparse(node.func)
             first, _, tail = call.partition('.')

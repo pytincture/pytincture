@@ -326,3 +326,42 @@ def test_run_js_preserves_result_type_check_and_errors():
     with pytest.raises(TypeError): call(code='6 * 7')
     with pytest.raises(RuntimeError, match='JS error'): call('throw')
     assert values == ['6 * 7', 'throw']
+
+
+NESTED_FSTRING_APP = '''def render(value):
+    return f"""before {("" if value else f"""nested {value}""")} after"""
+def main():
+    return render(True)
+'''
+
+
+@pytest.mark.parametrize('runtimes', [['micropython'], ['pyodide', 'micropython']])
+@pytest.mark.parametrize('check', [False, True])
+def test_nested_fstring_build_fails_before_publishing_with_runtime_report(tmp_path, runtimes, check):
+    from pytincture.browser_profile import CompatibilityError
+    (tmp_path/'app.py').write_text(NESTED_FSTRING_APP)
+    config = tmp_path/'pyproject.toml'
+    config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\nruntimes=' + json.dumps(runtimes) + '\n')
+    report_path = tmp_path/'report.json'
+    with pytest.raises(CompatibilityError, match='Nested f-strings') as error:
+        build_browser_bundle(config, check=check, report_path=report_path)
+    report = json.loads(report_path.read_text())
+    assert report == error.value.report
+    assert report['runtimes']['pyodide']['status'] == 'supported'
+    micro = report['runtimes']['micropython']
+    assert micro['status'] == 'unsupported'
+    finding = next(f for f in micro['findings'] if f['rule'] == 'nested-fstring')
+    assert finding['file'] == 'app.py' and finding['line'] == 2
+    assert not (tmp_path/'browser').exists()
+
+
+def test_nested_fstrings_keep_both_conditional_results_in_portable_pyodide(tmp_path):
+    (tmp_path/'app.py').write_text(NESTED_FSTRING_APP)
+    config = tmp_path/'pyproject.toml'
+    config.write_text('[tool.pytincture.browser]\nentrypoint="app:main"\nruntimes=["pyodide"]\n')
+    result = build_browser_bundle(config)
+    sources = json.loads((result.parent/'sources-pyodide.json').read_text())['files']
+    namespace = {}
+    exec(sources['app.py'], namespace)
+    assert namespace['render'](True) == 'before  after'
+    assert namespace['render'](False) == 'before nested False after'

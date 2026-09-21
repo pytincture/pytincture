@@ -5,6 +5,9 @@ set when a release is published.
 
 ## Unreleased
 
+- Reject nested f-strings during MicroPython compatibility checks and direct
+  adaptation, with source locations and guidance; retain Pyodide support.
+
 - Guard conventional Widgetset font initializers before resource reading/encoding
   when portable package assets are ready, with per-function build diagnostics.
 - Reference verified assets from package-resource manifests instead of shipping a

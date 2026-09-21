@@ -1,6 +1,6 @@
 """Build-time compatibility transforms for experimental MicroPython clients."""
 import ast
-from pytincture.browser_sources import main_only
+from pytincture.browser_sources import main_only, has_nested_fstring, NESTED_FSTRING_ERROR
 
 
 class BrowserCompatibility(ast.NodeTransformer):
@@ -41,6 +41,11 @@ class BrowserCompatibility(ast.NodeTransformer):
             return [self.visit(child) for child in node.orelse]
         if ast.unparse(node.test) in {'TYPE_CHECKING', 'typing.TYPE_CHECKING'}:
             return [self.visit(child) for child in node.orelse]
+        return self.generic_visit(node)
+
+    def visit_FormattedValue(self, node):
+        if has_nested_fstring(node):
+            raise ValueError(f'line {node.lineno}: {NESTED_FSTRING_ERROR}')
         return self.generic_visit(node)
 
     def visit_Match(self, node):

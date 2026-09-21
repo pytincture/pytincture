@@ -11,6 +11,7 @@ import zipfile
 from playwright.sync_api import expect, sync_playwright
 
 from pytincture.browser_build import build_browser_bundle
+from pytincture.browser_profile import import_source
 from pytincture.backend.browser_packages import create_appcode_archive
 
 
@@ -226,6 +227,11 @@ class ActualWindow(Intermediate):
                     if engine=='legacy':
                         expect(page.locator('#legacy-result')).to_have_text('legacy-ready')
                     else:
+                        if engine == 'pyodide':
+                            source = 'def _pep701_render(value):\n    return f"""before {("" if value else f"""nested {value}""")} after"""\n'
+                            page.evaluate('source => pytinctureBrowserRuntime.runtime.runPython(source)', import_source(source))
+                            for value, expected in [('True', 'before  after'), ('False', 'before nested False after')]:
+                                assert page.evaluate('source => pytinctureBrowserRuntime.runtime.runPython(source)', '_pep701_render('+value+')') == expected
                         result=json.loads(page.locator('#compat-result').inner_text())
                         assert result=={'registry':'browser substitute','provider':'allowed provider','rejected':True,'fallback':'fallback','local':'local','values':[0,1,2,3,4],'tuple':[0,1,2],'set':[0,1,2]},result
                         assert page.evaluate('window.oldWidgetLoads')==1

@@ -230,3 +230,17 @@ def discover_sources(root, entry, files, bff, *, discover=True, import_aliases=N
                 if resolved:
                     pending.append(resolved[0])
     return selected, boundaries
+
+
+def has_nested_fstring(node):
+    """Check expressions, not the JoinedStr used for an ordinary format spec."""
+    return isinstance(node, ast.FormattedValue) and any(
+        isinstance(child, ast.JoinedStr) for child in ast.walk(node.value)
+    )
+
+
+NESTED_FSTRING_ERROR = (
+    'Nested f-strings in replacement expressions are unsupported by the portable '
+    'MicroPython profile; compute the inner string separately before the outer '
+    'f-string, or select Pyodide'
+)
