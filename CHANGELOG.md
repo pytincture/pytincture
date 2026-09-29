@@ -5,6 +5,13 @@ set when a release is published.
 
 ## Unreleased
 
+- Read contained files on Windows. `safe_paths` opened the root directory with
+  `os.open()` to walk paths through directory descriptors; Windows refuses that
+  with `PermissionError`, before the existing no-`dir_fd` fallback applied, so
+  no BFF module or asset could be read. Platforms without `dir_fd` now take the
+  resolved-path open up front; containment, no-symlink and identity checks are
+  unchanged.
+
 ## 1.0.0rc12 — 2026-10-05
 
 - Fix the five-second service-worker startup delay (#372): redirect application
