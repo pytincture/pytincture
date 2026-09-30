@@ -5,10 +5,10 @@ set when a release is published.
 
 ## Unreleased
 
-## 1.0.0rc11 — pending
+## 1.0.0rc11 — 2026-09-30
 
-- Refresh the hash-locked PyJWT dependency to 2.15.1 to resolve the dependency
-  audit findings against the previous 2.13.0 lock entry.
+- Refresh the hash-locked PyJWT dependency to 2.15.1 and urllib3 to 2.8.0
+  to resolve release dependency audit findings.
 
 - Report BFF request/result byte, item and depth limits with the exact setting,
   effective threshold, observed lower bound and processing stage. Preserve
