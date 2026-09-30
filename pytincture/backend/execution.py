@@ -10,17 +10,22 @@ import multiprocessing
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from multiprocessing.connection import Connection
 from typing import Any
 
 from pytincture.backend.results import BFFResultLimitExceeded, encode_bff_result
+from pytincture.backend.limit_diagnostics import LimitViolation
 from pytincture.backend.source_loading import load_source_module
 from pytincture.dataclass import verify_bff_runtime_export
 
 
 class IsolatedExecutionRejected(RuntimeError):
     """Raised when bounded process or per-identity capacity is exhausted."""
+
+    def __init__(self, message: str, *, reason: str = "worker"):
+        super().__init__(message)
+        self.reason = reason
 
 
 class IsolatedExecutionTimeout(RuntimeError):
@@ -36,6 +41,7 @@ _IPC_STATUS_OK = b"O"
 _IPC_STATUS_RESULT_LIMIT = b"L"
 _IPC_STATUS_FAILED = b"F"
 _IPC_HEADER_BYTES = len(_IPC_MAGIC) + 1
+_IPC_LIMIT_DIAGNOSTIC_BYTES = 512
 
 
 def _isolated_message(status: bytes, payload: bytes = b"") -> bytes:
@@ -45,8 +51,10 @@ def _isolated_message(status: bytes, payload: bytes = b"") -> bytes:
         _IPC_STATUS_FAILED,
     }:
         raise ValueError("invalid isolated BFF message status")
-    if status != _IPC_STATUS_OK and payload:
+    if status == _IPC_STATUS_FAILED and payload:
         raise ValueError("isolated BFF error messages cannot include a payload")
+    if status == _IPC_STATUS_RESULT_LIMIT and len(payload) > _IPC_LIMIT_DIAGNOSTIC_BYTES:
+        raise ValueError("isolated BFF limit diagnostic is too large")
     return _IPC_MAGIC + status + payload
 
 
@@ -93,6 +101,25 @@ def _decode_isolated_message(
             raise IsolatedExecutionFailed("invalid isolated BFF response") from exc
         if canonical != payload:
             raise IsolatedExecutionFailed("invalid isolated BFF response")
+        return status, payload
+    if status == _IPC_STATUS_RESULT_LIMIT and payload:
+        try:
+            if len(payload) > _IPC_LIMIT_DIAGNOSTIC_BYTES:
+                raise ValueError("limit metadata too large")
+            data = json.loads(payload, object_pairs_hook=_unique_json_object, parse_constant=_reject_json_constant)
+            violation = LimitViolation(**data)
+            expected_limits = {
+                "BFF_RESULT_MAX_BYTES": result_max_bytes,
+                "BFF_RESULT_MAX_DEPTH": result_max_depth,
+                "BFF_RESULT_MAX_ITEMS": result_max_items,
+            }
+            if (
+                violation.setting not in expected_limits
+                or violation.limit != expected_limits[violation.setting]
+            ):
+                raise ValueError("invalid limit metadata")
+        except (TypeError, ValueError, UnicodeDecodeError) as exc:
+            raise IsolatedExecutionFailed("invalid isolated BFF response") from exc
         return status, payload
     if status in {_IPC_STATUS_RESULT_LIMIT, _IPC_STATUS_FAILED} and not payload:
         return status, payload
@@ -183,8 +210,13 @@ def _isolated_worker(
             max_items=result_max_items,
         )
         connection.send_bytes(_isolated_message(_IPC_STATUS_OK, payload))
-    except BFFResultLimitExceeded:
-        connection.send_bytes(_isolated_message(_IPC_STATUS_RESULT_LIMIT))
+    except BFFResultLimitExceeded as exc:
+        # Carry only validated numeric metadata, never child exception text or data.
+        diagnostic = (
+            json.dumps(asdict(exc.violation), separators=(",", ":")).encode("utf-8")
+            if exc.violation is not None else b""
+        )
+        connection.send_bytes(_isolated_message(_IPC_STATUS_RESULT_LIMIT, diagnostic))
     except BaseException:  # noqa: BLE001 - child failures cross only as a safe tag
         try:
             connection.send_bytes(_isolated_message(_IPC_STATUS_FAILED))
@@ -288,7 +320,7 @@ class ProcessIsolatedBFFExecutor:
             current = self._user_counts.get(subject, 0)
             if current >= self.max_per_user:
                 self._capacity.release()
-                raise IsolatedExecutionRejected("isolated BFF per-identity capacity is full")
+                raise IsolatedExecutionRejected("isolated BFF per-identity capacity is full", reason="per-user")
             self._user_counts[subject] = current + 1
 
     def _release(self, subject: str) -> None:
@@ -329,7 +361,7 @@ class ProcessIsolatedBFFExecutor:
                 if receiving.poll(min(0.05, remaining)):
                     try:
                         message = receiving.recv_bytes(
-                            self.result_max_bytes + _IPC_HEADER_BYTES
+                            max(self.result_max_bytes, _IPC_LIMIT_DIAGNOSTIC_BYTES) + _IPC_HEADER_BYTES
                         )
                     except (EOFError, OSError) as exc:
                         raise IsolatedExecutionFailed(
@@ -345,6 +377,8 @@ class ProcessIsolatedBFFExecutor:
                     if status == _IPC_STATUS_OK:
                         return payload
                     if status == _IPC_STATUS_RESULT_LIMIT:
+                        if payload:
+                            raise BFFResultLimitExceeded(LimitViolation(**json.loads(payload)))
                         raise BFFResultLimitExceeded("BFF result limit exceeded")
                     raise IsolatedExecutionFailed("isolated BFF call failed")
                 if not process.is_alive():

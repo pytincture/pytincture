@@ -332,12 +332,31 @@ var PytinctureRuntime = (() => {
       }
     };
   }
+  function bffError(status, className, method, getHeader) {
+    const setting = String(getHeader("X-Pytincture-Limit") || "");
+    const value = String(getHeader("X-Pytincture-Limit-Value") || "");
+    const observed = String(getHeader("X-Pytincture-Limit-Observed") || "");
+    let message = `BFF ${className}.${method} failed (${status})`;
+    const valid = /^(?:BFF_[A-Z0-9_]{1,124}|MAX_REQUEST_BODY_BYTES)$/.test(setting) && /^[0-9]{1,24}(?:\.[0-9]{1,6})?$/.test(value);
+    if (valid) {
+      message += `: ${setting}=${value}`;
+      if (/^[0-9]{1,24}(?:\.[0-9]{1,6})?$/.test(observed)) message += `; observed at least ${observed}`;
+    }
+    const error = new Error(message);
+    error.status_code = status;
+    error.limit_setting = valid ? setting : null;
+    error.limit_value = valid ? value : null;
+    return error;
+  }
   function createBffCaller(config) {
     if (!/^[A-Za-z_]\w*$/.test(config.application || "")) throw new Error("A BFF application is required");
     return async (module, className, method, args = {}, options = {}) => {
       const request = bffRequest(config, module, className, method, args, options);
       const response = await fetch(request.url, { ...request.init, signal: AbortSignal.timeout(35e3) });
-      if (!response.ok) throw new Error(`BFF ${className}.${method} failed (${response.status})`);
+      if (!response.ok) throw bffError(response.status, className, method, (name) => {
+        var _a;
+        return (_a = response.headers) == null ? void 0 : _a.get(name);
+      });
       return response.json();
     };
   }
@@ -349,7 +368,7 @@ var PytinctureRuntime = (() => {
       request.open(init.method, url, false);
       for (const [name, value] of Object.entries(init.headers)) request.setRequestHeader(name, value);
       request.send((_a = init.body) != null ? _a : null);
-      if (request.status < 200 || request.status >= 300) throw new Error(`BFF ${className}.${method} failed (${request.status})`);
+      if (request.status < 200 || request.status >= 300) throw bffError(request.status, className, method, (name) => request.getResponseHeader(name));
       return JSON.parse(request.responseText);
     };
   }
@@ -360,7 +379,10 @@ var PytinctureRuntime = (() => {
       const response = await fetch(url, { ...init, signal: controller.signal });
       if (!response.ok) {
         controller.abort();
-        throw new Error(`BFF ${className}.${method} failed (${response.status})`);
+        throw bffError(response.status, className, method, (name) => {
+          var _a;
+          return (_a = response.headers) == null ? void 0 : _a.get(name);
+        });
       }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -611,7 +633,7 @@ import ${manifest.entrypoint} as _pytincture_client`));
 
   // pytincture.js
   var FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
-  var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc10";
+  var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc11";
   var BUILTIN_WIDGET_WHEEL_LOCKS = Object.freeze({
     "dhxpyt==0.9.18": "https://files.pythonhosted.org/packages/0c/e7/b48e045156c7b4bf20778597991d7dfe591fd46ada5267b747e2d5977244/dhxpyt-0.9.18-py3-none-any.whl#sha256=acd8db34547c6b61c83a01958e9545ee724564859e5bcb53713ae3c872234fbe"
   });

@@ -13,9 +13,23 @@ from typing import Any
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 
+from pytincture.backend.limit_diagnostics import LimitDetail, LimitViolation
+
 
 class BFFResultLimitExceeded(ValueError):
     """Raised before an oversized or excessively complex result is retained."""
+
+    def __init__(self, message: str | LimitViolation):
+        self.violation = message if isinstance(message, LimitViolation) else None
+        super().__init__(str(message))
+
+    @property
+    def detail(self):
+        return LimitDetail(self.violation) if self.violation is not None else str(self)
+
+    @classmethod
+    def limit(cls, setting: str, limit: int, observed: int, stage: str):
+        return cls(LimitViolation(setting, limit, observed, stage))
 
 
 @dataclasses.dataclass(slots=True)
@@ -28,7 +42,7 @@ class _ResultBudget:
     def add_items(self, count: int) -> None:
         self.items += count
         if self.items > self.max_items:
-            raise BFFResultLimitExceeded("BFF result item limit exceeded")
+            raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_ITEMS", self.max_items, self.items, "materialization")
 
 
 def _close_iterator(iterator: Iterator[Any]) -> None:
@@ -51,18 +65,18 @@ def _materialize_bounded_result(
     """Materialize JSON containers and iterators before FastAPI converts them."""
 
     if depth > budget.max_depth:
-        raise BFFResultLimitExceeded("BFF result nesting limit exceeded")
+        raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_DEPTH", budget.max_depth, depth, "materialization")
     if isinstance(value, AsyncIterable):
         raise BFFResultLimitExceeded(
             "Async BFF result iterables require an explicit streaming export"
         )
     if isinstance(value, str):
         if len(value) > budget.max_bytes:
-            raise BFFResultLimitExceeded("BFF result byte limit exceeded")
+            raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_BYTES", budget.max_bytes, len(value), "materialization")
         return value
     if isinstance(value, (bytes, bytearray)):
         if len(value) > budget.max_bytes:
-            raise BFFResultLimitExceeded("BFF result byte limit exceeded")
+            raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_BYTES", budget.max_bytes, len(value), "materialization")
         return value
     if value is None or isinstance(value, (bool, int, float, Enum, PurePath)):
         return value
@@ -178,18 +192,18 @@ def _validate_result_shape(
     while stack:
         current, depth = stack.pop()
         if depth > max_depth:
-            raise BFFResultLimitExceeded("BFF result nesting limit exceeded")
+            raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_DEPTH", max_depth, depth, "JSON conversion")
         if isinstance(current, str):
             # Every Unicode code point requires at least one UTF-8 byte. This
             # rejects an obviously oversized string before JSON escaping makes
             # a second large copy.
             if len(current) > max_bytes:
-                raise BFFResultLimitExceeded("BFF result byte limit exceeded")
+                raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_BYTES", max_bytes, len(current), "JSON conversion")
             continue
         if isinstance(current, Mapping):
             item_count += len(current)
             if item_count > max_items:
-                raise BFFResultLimitExceeded("BFF result item limit exceeded")
+                raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_ITEMS", max_items, item_count, "JSON conversion")
             stack.extend((key, depth + 1) for key in current)
             stack.extend((item, depth + 1) for item in current.values())
         elif isinstance(current, Sequence) and not isinstance(
@@ -197,7 +211,7 @@ def _validate_result_shape(
         ):
             item_count += len(current)
             if item_count > max_items:
-                raise BFFResultLimitExceeded("BFF result item limit exceeded")
+                raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_ITEMS", max_items, item_count, "JSON conversion")
             stack.extend((item, depth + 1) for item in current)
 
 
@@ -256,6 +270,6 @@ def prepare_bff_result(
     for chunk in encoder.iterencode(converted):
         encoded = chunk.encode("utf-8")
         if len(output) + len(encoded) > max_bytes:
-            raise BFFResultLimitExceeded("BFF result byte limit exceeded")
+            raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_BYTES", max_bytes, len(output) + len(encoded), "JSON encoding")
         output.extend(encoded)
     return converted, bytes(output)

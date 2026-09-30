@@ -487,7 +487,7 @@ class PytinctureConfig:
         "Maximum signed browser-session cookie value bytes.",
     )
     max_request_body_bytes: int = _setting(
-        2 * 1024 * 1024, "MAX_REQUEST_BODY_BYTES", "Maximum request body size."
+        16 * 1024 * 1024, "MAX_REQUEST_BODY_BYTES", "Maximum request body size."
     )
     auth_request_ingress_max_concurrency: int = _setting(
         64,
@@ -645,16 +645,16 @@ class PytinctureConfig:
         "Maximum BFF request-body upload admission wait.",
     )
     bff_request_max_bytes: int = _setting(
-        1024 * 1024, "BFF_REQUEST_MAX_BYTES", "Maximum canonical BFF JSON body size."
+        8 * 1024 * 1024, "BFF_REQUEST_MAX_BYTES", "Maximum canonical BFF JSON body size."
     )
     bff_request_max_depth: int = _setting(
         32, "BFF_REQUEST_MAX_DEPTH", "Maximum canonical BFF JSON nesting depth."
     )
     bff_request_max_items: int = _setting(
-        10000, "BFF_REQUEST_MAX_ITEMS", "Maximum aggregate BFF JSON container items."
+        100_000, "BFF_REQUEST_MAX_ITEMS", "Maximum aggregate BFF JSON container items."
     )
     bff_result_max_bytes: int = _setting(
-        10 * 1024 * 1024,
+        50 * 1024 * 1024,
         "BFF_RESULT_MAX_BYTES",
         "Maximum serialized bytes in one ordinary BFF result.",
     )
@@ -662,7 +662,7 @@ class PytinctureConfig:
         32, "BFF_RESULT_MAX_DEPTH", "Maximum ordinary BFF result nesting depth."
     )
     bff_result_max_items: int = _setting(
-        10000, "BFF_RESULT_MAX_ITEMS", "Maximum aggregate ordinary BFF result items."
+        1_000_000, "BFF_RESULT_MAX_ITEMS", "Maximum aggregate ordinary BFF result items."
     )
     bff_execution_mode: str = _setting(
         "trusted-thread",
@@ -698,10 +698,10 @@ class PytinctureConfig:
         300.0, "BFF_STREAM_MAX_SECONDS", "Maximum BFF stream duration."
     )
     bff_stream_max_bytes: int = _setting(
-        10 * 1024 * 1024, "BFF_STREAM_MAX_BYTES", "Maximum BFF stream bytes."
+        50 * 1024 * 1024, "BFF_STREAM_MAX_BYTES", "Maximum BFF stream bytes."
     )
     bff_stream_max_items: int = _setting(
-        10000, "BFF_STREAM_MAX_ITEMS", "Maximum BFF stream items."
+        1_000_000, "BFF_STREAM_MAX_ITEMS", "Maximum BFF stream items."
     )
     bff_stream_idle_timeout_seconds: float = _setting(
         30.0, "BFF_STREAM_IDLE_TIMEOUT_SECONDS", "Maximum wait between stream items."

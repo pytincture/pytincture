@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {createHash} from 'node:crypto';
-import {BROWSER_RUNTIMES, createBffCaller, createOnceCallable, createEventCallback, sameOriginUrl, validateRuntimeManifest} from '../browser-runtimes.js';
+import {BROWSER_RUNTIMES, createBffCaller, createBffSyncCaller, createBffStreamCaller, createOnceCallable, createEventCallback, sameOriginUrl, validateRuntimeManifest} from '../browser-runtimes.js';
 
 test('managed event callbacks remain callable until released', () => {
     let calls = 0;
@@ -260,4 +260,40 @@ test('run_js keeps browser values and catches JS and CSP evaluation failures', a
         globalThis.pytinctureWidgetBridge = {eval:() => {throw new EvalError('Blocked by CSP');}};
         assert.deepEqual(evaluatePythonJavascript('code', true), {ok:false, error:'EvalError: Blocked by CSP'});
     } finally { globalThis.pytinctureWidgetBridge = previous; }
+});
+
+
+test('all portable BFF clients expose bounded limit headers without reading error bodies', async () => {
+    const original = {fetch:globalThis.fetch, document:globalThis.document, xhr:globalThis.XMLHttpRequest};
+    const headers = new Headers({
+        'X-Pytincture-Limit':'BFF_RESULT_MAX_BYTES',
+        'X-Pytincture-Limit-Value':'52428800',
+        'X-Pytincture-Limit-Observed':'52428801',
+    });
+    const neverRead = () => { throw new Error('error body must not be read'); };
+    globalThis.document = {cookie:''};
+    globalThis.fetch = async () => ({ok:false, status:413, headers, text:neverRead, json:neverRead});
+    globalThis.XMLHttpRequest = class {
+        constructor() { this.status = 413; }
+        open() {}
+        setRequestHeader() {}
+        send() {}
+        getResponseHeader(name) { return headers.get(name); }
+        get responseText() { return neverRead(); }
+    };
+    try {
+        const config = {application:'demo'};
+        const expected = error => error.limit_setting === 'BFF_RESULT_MAX_BYTES'
+            && /BFF_RESULT_MAX_BYTES=52428800; observed at least 52428801/.test(error.message);
+        await assert.rejects(createBffCaller(config)('api','Service','rows'), expected);
+        assert.throws(() => createBffSyncCaller(config)('api','Service','rows'), expected);
+        await assert.rejects(createBffStreamCaller(config)('api','Service','rows'), expected);
+        headers.set('X-Pytincture-Limit-Value', 'private-secret');
+        await assert.rejects(createBffCaller(config)('api','Service','rows'), error =>
+            error.limit_setting === null && !error.message.includes('private-secret'));
+    } finally {
+        globalThis.fetch = original.fetch;
+        globalThis.document = original.document;
+        globalThis.XMLHttpRequest = original.xhr;
+    }
 });
