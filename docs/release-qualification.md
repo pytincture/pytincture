@@ -7,6 +7,29 @@ every gate below has durable evidence.
 
 ## Current decision: NO-GO pending observation and edge evidence
 
+`1.0.0rc11` was published on 2026-09-30 from
+`3121974fe22b8c6799c3d98d8d9b4a393e39a870` after release PR #367 and the
+urllib3 audit fix #369 merged. Signed-tag qualification and every release
+CI/attestation job passed, followed by protected PyPI publication. Both public
+Python artifacts match the attested hashes. A fresh isolated Python 3.13 install
+from PyPI verifies the version, all seven approved payload defaults and an
+exact-setting BFF item-limit error. Full application conformance passed across
+legacy Pyodide, portable Pyodide and portable MicroPython. The unavailable private
+Tenzyn application is not claimed as validated.
+
+Published RC11 evidence:
+
+- [Release PR](https://github.com/pytincture/pytincture/pull/367) and [release audit fix](https://github.com/pytincture/pytincture/pull/369).
+- [Signed-tag qualification](https://github.com/pytincture/pytincture/actions/runs/36769074242).
+- [Release CI and attestations](https://github.com/pytincture/pytincture/actions/runs/36770242023).
+- [Successful protected PyPI publication](https://github.com/pytincture/pytincture/actions/runs/36771421863).
+- [Verified artifacts and checksums](https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc11).
+- [Published Python package](https://pypi.org/project/pytincture/1.0.0rc11/).
+- [npm publication awaiting independent approval](https://github.com/pytincture/pytincture/actions/runs/36771421936).
+
+Final 1.0 approvals and observation dates are unchanged. See the
+[RC11 payload defaults and diagnostics](configuration.md#rc11-resource-limits-and-diagnostics).
+
 `1.0.0rc10` was published on 2026-09-21 from
 `1ceaeac5534804f30c9e3ed47422adebd4ba2e69` after PR #364 merged. All 24 PR,
 main and signed-tag checks passed, followed by all 25 release CI/attestation
@@ -111,8 +134,8 @@ Published rc7 evidence:
 - [Release artifacts and SHA256SUMS.json](https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc7).
 - [Published Python package](https://pypi.org/project/pytincture/1.0.0rc7/).
 
-Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc10`, and rc4
-through rc10 are published on PyPI. Rc10 is the latest published candidate.
+Signed GitHub prereleases exist for `1.0.0rc1` through `1.0.0rc11`, and rc4
+through rc11 are published on PyPI. Rc11 is the latest published candidate.
 The previous rc6 evidence remains retained below. Its
 self-hosted icon asset, browser, BFF, authentication, streaming, cache, and
 capacity coverage passed the complete acceptance matrix. PyPI deliberately
@@ -382,12 +405,3 @@ GITHUB_TOKEN=... python scripts/audit_release_blockers.py
 The first command validates static controls and version alignment; it does not
 declare the final release ready. The final command succeeds only when the
 GitHub issue audit finds no labeled blocker.
-
-## RC11 preparation
-
-RC11 prepares actionable BFF limit diagnostics and larger payload defaults.
-The published-candidate ledger in `release/qualification.json` continues to
-record completed releases only. RC11 requires the normal signed-tag, CI, artifact
-attestation and protected publisher checks; local test/build success is not
-publication evidence. The existing final-1.0 observation and approval gates remain
-unchanged.
