@@ -7,6 +7,9 @@ set when a release is published.
 
 ## 1.0.0rc11 — pending
 
+- Refresh the hash-locked PyJWT dependency to 2.15.1 to resolve the dependency
+  audit findings against the previous 2.13.0 lock entry.
+
 - Report BFF request/result byte, item and depth limits with the exact setting,
   effective threshold, observed lower bound and processing stage. Preserve
   numeric diagnostics across isolated workers and partial async collections.
