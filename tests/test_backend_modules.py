@@ -331,7 +331,7 @@ class Worker:
             executor._acquire("session-one")
     finally:
         executor._release("session-one")
-    with pytest.raises(BFFResultLimitExceeded):
+    with pytest.raises(BFFResultLimitExceeded, match="BFF_RESULT_MAX_BYTES=16; observed at least 100 bytes"):
         executor.execute(
             _isolated_test_invocation(module_path, operation, "large")
         )
@@ -2339,12 +2339,14 @@ def test_opt_in_async_bff_stage_uses_worker_loop_and_retains_timed_out_work(
                 {},
                 "BFF policy timed out",
             )
-        assert timed_out.value.status_code == 504
-        assert timed_out.value.detail == "BFF policy timed out"
-        deferred = request.state.bff_deferred_task
-        assert deferred is not None
-        assert not deferred.done()
-        release.set()
+        try:
+            assert timed_out.value.status_code == 504
+            assert timed_out.value.detail.violation.setting == "BFF_CALL_TIMEOUT_SECONDS"
+            deferred = request.state.bff_deferred_task
+            assert deferred is not None
+            assert not deferred.done()
+        finally:
+            release.set()
         assert await asyncio.wait_for(deferred, timeout=1) is True
 
     asyncio.run(exercise_responsiveness())

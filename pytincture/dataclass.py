@@ -1460,12 +1460,29 @@ def generate_stub_classes(
 class PytinctureBFFError(RuntimeError):
     \"\"\"A generated BFF request failed without exposing its response body.\"\"\"
 
-    def __init__(self, status_code, operation, correlation_id=None):
+    def __init__(self, status_code, operation, correlation_id=None, limit_setting=None, limit_value=None, limit_observed=None):
         self.status_code = int(status_code)
         self.status = self.status_code
         self.operation = str(operation)
         self.correlation_id = str(correlation_id) if correlation_id else None
+        self.limit_setting = None
+        self.limit_value = None
+        self.limit_observed = None
+        setting = str(limit_setting or "")
+        value = str(limit_value or "")
+        observed = str(limit_observed or "")
+        if (0 < len(setting) <= 128 and (setting.startswith("BFF_") or setting == "MAX_REQUEST_BODY_BYTES")
+                and all(char in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for char in setting)
+                and 0 < len(value) <= 32 and value.replace(".", "", 1).isdigit()):
+            self.limit_setting = setting
+            self.limit_value = value
+            if 0 < len(observed) <= 32 and observed.replace(".", "", 1).isdigit():
+                self.limit_observed = observed
         message = f"BFF operation {self.operation} failed with HTTP {self.status_code}"
+        if self.limit_setting:
+            message += f": {self.limit_setting}={self.limit_value}"
+            if self.limit_observed:
+                message += f"; observed at least {self.limit_observed}"
         if self.correlation_id:
             message += f" (request {self.correlation_id})"
         super().__init__(message)
@@ -1516,9 +1533,10 @@ class PytinctureBFFError(RuntimeError):
             stub_class_code += "    def _bff_operation(self, url):\n"
             stub_class_code += "        method_name = str(url).rstrip('/').rsplit('/', 1)[-1]\n"
             stub_class_code += "        return f'{self.__class__.__name__}.{method_name}'\n"
-            stub_class_code += "    def _raise_for_bff_status(self, status, url, correlation_id=None):\n"
+            stub_class_code += "    def _raise_for_bff_status(self, status, url, correlation_id=None, get_header=None):\n"
             stub_class_code += "        if not 200 <= int(status) < 300:\n"
-            stub_class_code += "            raise PytinctureBFFError(status, self._bff_operation(url), correlation_id)\n"
+            stub_class_code += "            get_header = get_header or (lambda name: None)\n"
+            stub_class_code += "            raise PytinctureBFFError(status, self._bff_operation(url), correlation_id, get_header('X-Pytincture-Limit'), get_header('X-Pytincture-Limit-Value'), get_header('X-Pytincture-Limit-Observed'))\n"
             stub_class_code += "    def _csrf_token(self):\n"
             stub_class_code += "        from js import window\n"
             stub_class_code += "        cookie_name = str(getattr(window, '__pytinctureCsrfCookieName', ''))\n"
@@ -1671,7 +1689,7 @@ class PytinctureBFFError(RuntimeError):
             stub_class_code += f"            redirect_url = current_url + '/login'\n"
             stub_class_code += f"            window.location.href = redirect_url\n"
             stub_class_code += f"            return 'null'\n"
-            stub_class_code += "        self._raise_for_bff_status(req.status, url, req.getResponseHeader('X-Request-ID'))\n"
+            stub_class_code += "        self._raise_for_bff_status(req.status, url, req.getResponseHeader('X-Request-ID'), req.getResponseHeader)\n"
             stub_class_code += f"        return StringIO(req.response).getvalue()\n"
             stub_class_code += f"\n"
             stub_class_code += f"    async def fetch(self, url, payload=None, method='GET', _replay_retry=True):\n"
@@ -1698,7 +1716,7 @@ class PytinctureBFFError(RuntimeError):
             stub_class_code += f"                redirect_url = current_url + '/login'\n"
             stub_class_code += f"                window.location.href = redirect_url\n"
             stub_class_code += f"                return 'null'\n"
-            stub_class_code += "            self._raise_for_bff_status(response.status, url, response.headers.get('X-Request-ID'))\n"
+            stub_class_code += "            self._raise_for_bff_status(response.status, url, response.headers.get('X-Request-ID'), response.headers.get)\n"
             stub_class_code += "            self._schedule_pytincture_state_refill()\n"
             stub_class_code += f"            return await self._await_bff(response.text())\n"
             stub_class_code += "        finally:\n"
@@ -1747,7 +1765,7 @@ class PytinctureBFFError(RuntimeError):
                 stub_class_code += f"                redirect_url = current_url + '/login'\n"
                 stub_class_code += f"                window.location.href = redirect_url\n"
                 stub_class_code += f"                return\n"
-                stub_class_code += "            self._raise_for_bff_status(response.status, url, response.headers.get('X-Request-ID'))\n"
+                stub_class_code += "            self._raise_for_bff_status(response.status, url, response.headers.get('X-Request-ID'), response.headers.get)\n"
                 stub_class_code += "            self._schedule_pytincture_state_refill()\n"
                 stub_class_code += f"            reader = response.body.getReader()\n"
                 stub_class_code += f"            decoder = TextDecoder.new()\n"

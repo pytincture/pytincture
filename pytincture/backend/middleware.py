@@ -12,6 +12,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
+from pytincture.backend.limit_diagnostics import LimitDetail, limit_detail
+
 
 def _cache_control_has_directive(value: str, directive: str) -> bool:
     """Match one Cache-Control directive rather than an arbitrary substring."""
@@ -237,9 +239,8 @@ class RequestBodyLimitMiddleware:
         if content_length:
             try:
                 if int(content_length) > self.max_bytes:
-                    response = JSONResponse(
-                        {"detail": "Request body too large"}, status_code=413
-                    )
+                    detail = limit_detail("MAX_REQUEST_BODY_BYTES", self.max_bytes, int(content_length), "Content-Length")
+                    response = JSONResponse(detail.payload(), status_code=413, headers=detail.headers())
                     await response(scope, receive, send)
                     return
             except ValueError:
@@ -258,7 +259,7 @@ class RequestBodyLimitMiddleware:
                 received += len(message.get("body", b""))
                 if received > self.max_bytes:
                     raise HTTPException(
-                        status_code=413, detail="Request body too large"
+                        status_code=413, detail=limit_detail("MAX_REQUEST_BODY_BYTES", self.max_bytes, received, "request buffering")
                     )
             return message
 
@@ -268,6 +269,8 @@ class RequestBodyLimitMiddleware:
             if exc.status_code != 413:
                 raise
             response = JSONResponse(
-                {"detail": "Request body too large"}, status_code=413
+                exc.detail.payload() if isinstance(exc.detail, LimitDetail) else {"detail": exc.detail},
+                status_code=413,
+                headers=exc.detail.headers() if isinstance(exc.detail, LimitDetail) else None,
             )
             await response(scope, receive, send)

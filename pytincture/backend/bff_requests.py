@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from copy import deepcopy
 from typing import Any, Mapping, Sequence
 
+from pytincture.backend.limit_diagnostics import limit_detail
+
 
 @dataclass(frozen=True)
 class BFFArguments:
@@ -18,6 +20,10 @@ class BFFArguments:
 
 class BFFRequestValidationError(ValueError):
     """A BFF body does not satisfy the public JSON/signature contract."""
+
+    def __init__(self, detail):
+        self.detail = detail
+        super().__init__(str(detail))
 
 
 def _reject_constant(value: str):
@@ -39,17 +45,17 @@ def _validate_json_limits(value: Any, *, max_depth: int, max_items: int) -> None
     def visit(current: Any, depth: int) -> None:
         nonlocal item_count
         if depth > max_depth:
-            raise BFFRequestValidationError("BFF JSON nesting limit exceeded")
+            raise BFFRequestValidationError(limit_detail("BFF_REQUEST_MAX_DEPTH", max_depth, depth, "request parsing"))
         if isinstance(current, dict):
             item_count += len(current)
             if item_count > max_items:
-                raise BFFRequestValidationError("BFF JSON item limit exceeded")
+                raise BFFRequestValidationError(limit_detail("BFF_REQUEST_MAX_ITEMS", max_items, item_count, "request parsing"))
             for child in current.values():
                 visit(child, depth + 1)
         elif isinstance(current, list):
             item_count += len(current)
             if item_count > max_items:
-                raise BFFRequestValidationError("BFF JSON item limit exceeded")
+                raise BFFRequestValidationError(limit_detail("BFF_REQUEST_MAX_ITEMS", max_items, item_count, "request parsing"))
             for child in current:
                 visit(child, depth + 1)
         elif isinstance(current, float) and not math.isfinite(current):
@@ -67,7 +73,7 @@ def _decode_bff_object(
 ) -> dict[str, Any]:
     """Decode bounded UTF-8 JSON without duplicates or non-finite numbers."""
     if len(body) > max_bytes:
-        raise BFFRequestValidationError("BFF request body is too large")
+        raise BFFRequestValidationError(limit_detail("BFF_REQUEST_MAX_BYTES", max_bytes, len(body), "request parsing"))
     if not body:
         raise BFFRequestValidationError("BFF request body is required")
     try:

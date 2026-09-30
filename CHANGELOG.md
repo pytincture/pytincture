@@ -5,6 +5,25 @@ set when a release is published.
 
 ## Unreleased
 
+## 1.0.0rc11 — pending
+
+- Refresh the hash-locked PyJWT dependency to 2.15.1 to resolve the dependency
+  audit findings against the previous 2.13.0 lock entry.
+
+- Report BFF request/result byte, item and depth limits with the exact setting,
+  effective threshold, observed lower bound and processing stage. Preserve
+  numeric diagnostics across isolated workers and partial async collections.
+- Expose safe limit metadata in JSON, structured logs and bounded response
+  headers; generated Python and portable browser clients include the setting
+  in exceptions without reading arbitrary error response bodies.
+- Distinguish BFF queue saturation, admission timeout, upload timeout and
+  execution timeout. Report stream limits in server logs after headers start,
+  including nested-item failures previously mislabeled as byte failures.
+- Raise ordinary result and stream defaults to 50 MiB and 1,000,000 items;
+  BFF requests to 8 MiB and 100,000 items; and the global request cap to 16 MiB.
+  Explicit overrides remain authoritative. Depth, execution time, concurrency,
+  password/login and session limits retain their previous defaults.
+
 ## 1.0.0rc10 — 2026-09-21
 
 - Add explicit `server-only-imports` to portable builds: skip server dependency

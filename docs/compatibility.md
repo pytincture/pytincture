@@ -34,6 +34,11 @@ versions for each release candidate.
 
 ## Version compatibility rules
 
+RC11 keeps the version-1 BFF contract and adds limit metadata and response
+headers. Rebuild precompiled appcode and portable bundles to get the updated
+client exception details. Existing explicit payload limits retain precedence;
+see [RC11 defaults](configuration.md#rc11-resource-limits-and-diagnostics).
+
 - Python and npm artifacts from one release must have semantically equivalent
   versions. Stable strings match; PEP 440 `1.0.0rc1` maps to npm SemVer
   `1.0.0-rc.1`.

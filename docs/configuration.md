@@ -464,3 +464,46 @@ or `False` on the class to override; `None` restores inheritance. The stricter
 `api_docs_scope="public"` and `api_docs_mode="disabled"` settings still win.
 This only changes documentation visibility; calling methods still requires the
 same session or scoped token permissions.
+
+## RC11 resource limits and diagnostics
+
+RC11 raises the following default payload ceilings. All values remain configurable;
+existing explicit environment values and typed overrides retain precedence.
+
+| Setting | RC10 default | RC11 default |
+| --- | ---: | ---: |
+| `MAX_REQUEST_BODY_BYTES` | 2097152 (2 MiB) | 16777216 (16 MiB) |
+| `BFF_REQUEST_MAX_BYTES` | 1048576 (1 MiB) | 8388608 (8 MiB) |
+| `BFF_REQUEST_MAX_ITEMS` | 10000 | 100000 |
+| `BFF_RESULT_MAX_BYTES` | 10485760 (10 MiB) | 52428800 (50 MiB) |
+| `BFF_RESULT_MAX_ITEMS` | 10000 | 1000000 |
+| `BFF_STREAM_MAX_BYTES` | 10485760 (10 MiB) | 52428800 (50 MiB) |
+| `BFF_STREAM_MAX_ITEMS` | 10000 | 1000000 |
+
+Items count entries across nested lists and object fields, not characters or
+bytes. Counts reset per response; the pre/post-JSON checks have separate budgets.
+Streams cap emitted records and the aggregate container items in each record.
+`BFF_RESULT_MAX_DEPTH` also bounds JSON structures in stream records. The global
+request cap applies to all routes, including authentication uploads; dedicated
+password, identity, session and SAML limits remain unchanged. Larger payloads
+can consume more memory per admitted call. Concurrency and timeout defaults
+remain bounded and unchanged; deployments can retain RC10 payload caps explicitly.
+
+A limit failure retains a readable `detail` and adds `limit` metadata containing
+`setting`, `limit`, `observed`, `stage`, and `observed_is_lower_bound`. The count
+is a lower bound at the point processing stopped, not a claim that the full
+payload was traversed. A null observed count means no count was measured (for
+example, queue/deadline rejection). Diagnostics include no submitted values,
+object field names, source paths, tokens or credentials.
+
+`X-Pytincture-Limit`, `X-Pytincture-Limit-Value`, and optional
+`X-Pytincture-Limit-Observed` headers let generated and portable clients expose
+this information without consuming untrusted error bodies. The generated
+`PytinctureBFFError` exposes `limit_setting`, `limit_value`, and `limit_observed`.
+Rebuild prebuilt appcode/portable bundles to update their generated client stubs.
+Only typed framework limit diagnostics bypass generic 5xx sanitization.
+
+Search `request.limit_exceeded` logs by request correlation ID. Once streaming
+headers have been sent, the server cannot replace the response status/body with
+a JSON error; search `bff.stream.limit_exceeded` and `bff.stream.finish` instead.
+Stream cleanup and response formats remain unchanged.

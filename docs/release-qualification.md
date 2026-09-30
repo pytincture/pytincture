@@ -382,3 +382,12 @@ GITHUB_TOKEN=... python scripts/audit_release_blockers.py
 The first command validates static controls and version alignment; it does not
 declare the final release ready. The final command succeeds only when the
 GitHub issue audit finds no labeled blocker.
+
+## RC11 preparation
+
+RC11 prepares actionable BFF limit diagnostics and larger payload defaults.
+The published-candidate ledger in `release/qualification.json` continues to
+record completed releases only. RC11 requires the normal signed-tag, CI, artifact
+attestation and protected publisher checks; local test/build success is not
+publication evidence. The existing final-1.0 observation and approval gates remain
+unchanged.

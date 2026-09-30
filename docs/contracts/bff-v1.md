@@ -264,3 +264,14 @@ or `enable_dev_email_login`) and hides them otherwise. An explicit boolean
 overrides that default; `api_docs_scope="public"` still excludes session methods. Module docs are at `/{application}/{extensionless-module}/bff-docs`,
 including nested module folders; aggregate docs return 404. Swagger operations
 are class/method paths relative to an extensionless module class-call server URL.
+
+## RC11 limit diagnostics
+
+Framework resource failures add `limit` metadata and the `X-Pytincture-Limit`,
+`X-Pytincture-Limit-Value`, and optional `X-Pytincture-Limit-Observed` headers.
+The readable `detail` remains a string; clients must not depend on its exact
+wording. The response status remains authoritative. Counts are lower bounds
+and may be null when only the threshold is known. See the
+[configuration reference](../configuration.md#rc11-resource-limits-and-diagnostics).
+After streaming headers start, precise limit metadata is logged rather than
+injected into application stream records.

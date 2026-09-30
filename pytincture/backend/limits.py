@@ -12,6 +12,10 @@ from typing import AsyncIterator
 class AdmissionRejected(RuntimeError):
     """Raised when a bounded worker queue cannot admit more work."""
 
+    def __init__(self, message, *, reason="queue-full"):
+        self.reason = reason
+        super().__init__(message)
+
 
 class AsyncAdmissionGate:
     """Bound active work and waiters without storing user or session state."""
@@ -35,7 +39,7 @@ class AsyncAdmissionGate:
                 self._semaphore.acquire(), timeout=self._wait_seconds
             )
         except asyncio.TimeoutError as exc:
-            raise AdmissionRejected("admission wait timed out") from exc
+            raise AdmissionRejected("admission wait timed out", reason="queue-timeout") from exc
         finally:
             with self._waiters_lock:
                 self._waiters -= 1

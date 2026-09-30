@@ -1772,7 +1772,7 @@ def test_mcp_password_login_requires_one_time_application_transaction(
 
 
 def test_request_body_limit_rejects_oversized_payload(fresh_client):
-    response = fresh_client.post("/logs", content=b"x" * (2 * 1024 * 1024 + 1))
+    response = fresh_client.post("/logs", content=b"x" * (16 * 1024 * 1024 + 1))
     assert response.status_code == 413
 
 def test_favicon(fresh_client):
@@ -3159,7 +3159,9 @@ def test_class_call_timeout_returns_gateway_timeout(monkeypatch, fresh_client, t
         json={"args": [], "kwargs": {}},
     )
     assert response.status_code == 504
-    assert response.json()["detail"] == "Internal server error"
+    assert response.json()["limit"]["setting"] == "BFF_CALL_TIMEOUT_SECONDS"
+    assert response.json()["limit"]["limit"] == 0.001
+    assert response.headers["X-Pytincture-Limit"] == "BFF_CALL_TIMEOUT_SECONDS"
     assert response.json()["correlation_id"]
 
 
@@ -3243,7 +3245,8 @@ def test_slow_bff_body_times_out_before_execution_admission(monkeypatch):
         with pytest.raises(HTTPException) as timed_out:
             await admission.__anext__()
         assert timed_out.value.status_code == 408
-        assert timed_out.value.detail == "BFF request body timed out"
+        assert timed_out.value.detail.violation.setting == "BFF_REQUEST_INGRESS_TIMEOUT_SECONDS"
+        assert timed_out.value.detail.violation.limit == 0.01
         assert execution_gate.acquire_calls == 0
         assert ingress_gate.acquire_calls == 1
         assert ingress_gate.release_calls == 1
@@ -3708,6 +3711,9 @@ def test_ordinary_bff_results_are_serialized_under_a_hard_byte_limit(
             def __init__(self, _user): pass
             def large(self): return {"payload": "x" * 1000}
             def raw(self): return Response(content=b"x" * 1000)
+            async def pages(self):
+                yield "x" * 40
+                yield "x" * 40
             def ping(self): return {"ready": True}
     """))
     monkeypatch.setenv("MODULES_PATH", str(tmp_path))
@@ -3727,10 +3733,26 @@ def test_ordinary_bff_results_are_serialized_under_a_hard_byte_limit(
         "/bounded/classcall/bounded.py/Bounded/raw",
         json={"args": [], "kwargs": {}},
     )
+    oversized_pages = fresh_client.post(
+        "/bounded/classcall/bounded.py/Bounded/pages",
+        json={"args": [], "kwargs": {}},
+    )
 
     assert oversized.status_code == 413
-    assert oversized.json() == {"detail": "BFF result byte limit exceeded"}
+    assert oversized.json()["detail"] == (
+        "BFF result byte limit exceeded: BFF_RESULT_MAX_BYTES=64; "
+        "observed at least 1000 bytes during materialization"
+    )
     assert oversized_response.status_code == 413
+    assert oversized_response.json()["detail"] == (
+        "BFF result byte limit exceeded: BFF_RESULT_MAX_BYTES=64; "
+        "observed at least 1000 bytes during response body"
+    )
+    assert oversized_pages.status_code == 413
+    assert oversized_pages.json()["detail"] == (
+        "BFF result byte limit exceeded: BFF_RESULT_MAX_BYTES=64; "
+        "observed at least 82 bytes during async collection"
+    )
     assert recovered.status_code == 200
     assert recovered.json() == {"ready": True}
 
@@ -3782,7 +3804,15 @@ def test_ordinary_bff_iterables_are_bounded_before_json_conversion(
     assert finite.status_code == 200
     assert finite.json() == [0, 1, 2]
     assert unbounded.status_code == 413
-    assert unbounded.json() == {"detail": "BFF result item limit exceeded"}
+    assert unbounded.headers["X-Pytincture-Limit"] == "BFF_RESULT_MAX_ITEMS"
+    assert unbounded.headers["X-Pytincture-Limit-Value"] == "3"
+    assert unbounded.headers["X-Pytincture-Limit-Observed"] == "4"
+    assert unbounded.json()["limit"]["setting"] == "BFF_RESULT_MAX_ITEMS"
+    assert unbounded.json()["detail"] == (
+        "BFF result item limit exceeded: BFF_RESULT_MAX_ITEMS=3; "
+        "observed at least 4 aggregate items during materialization. "
+        "Items count list entries and object fields across nested containers, not bytes"
+    )
     assert async_iterable.status_code == 413
     assert async_iterable.json() == {
         "detail": "Async BFF result iterables require an explicit streaming export"
