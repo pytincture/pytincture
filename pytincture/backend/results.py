@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from copy import copy
 from collections import deque
 from collections.abc import AsyncIterable, Iterator, Mapping, Sequence, Set
 from enum import Enum
@@ -55,6 +56,89 @@ def _close_iterator(iterator: Iterator[Any]) -> None:
             pass
 
 
+def _materialize_model_iterators(
+    value: Any,
+    *,
+    budget: _ResultBudget,
+    depth: int = 0,
+    active: set[int] | None = None,
+) -> Any:
+    """Bound lazy model inputs before Pydantic's eager JSON serialization.
+
+    Preserve model/field types and leave the caller's objects intact so aliases
+    and JSON-only serializers still run on models, rather than plain dicts.
+    Other result limits are checked on the serialized representation below.
+    """
+    if depth > budget.max_depth:
+        raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_DEPTH", budget.max_depth, depth, "materialization")
+    if isinstance(value, (str, bytes, bytearray)) and len(value) > budget.max_bytes:
+        raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_BYTES", budget.max_bytes, len(value), "materialization")
+    if isinstance(value, AsyncIterable):
+        raise BFFResultLimitExceeded("Async BFF result iterables require an explicit streaming export")
+    if not isinstance(value, (BaseModel, dict, list, tuple, set, frozenset, deque, Iterator)) and not (
+        dataclasses.is_dataclass(value) and not isinstance(value, type)
+    ):
+        return value
+    active = active if active is not None else set()
+    identity = id(value)
+    if identity in active:
+        raise BFFResultLimitExceeded("BFF result contains a circular reference")
+    active.add(identity)
+
+    def child(item):
+        return _materialize_model_iterators(item, budget=budget, depth=depth + 1, active=active)
+
+    try:
+        if isinstance(value, Iterator):
+            result = []
+            try:
+                for item in value:
+                    budget.add_items(1)
+                    result.append(child(item))
+            except BaseException:
+                _close_iterator(value)
+                raise
+            return (item for item in result)
+        if isinstance(value, BaseModel):
+            updates = {}
+            fields = type(value).model_fields
+            for name, item in {**value.__dict__, **(value.model_extra or {})}.items():
+                if name in fields and fields[name].exclude is True:
+                    continue
+                if type(value).__pydantic_root_model__ and name == 'root':
+                    prepared = _materialize_model_iterators(
+                        item, budget=budget, depth=depth, active=active,
+                    )
+                else:
+                    prepared = child(item)
+                if prepared is not item:
+                    updates[name] = prepared
+            return value.model_copy(update=updates) if updates else value
+        if isinstance(value, dict):
+            updates = {key: child(item) for key, item in value.items()}
+            if all(updates[key] is item for key, item in value.items()):
+                return value
+            result = copy(value)
+            result.update(updates)
+            return result
+        if dataclasses.is_dataclass(value):
+            updates = {field.name: child(getattr(value, field.name)) for field in dataclasses.fields(value)}
+            if all(item is getattr(value, name) for name, item in updates.items()):
+                return value
+            result = copy(value)
+            for name, item in updates.items():
+                object.__setattr__(result, name, item)
+            return result
+        items = [child(item) for item in value]
+        if all(prepared is original for prepared, original in zip(items, value)):
+            return value
+        if isinstance(value, tuple) and hasattr(value, '_fields'):
+            return type(value)(*items)
+        return type(value)(items)
+    finally:
+        active.remove(identity)
+
+
 def _materialize_bounded_result(
     value: Any,
     *,
@@ -89,8 +173,13 @@ def _materialize_bounded_result(
     if isinstance(value, BaseModel):
         active.add(identity)
         try:
+            prepared = _materialize_model_iterators(
+                value,
+                budget=_ResultBudget(budget.max_bytes, budget.max_depth, budget.max_items),
+                depth=depth,
+            )
             return _materialize_bounded_result(
-                value.model_dump(mode="python"),
+                prepared.model_dump(mode="json", by_alias=True),
                 budget=budget,
                 depth=depth,
                 active=active,

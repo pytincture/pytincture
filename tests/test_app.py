@@ -2805,6 +2805,7 @@ def test_class_call_nested_module_path(monkeypatch, fresh_client, tmp_path):
     target_dir.mkdir(parents=True)
     module_code = textwrap.dedent("""
         from pytincture.dataclass import backend_for_frontend
+        from .helper import echo
 
         @backend_for_frontend
         class Worker:
@@ -2812,9 +2813,10 @@ def test_class_call_nested_module_path(monkeypatch, fresh_client, tmp_path):
                 self._user = _user
 
             def ping(self, value):
-                return {"echo": value}
+                return {"echo": echo(value)}
     """)
     (target_dir / "worker.py").write_text(module_code)
+    (target_dir / "helper.py").write_text("def echo(value): return value\n")
     (modules_dir / "nested_app.py").write_text(
         "from pkg.internal.worker import Worker\n",
         encoding="utf-8",

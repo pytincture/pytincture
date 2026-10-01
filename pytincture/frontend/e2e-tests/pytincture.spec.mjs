@@ -134,6 +134,40 @@ async function measureAuthenticatedBff(page, sampleCount) {
     }, sampleCount);
 }
 
+test("BFF regression fixes work through real Pyodide and portable transports", async ({ page }) => {
+    await loginAndStartPackagedApp(page);
+    const result = await page.evaluate(async () => {
+        const runtime = globalThis.pytinctureBrowserRuntime.runtime;
+        return JSON.parse(await runtime.runPythonAsync(`
+import json
+from e2e_data import E2EData
+_regression_service = E2EData()
+json.dumps({
+    "fetch": await _regression_service.fetch(),
+    "sync": _regression_service.fetch_sync(),
+    "sync_async": await _regression_service.fetch_sync_async(),
+    "strings": [item async for item in _regression_service.fetch_stream()],
+    "count": _regression_service.count,
+    "model": await _regression_service.model_result_async(),
+})
+`));
+    });
+    expect(result).toEqual({fetch: 'fetch', sync: 'fetch_sync', sync_async: 'fetch_sync',
+        strings: ['hello', '123', 'true', '', 'a\nb', 'café'], count: 3,
+        model: {displayName: 'EXAMPLE'}});
+    const mutations = await page.evaluate(async () => {
+        const {createBffCaller, createBffSyncCaller} = await import('/e2e_app/frontend/browser-runtimes.js');
+        const config = {application: 'e2e_app', csrfCookieName: globalThis.__pytinctureCsrfCookieName};
+        const results = [];
+        for (const method of ['PUT', 'PATCH', 'DELETE']) {
+            results.push(await createBffCaller(config)('e2e_data', 'E2EData', 'update', {value: method}, {method}));
+            results.push(createBffSyncCaller(config)('e2e_data', 'E2EData', 'update', {value: method}, {method}));
+        }
+        return results;
+    });
+    expect(mutations).toEqual(['PUT', 'PUT', 'PATCH', 'PATCH', 'DELETE', 'DELETE'].map(value => ({value})));
+});
+
 test("BFF documentation uses packaged hash-locked assets", async ({ page }) => {
     const diagnostics = collectDiagnostics(page);
     const response = await page.goto("/e2e_app/e2e_data/bff-docs");

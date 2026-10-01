@@ -321,7 +321,7 @@ var PytinctureRuntime = (() => {
     const cookie = cookies.find((value) => value.startsWith(`${cookieName}=`));
     const csrf = cookie ? decodeURIComponent(cookie.slice(cookieName.length + 1)) : "";
     const httpMethod = options.method || "POST";
-    if (!["POST", "GET"].includes(httpMethod)) throw new Error("Unsupported browser BFF HTTP method");
+    if (!["POST", "GET", "PUT", "PATCH", "DELETE"].includes(httpMethod)) throw new Error("Unsupported browser BFF HTTP method");
     return {
       url: `/${config.application}/classcall/${module}/${className}/${method}`,
       init: {

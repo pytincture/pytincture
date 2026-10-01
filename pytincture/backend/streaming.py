@@ -131,7 +131,10 @@ class BoundedStreamingResponse(StreamingResponse):
                 if callable(close):
                     await close()
             else:
-                await self.close_unstarted_source()
+                try:
+                    await self.close_unstarted_source()
+                finally:
+                    self.on_send_timeout("disconnect", sent_bytes)
             raise
 
 
@@ -200,11 +203,13 @@ def serialize_stream_item(
         if max_bytes is not None and len(data) > max_bytes:
             raise BFFResultLimitExceeded.limit("BFF_STREAM_MAX_BYTES", max_bytes, len(item), "streaming")
         return data if raw or data.endswith(b"\n") else data + b"\n"
-    if isinstance(item, str):
+    if isinstance(item, str) and raw:
         if max_bytes is not None and len(item) > max_bytes:
             raise BFFResultLimitExceeded.limit("BFF_STREAM_MAX_BYTES", max_bytes, len(item), "streaming")
         text = item
     else:
+        if max_bytes == 0:
+            raise BFFResultLimitExceeded.limit("BFF_STREAM_MAX_BYTES", 0, 1, "streaming")
         text = encode_bff_result(
             item,
             max_bytes=max_bytes if max_bytes is not None else 2**63 - 1,

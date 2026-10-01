@@ -1,11 +1,12 @@
 """Collision-safe loading of application source modules."""
 
 import hashlib
+import importlib
 import importlib.util
 import os
 import re
 import sys
-from importlib.machinery import SourceFileLoader
+from importlib.machinery import ModuleSpec, SourceFileLoader
 
 from pytincture.backend.safe_paths import (
     canonical_root,
@@ -52,7 +53,22 @@ def load_source_module(
     if expected_digest is not None and secure_file.digest != expected_digest:
         raise ImportError("BFF source changed after registry discovery")
 
-    module_name = build_dynamic_module_name(secure_file.path, name_hint, root)
+    # Give relative imports a real package context without putting app roots on
+    # process-global sys.path or mixing same-named packages from different apps.
+    namespace = "_pytincture_modules_" + hashlib.sha256(root.encode()).hexdigest()[:16]
+    if namespace not in sys.modules:
+        namespace_spec = ModuleSpec(namespace, loader=None, is_package=True)
+        namespace_spec.submodule_search_locations = [root]
+        sys.modules.setdefault(namespace, importlib.util.module_from_spec(namespace_spec))
+    directories = relative_path.split("/")[:-1]
+    package_name = ".".join([namespace, *directories])
+    is_package = os.path.basename(secure_file.path) == "__init__.py"
+    parent_name = package_name.rpartition(".")[0] if is_package and directories else package_name
+    importlib.import_module(parent_name)
+    module_name = (
+        package_name if is_package else
+        f"{package_name}.{build_dynamic_module_name(secure_file.path, name_hint, root)}"
+    )
     loader = SourceFileLoader(module_name, secure_file.path)
     spec = importlib.util.spec_from_loader(module_name, loader)
     if spec is None:
