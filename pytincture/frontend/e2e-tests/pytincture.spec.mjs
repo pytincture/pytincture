@@ -74,7 +74,7 @@ async function loginAndStartPackagedApp(page) {
     await page.getByPlaceholder("Email").fill("e2e@example.com");
     await page.getByPlaceholder("Password").fill("demo-password");
     await Promise.all([
-        page.waitForURL(/\/e2e_app$/),
+        page.waitForURL(/\/e2e_app\/$/),
         page.getByRole("button", { name: "Login with Email" }).click(),
     ]);
     await expect(page.locator("#e2e-ready")).toBeVisible();
@@ -214,7 +214,7 @@ test("Swagger executes named function arguments with session CSRF protection", a
     await page.getByPlaceholder("Email").fill("e2e@example.com");
     await page.getByPlaceholder("Password").fill("demo-password");
     await Promise.all([
-        page.waitForURL(/\/e2e_app$/),
+        page.waitForURL(/\/e2e_app\/$/),
         page.getByRole("button", { name: "Login with Email" }).click(),
     ]);
     await page.goto("/e2e_app/e2e_data/bff-docs");
@@ -251,7 +251,7 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
             PERFORMANCE_BUDGETS.browser.cold_authenticated_start_ms,
         );
 
-        await expect(page).toHaveURL("/e2e_app");
+        await expect(page).toHaveURL("/e2e_app/");
         expect(new URL(page.url()).search).toBe("");
         await expect(page.locator("#static-import")).toHaveText("static-import-ok");
         await expect(page.locator("#dynamic-import")).toHaveText("dynamic-browser-file-ok");
@@ -289,9 +289,26 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
             styles.some(style => style.textContent.includes("data:font/woff2;base64,"))
         ))).toBe(true);
 
+        const workerPath = () => page.evaluate(() => (
+            navigator.serviceWorker.controller
+                ? new URL(navigator.serviceWorker.controller.scriptURL).pathname : null
+        ));
+        // Registration and warmed Cache Storage alone do not prove control (#372).
+        expect(await workerPath()).toBe("/e2e_app/frontend/sw.js");
+        const workerTiming = await page.evaluate(() => (
+            window.pytinctureRuntime.getInfo().startupTimings.find(t => t.stage === "service-worker")
+        ));
+        expect(workerTiming).toBeTruthy();
+
         const warmStartedAt = Date.now();
+        const wasmResponse = page.waitForResponse(response => (
+            new URL(response.url()).pathname.endsWith("/pyodide.asm.wasm")
+            && response.fromServiceWorker()
+        ));
         await page.goto("/e2e_app");
         await expect(page.locator("#e2e-ready")).toBeVisible();
+        expect(await workerPath()).toBe("/e2e_app/frontend/sw.js");
+        expect((await wasmResponse).ok()).toBe(true);
         performanceEvidence.warm_authenticated_start_ms = Date.now() - warmStartedAt;
         expect(performanceEvidence.warm_authenticated_start_ms).toBeLessThanOrEqual(
             PERFORMANCE_BUDGETS.browser.warm_authenticated_start_ms,
@@ -384,6 +401,30 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         const cacheEvidence = await readCacheEvidence();
         expect(cacheEvidence.names.some(name => name.startsWith("pytincture:e2e_app:"))).toBe(true);
         expect(cacheEvidence.urls.every(url => new URL(url).searchParams.get("uuid"))).toBe(true);
+
+        // A cached framework asset must be readable without a network, not merely stored.
+        await expect.poll(() => page.evaluate(async () => {
+            const registration = await navigator.serviceWorker.getRegistration();
+            const uuid = new URL(registration.active.scriptURL).searchParams.get("uuid");
+            return Boolean(await caches.match(`/e2e_app/frontend/pyodide/0.29.3/full/pyodide.asm.wasm?uuid=${uuid}`));
+        })).toBe(true);
+        await page.context().setOffline(true);
+        try {
+            const bytes = await page.evaluate(async () => {
+                const response = await fetch("/e2e_app/frontend/pyodide/0.29.3/full/pyodide.asm.wasm");
+                return (await response.arrayBuffer()).byteLength;
+            });
+            expect(bytes).toBeGreaterThan(1_000_000);
+        } finally {
+            await page.context().setOffline(false);
+        }
+        const neighbor = await page.context().newPage();
+        try {
+            await neighbor.goto("/e2e_app2/login");
+            expect(await neighbor.evaluate(() => navigator.serviceWorker.controller === null)).toBe(true);
+        } finally {
+            await neighbor.close();
+        }
 
         const signedUrl = "https://api.example.test/report?X-Amz-Signature=abc123&part=1";
         let observedSignedUrl = "";
@@ -534,7 +575,7 @@ test("packaged entrypoint failure is rendered without fallback", async ({ browse
         await page.getByPlaceholder("Email").fill("e2e@example.com");
         await page.getByPlaceholder("Password").fill("demo-password");
         await Promise.all([
-            page.waitForURL(/\/failure_app$/),
+            page.waitForURL(/\/failure_app\/$/),
             page.getByRole("button", { name: "Login with Email" }).click(),
         ]);
         await expect(page.locator(".pytincture-loading__status")).toContainText("Failed during entrypoint-execution");

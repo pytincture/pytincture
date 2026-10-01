@@ -7,6 +7,12 @@ set when a release is published.
 
 ## 1.0.0rc12 — unpublished
 
+- Fix the five-second service-worker startup delay (#372): redirect application
+  pages to their scoped trailing-slash URLs while preserving existing entry
+  links. Keep BFF, appcode, auth, and frontend endpoints unchanged; use absolute
+  loader URLs, report service-worker timing, and clean up timed-out listeners.
+  Add `enable_service_worker` / `PYTINCTURE_ENABLE_SERVICE_WORKER` (default true).
+
 - Fix BFF admission cleanup when a stream disconnects before response headers.
 - Preserve Pydantic JSON serializers and field aliases while bounding lazy model
   inputs before serialization.

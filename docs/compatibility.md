@@ -34,7 +34,9 @@ versions for each release candidate.
 
 ## Version compatibility rules
 
-RC12 keeps the version-1 BFF contract and RC11 resource limits. Rebuild
+RC12 keeps the version-1 BFF contract and RC11 resource limits. Application
+page links at `/app` redirect to `/app/` so the scoped service worker controls
+the document. BFF, authentication, and appcode endpoint paths stay the same. Rebuild
 precompiled appcode and portable bundles to receive the generated-client fixes.
 Default streamed strings now arrive as JSON string values; producers of
 hand-encoded JSON/SSE text must use `bff_stream(raw=True)` and supply their own

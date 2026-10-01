@@ -8,8 +8,8 @@ every gate below has durable evidence.
 ## RC12 preparation — unpublished
 
 [PR #371](https://github.com/pytincture/pytincture/pull/371) prepares
-`1.0.0rc12` (npm `1.0.0-rc.12`) with eight BFF functional fixes and regression
-coverage. The preceding functional-fix commit passed all applicable
+`1.0.0rc12` (npm `1.0.0-rc.12`) with eight BFF functional fixes, the service-worker startup correction
+(#372), and regression coverage. The preceding functional-fix commit passed all applicable
 [PR CI checks](https://github.com/pytincture/pytincture/actions/runs/36871398149),
 including 1,150 Python tests on each supported CPython version and browser
 application conformance across legacy Pyodide, portable Pyodide, and MicroPython.

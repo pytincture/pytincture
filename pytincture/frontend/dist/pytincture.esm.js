@@ -1470,19 +1470,30 @@ async function ensureServiceWorker(config) {
   }
 }
 async function waitForServiceWorkerControl(registration) {
-  if (navigator.serviceWorker.controller) {
+  if (!window.location.href.startsWith(registration.scope)) {
     return registration;
   }
-  await Promise.race([
-    new Promise((resolve) => {
-      const handleControllerChange = () => {
-        navigator.serviceWorker.removeEventListener("controllerchange", handleControllerChange);
-        resolve(registration);
-      };
-      navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
-    }),
-    new Promise((resolve) => setTimeout(() => resolve(registration), 5e3))
-  ]);
+  const isControlled = () => {
+    var _a;
+    const controller = navigator.serviceWorker.controller;
+    return controller && controller.scriptURL === ((_a = registration.active) == null ? void 0 : _a.scriptURL);
+  };
+  if (isControlled()) {
+    return registration;
+  }
+  await new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      navigator.serviceWorker.removeEventListener("controllerchange", handleControllerChange);
+      resolve();
+    };
+    const handleControllerChange = () => {
+      if (isControlled()) finish();
+    };
+    const timer = setTimeout(finish, 5e3);
+    navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
+    handleControllerChange();
+  });
   return registration;
 }
 async function waitForServiceWorkerActivation(registration) {
@@ -1493,19 +1504,19 @@ async function waitForServiceWorkerActivation(registration) {
   if (!worker) {
     return registration;
   }
-  await Promise.race([
-    new Promise((resolve) => {
-      const handleStateChange = () => {
-        if (worker.state === "activated" || worker.state === "redundant") {
-          worker.removeEventListener("statechange", handleStateChange);
-          resolve(registration);
-        }
-      };
-      worker.addEventListener("statechange", handleStateChange);
-      handleStateChange();
-    }),
-    new Promise((resolve) => setTimeout(() => resolve(registration), 5e3))
-  ]);
+  await new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      worker.removeEventListener("statechange", handleStateChange);
+      resolve();
+    };
+    const handleStateChange = () => {
+      if (worker.state === "activated" || worker.state === "redundant") finish();
+    };
+    const timer = setTimeout(finish, 5e3);
+    worker.addEventListener("statechange", handleStateChange);
+    handleStateChange();
+  });
   return registration;
 }
 function ownedCachePrefix(config) {
@@ -1575,7 +1586,12 @@ async function unregisterOwnedServiceWorker(config) {
   return removed;
 }
 async function warmPyodideCache(config) {
+  var _a;
   if (!config.enableServiceWorker || !config.warmPyodideCache) {
+    return;
+  }
+  const controller = typeof navigator !== "undefined" && ((_a = navigator.serviceWorker) == null ? void 0 : _a.controller);
+  if (!controller || new URL(controller.scriptURL).pathname !== new URL(config.serviceWorkerUrl, window.location.href).pathname) {
     return;
   }
   if (typeof caches === "undefined") {
@@ -1720,7 +1736,7 @@ async function resolveBackendWidgetSources(config) {
 }
 async function downloadPackagedApp(config) {
   var _a, _b;
-  const archiveUrl = withRequestUuid(`${config.application}/appcode/appcode.pyt`, config.requestUuid);
+  const archiveUrl = withRequestUuid(`/${config.application}/appcode/appcode.pyt`, config.requestUuid);
   const response = await fetch(archiveUrl);
   const correlationId = ((_b = (_a = response.headers) == null ? void 0 : _a.get) == null ? void 0 : _b.call(_a, "x-request-id")) || null;
   if (!response.ok) {
@@ -2118,7 +2134,12 @@ async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_O
     config.pyodideBaseUrl,
     () => operations.preflightConfig(config)
   );
-  await operations.ensureServiceWorker(config);
+  await measureRuntimePhase(
+    config,
+    "service-worker",
+    config.serviceWorkerUrl,
+    () => operations.ensureServiceWorker(config)
+  );
   if (config.loadMaterialIcons) {
     await operations.ensureMaterialIcons(
       config.materialIconsUrl,
@@ -2210,7 +2231,7 @@ output.getvalue()`);
       downloaded = await runLifecycleStage(
         config,
         LIFECYCLE_STAGES.ARCHIVE_DOWNLOAD,
-        `${config.application}/appcode/appcode.pyt`,
+        `/${config.application}/appcode/appcode.pyt`,
         () => operations.downloadPackagedApp(config)
       );
     } catch (error) {
