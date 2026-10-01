@@ -5,6 +5,21 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
+## RC12 preparation — unpublished
+
+[PR #371](https://github.com/pytincture/pytincture/pull/371) prepares
+`1.0.0rc12` (npm `1.0.0-rc.12`) with eight BFF functional fixes and regression
+coverage. The preceding functional-fix commit passed all applicable
+[PR CI checks](https://github.com/pytincture/pytincture/actions/runs/36871398149),
+including 1,150 Python tests on each supported CPython version and browser
+application conformance across legacy Pyodide, portable Pyodide, and MicroPython.
+The versioned RC12 commit must pass its own PR checks before merge.
+
+RC12 has no publication or observation evidence yet. Before tagging it, land
+[the RC11 publication evidence in PR #370](https://github.com/pytincture/pytincture/pull/370)
+and rerun the release gates for `v1.0.0rc12`. Publication remains a separate step;
+this preparation does not authorize a tag, GitHub release, or package upload.
+
 ## Current decision: NO-GO pending observation and edge evidence
 
 `1.0.0rc10` was published on 2026-09-21 from

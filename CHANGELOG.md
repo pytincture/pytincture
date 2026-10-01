@@ -5,6 +5,8 @@ set when a release is published.
 
 ## Unreleased
 
+## 1.0.0rc12 — unpublished
+
 - Fix BFF admission cleanup when a stream disconnects before response headers.
 - Preserve Pydantic JSON serializers and field aliases while bounding lazy model
   inputs before serialization.

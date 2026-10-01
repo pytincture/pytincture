@@ -34,6 +34,13 @@ versions for each release candidate.
 
 ## Version compatibility rules
 
+RC12 keeps the version-1 BFF contract and RC11 resource limits. Rebuild
+precompiled appcode and portable bundles to receive the generated-client fixes.
+Default streamed strings now arrive as JSON string values; producers of
+hand-encoded JSON/SSE text must use `bff_stream(raw=True)` and supply their own
+delimiters. Existing raw streams and pre-encoded byte framing are preserved.
+See [RC12 migration notes](migrations/0.10-to-1.0.md#rc11-to-rc12).
+
 RC11 keeps the version-1 BFF contract and adds limit metadata and response
 headers. Rebuild precompiled appcode and portable bundles to get the updated
 client exception details. Existing explicit payload limits retain precedence;
