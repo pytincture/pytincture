@@ -217,7 +217,7 @@ index 61c5861..73bf6f4 100644
 +        print(f"waiting for the app ({args.runtime or 'default'} runtime)")
          page.get_by_text("Book Details and Ratings").wait_for(timeout=BOOT_TIMEOUT_MS)
 -        check("url after login", page.url, f"{BASE_URL}/py_ui")
-+        check("url after login", page.url, app_url)
++        check("url after login", page.url, f"{BASE_URL}/py_ui/" + (f"?runtime={args.runtime}" if args.runtime else ""))
 +        if args.runtime:
 +            check("requested runtime", page.locator("body").get_attribute("data-browser-runtime"), args.runtime)
  

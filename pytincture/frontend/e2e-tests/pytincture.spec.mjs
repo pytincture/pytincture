@@ -300,15 +300,71 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         ));
         expect(workerTiming).toBeTruthy();
 
+        // Prove the fetch handler reads this cache entry, rather than fetching
+        // another successful response from the server. Restore it after probing.
+        await expect.poll(() => page.evaluate(async () => {
+            const registration = await navigator.serviceWorker.getRegistration();
+            const uuid = new URL(registration.active.scriptURL).searchParams.get("uuid");
+            return Boolean(await caches.match(`/e2e_app/frontend/pyodide/0.29.3/full/pyodide.asm.wasm?uuid=${uuid}`));
+        })).toBe(true);
+        const cachedFetch = await page.evaluate(async () => {
+            const asset = "/e2e_app/frontend/pyodide/0.29.3/full/pyodide.asm.wasm";
+            const registration = await navigator.serviceWorker.getRegistration();
+            const uuid = new URL(registration.active.scriptURL).searchParams.get("uuid");
+            const cacheKey = `${asset}?uuid=${uuid}`;
+            const names = await caches.keys();
+            const name = names.find(name => name.startsWith("pytincture:e2e_app:") && name.endsWith(`:${uuid}`));
+            const cache = await caches.open(name);
+            const original = await cache.match(cacheKey);
+            const headers = new Headers(original.headers);
+            const marker = crypto.randomUUID();
+            headers.set("X-Pytincture-Cache-Probe", marker);
+            await cache.put(cacheKey, new Response(await original.clone().arrayBuffer(), {
+                status: original.status, headers,
+            }));
+            try {
+                const response = await fetch(asset);
+                return {
+                    cacheHit: response.headers.get("X-Pytincture-Cache-Probe") === marker,
+                    bytes: (await response.arrayBuffer()).byteLength,
+                };
+            } finally {
+                await cache.put(cacheKey, original);
+            }
+        });
+        expect(cachedFetch.cacheHit).toBe(true);
+        expect(cachedFetch.bytes).toBeGreaterThan(1_000_000);
+        // Playwright's offline service-worker emulation is Chromium-only:
+        // https://playwright.dev/docs/service-workers
+        if (testInfo.project.name === "chromium") {
+            await page.context().setOffline(true);
+            try {
+                const bytes = await page.evaluate(async () => {
+                    const response = await fetch("/e2e_app/frontend/pyodide/0.29.3/full/pyodide.asm.wasm");
+                    return (await response.arrayBuffer()).byteLength;
+                });
+                expect(bytes).toBeGreaterThan(1_000_000);
+            } finally {
+                await page.context().setOffline(false);
+            }
+        }
+
         const warmStartedAt = Date.now();
-        const wasmResponse = page.waitForResponse(response => (
+        // Playwright Firefox loses control on subsequent network-served pages,
+        // even in a minimal framework-free reproduction. Keep first-load cache
+        // proof above; verify warm worker control in Chromium and WebKit.
+        // https://github.com/microsoft/playwright/issues/37012
+        const verifyWarmControl = testInfo.project.name !== "firefox";
+        const wasmResponse = verifyWarmControl ? page.waitForResponse(response => (
             new URL(response.url()).pathname.endsWith("/pyodide.asm.wasm")
             && response.fromServiceWorker()
-        ));
+        )) : null;
         await page.goto("/e2e_app");
         await expect(page.locator("#e2e-ready")).toBeVisible();
-        expect(await workerPath()).toBe("/e2e_app/frontend/sw.js");
-        expect((await wasmResponse).ok()).toBe(true);
+        if (verifyWarmControl) {
+            expect(await workerPath()).toBe("/e2e_app/frontend/sw.js");
+            expect((await wasmResponse).ok()).toBe(true);
+        }
         performanceEvidence.warm_authenticated_start_ms = Date.now() - warmStartedAt;
         expect(performanceEvidence.warm_authenticated_start_ms).toBeLessThanOrEqual(
             PERFORMANCE_BUDGETS.browser.warm_authenticated_start_ms,
@@ -402,22 +458,6 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         expect(cacheEvidence.names.some(name => name.startsWith("pytincture:e2e_app:"))).toBe(true);
         expect(cacheEvidence.urls.every(url => new URL(url).searchParams.get("uuid"))).toBe(true);
 
-        // A cached framework asset must be readable without a network, not merely stored.
-        await expect.poll(() => page.evaluate(async () => {
-            const registration = await navigator.serviceWorker.getRegistration();
-            const uuid = new URL(registration.active.scriptURL).searchParams.get("uuid");
-            return Boolean(await caches.match(`/e2e_app/frontend/pyodide/0.29.3/full/pyodide.asm.wasm?uuid=${uuid}`));
-        })).toBe(true);
-        await page.context().setOffline(true);
-        try {
-            const bytes = await page.evaluate(async () => {
-                const response = await fetch("/e2e_app/frontend/pyodide/0.29.3/full/pyodide.asm.wasm");
-                return (await response.arrayBuffer()).byteLength;
-            });
-            expect(bytes).toBeGreaterThan(1_000_000);
-        } finally {
-            await page.context().setOffline(false);
-        }
         const neighbor = await page.context().newPage();
         try {
             await neighbor.goto("/e2e_app2/login");
@@ -426,22 +466,11 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
             await neighbor.close();
         }
 
-        const signedUrl = "https://api.example.test/report?X-Amz-Signature=abc123&part=1";
-        let observedSignedUrl = "";
-        await page.route("https://api.example.test/**", async route => {
-            observedSignedUrl = route.request().url();
-            await route.fulfill({
-                status: 200,
-                headers: {
-                    "Access-Control-Allow-Origin": "http://127.0.0.1:8079",
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ ok: true }),
-            });
-        });
-        expect(await page.evaluate(async url => (await fetch(url)).json(), signedUrl)).toEqual({ ok: true });
-        expect(observedSignedUrl).toBe(signedUrl);
-        await page.unroute("https://api.example.test/**");
+        // Exercise signed queries against a real endpoint outside the framework
+        // asset allowlist; lifecycle unit tests also cover cross-origin URLs.
+        const signedUrl = "http://127.0.0.1:8079/external-api/signed-url-probe?X-Amz-Signature=abc123&part=1";
+        expect(await page.evaluate(async url => (await fetch(url)).json(), signedUrl))
+            .toEqual({ url: signedUrl });
 
         const upgradedCaches = await page.evaluate(async () => {
             await caches.open("foreign-library-cache");
@@ -477,8 +506,9 @@ test("authenticated packaged and inline apps run through real Pyodide", async ({
         await page.goto("/e2e_app/appcode/inline-e2e.html");
         await expect(page.locator("#inline-ready")).toBeVisible();
         expect(new URL(page.url()).search).toBe("");
-        const inlineLifecycle = await page.evaluate(() => window.__pytinctureLifecycle);
-        expect(inlineLifecycle.at(-1).type).toBe("ready");
+        await expect.poll(() => page.evaluate(() => (
+            window.__pytinctureLifecycle.at(-1)?.type
+        ))).toBe("ready");
         performanceEvidence.status = "passed";
     } finally {
         performanceEvidence.status ||= "failed";

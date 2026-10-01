@@ -15,6 +15,14 @@ including 1,150 Python tests on each supported CPython version and browser
 application conformance across legacy Pyodide, portable Pyodide, and MicroPython.
 The versioned RC12 commit must pass its own PR checks before merge.
 
+Service-worker regressions check first-load control and actual cached WASM reads
+in Chromium, Firefox, and WebKit. Repeat-navigation control is checked in Chromium
+and WebKit; [Playwright Firefox issue #37012](https://github.com/microsoft/playwright/issues/37012)
+prevents that assertion in Firefox, reproduced independently without Pytincture.
+Offline emulation is checked in Chromium; WebKit uses a marked cache-response
+probe because of [Playwright issue #42775](https://github.com/microsoft/playwright/issues/42775).
+These automation limitations do not constitute full native-browser qualification.
+
 RC12 has no publication or observation evidence yet. Before tagging it, land
 [the RC11 publication evidence in PR #370](https://github.com/pytincture/pytincture/pull/370)
 and rerun the release gates for `v1.0.0rc12`. Publication remains a separate step;
