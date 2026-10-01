@@ -6,7 +6,7 @@
       "url": "https://github.com/pytincture/pytincture_example.git",
       "commit": "0971ee3ba7087dc310003c1d3812b92331c7fe95",
       "patch": "example.patch",
-      "patch_sha256": "efa5729cda8a9fbe3241699c4e23bdfca316c61506f79f2fa9259a91f8b57969"
+      "patch_sha256": "0f65981ccae09b47d8d9aafa069f71f600b2dcca66a3265cd5c2c4aca47d4698"
     },
     "chat": {
       "url": "https://github.com/WAwesome-AI/wAwesomeChat.git",

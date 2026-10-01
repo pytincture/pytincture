@@ -321,7 +321,7 @@ var PytinctureRuntime = (() => {
     const cookie = cookies.find((value) => value.startsWith(`${cookieName}=`));
     const csrf = cookie ? decodeURIComponent(cookie.slice(cookieName.length + 1)) : "";
     const httpMethod = options.method || "POST";
-    if (!["POST", "GET"].includes(httpMethod)) throw new Error("Unsupported browser BFF HTTP method");
+    if (!["POST", "GET", "PUT", "PATCH", "DELETE"].includes(httpMethod)) throw new Error("Unsupported browser BFF HTTP method");
     return {
       url: `/${config.application}/classcall/${module}/${className}/${method}`,
       init: {
@@ -633,7 +633,7 @@ import ${manifest.entrypoint} as _pytincture_client`));
 
   // pytincture.js
   var FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
-  var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc11";
+  var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc12";
   var BUILTIN_WIDGET_WHEEL_LOCKS = Object.freeze({
     "dhxpyt==0.9.18": "https://files.pythonhosted.org/packages/0c/e7/b48e045156c7b4bf20778597991d7dfe591fd46ada5267b747e2d5977244/dhxpyt-0.9.18-py3-none-any.whl#sha256=acd8db34547c6b61c83a01958e9545ee724564859e5bcb53713ae3c872234fbe"
   });
@@ -1472,19 +1472,30 @@ import ${manifest.entrypoint} as _pytincture_client`));
     }
   }
   async function waitForServiceWorkerControl(registration) {
-    if (navigator.serviceWorker.controller) {
+    if (!window.location.href.startsWith(registration.scope)) {
       return registration;
     }
-    await Promise.race([
-      new Promise((resolve) => {
-        const handleControllerChange = () => {
-          navigator.serviceWorker.removeEventListener("controllerchange", handleControllerChange);
-          resolve(registration);
-        };
-        navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
-      }),
-      new Promise((resolve) => setTimeout(() => resolve(registration), 5e3))
-    ]);
+    const isControlled = () => {
+      var _a;
+      const controller = navigator.serviceWorker.controller;
+      return controller && controller.scriptURL === ((_a = registration.active) == null ? void 0 : _a.scriptURL);
+    };
+    if (isControlled()) {
+      return registration;
+    }
+    await new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        navigator.serviceWorker.removeEventListener("controllerchange", handleControllerChange);
+        resolve();
+      };
+      const handleControllerChange = () => {
+        if (isControlled()) finish();
+      };
+      const timer = setTimeout(finish, 5e3);
+      navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
+      handleControllerChange();
+    });
     return registration;
   }
   async function waitForServiceWorkerActivation(registration) {
@@ -1495,19 +1506,19 @@ import ${manifest.entrypoint} as _pytincture_client`));
     if (!worker) {
       return registration;
     }
-    await Promise.race([
-      new Promise((resolve) => {
-        const handleStateChange = () => {
-          if (worker.state === "activated" || worker.state === "redundant") {
-            worker.removeEventListener("statechange", handleStateChange);
-            resolve(registration);
-          }
-        };
-        worker.addEventListener("statechange", handleStateChange);
-        handleStateChange();
-      }),
-      new Promise((resolve) => setTimeout(() => resolve(registration), 5e3))
-    ]);
+    await new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        worker.removeEventListener("statechange", handleStateChange);
+        resolve();
+      };
+      const handleStateChange = () => {
+        if (worker.state === "activated" || worker.state === "redundant") finish();
+      };
+      const timer = setTimeout(finish, 5e3);
+      worker.addEventListener("statechange", handleStateChange);
+      handleStateChange();
+    });
     return registration;
   }
   function ownedCachePrefix(config) {
@@ -1577,7 +1588,12 @@ import ${manifest.entrypoint} as _pytincture_client`));
     return removed;
   }
   async function warmPyodideCache(config) {
+    var _a;
     if (!config.enableServiceWorker || !config.warmPyodideCache) {
+      return;
+    }
+    const controller = typeof navigator !== "undefined" && ((_a = navigator.serviceWorker) == null ? void 0 : _a.controller);
+    if (!controller || new URL(controller.scriptURL).pathname !== new URL(config.serviceWorkerUrl, window.location.href).pathname) {
       return;
     }
     if (typeof caches === "undefined") {
@@ -1722,7 +1738,7 @@ await micropip.install(${libLiteral}, deps=False)
   }
   async function downloadPackagedApp(config) {
     var _a, _b;
-    const archiveUrl = withRequestUuid(`${config.application}/appcode/appcode.pyt`, config.requestUuid);
+    const archiveUrl = withRequestUuid(`/${config.application}/appcode/appcode.pyt`, config.requestUuid);
     const response = await fetch(archiveUrl);
     const correlationId = ((_b = (_a = response.headers) == null ? void 0 : _a.get) == null ? void 0 : _b.call(_a, "x-request-id")) || null;
     if (!response.ok) {
@@ -2120,7 +2136,12 @@ json.dumps({
       config.pyodideBaseUrl,
       () => operations.preflightConfig(config)
     );
-    await operations.ensureServiceWorker(config);
+    await measureRuntimePhase(
+      config,
+      "service-worker",
+      config.serviceWorkerUrl,
+      () => operations.ensureServiceWorker(config)
+    );
     if (config.loadMaterialIcons) {
       await operations.ensureMaterialIcons(
         config.materialIconsUrl,
@@ -2212,7 +2233,7 @@ output.getvalue()`);
         downloaded = await runLifecycleStage(
           config,
           LIFECYCLE_STAGES.ARCHIVE_DOWNLOAD,
-          `${config.application}/appcode/appcode.pyt`,
+          `/${config.application}/appcode/appcode.pyt`,
           () => operations.downloadPackagedApp(config)
         );
       } catch (error) {

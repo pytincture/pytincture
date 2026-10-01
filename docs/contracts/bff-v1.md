@@ -163,6 +163,10 @@ to the application login page and returning `None`. A rejected replay proof may
 refill and retry once before a remaining 409 becomes a typed error.
 
 `@bff_stream()` defaults to `text/event-stream` and newline-delimited JSON.
+String values are JSON-quoted and escaped, so `"123"` remains a string and an
+embedded newline stays inside one record. Existing pre-encoded byte chunks
+retain their newline framing. Code yielding hand-encoded JSON or SSE as text
+must use `raw=True` and include its own record delimiters.
 `raw=True` forwards string/byte chunks without JSON framing. The declared
 `media_type` is preserved.
 
@@ -192,7 +196,9 @@ Generated browser classes preserve the exported class, method, and attribute
 names. They construct the route from the module-relative identifier and call
 the declared HTTP method. Sync methods retain synchronous browser requests for
 the 1.x compatibility period and receive an additive `<method>_async`
-companion. Async and streaming methods use deadline-bounded asynchronous
+companion when that name is not already declared by the class. Exported names
+take precedence over generated companions and internal transport helpers.
+Async and streaming methods use deadline-bounded asynchronous
 fetch/iteration behavior. Each generated BFF module exposes
 `PytinctureBFFError` for callers that want to catch the typed failure.
 Authentication redirects and optional replay-token refill are runtime concerns

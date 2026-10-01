@@ -5,6 +5,27 @@ set when a release is published.
 
 ## Unreleased
 
+## 1.0.0rc12 — unpublished
+
+- Fix the five-second service-worker startup delay (#372): redirect application
+  pages to their scoped trailing-slash URLs while preserving existing entry
+  links. Keep BFF, appcode, auth, and frontend endpoints unchanged; use absolute
+  loader URLs, report service-worker timing, and clean up timed-out listeners.
+  Add `enable_service_worker` / `PYTINCTURE_ENABLE_SERVICE_WORKER` (default true).
+
+- Fix BFF admission cleanup when a stream disconnects before response headers.
+- Preserve Pydantic JSON serializers and field aliases while bounding lazy model
+  inputs before serialization.
+- Encode default streamed strings as JSON values, preserving their types and
+  embedded newlines. For hand-encoded text/SSE frames, use `bff_stream(raw=True)`;
+  existing pre-encoded byte frames keep their newline framing.
+- Support relative imports in nested BFF modules with package contexts isolated
+  by application source root.
+- Preserve PUT/PATCH/DELETE in portable BFF clients and avoid overwriting declared
+  methods with generated async companions.
+- Keep legacy BFF transport helpers separate from exported `fetch`, `fetch_sync`,
+  and `fetch_stream` members, and generate GET properties for annotated attributes.
+
 ## 1.0.0rc11 — 2026-09-30
 
 - Refresh the hash-locked PyJWT dependency to 2.15.1 and urllib3 to 2.8.0

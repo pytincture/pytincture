@@ -78,7 +78,7 @@ def _bff_stub(name: str, source: str) -> str:
         classes.setdefault(class_name, [])
         if operation.get('external') or operation['kind'] != 'method':
             continue
-        http_method = 'POST' if 'POST' in operation['http_methods'] else 'GET'
+        http_method = 'POST' if 'POST' in operation['http_methods'] else operation['http_methods'][0]
         envelope = any(p['kind'] in {'positional_only', 'var_positional', 'var_keyword'} for p in operation['parameters'])
         signature = ['self']
         payload_name = '_pytincture_arguments'
@@ -112,10 +112,14 @@ def _bff_stub(name: str, source: str) -> str:
             classes[class_name].append(f'    def {method}({declaration}):\n' + '\n'.join(stream_body))
         else:
             async_body = body + [f'        return {json_name}.loads(await {js_name}.pytinctureBrowserBff({call_args}))']
-            classes[class_name].append(f'    async def {method}_async({declaration}):\n' + '\n'.join(async_body))
+            companion = f'{method}_async'
             if (class_name, method) in async_methods:
-                classes[class_name].append(f'    {method} = {method}_async')
+                classes[class_name].append(f'    async def {method}({declaration}):\n' + '\n'.join(async_body))
+                if (class_name, companion) not in operations:
+                    classes[class_name].append(f'    {companion} = {method}')
             else:
+                if (class_name, companion) not in operations:
+                    classes[class_name].append(f'    async def {companion}({declaration}):\n' + '\n'.join(async_body))
                 sync_body = body + [f'        return {json_name}.loads({js_name}.pytinctureBrowserBffSync({call_args}))']
                 classes[class_name].append(f'    def {method}({declaration}):\n' + '\n'.join(sync_body))
     if not classes:

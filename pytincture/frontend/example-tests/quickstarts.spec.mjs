@@ -73,7 +73,7 @@ test("service quickstart runs the packaged example", async ({ page, request }) =
 
     const response = await page.goto(`${SERVICE_URL}/`);
     expect(response?.ok()).toBe(true);
-    await expect(page).toHaveURL(`${SERVICE_URL}/hello`);
+    await expect(page).toHaveURL(`${SERVICE_URL}/hello/`);
     await expect(page.getByRole("heading", { name: "Hello from Pytincture" })).toBeVisible();
     await expect(page.getByText("Python is running in your browser.")).toBeVisible();
     await expectMaterialIcons(page);

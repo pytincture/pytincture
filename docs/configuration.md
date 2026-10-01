@@ -209,6 +209,7 @@ The contract test checks every row in this table against the dataclass model.
 | `browser_runtime` | `PYTINCTURE_BROWSER_RUNTIME` | Default engine: pyodide or micropython. MicroPython requires explicit portable-bundle delivery. |
 | `delivery_mode` | `PYTINCTURE_DELIVERY_MODE` | Application delivery: legacy-package (default) or portable-bundle; independent of the engine. |
 | `allow_runtime_selection` | `PYTINCTURE_ALLOW_RUNTIME_SELECTION` | Development/testing only: allow the runtime query parameter; keep false in production. |
+| `enable_service_worker` | `PYTINCTURE_ENABLE_SERVICE_WORKER` | Enable application-scoped framework asset caching in the browser. |
 | `favicon_folder` | `PYTINCTURE_FAVICON_FOLDER` | Optional favicon file/directory. |
 | `cors_allowed_origins` | `CORS_ALLOWED_ORIGINS` | Allowed browser origins. |
 | `browser_connect_origins` | `PYTINCTURE_BROWSER_CONNECT_ORIGINS` | Exact additional HTTPS/WSS origins permitted by browser connect-src. |

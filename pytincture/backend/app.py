@@ -2417,6 +2417,11 @@ def _locally_validated_auth_session(request: Request):
             _clear_auth_session(request)
             return None
 
+        # RC11 and older cookies contain a document-relative framework avatar.
+        # Preserve its target when the document moves from /app to /app/.
+        picture = user_session.get("picture")
+        if isinstance(picture, str) and re.fullmatch(r"[A-Za-z_]\w*/appcode/profile\.png", picture):
+            return {**user_session, "picture": "/" + picture}
         return user_session
 
 
@@ -6818,7 +6823,7 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
     user_info = {
         "email": email_attr,
         "name": name_attr or "",
-        "picture": f"{application}/appcode/profile.png",
+        "picture": f"/{application}/appcode/profile.png",
         "auth_type": "saml",
         "auth_provider": provider["id"],
         "auth_provider_label": provider.get("label") or provider["id"],
@@ -7364,7 +7369,7 @@ async def auth_user_callback(request: Request, application: str):
 
     user_info = {
         **authenticated_claims,
-        "picture": f"{application}/appcode/profile.png",
+        "picture": f"/{application}/appcode/profile.png",
         "auth_type": "user",
         "roles": authenticated_claims.get("roles", authenticated_claims.get("role", [])),
     }
@@ -7379,7 +7384,7 @@ async def auth_user_callback(request: Request, application: str):
     )
 
     # See if we stored a "return_to" path earlier; default to "/{application}"
-    return_to = _sanitize_return_to(request.session.pop("return_to", None)) or f"/{application}"
+    return_to = _sanitize_return_to(request.session.pop("return_to", None)) or f"/{application}/"
     return RedirectResponse(url=return_to, status_code=303)
 
 # Pydantic model for MCP auth input
@@ -7430,7 +7435,7 @@ async def mcp_auth(request: Request, application: str):
     )
     user_info = {
         **authenticated_claims,
-        "picture": f"{application}/appcode/profile.png",
+        "picture": f"/{application}/appcode/profile.png",
         "auth_type": "user",
         "roles": authenticated_claims.get("roles", authenticated_claims.get("role", [])),
     }
@@ -7594,7 +7599,8 @@ def _browser_runtime_settings(application, request, entrypoint):
     return runtime, delivery, f"/{application}/appcode/{quote(normalized, safe='/._-')}"
 
 
-@app.get("/{application}", response_class=HTMLResponse, operation_id="getMainApp", responses={200: {"description": "HTMLResponse (modified index.html with widgetset)"}, 302: {"description": "RedirectResponse (to login if not authenticated)"}})
+@app.get("/{application}/", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/{application}", response_class=HTMLResponse, operation_id="getMainApp", responses={200: {"description": "HTMLResponse (modified index.html with widgetset)"}, 302: {"description": "RedirectResponse (to login if not authenticated)"}, 307: {"description": "Redirect to the application page with a trailing slash"}})
 async def main_app_route(response: Response, application: str, request: Request):
     """
     1) Check if user is in session.
@@ -7606,7 +7612,7 @@ async def main_app_route(response: Response, application: str, request: Request)
     except ValueError:
         raise HTTPException(status_code=404, detail="Application not found")
 
-    return_path = f"/{application}"
+    return_path = f"/{application}/"
     if "runtime" in request.query_params:
         return_path += "?runtime=" + quote(request.query_params["runtime"], safe="")
 
@@ -7646,6 +7652,16 @@ async def main_app_route(response: Response, application: str, request: Request)
     except UnsafePath:
         raise HTTPException(status_code=404, detail="Application not found")
     browser_runtime, delivery_mode, runtime_manifest_url = _browser_runtime_settings(application, request, secure_entrypoint)
+    # Keep the application document inside its /application/ worker scope.
+    # Existing entry URLs remain valid; API and asset routes do not change.
+    if not request.url.path.endswith("/"):
+        canonical_path = request.url.path + "/"
+        if request.url.query:
+            canonical_path += "?" + request.url.query
+        return RedirectResponse(
+            url=canonical_path, status_code=307,
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
     widgetset = get_widgetset(application, appcode_folder)
     try:
         widget_asset_manifest = None if runtime_manifest_url else _trusted_widget_manifest(widgetset)
@@ -7734,6 +7750,10 @@ async def main_app_route(response: Response, application: str, request: Request)
     index_html = index_html.replace(
         "***ENABLE_BACKEND_LOGGING***",
         _html_script_json(_browser_logging_available()),
+    )
+    index_html = index_html.replace(
+        "***ENABLE_SERVICE_WORKER***",
+        _html_script_json(os.getenv("PYTINCTURE_ENABLE_SERVICE_WORKER", "true").lower() == "true"),
     )
 
     index_html = index_html.replace(
