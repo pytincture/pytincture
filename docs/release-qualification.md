@@ -5,15 +5,31 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## RC12 preparation — unpublished
+## RC12 publication — 2026-10-05
 
-[PR #371](https://github.com/pytincture/pytincture/pull/371) prepares
-`1.0.0rc12` (npm `1.0.0-rc.12`) with eight BFF functional fixes, the service-worker startup correction
-(#372), and regression coverage. The RC12 implementation passed all 24 applicable
-[PR CI checks](https://github.com/pytincture/pytincture/actions/runs/36895566106),
-including 1,162 Python tests on each supported CPython version, all three browser
-engines, and application conformance across legacy Pyodide, portable Pyodide,
-and MicroPython. The merged release commit and signed tag must also pass CI.
+`1.0.0rc12` was published on 2026-10-05 from
+`d5df63a35421bdc4b0f01450d24b6631d646b333` after RC11 publication record #370
+and release PR #371 merged. All 24 main-branch and signed-tag checks and all
+25 release CI/attestation jobs passed, followed by protected PyPI publication.
+The Python 3.13 and 3.14 suites each passed 1,162 tests. Full pinned example/chat
+conformance passed across legacy Pyodide, portable Pyodide, and MicroPython.
+
+Both public Python artifact hashes match the retained, attested files. A fresh
+isolated Python 3.13 installation from the public PyPI index verifies the version,
+keyword-only service-worker option, configuration round-trip, and application,
+BFF, and appcode routes. RC12's behavior changes and migration guidance are in
+[the migration notes](migrations/0.10-to-1.0.md).
+
+Published RC12 evidence:
+
+- [Release PR #371](https://github.com/pytincture/pytincture/pull/371).
+- [Main-branch validation](https://github.com/pytincture/pytincture/actions/runs/37329490988).
+- [Signed-tag qualification](https://github.com/pytincture/pytincture/actions/runs/37329531689).
+- [Release CI and attestations](https://github.com/pytincture/pytincture/actions/runs/37330729019).
+- [Successful protected PyPI publication](https://github.com/pytincture/pytincture/actions/runs/37331711834).
+- [Verified artifacts and checksums](https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc12).
+- [Published Python package](https://pypi.org/project/pytincture/1.0.0rc12/).
+- [npm publication awaiting independent approval](https://github.com/pytincture/pytincture/actions/runs/37331711705).
 
 Service-worker regressions check first-load control and actual cached WASM reads
 in Chromium, Firefox, and WebKit. Repeat-navigation control is checked in Chromium
@@ -23,14 +39,9 @@ Offline emulation is checked in Chromium; WebKit uses a marked cache-response
 probe because of [Playwright issue #42775](https://github.com/microsoft/playwright/issues/42775).
 These automation limitations do not constitute full native-browser qualification.
 
-RC11 publication evidence is recorded through
-[merged PR #370](https://github.com/pytincture/pytincture/pull/370), and the
-`v1.0.0rc12` candidate progression gate passes with that record. RC12 publication
-and observation evidence remain pending. Publish only through the signed-tag,
-release CI, artifact attestation, and protected registry workflow described in
-[the release procedure](releasing.md).
+Existing observation dates and final 1.0 approvals are unchanged.
 
-## Current decision: NO-GO pending observation and edge evidence
+## Final 1.0 decision: NO-GO pending observation and edge evidence
 
 `1.0.0rc11` was published on 2026-09-30 from
 `3121974fe22b8c6799c3d98d8d9b4a393e39a870` after release PR #367 and the

@@ -147,6 +147,19 @@
       },
       "status": "passed",
       "notes": "Release PR #367 and dependency-audit fix #369 merged. All signed-tag checks (36769074242), release CI/attestation jobs (36770242023), and protected PyPI publication (36771421863) passed. The exact retained wheel, source distribution, npm tarball and SHA256SUMS.json are attached to the GitHub prerelease. Public PyPI wheel/sdist bytes match the attested hashes. A fresh isolated Python 3.13 public-index installation imports 1.0.0rc11, verifies all seven approved payload defaults and exercises an exact-setting BFF item-limit diagnostic. Full pinned application conformance passed across all three runtime/delivery modes. No direct validation of the unavailable private Tenzyn app is claimed. npm publication (36771421936) awaits independent environment approval; PyPI publication was the requested distribution. Existing observation dates and final 1.0 approvals are unchanged."
+    },
+    {
+      "version": "1.0.0rc12",
+      "published_at": "2026-10-05T15:10:57Z",
+      "commit_sha": "d5df63a35421bdc4b0f01450d24b6631d646b333",
+      "ci_url": "https://github.com/pytincture/pytincture/actions/runs/37330729019",
+      "artifacts": {
+        "wheel": "8434b1df36f8dfc8586a41c63b667e95448ca51b1b0889c9cb61239bf2304c26",
+        "sdist": "6e80746ffafded790f103208f7fe3c6385a83756a26b79041957616e58dfc782",
+        "npm": "099290df0da861a1f2061fefd80d6856b5609458e90a8486498344d0565c360a"
+      },
+      "status": "passed",
+      "notes": "Release PR #371 and RC11 publication evidence #370 merged. All 24 main-branch and signed-tag checks (37329490988, 37329531689), all 25 release CI/attestation jobs (37330729019), and protected PyPI publication (37331711834) passed. The exact retained wheel, source distribution, npm tarball and SHA256SUMS.json are attached to the GitHub prerelease. Public PyPI wheel/sdist bytes match the attested hashes. A fresh isolated Python 3.13 public-index installation imports 1.0.0rc12, verifies the keyword-only service-worker setting and configuration round-trip, and creates an app exposing the application, BFF and appcode routes. Full pinned application conformance passed across all three runtime/delivery modes. Documented Playwright worker-control/offline-emulation limitations remain; arbitrary native-browser or unavailable private-application compatibility is not claimed. npm publication (37331711705) awaits independent environment approval; PyPI was the requested distribution. Existing observation dates and final 1.0 approvals are unchanged."
     }
   ],
   "representative_applications": {
@@ -763,6 +776,6 @@
     "status": "pending",
     "decided_at": null,
     "approvers": [],
-    "notes": "RC1 through RC11 release evidence is recorded, and rc4 through rc11 are published on PyPI. Rc11 passed complete framework release CI, pinned application conformance across all three runtime/delivery profiles, artifact attestation, public artifact hash verification and a clean public-index install. Legacy Pyodide remains the default. Portable profile fixes do not establish arbitrary CPython or unavailable private-application compatibility. The optional application-credential registry and portable runtime targets still need observation-scope review. Final 1.0 remains NO-GO pending the approved observation period, production-edge evidence, remaining registry distribution and final release-manager approval. Existing observation dates have not been changed."
+    "notes": "RC1 through RC12 release evidence is recorded, and rc4 through rc12 are published on PyPI. Rc12 passed complete framework release CI, pinned application conformance across all three runtime/delivery profiles, artifact attestation, public artifact hash verification and a clean public-index install. Legacy Pyodide remains the default. Portable profile fixes do not establish arbitrary CPython or unavailable private-application compatibility. The optional application-credential registry and portable runtime targets still need observation-scope review. Final 1.0 remains NO-GO pending the approved observation period, production-edge evidence, remaining registry distribution and final release-manager approval. Existing observation dates have not been changed."
   }
 }
