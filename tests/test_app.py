@@ -1167,7 +1167,7 @@ def test_main_page_revocation_lookup_runs_off_the_event_loop(
         tracked_validate_application_name,
     )
 
-    response = fresh_client.get("/example", follow_redirects=False)
+    response = fresh_client.get("/example/", follow_redirects=False)
     # Authentication completes before unresolved UI entrypoint discovery is
     # deferred to the browser (client modules are never executed here).
     assert response.status_code == 200
@@ -1847,7 +1847,7 @@ def test_main_route_ignores_backend_session_snapshot(
         "picture": "demoapp/appcode/profile.png",
     }
 
-    response = fresh_client.get("/demoapp", follow_redirects=False)
+    response = fresh_client.get("/demoapp/", follow_redirects=False)
     assert response.status_code == 200
 
 def test_main_route_no_auth_when_disabled(fresh_client, monkeypatch, tmp_path):
@@ -2805,6 +2805,7 @@ def test_class_call_nested_module_path(monkeypatch, fresh_client, tmp_path):
     target_dir.mkdir(parents=True)
     module_code = textwrap.dedent("""
         from pytincture.dataclass import backend_for_frontend
+        from .helper import echo
 
         @backend_for_frontend
         class Worker:
@@ -2812,9 +2813,10 @@ def test_class_call_nested_module_path(monkeypatch, fresh_client, tmp_path):
                 self._user = _user
 
             def ping(self, value):
-                return {"echo": value}
+                return {"echo": echo(value)}
     """)
     (target_dir / "worker.py").write_text(module_code)
+    (target_dir / "helper.py").write_text("def echo(value): return value\n")
     (modules_dir / "nested_app.py").write_text(
         "from pkg.internal.worker import Worker\n",
         encoding="utf-8",
@@ -4222,7 +4224,7 @@ def test_frontend_runtime_cache_busts_packaged_app_fetch(fresh_client):
     assert response.status_code == 200
     assert "installCacheBustingFetch" not in response.text
     assert "globalThis.fetch =" not in response.text
-    assert 'withRequestUuid(`${config.application}/appcode/appcode.pyt`, config.requestUuid)' in response.text
+    assert 'withRequestUuid(`/${config.application}/appcode/appcode.pyt`, config.requestUuid)' in response.text
     assert "`${config.pyodideBaseUrl}pyodide.asm.js`" in response.text
     assert 'config.pyodideScriptIntegrity?.["pyodide.asm.js"]' in response.text
     assert "withSameOriginRequestUuid(url, requestUuid)" in response.text
@@ -6593,3 +6595,86 @@ def test_saml_metadata_cache_is_bounded_and_settings_fingerprinted(monkeypatch):
         "https://changed.test/metadata",
     ]
     assert len(backend_app._SAML_METADATA_CACHE) == 1
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_application_page_canonical_url_and_service_worker_setting(
+    fresh_client, monkeypatch, enabled
+):
+    from urllib.parse import urljoin
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+
+    monkeypatch.setenv("PYTINCTURE_ENABLE_SERVICE_WORKER", str(enabled).lower())
+    response = fresh_client.get("/demoapp?view=grid&item=a%2Fb", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/demoapp/?view=grid&item=a%2Fb"
+    page = fresh_client.get(response.headers["location"], follow_redirects=False)
+    assert page.status_code == 200
+    assert f"enableServiceWorker: {str(enabled).lower()}" in page.text
+    assert "***ENABLE_SERVICE_WORKER***" not in page.text
+    scripts = re.findall(r'<script src="([^"]+)"', page.text)
+    assert scripts
+    for script in scripts:
+        assert urljoin(str(page.url), script).startswith(
+            "https://127.0.0.1/demoapp/frontend/"
+        )
+    # API paths keep their existing behavior, with no page canonicalization.
+    assert fresh_client.get("/demoapp/appcode/appcode.pyt", follow_redirects=False).status_code == 200
+    worker = fresh_client.get("/demoapp/frontend/sw.js", follow_redirects=False)
+    assert worker.status_code == 200
+    assert worker.headers["service-worker-allowed"] == "/demoapp/"
+    assert fresh_client.get("/missing_app", follow_redirects=False).status_code == 404
+
+
+@pytest.mark.parametrize("path", ["/demoapp", "/demoapp/"])
+def test_login_returns_to_canonical_application_page(fresh_client, monkeypatch, path):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "AUTH_LOGIN_RATE_LIMITER", backend_app.SlidingWindowRateLimiter(100, 60))
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    monkeypatch.setenv("PYTINCTURE_ALLOW_RUNTIME_SELECTION", "true")
+    login = fresh_client.get(path + "?runtime=pyodide", follow_redirects=False)
+    assert login.headers["location"] == "/demoapp/login"
+    authenticated = _password_login(fresh_client, follow_redirects=False)
+    assert authenticated.status_code == 303
+    assert authenticated.headers["location"] == "/demoapp/?runtime=pyodide"
+    page = fresh_client.get(authenticated.headers["location"], follow_redirects=False)
+    assert page.status_code == 200
+
+
+@pytest.mark.parametrize("application", ["demoapp", "demoapp2"])
+def test_prefix_named_applications_keep_disjoint_worker_scopes(
+    fresh_client, monkeypatch, tmp_path, application
+):
+    import pytincture.backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setenv("MODULES_PATH", str(tmp_path))
+    (tmp_path / f"{application}.py").write_text("value = 1\n")
+    page = fresh_client.get(f"/{application}", follow_redirects=False)
+    assert page.headers["location"] == f"/{application}/"
+    worker = fresh_client.get(f"/{application}/frontend/sw.js")
+    assert worker.headers["service-worker-allowed"] == f"/{application}/"
+
+
+@pytest.mark.parametrize("picture, expected", [
+    ("demoapp/appcode/profile.png", "/demoapp/appcode/profile.png"),
+    ("/demoapp/appcode/profile.png", "/demoapp/appcode/profile.png"),
+    ("https://example.test/avatar.png", "https://example.test/avatar.png"),
+])
+def test_existing_session_avatar_survives_canonical_page_url(picture, expected):
+    import pytincture.backend.app as backend_app
+    from starlette.requests import Request
+
+    user = {"session_version": backend_app.AUTH_SESSION_SCHEMA_VERSION,
+            "email": "person@example.com", "is_authenticated": True, "picture": picture}
+    request = Request({"type": "http", "session": {
+        "user": user, "session_id": "existing-session", "auth_issued_at": time.time(),
+    }})
+    assert backend_app._locally_validated_auth_session(request)["picture"] == expected
+    assert user["picture"] == picture

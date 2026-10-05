@@ -5,6 +5,8 @@ import json
 import os
 
 import uvicorn
+from fastapi import Request
+from fastapi.responses import JSONResponse
 
 from pytincture import PytinctureConfig, create_app
 from pytincture.api_clients import create_client
@@ -54,6 +56,13 @@ config = PytinctureConfig(
 )
 
 app = create_app(config)
+
+
+@app.get("/external-api/signed-url-probe")
+async def signed_url_probe(request: Request):
+    # A real non-framework request avoids browser automation interception limits
+    # when the app is controlled by a service worker.
+    return JSONResponse({"url": str(request.url)})
 
 
 if __name__ == "__main__":

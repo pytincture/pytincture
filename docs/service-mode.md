@@ -52,7 +52,8 @@ supported compatibility launcher for existing code.
 
 ## Browser delivery
 
-`GET /{application}` returns the loader page. It fetches
+`GET /{application}` redirects to `/{application}/`, which returns the loader
+page within its application-specific service-worker scope. It fetches
 `/{application}/appcode/appcode.pyt`, a ZIP archive containing only the
 entrypoint, reachable local imports, configured browser files, and generated
 BFF stubs. Frontend and backend-hosted files receive the service-instance UUID

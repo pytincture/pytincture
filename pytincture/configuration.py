@@ -152,10 +152,11 @@ def canonical_widget_public_index_specs(values: object) -> tuple[str, ...]:
     return tuple(specs)
 
 
-def _setting(default, env: str, description: str, *, repr: bool = True):
+def _setting(default, env: str, description: str, *, repr: bool = True, kw_only: bool = False):
     return field(
         default=default,
         repr=repr,
+        kw_only=kw_only,
         metadata={"env": env, "description": description},
     )
 
@@ -237,6 +238,11 @@ class PytinctureConfig:
     allow_runtime_selection: bool = _setting(
         False, "PYTINCTURE_ALLOW_RUNTIME_SELECTION",
         "Development/testing only: allow the runtime query parameter; keep false in production.",
+    )
+    enable_service_worker: bool = _setting(
+        True, "PYTINCTURE_ENABLE_SERVICE_WORKER",
+        "Enable application-scoped framework asset caching in the browser.",
+        kw_only=True,
     )
     favicon_folder: Optional[str] = _setting(
         None, "PYTINCTURE_FAVICON_FOLDER", "Optional favicon file/directory."
@@ -1037,7 +1043,7 @@ class PytinctureConfig:
         if not isinstance(self.browser_runtime, str) or self.browser_runtime not in {"pyodide", "micropython"}:
             raise ValueError("browser_runtime must be pyodide or micropython")
         for name in (
-            "allow_runtime_selection",
+            "enable_service_worker", "allow_runtime_selection",
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
         ):
             if not isinstance(getattr(self, name), bool):
@@ -1666,6 +1672,7 @@ class PytinctureConfig:
         source = dict(os.environ if environ is None else environ)
         values = {}
         boolean_fields = {
+            "enable_service_worker",
             "allow_runtime_selection",
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
             "require_readonly_modules_path",

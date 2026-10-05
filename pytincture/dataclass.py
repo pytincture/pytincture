@@ -1521,6 +1521,7 @@ class PytinctureBFFError(RuntimeError):
                 file_path, class_name, source_code=code
             )
             class_imports.update(used_imports)
+            helper_start = len(stub_class_code)
             stub_class_code += f"\nclass {class_name}:\n"
             stub_class_code += f"    _pytincture_replay_enabled = {replay_enabled!r}\n"
             stub_class_code += f"    _pytincture_replay_capsule = {replay_capsule!r}\n"
@@ -1787,6 +1788,24 @@ class PytinctureBFFError(RuntimeError):
                 for node in class_node.body
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             }
+            declared_member_names.update(
+                target.id
+                for node in class_node.body
+                if isinstance(node, (ast.Assign, ast.AnnAssign))
+                for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+                if isinstance(target, ast.Name)
+            )
+            # Keep the historical transport names when available, but never
+            # let an exported member replace the transport it needs to call.
+            transport_names = {
+                name: f"_pytincture_{name}" if name in declared_member_names else name
+                for name in ("fetch", "fetch_sync", "fetch_stream")
+            }
+            helpers = stub_class_code[helper_start:]
+            for name, transport_name in transport_names.items():
+                helpers = helpers.replace(f"def {name}(", f"def {transport_name}(")
+                helpers = helpers.replace(f"self.{name}(", f"self.{transport_name}(")
+            stub_class_code = stub_class_code[:helper_start] + helpers
             for node in class_node.body:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith('_'):
                     is_streaming = node.name in streaming_methods
@@ -1802,7 +1821,7 @@ class PytinctureBFFError(RuntimeError):
                         call_url = f"{application_prefix}/classcall/{file_identifier}/{class_name}/{node.name}"
                         stub_class_code += f"        url = {call_url!r}\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
-                        stub_class_code += f"        stream_iter = self.fetch_stream(url, payload, {request_method!r})\n"
+                        stub_class_code += f"        stream_iter = self.{transport_names['fetch_stream']}(url, payload, {request_method!r})\n"
                         if stream_config.get("raw"):
                             stub_class_code +=  "        async for chunk in stream_iter:\n"
                             stub_class_code +=  "            if chunk:\n"
@@ -1826,31 +1845,32 @@ class PytinctureBFFError(RuntimeError):
                         call_url = f"{application_prefix}/classcall/{file_identifier}/{class_name}/{node.name}"
                         stub_class_code += f"        url = {call_url!r}\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
-                        stub_class_code += f"        response = await self.fetch(url, payload, {request_method!r})\n"
+                        stub_class_code += f"        response = await self.{transport_names['fetch']}(url, payload, {request_method!r})\n"
                         stub_class_code +=  "        return json.loads(response)\n"
                     else:
                         stub_class_code += f"    def {node.name}(self, *args, **kwargs):\n"
                         call_url = f"{application_prefix}/classcall/{file_identifier}/{class_name}/{node.name}"
                         stub_class_code += f"        url = {call_url!r}\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
-                        stub_class_code += f"        response = self.fetch_sync(url, payload, {request_method!r})\n"
+                        stub_class_code += f"        response = self.{transport_names['fetch_sync']}(url, payload, {request_method!r})\n"
                         stub_class_code +=  "        return json.loads(response)\n"
                         async_companion = f"{node.name}_async"
                         if async_companion not in declared_member_names:
                             stub_class_code += f"    async def {async_companion}(self, *args, **kwargs):\n"
                             stub_class_code += f"        url = {call_url!r}\n"
                             stub_class_code += "        payload = {'args': args, 'kwargs': kwargs}\n"
-                            stub_class_code += f"        response = await self.fetch(url, payload, {request_method!r})\n"
+                            stub_class_code += f"        response = await self.{transport_names['fetch']}(url, payload, {request_method!r})\n"
                             stub_class_code += "        return json.loads(response)\n"
-                elif isinstance(node, ast.Assign):
-                    for target in node.targets:
-                        if isinstance(target, ast.Name):
+                elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                    for target in targets:
+                        if isinstance(target, ast.Name) and not target.id.startswith('_'):
                             property_name = target.id
                             stub_class_code +=  "    @property\n"
                             stub_class_code += f"    def {property_name}(self):\n"
                             call_url = f"{application_prefix}/classcall/{file_identifier}/{class_name}/{property_name}"
                             stub_class_code += f"        url = {call_url!r}\n"
-                            stub_class_code +=  "        response = self.fetch_sync(url)\n"
+                            stub_class_code += f"        response = self.{transport_names['fetch_sync']}(url)\n"
                             stub_class_code +=  "        return json.loads(response)\n"
     all_imports.add("import json")
     all_imports.add("import base64")

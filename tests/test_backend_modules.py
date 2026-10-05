@@ -2369,13 +2369,13 @@ def test_sync_stream_closes_source_at_byte_limit():
             source(),
             raw=False,
             max_seconds=10,
-            max_bytes=6,
+            max_bytes=8,
             on_finish=lambda reason, size: reasons.append((reason, size)),
         )
-    ) == ["first\n"]
+    ) == ['"first"\n']
     assert closed == [True]
     # The rejected second item is never retained as serialized output.
-    assert reasons == [("byte-limit", 6)]
+    assert reasons == [("byte-limit", 8)]
 
 
 def test_stream_rejects_one_oversized_item_before_retaining_serialized_bytes():
@@ -2443,12 +2443,12 @@ def test_async_stream_disconnect_closes_source():
             max_bytes=100,
             on_finish=lambda reason, size: reasons.append((reason, size)),
         )
-        assert await anext(stream) == "first\n"
+        assert await anext(stream) == '"first"\n'
         await stream.aclose()
 
     asyncio.run(consume_one_then_disconnect())
     assert closed == [True]
-    assert reasons == [("disconnect", 6)]
+    assert reasons == [("disconnect", 8)]
 
 
 def test_admission_gate_rejects_saturation_then_recovers():
