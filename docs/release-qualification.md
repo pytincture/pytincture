@@ -9,11 +9,11 @@ every gate below has durable evidence.
 
 [PR #371](https://github.com/pytincture/pytincture/pull/371) prepares
 `1.0.0rc12` (npm `1.0.0-rc.12`) with eight BFF functional fixes, the service-worker startup correction
-(#372), and regression coverage. The preceding functional-fix commit passed all applicable
-[PR CI checks](https://github.com/pytincture/pytincture/actions/runs/36871398149),
-including 1,150 Python tests on each supported CPython version and browser
-application conformance across legacy Pyodide, portable Pyodide, and MicroPython.
-The versioned RC12 commit must pass its own PR checks before merge.
+(#372), and regression coverage. The RC12 implementation passed all 24 applicable
+[PR CI checks](https://github.com/pytincture/pytincture/actions/runs/36895566106),
+including 1,162 Python tests on each supported CPython version, all three browser
+engines, and application conformance across legacy Pyodide, portable Pyodide,
+and MicroPython. The merged release commit and signed tag must also pass CI.
 
 Service-worker regressions check first-load control and actual cached WASM reads
 in Chromium, Firefox, and WebKit. Repeat-navigation control is checked in Chromium
@@ -23,10 +23,12 @@ Offline emulation is checked in Chromium; WebKit uses a marked cache-response
 probe because of [Playwright issue #42775](https://github.com/microsoft/playwright/issues/42775).
 These automation limitations do not constitute full native-browser qualification.
 
-RC12 has no publication or observation evidence yet. Before tagging it, land
-[the RC11 publication evidence in PR #370](https://github.com/pytincture/pytincture/pull/370)
-and rerun the release gates for `v1.0.0rc12`. Publication remains a separate step;
-this preparation does not authorize a tag, GitHub release, or package upload.
+RC11 publication evidence is recorded through
+[merged PR #370](https://github.com/pytincture/pytincture/pull/370), and the
+`v1.0.0rc12` candidate progression gate passes with that record. RC12 publication
+and observation evidence remain pending. Publish only through the signed-tag,
+release CI, artifact attestation, and protected registry workflow described in
+[the release procedure](releasing.md).
 
 ## Current decision: NO-GO pending observation and edge evidence
 

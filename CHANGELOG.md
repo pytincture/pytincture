@@ -5,7 +5,7 @@ set when a release is published.
 
 ## Unreleased
 
-## 1.0.0rc12 — unpublished
+## 1.0.0rc12 — 2026-10-05
 
 - Fix the five-second service-worker startup delay (#372): redirect application
   pages to their scoped trailing-slash URLs while preserving existing entry
