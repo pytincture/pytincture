@@ -5,9 +5,11 @@ Run with a Python environment containing Playwright and Chromium:
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import socket
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -31,11 +33,18 @@ def main():
         root = Path(temporary)
         shutil.copytree(Path(__file__).with_name('browser_apps'), root, dirs_exist_ok=True)
         (root/'components/logo.bin').write_bytes(b'\x00\xffportable-resource')
-        editor_vendor = Path(__file__).resolve().parents[1]/'pytincture/frontend/node_modules/codemirror'
-        for name in ('lib/codemirror.js', 'lib/codemirror.css', 'LICENSE'):
-            target = root/'public/editor'/Path(name).name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(editor_vendor/name, target)
+        frontend = Path(__file__).resolve().parents[1]/'pytincture/frontend'
+        editor_assets = root/'public/editor'
+        editor_assets.mkdir(parents=True, exist_ok=True)
+        # CodeMirror 6 ships modules; bundle the browser fixture with the same
+        # locked esbuild dependency used by the framework runtime.
+        subprocess.run([
+            'node', str(frontend/'node_modules/esbuild/bin/esbuild'),
+            str(Path(__file__).with_name('browser_apps')/'editor.mjs'),
+            '--bundle', '--format=iife', '--global-name=PortableEditor',
+            '--outfile=' + str(editor_assets/'codemirror.js'),
+        ], check=True, env={**os.environ, 'NODE_PATH': str(frontend/'node_modules')})
+        shutil.copyfile(frontend/'node_modules/codemirror/LICENSE', editor_assets/'LICENSE')
         config = root / 'pyproject.toml'
         settings = '[tool.pytincture.browser]\n'
         if args.micropython_assets:
@@ -46,7 +55,7 @@ def main():
                           + '[tool.pytincture.browser.apps.warehouse]\nresources=["components/logo.bin"]\n'
                           + 'assets=["public/settings.json", "public/theme.css"]\nstyles=["public/theme.css"]\n'
                           + '[tool.pytincture.browser.apps.widgets]\n'
-                          + '[tool.pytincture.browser.apps.editor]\nassets=["public/editor/codemirror.js","public/editor/codemirror.css","public/editor/LICENSE"]\nscripts=["public/editor/codemirror.js"]\nstyles=["public/editor/codemirror.css"]\n')
+                          + '[tool.pytincture.browser.apps.editor]\nassets=["public/editor/codemirror.js","public/editor/LICENSE"]\nscripts=["public/editor/codemirror.js"]\n')
         for name in ('warehouse', 'widgets', 'editor'):
             manifest = build_browser_bundle(config, application=name)
             assert 'server-implementation-must-not-be-shipped' not in (manifest.parent / 'sources.json').read_text()
@@ -136,13 +145,13 @@ def main():
                         page.get_by_role('button',name='Save code').click()
                         expect(page.locator('#saved-code')).to_have_text('portable editor '+runtime)
                         page.get_by_role('button',name='Open editor').click()
-                        expect(page.locator('.CodeMirror')).to_contain_text('portable editor '+runtime)
+                        expect(page.locator('.cm-editor')).to_contain_text('portable editor '+runtime)
                         page.get_by_role('button',name='Save code').click()
                         page.reload()
                         page.locator('#pytincture-loading').wait_for(state='hidden',timeout=60000)
                         warm = page.evaluate('pytinctureRuntime.getInfo()')
                         page.get_by_role('button',name='Open editor').click()
-                        expect(page.locator('.CodeMirror')).to_contain_text('portable editor '+runtime)
+                        expect(page.locator('.cm-editor')).to_contain_text('portable editor '+runtime)
                         await_fonts = page.evaluate('async () => {await document.fonts.ready; return document.fonts.status}')
                         assert await_fonts == 'loaded'
                         assert not page.evaluate('window.__cspViolations'), page.evaluate('window.__cspViolations')

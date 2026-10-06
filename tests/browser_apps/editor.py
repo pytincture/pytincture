@@ -10,20 +10,21 @@ editor = None
 async def main():
     global editor
     root = js.document.createElement('section')
-    root.innerHTML = '<h1>Portable editor</h1><button id="open-editor">Open editor</button><p id="saved-code"></p><dialog id="editor-dialog"><textarea id="code"></textarea><button id="save-code">Save code</button></dialog>'
+    root.innerHTML = '<h1>Portable editor</h1><button id="open-editor">Open editor</button><p id="saved-code"></p><dialog id="editor-dialog"><div id="code"></div><button id="save-code">Save code</button></dialog>'
     js.document.body.appendChild(root)
     dialog = js.document.getElementById('editor-dialog')
-    textarea = js.document.getElementById('code')
-    editor = js.CodeMirror.fromTextArea(textarea, js.JSON.parse('{"lineNumbers":true}'))
-    editor.setValue(js.localStorage.getItem('portable-code') or 'print("hello")')
+    editor = js.PortableEditor.createEditor(
+        js.document.getElementById('code'),
+        js.localStorage.getItem('portable-code') or 'print("hello")',
+    )
 
     def open_dialog(event):
         dialog.showModal()
-        editor.refresh()
+        editor.requestMeasure()
         editor.focus()
 
     def save_code(event):
-        value = editor.getValue()
+        value = editor.state.doc.toString()
         js.localStorage.setItem('portable-code', value)
         js.document.getElementById('saved-code').textContent = value
         dialog.close()
