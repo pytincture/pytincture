@@ -1239,6 +1239,94 @@ def test_widgetset_discovery_reads_installed_distribution_without_importing(
     assert "external_widget" not in sys.modules
 
 
+def _finder_editable_widget(tmp_path: Path, monkeypatch, *, finder_target: Path):
+    """Lay out a setuptools-style finder editable install of external_widget.
+
+    RECORD lists only the .pth and finder, like a real PEP 660 install, and
+    the package is reachable solely through a meta-path finder -- PathFinder
+    cannot see it.
+    """
+    import importlib.machinery
+    import importlib.util
+
+    application_root = tmp_path / "applications"
+    application_root.mkdir()
+    (application_root / "demo.py").write_text(
+        "import external_widget\n", encoding="utf-8"
+    )
+
+    project = tmp_path / "project"
+    package = project / "external_widget"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text(
+        '__widgetset__ = "external-widget"\n'
+        'raise RuntimeError("server must not import browser package")\n',
+        encoding="utf-8",
+    )
+
+    site = tmp_path / "site-packages"
+    dist_info = site / "external_widget-4.5.6.dist-info"
+    dist_info.mkdir(parents=True)
+    (dist_info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: external-widget\nVersion: 4.5.6\n",
+        encoding="utf-8",
+    )
+    (dist_info / "top_level.txt").write_text("external_widget\n", encoding="utf-8")
+    (dist_info / "RECORD").write_text(
+        "__editable__.external_widget-4.5.6.pth,,\n"
+        "__editable___external_widget_4_5_6_finder.py,,\n",
+        encoding="utf-8",
+    )
+    (dist_info / "direct_url.json").write_text(
+        json.dumps({"url": project.as_uri(), "dir_info": {"editable": True}}),
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(site))
+
+    class EditableFinder:
+        @staticmethod
+        def find_spec(name, path=None, target=None):
+            if name != "external_widget":
+                return None
+            init = finder_target / "__init__.py"
+            return importlib.util.spec_from_file_location(
+                name, init, submodule_search_locations=[str(finder_target)]
+            )
+
+    monkeypatch.setattr(sys, "meta_path", [EditableFinder(), *sys.meta_path])
+    assert importlib.machinery.PathFinder.find_spec("external_widget") is None
+    return application_root, package
+
+
+def test_widgetset_discovery_reads_finder_editable_install_without_importing(
+    tmp_path: Path, monkeypatch
+):
+    application_root, package = _finder_editable_widget(
+        tmp_path, monkeypatch, finder_target=tmp_path / "project" / "external_widget"
+    )
+
+    assert "external_widget" not in sys.modules
+    assert discover_widgetset("demo", str(application_root)) == "external-widget==4.5.6"
+    assert "external_widget" not in sys.modules
+
+
+def test_widgetset_discovery_ignores_editable_source_outside_the_project(
+    tmp_path: Path, monkeypatch
+):
+    elsewhere = tmp_path / "elsewhere" / "external_widget"
+    elsewhere.mkdir(parents=True)
+    (elsewhere / "__init__.py").write_text(
+        '__widgetset__ = "impostor-widget"\n', encoding="utf-8"
+    )
+    application_root, _package = _finder_editable_widget(
+        tmp_path, monkeypatch, finder_target=elsewhere
+    )
+
+    # A finder resolving outside the project recorded in direct_url.json is
+    # not this distribution's source, so it must not decide the widgetset.
+    assert discover_widgetset("demo", str(application_root)) == ""
+
+
 def test_widget_trust_policy_is_an_exact_administrator_allowlist():
     policy = canonical_widget_trust_policy(
         json.dumps(
