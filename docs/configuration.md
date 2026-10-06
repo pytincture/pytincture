@@ -233,7 +233,8 @@ The contract test checks every row in this table against the dataclass model.
 | `google_client_secret` | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret. |
 | `microsoft_client_id` | `MICROSOFT_CLIENT_ID` | Microsoft OAuth client id. |
 | `microsoft_client_secret` | `MICROSOFT_CLIENT_SECRET` | Microsoft OAuth client secret. |
-| `microsoft_tenant_id` | `MICROSOFT_TENANT_ID` | Required Microsoft Entra tenant id. |
+| `microsoft_tenant_id` | `MICROSOFT_TENANT_ID` | Microsoft Entra tenant id, or organizations with the multi-tenant opt-in. |
+| `microsoft_allow_multitenant` | `MICROSOFT_ALLOW_MULTITENANT` | Default false. Allow work/school accounts across organizations when the tenant id is organizations. |
 | `oauth_initiation_rate_limit_attempts` | `OAUTH_INITIATION_RATE_LIMIT_ATTEMPTS` | OAuth login initiations allowed per peer/application/provider window. |
 | `oauth_callback_rate_limit_attempts` | `OAUTH_CALLBACK_RATE_LIMIT_ATTEMPTS` | OAuth callbacks allowed per peer/application/provider window. |
 | `oauth_rate_limit_window_seconds` | `OAUTH_RATE_LIMIT_WINDOW_SECONDS` | OAuth initiation and callback rate-limit window. |

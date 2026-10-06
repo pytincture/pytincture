@@ -21,10 +21,8 @@ from packaging.version import InvalidVersion, Version
 from pytincture.backend.application_admission import canonical_application_admission
 from pytincture.backend.safe_paths import validate_application_name
 from pytincture.backend.storage import validate_redis_url
+from pytincture.backend.microsoft import valid_microsoft_tenant_id
 from pytincture.backend.widget_trust import canonical_widget_trust_policy
-
-
-_MICROSOFT_SHARED_TENANTS = {"common", "organizations", "consumers"}
 
 
 def _is_literal_loopback_host(value: str) -> bool:
@@ -52,18 +50,6 @@ def _is_literal_loopback_origin(value: str) -> bool:
         return ipaddress.ip_address(parsed.hostname).is_loopback
     except ValueError:
         return False
-
-
-def _valid_microsoft_tenant_id(value: str) -> bool:
-    normalized = value.strip().casefold()
-    return bool(
-        normalized
-        and normalized not in _MICROSOFT_SHARED_TENANTS
-        and re.fullmatch(
-            r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?",
-            value.strip(),
-        )
-    )
 
 
 def _canonical_browser_connect_origin(value: str) -> str:
@@ -337,7 +323,10 @@ class PytinctureConfig:
         "", "MICROSOFT_CLIENT_SECRET", "Microsoft OAuth client secret.", repr=False
     )
     microsoft_tenant_id: str = _setting(
-        "", "MICROSOFT_TENANT_ID", "Required Microsoft Entra tenant id."
+        "", "MICROSOFT_TENANT_ID", "Microsoft Entra tenant id, or organizations with the multi-tenant opt-in."
+    )
+    microsoft_allow_multitenant: bool = _setting(
+        False, "MICROSOFT_ALLOW_MULTITENANT", "Default false. Allow work/school accounts across organizations when the tenant id is organizations."
     )
     oauth_initiation_rate_limit_attempts: int = _setting(
         1200,
@@ -1542,10 +1531,13 @@ class PytinctureConfig:
             raise ValueError(
                 "Microsoft authentication requires client id, client secret, and tenant id"
             )
-        if self.microsoft_tenant_id and not _valid_microsoft_tenant_id(
-            self.microsoft_tenant_id
+        if self.microsoft_tenant_id and not valid_microsoft_tenant_id(
+            self.microsoft_tenant_id, allow_multitenant=self.microsoft_allow_multitenant
         ):
-            raise ValueError("microsoft_tenant_id must identify one explicit tenant")
+            raise ValueError(
+                "microsoft_tenant_id must identify one explicit tenant, or organizations "
+                "with microsoft_allow_multitenant=true"
+            )
         if self.enable_saml_auth:
             if self.saml_providers:
                 try:
@@ -1703,7 +1695,7 @@ class PytinctureConfig:
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
             "require_readonly_modules_path",
             "enable_user_login", "enable_dev_email_login", "enable_google_auth",
-            "enable_microsoft_auth", "enable_saml_auth", "enable_bff_replay_tokens",
+            "enable_microsoft_auth", "microsoft_allow_multitenant", "enable_saml_auth", "enable_bff_replay_tokens",
             "require_prebuilt_appcode",
             "bff_replay_require_shared_store",
             "use_redis_instance", "enable_mcp", "trusted_proxy_headers",

@@ -1002,6 +1002,34 @@ def test_microsoft_auth_requires_explicit_tenant(tmp_path):
         )
 
 
+def test_microsoft_multitenant_configuration_roundtrips(tmp_path):
+    config = PytinctureConfig.from_env({
+        "MODULES_PATH": str(tmp_path), "ENABLE_MICROSOFT_AUTH": "true",
+        "MICROSOFT_CLIENT_ID": "client", "MICROSOFT_CLIENT_SECRET": "secret",
+        "MICROSOFT_TENANT_ID": "organizations", "MICROSOFT_ALLOW_MULTITENANT": "true",
+        "SAML_SECRET_KEY": "0123456789abcdef" * 2,
+        "PYTINCTURE_ALLOWED_HOSTS": "service.example",
+        "PYTINCTURE_CANONICAL_ORIGIN": "https://service.example",
+    })
+    assert config.microsoft_allow_multitenant is True
+    assert config.to_environ()["MICROSOFT_ALLOW_MULTITENANT"] == "true"
+    assert PytinctureConfig.from_env(config.to_environ()) == config
+
+
+@pytest.mark.parametrize("tenant", ["common", "consumers", "../tenant", "https://evil.example"])
+def test_microsoft_multitenant_opt_in_rejects_other_authorities(tmp_path, tenant):
+    with pytest.raises(ValueError, match="one explicit tenant"):
+        PytinctureConfig(modules_path=str(tmp_path), microsoft_tenant_id=tenant,
+                         microsoft_allow_multitenant=True)
+
+
+def test_microsoft_organizations_authority_requires_explicit_opt_in(tmp_path):
+    with pytest.raises(ValueError, match="microsoft_allow_multitenant=true"):
+        PytinctureConfig(modules_path=str(tmp_path), microsoft_tenant_id="organizations")
+    config = PytinctureConfig(modules_path=str(tmp_path), microsoft_tenant_id="tenant-123")
+    assert config.microsoft_allow_multitenant is False
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
