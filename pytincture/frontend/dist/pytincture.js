@@ -633,7 +633,7 @@ import ${manifest.entrypoint} as _pytincture_client`));
 
   // pytincture.js
   var FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
-  var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc12";
+  var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc13";
   var BUILTIN_WIDGET_WHEEL_LOCKS = Object.freeze({
     "dhxpyt==0.9.18": "https://files.pythonhosted.org/packages/0c/e7/b48e045156c7b4bf20778597991d7dfe591fd46ada5267b747e2d5977244/dhxpyt-0.9.18-py3-none-any.whl#sha256=acd8db34547c6b61c83a01958e9545ee724564859e5bcb53713ae3c872234fbe"
   });
@@ -659,10 +659,14 @@ import ${manifest.entrypoint} as _pytincture_client`));
       ]
     }
   });
-  var CSRF_COOKIE_NAMES = Object.freeze([
-    "__Host-pytincture-csrf",
-    "pytincture-dev-csrf"
-  ]);
+  var CSRF_COOKIE_NAMESPACE = "[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?";
+  var CSRF_COOKIE_NAME_PATTERN = new RegExp(
+    `^(?:__Host-(${CSRF_COOKIE_NAMESPACE})-csrf|(${CSRF_COOKIE_NAMESPACE})-dev-csrf)$`
+  );
+  function isCsrfCookieName(cookieName) {
+    const match = CSRF_COOKIE_NAME_PATTERN.exec(String(cookieName));
+    return Boolean(match) && !(match[1] || match[2]).includes("--");
+  }
   var DEFAULT_CONFIG = {
     runtime: "pyodide",
     deliveryMode: "legacy-package",
@@ -1091,7 +1095,7 @@ import ${manifest.entrypoint} as _pytincture_client`));
   }
   function normalizeCsrfCookieName(cookieName) {
     const selected = cookieName || defaultCsrfCookieName();
-    if (!CSRF_COOKIE_NAMES.includes(selected)) {
+    if (!isCsrfCookieName(selected)) {
       throw new Error("Unsupported Pytincture CSRF cookie name.");
     }
     return selected;

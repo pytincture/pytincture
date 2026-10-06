@@ -5,13 +5,15 @@ set when a release is published.
 
 ## Unreleased
 
-- Discover a widgetset installed in editable mode (`pip install -e`). Its
-  RECORD lists only the `.pth` file and the setuptools finder, never the
-  package source, and the finder is invisible to `PathFinder`, so an app that
-  imported the widgetset by name resolved no widgetset at all. Editable
-  installs are now located through `importlib.util.find_spec`, without
-  importing the package, and trusted only inside the project directory
-  recorded in `direct_url.json`.
+## 1.0.0rc13 — unpublished
+
+- Add `cookie_namespace` / `AUTH_COOKIE_NAMESPACE` (default `pytincture`) so
+  services sharing a host can use distinct session, CSRF, and SAML handshake
+  cookie names (#375). Browsers scope cookies by host, not port, so two
+  services on one host previously signed each other out. HTTPS names keep the
+  `__Host-` prefix; the browser runtime and generated BFF clients accept
+  `__Host-<namespace>-csrf` and `<namespace>-dev-csrf` instead of the two fixed
+  names. Default cookie names are unchanged.
 
 ## 1.0.0rc12 — 2026-10-05
 

@@ -5026,16 +5026,16 @@ AUTH_SESSION_HTTPS_ONLY = os.getenv(
     "AUTH_SESSION_HTTPS_ONLY",
     "false" if DEV_EMAIL_LOGIN_ONLY else "true",
 ).lower() == "true"
-_SESSION_COOKIE = (
-    "__Host-pytincture-session"
+# Cookies are scoped by host, not port: applications sharing a host need
+# distinct names or each sign-in replaces the other's session.
+AUTH_COOKIE_NAMESPACE = _PYTINCTURE_CONFIG.cookie_namespace
+_COOKIE_PREFIX = (
+    f"__Host-{AUTH_COOKIE_NAMESPACE}-"
     if AUTH_SESSION_HTTPS_ONLY
-    else "pytincture-dev-session"
+    else f"{AUTH_COOKIE_NAMESPACE}-dev-"
 )
-_CSRF_COOKIE = (
-    "__Host-pytincture-csrf"
-    if AUTH_SESSION_HTTPS_ONLY
-    else "pytincture-dev-csrf"
-)
+_SESSION_COOKIE = f"{_COOKIE_PREFIX}session"
+_CSRF_COOKIE = f"{_COOKIE_PREFIX}csrf"
 
 if ALLOW_DEVELOPMENT_AUTH_ORIGIN:
     if not _authentication_enabled():
@@ -5907,12 +5907,7 @@ def _get_saml_handshake_cookie_serializer() -> URLSafeTimedSerializer:
 
 
 def _saml_handshake_cookie_name(application: str) -> str:
-    prefix = (
-        "__Host-pytincture-saml-handshake-"
-        if AUTH_SESSION_HTTPS_ONLY
-        else "pytincture-dev-saml-handshake-"
-    )
-    return f"{prefix}{application}"
+    return f"{_COOKIE_PREFIX}saml-handshake-{application}"
 
 
 def _saml_handshake_cookie_path(application: str) -> str:
