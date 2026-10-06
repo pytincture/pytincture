@@ -150,7 +150,13 @@ def main():
     parser.add_argument('--profile', choices=PROFILES, action='append')
     parser.add_argument('--app', choices=['example','chat'], action='append')
     args = parser.parse_args()
-    env = {**os.environ, 'PYTHONPATH':str(ROOT)}
+    # This suite repeatedly opens/reloads full applications from one peer.
+    # Give its browser diagnostics enough capacity without changing production
+    # defaults or hiding browser errors and failed HTTP responses.
+    env = {
+        **os.environ, 'PYTHONPATH':str(ROOT),
+        'BROWSER_LOG_RATE_LIMIT_ATTEMPTS': os.environ.get('BROWSER_LOG_RATE_LIMIT_ATTEMPTS', '1000'),
+    }
     if args.prepared:
         prepared = json.loads(args.prepared.read_text())
         args.example, args.chat = Path(prepared['example']), Path(prepared['chat'])
