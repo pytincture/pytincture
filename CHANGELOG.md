@@ -5,12 +5,15 @@ set when a release is published.
 
 ## Unreleased
 
-- Read contained files on Windows. `safe_paths` opened the root directory with
-  `os.open()` to walk paths through directory descriptors; Windows refuses that
-  with `PermissionError`, before the existing no-`dir_fd` fallback applied, so
-  no BFF module or asset could be read. Platforms without `dir_fd` now take the
-  resolved-path open up front; containment, no-symlink and identity checks are
-  unchanged.
+## 1.0.0rc13 — unpublished
+
+- Add `cookie_namespace` / `AUTH_COOKIE_NAMESPACE` (default `pytincture`) so
+  services sharing a host can use distinct session, CSRF, and SAML handshake
+  cookie names (#375). Browsers scope cookies by host, not port, so two
+  services on one host previously signed each other out. HTTPS names keep the
+  `__Host-` prefix; the browser runtime and generated BFF clients accept
+  `__Host-<namespace>-csrf` and `<namespace>-dev-csrf` instead of the two fixed
+  names. Default cookie names are unchanged.
 
 ## 1.0.0rc12 — 2026-10-05
 
