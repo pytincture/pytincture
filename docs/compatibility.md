@@ -34,6 +34,13 @@ versions for each release candidate.
 
 ## Version compatibility rules
 
+RC13 keeps the version-1 BFF contract, RC11 resource limits, and RC12 page and
+streaming behavior. It adds `cookie_namespace` / `AUTH_COOKIE_NAMESPACE`; the
+default, `pytincture`, keeps every existing cookie name, so nothing changes until
+a deployment sets it. Rebuild precompiled appcode and portable bundles before
+setting a namespace: the regenerated clients read the namespaced CSRF cookie.
+See [RC13 migration notes](migrations/0.10-to-1.0.md#rc12-to-rc13).
+
 RC12 keeps the version-1 BFF contract and RC11 resource limits. Application
 page links at `/app` redirect to `/app/` so the scoped service worker controls
 the document. BFF, authentication, and appcode endpoint paths stay the same. Rebuild

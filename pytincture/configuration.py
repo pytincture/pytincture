@@ -152,6 +152,26 @@ def canonical_widget_public_index_specs(values: object) -> tuple[str, ...]:
     return tuple(specs)
 
 
+_COOKIE_NAMESPACE_PATTERN = re.compile(r"^[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?$")
+
+
+def validate_cookie_namespace(value: object) -> str:
+    """Return the cookie-name stem shared by one application's auth cookies.
+
+    Browsers scope cookies by host, never by port, so two applications on one
+    host must not share cookie names. The stem stays lowercase ASCII so every
+    derived name is a valid RFC 6265 token and the ``__Host-``/``-dev-``
+    structure the browser runtime checks remains unambiguous.
+    """
+    candidate = str(value).strip()
+    if not _COOKIE_NAMESPACE_PATTERN.fullmatch(candidate) or "--" in candidate:
+        raise ValueError(
+            "cookie_namespace must be 1-32 lowercase letters, digits, or single "
+            "hyphens, starting with a letter and not ending with a hyphen"
+        )
+    return candidate
+
+
 def _setting(default, env: str, description: str, *, repr: bool = True, kw_only: bool = False):
     return field(
         default=default,
@@ -477,6 +497,11 @@ class PytinctureConfig:
         None, "AUTH_SESSION_HTTPS_ONLY", "Secure-cookie requirement; derived when omitted."
     )
     session_same_site: str = _setting("lax", "AUTH_SESSION_SAME_SITE", "Cookie SameSite policy.")
+    cookie_namespace: str = _setting(
+        "pytincture",
+        "AUTH_COOKIE_NAMESPACE",
+        "Stem of the session, CSRF, and SAML handshake cookie names; distinct per application sharing a host.",
+    )
     session_max_claim_count: int = _setting(
         32,
         "AUTH_SESSION_MAX_CLAIM_COUNT",
@@ -1150,6 +1175,7 @@ class PytinctureConfig:
         object.__setattr__(self, "session_same_site", self.session_same_site.lower())
         if self.session_same_site == "none" and self.session_https_only is False:
             raise ValueError("session_same_site='none' requires session_https_only=true")
+        object.__setattr__(self, "cookie_namespace", validate_cookie_namespace(self.cookie_namespace))
         if self.max_request_body_bytes <= 0:
             raise ValueError("max_request_body_bytes must be greater than zero")
         if self.saml_transaction_ttl_seconds <= 0:
