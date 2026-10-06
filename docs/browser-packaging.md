@@ -1,9 +1,14 @@
 # Browser packaging and dynamic imports
 
+This guide covers the default legacy Pyodide delivery. Opt-in portable bundles
+have a separate [builder and import configuration](browser-runtimes.md), including
+`dynamic-imports`, `browser-substitutes`, and `server-only-imports`.
+
 Pytincture builds `appcode.pyt` from a conservative static graph. It includes:
 
 - `<application>.py`;
 - recursively reachable local `import x` and `from x import y` Python files;
+- discovered installed pure-Python dependencies, their package data and metadata;
 - files selected by `PYTINCTURE_BROWSER_FILES`; and
 - browser-safe stubs for decorated BFF modules.
 
@@ -15,9 +20,12 @@ Packages containing only BFF proxies use Python namespace-package behavior so
 a server-side package initializer is not copied into the archive. Initializers
 required by ordinary browser modules remain part of the browser graph.
 
-It excludes virtual environments, caches, `node_modules`, build output, server
-implementations, and unrelated files. Archive paths are relative, cannot
-escape the module root, and follow the [appcode v1 contract](contracts/appcode-v1.md).
+Local discovery excludes virtual environments, caches, `node_modules`, build
+output, server implementations, and unrelated files. Installed dependencies are
+read separately through their distribution inventories, without executing package
+code; native distributions and Widgetsets use their own runtime installation
+paths. Archive paths are relative and follow the
+[appcode v1 contract](contracts/appcode-v1.md).
 
 ## Dynamic imports
 

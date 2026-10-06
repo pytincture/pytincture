@@ -1,7 +1,7 @@
 # pyTincture
 
 ## Overview
-`pyTincture` is a Python framework for browser interfaces with Python backends. Pyodide is the default browser runtime. This feature branch adds opt-in portable bundles for Pyodide and MicroPython. Engine and delivery mode are independent; see [configuration and migration](docs/browser-runtimes.md) and the [portable Python profile](docs/portable-python-profile.md).
+`pyTincture` is a Python framework for browser interfaces with Python backends. Pyodide with legacy package delivery is the default. Portable bundles for Pyodide and MicroPython are opt-in. Engine and delivery mode are independent; see [configuration and migration](docs/browser-runtimes.md) and the [portable Python profile](docs/portable-python-profile.md).
 
 Development toward a stable 1.0 release is tracked in the [Pytincture 1.0 roadmap](ROADMAP.md) and the [Pytincture 1.0 GitHub milestone](https://github.com/pytincture/pytincture/milestone/1).
 
@@ -53,29 +53,33 @@ evidence for browser startup, package generation, health, and BFF calls.
 
 ## Installation
 
-From PyPI:
+Install the latest published release candidate from PyPI:
 ~~~
-pip install pytincture
+pip install 'pytincture==1.0.0rc12'
 ~~~
+
+An unpinned `pip install pytincture` selects the latest stable release. This
+checkout is developing RC13; use the source installation below for unreleased
+changes and see the [migration notes](docs/migrations/0.10-to-1.0.md).
 
 The base install serves unauthenticated applications and local development
 without pulling optional identity-provider, Redis, or MCP stacks. Install only
 the features a deployment enables:
 
 ```bash
-pip install "pytincture[password]"  # Argon2/bcrypt local login
-pip install "pytincture[oauth]"     # Google/Microsoft OAuth
-pip install "pytincture[saml]"      # SAML 2.0
-pip install "pytincture[redis]"     # shared Upstash state
-pip install "pytincture[mcp]"       # MCP endpoint
-pip install "pytincture[dev]"       # contributors: all features and test/build tools
+pip install "pytincture[password]==1.0.0rc12"  # Argon2/bcrypt local login
+pip install "pytincture[oauth]==1.0.0rc12"     # Google/Microsoft OAuth
+pip install "pytincture[saml]==1.0.0rc12"      # SAML 2.0
+pip install "pytincture[redis]==1.0.0rc12"     # shared Upstash state
+pip install "pytincture[mcp]==1.0.0rc12"       # MCP endpoint
+pip install "pytincture[dev]==1.0.0rc12"       # all features and test/build tools
 ```
 
 From Source:
   1. Clone the repository:
 ~~~
-git clone https://github.com/yourusername/pyTincture.git
-cd pyTincture
+git clone https://github.com/pytincture/pytincture.git
+cd pytincture
 ~~~
 
   2. Install dependencies:
@@ -284,7 +288,7 @@ export documented in [standalone mode](docs/standalone-mode.md).
 1. Install the JS tooling once:
    ```
    cd pytincture/frontend
-   npm install
+   npm ci --ignore-scripts
    ```
 2. Produce distributable artifacts (this automatically syncs `package.json`'s version to the Python framework’s `pytincture/__init__.py`):
    ```
@@ -307,8 +311,10 @@ npm pack --dry-run
 The build synchronizes the npm and browser runtime versions with the Python
 framework version. Official npm publication occurs from the validated GitHub
 release artifacts described below.
-An exact npm release may be used for controlled demos only when its SRI is
-copied from the trusted release integrity manifest, for example:
+An exact npm release may be used for controlled demos only after that version
+is published to npm and its SRI is copied from the trusted release integrity
+manifest. The URL below requires completed npm publication; use the Python-wheel
+asset export while publication is pending:
 ```
 <script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.13/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
 ```
@@ -376,20 +382,27 @@ Version 0.10 intentionally removes insecure legacy behavior:
 - change manually issued GET method calls to POST or declare `@bff_http_methods("GET")`;
 - explicitly list extra browser package files and public assets;
 - explicitly opt in to MCP operations;
-- update custom cookie-based clients to echo the `pytincture_csrf` cookie in `X-CSRF-Token` for POST, PUT, PATCH, and DELETE.
+- update custom cookie-based clients to echo the configured CSRF cookie in
+  `X-CSRF-Token` for POST, PUT, PATCH, and DELETE. Default names are
+  `__Host-pytincture-csrf` on HTTPS and `pytincture-dev-csrf` for HTTP
+  development; RC13 supports per-service cookie namespaces. See
+  [authentication](docs/authentication.md).
 
-Pytincture does not currently provide rate limiting. Production deployments should enforce suitable login and request rates at the application gateway or reverse proxy.
+Pytincture provides worker-local login/request limits and bounded admission.
+Production deployments should also enforce fleet-wide login and request rates
+at the application gateway or reverse proxy; see [production deployment](docs/production-deployment.md).
 
 ### CI/CD release flow
 Publishing a GitHub release runs the complete CI workflow. CI builds the wheel,
-source distribution, and npm tarball once; verifies their contents, versions,
-and hashes; clean-installs every optional feature; and publishes those exact
-validated files only after the Python, JavaScript, browser, and production
-gates pass. Manual publish workflows are intentionally not provided.
+source distribution, and npm tarball, verifies their contents and reproducibility,
+and attests their exact bytes after all qualification gates pass. Protected
+PyPI and npm workflows independently publish those retained artifacts. Both
+support retries by published release tag; neither accepts arbitrary build files.
 
-Required GitHub secrets:
-- `PYPI_PASSWORD`: a PyPI API token (formatted `pypi-***`) with publish rights to `pytincture`.
-- `NPM_TOKEN`: an npm access token with publish rights to `@pytincture/runtime`.
+PyPI uses the protected `PYPI_PASSWORD` project token. npm uses trusted-publisher
+OIDC, with no `NPM_TOKEN`. Registry publication and approvals are independent;
+a GitHub or PyPI release does not establish npm/CDN availability. See the
+[release procedure](docs/releasing.md) for configuration and retry instructions.
 
 The artifact contract and local verification command are documented in the
 [release artifact guide](docs/release-artifacts.md).
