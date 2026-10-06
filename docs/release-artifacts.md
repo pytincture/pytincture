@@ -1,20 +1,26 @@
 # Release artifacts and dependency extras
 
-Pytincture publishes three semantically synchronized artifacts:
+Pytincture builds three semantically synchronized release artifacts:
 
 - a platform-independent Python wheel;
 - a Python source distribution; and
 - the `@pytincture/runtime` npm tarball.
 
+PyPI and npm publication use separate protected workflows and approvals. A
+retained GitHub release artifact is not proof of availability from either registry;
+check the [publication evidence](release-qualification.md) for the selected release.
+
 The Python wheel embeds the backend, browser runtime bundles, service worker,
 and the pinned Pyodide 0.29.3 runtime. The npm package intentionally contains
-only its README, package metadata, and built JavaScript bundles; it does not
-duplicate Pyodide.
+its README, package metadata, built JavaScript bundles and source maps, release
+integrity manifest, and the pinned Material Design icon CSS/font/license files.
+It does not duplicate the Pyodide distribution.
 
 ## Dependency model
 
-`pip install pytincture` installs the FastAPI/Starlette service core. Optional
-features have explicit extras:
+The base package installs the FastAPI/Starlette service core. For the latest
+published candidate, use `pip install 'pytincture==1.0.0rc12'`; an unpinned install
+selects the latest stable release. Optional features have explicit extras:
 
 | Extra | Required for |
 | --- | --- |
@@ -41,6 +47,7 @@ lifecycle scripts.
 Build the runtime first, then all three release files:
 
 ```bash
+export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
 cd pytincture/frontend
 npm ci --ignore-scripts
 npm run build
@@ -48,7 +55,6 @@ mkdir -p ../../dist
 npm pack --pack-destination ../../dist
 cd ../..
 python -m build
-export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
 python scripts/normalize_sdist.py dist/pytincture-*.tar.gz "$SOURCE_DATE_EPOCH"
 python scripts/inspect_release_artifacts.py \
   --wheel dist/pytincture-*.whl \
@@ -96,8 +102,10 @@ clean environment. It also runs Python 3.13/3.14, JavaScript, Chromium,
 Firefox, WebKit, and production topology gates.
 
 Publishing a GitHub release runs the same gates and attests the exact validated
-artifact bytes after they pass. PyPI publishes from that release run. The npm
-publisher additionally verifies the published tag and commit, release-triggered
-CI identity, artifact attestation, package identity, filename, and mapped
-SemVer. A manual npm retry accepts only a published tag and resolves the same
-successful attested release run; it cannot select an arbitrary CI artifact.
+artifact bytes after they pass. Both protected publishers verify the published
+tag and commit, protected-default-branch ancestry, release-triggered CI identity,
+artifact attestation, package identity, filename, and registry-specific version.
+Manual retries accept only a published tag and resolve the same successful
+attested release run; they cannot select arbitrary CI artifacts. PyPI uses the
+protected project token and npm uses trusted-publisher OIDC. See the
+[release procedure](releasing.md).

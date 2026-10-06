@@ -6,7 +6,7 @@ This document defines the API surface Pytincture intends to stabilize for
 that the inventory still matches the implementation.
 
 The contract becomes a semantic-versioning commitment with 1.0. During the
-remaining 0.x releases, incompatible corrections remain possible, but the
+1.0 prerelease period, incompatible corrections remain possible, but the
 project will use the deprecation process whenever practical.
 
 ## Python API
@@ -24,7 +24,7 @@ Import these names from `pytincture`:
   ssl_certfile=None, env_vars=None, bff_docs_path="/bff-docs",
   bff_docs_title="", default_application=None,
   favicon_folder=None, host=None)` starts the Pytincture service. The existing call forms
-  remain supported when the planned application factory is introduced.
+  remain supported alongside `create_app()`.
 - `set_modules_path(path)` selects the application module root for the current
   process and synchronizes `MODULES_PATH`.
 - `get_modules_path()` returns the selected module root, then `MODULES_PATH`,
@@ -269,8 +269,8 @@ must pass these fields explicitly or read the environment into them.
 
 ### Runtime hooks
 
-The following hooks currently live in `pytincture.backend.app` and remain
-supported while the typed configuration/application-factory API is developed:
+The following compatibility hooks live in `pytincture.backend.app` and remain
+supported:
 
 - `set_bff_policy_hook(hook)` installs or clears the sync/async authorization
   hook invoked before a BFF operation. `True` and `None` allow, `False` denies,
@@ -284,16 +284,23 @@ supported while the typed configuration/application-factory API is developed:
 - `revoke_session(session_id)` revokes a session in the configured revocation
   store.
 
-The hooks will gain a configuration-object home in a later roadmap phase. A
-compatibility import or migration period will precede removal of these paths.
+For new services, prefer `create_app(PytinctureConfig(...))` and the documented
+[configuration fields](configuration.md) where available. These compatibility
+imports remain covered by the public contract and deprecation policy.
 
 ## JavaScript API
 
-Pytincture exposes one function on `window`:
+Pytincture exposes these runtime APIs on `window`:
 
-- `runTinctureApp(config)` starts one packaged or inline browser application
+- `runTinctureApp(config)` starts one legacy packaged, inline, or portable browser application
   and returns a promise that resolves after the entrypoint starts or rejects
   with a `PytinctureLifecycleError`.
+- `pytinctureRuntime.getInfo()` reports the selected engine, delivery mode,
+  versions, bundle/profile identity, and startup timings. See
+  [runtime diagnostics](browser-runtimes.md).
+- `pytinctureAssets` exposes the asset ownership registry used by Widgetsets
+  to avoid loading already verified assets again. See the
+  [Widgetset ownership bridge](browser-runtimes.md#widgetset-asset-ownership).
 
 `window.PytinctureLifecycleError` exposes the stable `stage`, `code`,
 `resource`, `requestId`, `correlationId`, and sanitized `rootCause` fields.
@@ -327,15 +334,18 @@ Two pre-load globals are public:
 | --- | --- | --- |
 | `application` | `null` | Service application route/name. |
 | `entrypoint` | application | Python class or callable to start. |
-| `widgetlib` | `"dhxpyt==0.9.18"` | Exact PyPI package/version for the widgetset. |
+| `widgetlib` | `"dhxpyt==0.9.18"` | Exact widgetset package/version requirement. |
+| `runtime` | `"pyodide"` | Browser engine: `"pyodide"` or `"micropython"`. MicroPython requires portable delivery. |
+| `deliveryMode` | `"legacy-package"` | Explicit `"legacy-package"` or `"portable-bundle"` selection; a manifest alone does not select portable mode. |
+| `runtimeManifestUrl` | `null` | Bundle manifest URL required for portable delivery. |
 | `widgetSource` | `null` | Explicit `#sha256=`-locked wheel URL; disables backend fallback. |
 | `widgetAssetManifest` | `null` | Optional hashed asset manifest for a controlled legacy widget wheel. |
 | `backendWidgetSources` | service metadata | Existing deployment-owned backend wheel URLs. Generated service pages supply this; standalone owners normally leave it unset. |
 | `allowPublicWidgetIndex` | standalone: `true`; service: backend policy | Permit an exact custom widget package pin to use PyPI only after backend-wheel resolution. Hosted pages enable it only for specs in `PYTINCTURE_WIDGET_PUBLIC_INDEX_ALLOWLIST`. |
 | `requestUuid` | generated | Cache namespace; service mode supplies one per server process. |
 | `csrfCookieName` | page protocol | Exact framework CSRF cookie selected by hosted runtime metadata. |
-| `mode` | `"auto"` | `"package"`, `"inline"`, or automatic selection. |
-| `onLifecycleEvent` | `null` | Callback for stage, compatibility, fallback, error, and ready events. |
+| `mode` | `"auto"` | Legacy delivery: `"package"`, `"inline"`, or automatic selection; independent of `deliveryMode`. |
+| `onLifecycleEvent` | `null` | Callback for stage start/completion/failure, compatibility, fallback, error, and ready events. |
 | `pyodideBaseUrl` | bundled path | Trailing-slash base for Pyodide assets. |
 | `pyodideScriptIntegrity` | `null` | Required `pyodide.js`/`pyodide.asm.js` SRI map when `pyodideBaseUrl` is cross-origin. |
 | `allowUnverifiedExternalPyodide` | `false` | Explicit demo/development opt-in for cross-origin Pyodide; production uses the self-hosted verified default. |
@@ -347,7 +357,7 @@ Two pre-load globals are public:
 | `inlineSelector` | Python script selector | Locates inline Python blocks. |
 | `libsSelector` | `"#micropip-libs"` | Locates the JSON list of extra micropip packages. |
 | `devWidgetHost` | page origin | Backend host used for widget-wheel fallback. |
-| `devWheelVersion` | `"99.99.99"` | Final development-wheel fallback version. |
+| `devWheelVersion` | `"99.99.99"` | Backend development-wheel fallback after the declared version. |
 | `enableServiceWorker` | `false` | Register the runtime service worker. |
 | `serviceWorkerUrl` | `"sw.js"` | Service-worker script URL. |
 | `serviceWorkerScope` | `"./"` | Service-worker scope. |
