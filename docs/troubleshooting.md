@@ -6,17 +6,27 @@ network request, and its `X-Request-ID`. `/healthz` tests the process;
 
 ## Application does not start
 
+For default legacy Pyodide delivery:
+
 - `runtime-load`: verify the Pyodide base URL and that all same-origin runtime
   files return 200 with the instance `?uuid=` query.
 - `package-install`: inspect the package-index response; do not add a backend
   UUID to micropip/PyPI URLs.
-- `widgetset-install`: Pytincture tries PyPI, then the backend for the declared
-  real version, then `99.99.99`. A failed PyPI lookup followed by a successful
-  backend wheel is expected fallback, not an application failure.
+- `widgetset-install`: unless an explicit locked `widgetSource` is supplied,
+  service mode tries the declared backend wheel, its permitted development
+  fallback, then the built-in complete-wheel lock or an explicitly allowlisted
+  exact public-index pin. Check the [widget source policy](widgetset-packaging.md)
+  and backend wheel metadata before changing package-index settings.
 - `widgetset-load`: confirm the wheel includes the required JavaScript/CSS and
   that its `__widgetset__`/`__version__` metadata matches.
 - `entrypoint-execution`: the packaged app failed. Pytincture intentionally
   does not hide this by falling back to inline mode.
+
+For portable delivery, inspect `pytinctureRuntime.getInfo()` and the named
+[bundle/runtime phases](browser-runtimes.md#runtime-identity-and-startup-timing).
+Rebuild with the matching framework version and review the per-runtime
+compatibility report; installing extra micropip packages is not the portable
+dependency path.
 
 `TypeError: chartFactory is not a constructor` means the widget JavaScript for
 that chart is missing or incompatible, even if the Python wrapper installed.

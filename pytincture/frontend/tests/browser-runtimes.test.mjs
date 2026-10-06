@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {createHash} from 'node:crypto';
-import {BROWSER_RUNTIMES, createBffCaller, createOnceCallable, createEventCallback, sameOriginUrl, validateRuntimeManifest} from '../browser-runtimes.js';
+import {BROWSER_RUNTIMES, createBffCaller, createBffSyncCaller, createBffStreamCaller, createOnceCallable, createEventCallback, sameOriginUrl, validateRuntimeManifest} from '../browser-runtimes.js';
 
 test('managed event callbacks remain callable until released', () => {
     let calls = 0;
@@ -143,7 +143,7 @@ test('GET-only BFF requests omit the body and reject unexpected verbs', async ()
         assert.equal(options.method, 'GET');
         assert.equal('body' in options, false);
         assert.ok(options.signal);
-        await assert.rejects(call('api/catalog', 'Catalog', 'ping', {}, {method:'DELETE'}), /Unsupported/);
+        await assert.rejects(call('api/catalog', 'Catalog', 'ping', {}, {method:'TRACE'}), /Unsupported/);
     } finally {
         globalThis.fetch = priorFetch;
         if (priorDocument === undefined) delete globalThis.document;
@@ -260,4 +260,79 @@ test('run_js keeps browser values and catches JS and CSP evaluation failures', a
         globalThis.pytinctureWidgetBridge = {eval:() => {throw new EvalError('Blocked by CSP');}};
         assert.deepEqual(evaluatePythonJavascript('code', true), {ok:false, error:'EvalError: Blocked by CSP'});
     } finally { globalThis.pytinctureWidgetBridge = previous; }
+});
+
+
+test('all portable BFF clients expose bounded limit headers without reading error bodies', async () => {
+    const original = {fetch:globalThis.fetch, document:globalThis.document, xhr:globalThis.XMLHttpRequest};
+    const headers = new Headers({
+        'X-Pytincture-Limit':'BFF_RESULT_MAX_BYTES',
+        'X-Pytincture-Limit-Value':'52428800',
+        'X-Pytincture-Limit-Observed':'52428801',
+    });
+    const neverRead = () => { throw new Error('error body must not be read'); };
+    globalThis.document = {cookie:''};
+    globalThis.fetch = async () => ({ok:false, status:413, headers, text:neverRead, json:neverRead});
+    globalThis.XMLHttpRequest = class {
+        constructor() { this.status = 413; }
+        open() {}
+        setRequestHeader() {}
+        send() {}
+        getResponseHeader(name) { return headers.get(name); }
+        get responseText() { return neverRead(); }
+    };
+    try {
+        const config = {application:'demo'};
+        const expected = error => error.limit_setting === 'BFF_RESULT_MAX_BYTES'
+            && /BFF_RESULT_MAX_BYTES=52428800; observed at least 52428801/.test(error.message);
+        await assert.rejects(createBffCaller(config)('api','Service','rows'), expected);
+        assert.throws(() => createBffSyncCaller(config)('api','Service','rows'), expected);
+        await assert.rejects(createBffStreamCaller(config)('api','Service','rows'), expected);
+        headers.set('X-Pytincture-Limit-Value', 'private-secret');
+        await assert.rejects(createBffCaller(config)('api','Service','rows'), error =>
+            error.limit_setting === null && !error.message.includes('private-secret'));
+    } finally {
+        globalThis.fetch = original.fetch;
+        globalThis.document = original.document;
+        globalThis.XMLHttpRequest = original.xhr;
+    }
+});
+
+test('mutation verbs retain bodies and CSRF in sync, async and stream transports', async () => {
+    const {createBffSyncCaller, createBffStreamCaller} = await import('../browser-runtimes.js');
+    const previous = {document: globalThis.document, fetch: globalThis.fetch, XMLHttpRequest: globalThis.XMLHttpRequest};
+    const requests = [];
+    try {
+        globalThis.document = {cookie: 'pytincture-dev-csrf=token'};
+        globalThis.fetch = async (url, init) => {
+            requests.push({url, ...init});
+            return new Response('"hello"\n');
+        };
+        globalThis.XMLHttpRequest = class {
+            constructor() { this.headers = {}; this.status = 200; this.responseText = '"hello"'; }
+            open(method, url, async) { assert.equal(async, false); this.method = method; this.url = url; }
+            setRequestHeader(name, value) { this.headers[name] = value; }
+            send(body) { requests.push({url: this.url, method: this.method, headers: this.headers, body}); }
+        };
+        const config = {application: 'demo'};
+        for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+            const payload = {value: 'café'};
+            assert.equal(await createBffCaller(config)('api/data', 'Data', 'update', payload, {method}), 'hello');
+            assert.equal(createBffSyncCaller(config)('api/data', 'Data', 'update', payload, {method}), 'hello');
+            const stream = await createBffStreamCaller(config)('api/data', 'Data', 'update', payload, {method});
+            assert.deepEqual(JSON.parse(await stream.next()), {done: false, value: 'hello'});
+            assert.deepEqual(JSON.parse(await stream.next()), {done: true});
+            for (const request of requests.splice(0)) {
+                assert.equal(request.url, '/demo/classcall/api/data/Data/update');
+                assert.equal(request.method, method);
+                assert.equal(request.headers['X-CSRF-Token'], 'token');
+                assert.deepEqual(JSON.parse(request.body), payload);
+            }
+        }
+    } finally {
+        for (const [key, value] of Object.entries(previous)) {
+            if (value === undefined) delete globalThis[key];
+            else globalThis[key] = value;
+        }
+    }
 });

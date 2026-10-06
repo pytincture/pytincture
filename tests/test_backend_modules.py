@@ -331,7 +331,7 @@ class Worker:
             executor._acquire("session-one")
     finally:
         executor._release("session-one")
-    with pytest.raises(BFFResultLimitExceeded):
+    with pytest.raises(BFFResultLimitExceeded, match="BFF_RESULT_MAX_BYTES=16; observed at least 100 bytes"):
         executor.execute(
             _isolated_test_invocation(module_path, operation, "large")
         )
@@ -853,6 +853,49 @@ def test_secure_stat_reads_metadata_without_reading_file_contents(tmp_path, monk
     assert metadata.size == target.stat().st_size
     assert metadata.path == str(target.resolve())
 
+
+
+def _like_windows(monkeypatch):
+    """No dir_fd, and os.open() on a directory is refused, as on Windows."""
+    import os
+    import stat as stat_module
+
+    import pytincture.backend.safe_paths as safe_paths
+
+    real_open = os.open
+
+    def windows_open(path, flags, mode=0o777, *, dir_fd=None):
+        if dir_fd is not None:
+            raise NotImplementedError("dir_fd unavailable on this platform")
+        if stat_module.S_ISDIR(os.stat(path).st_mode):
+            raise PermissionError(13, "Permission denied", path)
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(safe_paths.os, "supports_dir_fd", set())
+    monkeypatch.setattr(safe_paths.os, "open", windows_open)
+
+
+def test_secure_read_works_without_directory_descriptors(tmp_path, monkeypatch):
+    _like_windows(monkeypatch)
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "worker.py").write_bytes(b"value = 42\r\n")
+
+    secure = read_contained_file(str(tmp_path), "package/worker.py")
+    assert secure.content == b"value = 42\r\n"
+    with pytest.raises(UnsafePath):
+        read_contained_file(str(tmp_path), "../outside.py")
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "symlink"), reason="symlinks unavailable")
+def test_secure_read_without_directory_descriptors_still_rejects_symlinks(tmp_path, monkeypatch):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
+    outside.write_text("secret = True\n", encoding="utf-8")
+    (tmp_path / "linked.py").symlink_to(outside)
+    _like_windows(monkeypatch)
+
+    with pytest.raises(UnsafePath, match="symlinks"):
+        read_contained_file(str(tmp_path), "linked.py")
 
 @pytest.mark.skipif(not hasattr(__import__("os"), "symlink"), reason="symlinks unavailable")
 def test_secure_read_rejects_file_and_directory_symlinks(tmp_path):
@@ -2339,12 +2382,14 @@ def test_opt_in_async_bff_stage_uses_worker_loop_and_retains_timed_out_work(
                 {},
                 "BFF policy timed out",
             )
-        assert timed_out.value.status_code == 504
-        assert timed_out.value.detail == "BFF policy timed out"
-        deferred = request.state.bff_deferred_task
-        assert deferred is not None
-        assert not deferred.done()
-        release.set()
+        try:
+            assert timed_out.value.status_code == 504
+            assert timed_out.value.detail.violation.setting == "BFF_CALL_TIMEOUT_SECONDS"
+            deferred = request.state.bff_deferred_task
+            assert deferred is not None
+            assert not deferred.done()
+        finally:
+            release.set()
         assert await asyncio.wait_for(deferred, timeout=1) is True
 
     asyncio.run(exercise_responsiveness())
@@ -2367,13 +2412,13 @@ def test_sync_stream_closes_source_at_byte_limit():
             source(),
             raw=False,
             max_seconds=10,
-            max_bytes=6,
+            max_bytes=8,
             on_finish=lambda reason, size: reasons.append((reason, size)),
         )
-    ) == ["first\n"]
+    ) == ['"first"\n']
     assert closed == [True]
     # The rejected second item is never retained as serialized output.
-    assert reasons == [("byte-limit", 6)]
+    assert reasons == [("byte-limit", 8)]
 
 
 def test_stream_rejects_one_oversized_item_before_retaining_serialized_bytes():
@@ -2441,12 +2486,12 @@ def test_async_stream_disconnect_closes_source():
             max_bytes=100,
             on_finish=lambda reason, size: reasons.append((reason, size)),
         )
-        assert await anext(stream) == "first\n"
+        assert await anext(stream) == '"first"\n'
         await stream.aclose()
 
     asyncio.run(consume_one_then_disconnect())
     assert closed == [True]
-    assert reasons == [("disconnect", 6)]
+    assert reasons == [("disconnect", 8)]
 
 
 def test_admission_gate_rejects_saturation_then_recovers():

@@ -152,10 +152,31 @@ def canonical_widget_public_index_specs(values: object) -> tuple[str, ...]:
     return tuple(specs)
 
 
-def _setting(default, env: str, description: str, *, repr: bool = True):
+_COOKIE_NAMESPACE_PATTERN = re.compile(r"^[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?$")
+
+
+def validate_cookie_namespace(value: object) -> str:
+    """Return the cookie-name stem shared by one application's auth cookies.
+
+    Browsers scope cookies by host, never by port, so two applications on one
+    host must not share cookie names. The stem stays lowercase ASCII so every
+    derived name is a valid RFC 6265 token and the ``__Host-``/``-dev-``
+    structure the browser runtime checks remains unambiguous.
+    """
+    candidate = str(value).strip()
+    if not _COOKIE_NAMESPACE_PATTERN.fullmatch(candidate) or "--" in candidate:
+        raise ValueError(
+            "cookie_namespace must be 1-32 lowercase letters, digits, or single "
+            "hyphens, starting with a letter and not ending with a hyphen"
+        )
+    return candidate
+
+
+def _setting(default, env: str, description: str, *, repr: bool = True, kw_only: bool = False):
     return field(
         default=default,
         repr=repr,
+        kw_only=kw_only,
         metadata={"env": env, "description": description},
     )
 
@@ -237,6 +258,11 @@ class PytinctureConfig:
     allow_runtime_selection: bool = _setting(
         False, "PYTINCTURE_ALLOW_RUNTIME_SELECTION",
         "Development/testing only: allow the runtime query parameter; keep false in production.",
+    )
+    enable_service_worker: bool = _setting(
+        True, "PYTINCTURE_ENABLE_SERVICE_WORKER",
+        "Enable application-scoped framework asset caching in the browser.",
+        kw_only=True,
     )
     favicon_folder: Optional[str] = _setting(
         None, "PYTINCTURE_FAVICON_FOLDER", "Optional favicon file/directory."
@@ -471,6 +497,11 @@ class PytinctureConfig:
         None, "AUTH_SESSION_HTTPS_ONLY", "Secure-cookie requirement; derived when omitted."
     )
     session_same_site: str = _setting("lax", "AUTH_SESSION_SAME_SITE", "Cookie SameSite policy.")
+    cookie_namespace: str = _setting(
+        "pytincture",
+        "AUTH_COOKIE_NAMESPACE",
+        "Stem of the session, CSRF, and SAML handshake cookie names; distinct per application sharing a host.",
+    )
     session_max_claim_count: int = _setting(
         32,
         "AUTH_SESSION_MAX_CLAIM_COUNT",
@@ -487,7 +518,7 @@ class PytinctureConfig:
         "Maximum signed browser-session cookie value bytes.",
     )
     max_request_body_bytes: int = _setting(
-        2 * 1024 * 1024, "MAX_REQUEST_BODY_BYTES", "Maximum request body size."
+        16 * 1024 * 1024, "MAX_REQUEST_BODY_BYTES", "Maximum request body size."
     )
     auth_request_ingress_max_concurrency: int = _setting(
         64,
@@ -645,16 +676,16 @@ class PytinctureConfig:
         "Maximum BFF request-body upload admission wait.",
     )
     bff_request_max_bytes: int = _setting(
-        1024 * 1024, "BFF_REQUEST_MAX_BYTES", "Maximum canonical BFF JSON body size."
+        8 * 1024 * 1024, "BFF_REQUEST_MAX_BYTES", "Maximum canonical BFF JSON body size."
     )
     bff_request_max_depth: int = _setting(
         32, "BFF_REQUEST_MAX_DEPTH", "Maximum canonical BFF JSON nesting depth."
     )
     bff_request_max_items: int = _setting(
-        10000, "BFF_REQUEST_MAX_ITEMS", "Maximum aggregate BFF JSON container items."
+        100_000, "BFF_REQUEST_MAX_ITEMS", "Maximum aggregate BFF JSON container items."
     )
     bff_result_max_bytes: int = _setting(
-        10 * 1024 * 1024,
+        50 * 1024 * 1024,
         "BFF_RESULT_MAX_BYTES",
         "Maximum serialized bytes in one ordinary BFF result.",
     )
@@ -662,7 +693,7 @@ class PytinctureConfig:
         32, "BFF_RESULT_MAX_DEPTH", "Maximum ordinary BFF result nesting depth."
     )
     bff_result_max_items: int = _setting(
-        10000, "BFF_RESULT_MAX_ITEMS", "Maximum aggregate ordinary BFF result items."
+        1_000_000, "BFF_RESULT_MAX_ITEMS", "Maximum aggregate ordinary BFF result items."
     )
     bff_execution_mode: str = _setting(
         "trusted-thread",
@@ -698,10 +729,10 @@ class PytinctureConfig:
         300.0, "BFF_STREAM_MAX_SECONDS", "Maximum BFF stream duration."
     )
     bff_stream_max_bytes: int = _setting(
-        10 * 1024 * 1024, "BFF_STREAM_MAX_BYTES", "Maximum BFF stream bytes."
+        50 * 1024 * 1024, "BFF_STREAM_MAX_BYTES", "Maximum BFF stream bytes."
     )
     bff_stream_max_items: int = _setting(
-        10000, "BFF_STREAM_MAX_ITEMS", "Maximum BFF stream items."
+        1_000_000, "BFF_STREAM_MAX_ITEMS", "Maximum BFF stream items."
     )
     bff_stream_idle_timeout_seconds: float = _setting(
         30.0, "BFF_STREAM_IDLE_TIMEOUT_SECONDS", "Maximum wait between stream items."
@@ -1037,7 +1068,7 @@ class PytinctureConfig:
         if not isinstance(self.browser_runtime, str) or self.browser_runtime not in {"pyodide", "micropython"}:
             raise ValueError("browser_runtime must be pyodide or micropython")
         for name in (
-            "allow_runtime_selection",
+            "enable_service_worker", "allow_runtime_selection",
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
         ):
             if not isinstance(getattr(self, name), bool):
@@ -1144,6 +1175,7 @@ class PytinctureConfig:
         object.__setattr__(self, "session_same_site", self.session_same_site.lower())
         if self.session_same_site == "none" and self.session_https_only is False:
             raise ValueError("session_same_site='none' requires session_https_only=true")
+        object.__setattr__(self, "cookie_namespace", validate_cookie_namespace(self.cookie_namespace))
         if self.max_request_body_bytes <= 0:
             raise ValueError("max_request_body_bytes must be greater than zero")
         if self.saml_transaction_ttl_seconds <= 0:
@@ -1666,6 +1698,7 @@ class PytinctureConfig:
         source = dict(os.environ if environ is None else environ)
         values = {}
         boolean_fields = {
+            "enable_service_worker",
             "allow_runtime_selection",
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
             "require_readonly_modules_path",

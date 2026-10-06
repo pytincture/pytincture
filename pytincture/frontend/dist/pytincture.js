@@ -321,7 +321,7 @@ var PytinctureRuntime = (() => {
     const cookie = cookies.find((value) => value.startsWith(`${cookieName}=`));
     const csrf = cookie ? decodeURIComponent(cookie.slice(cookieName.length + 1)) : "";
     const httpMethod = options.method || "POST";
-    if (!["POST", "GET"].includes(httpMethod)) throw new Error("Unsupported browser BFF HTTP method");
+    if (!["POST", "GET", "PUT", "PATCH", "DELETE"].includes(httpMethod)) throw new Error("Unsupported browser BFF HTTP method");
     return {
       url: `/${config.application}/classcall/${module}/${className}/${method}`,
       init: {
@@ -332,12 +332,31 @@ var PytinctureRuntime = (() => {
       }
     };
   }
+  function bffError(status, className, method, getHeader) {
+    const setting = String(getHeader("X-Pytincture-Limit") || "");
+    const value = String(getHeader("X-Pytincture-Limit-Value") || "");
+    const observed = String(getHeader("X-Pytincture-Limit-Observed") || "");
+    let message = `BFF ${className}.${method} failed (${status})`;
+    const valid = /^(?:BFF_[A-Z0-9_]{1,124}|MAX_REQUEST_BODY_BYTES)$/.test(setting) && /^[0-9]{1,24}(?:\.[0-9]{1,6})?$/.test(value);
+    if (valid) {
+      message += `: ${setting}=${value}`;
+      if (/^[0-9]{1,24}(?:\.[0-9]{1,6})?$/.test(observed)) message += `; observed at least ${observed}`;
+    }
+    const error = new Error(message);
+    error.status_code = status;
+    error.limit_setting = valid ? setting : null;
+    error.limit_value = valid ? value : null;
+    return error;
+  }
   function createBffCaller(config) {
     if (!/^[A-Za-z_]\w*$/.test(config.application || "")) throw new Error("A BFF application is required");
     return async (module, className, method, args = {}, options = {}) => {
       const request = bffRequest(config, module, className, method, args, options);
       const response = await fetch(request.url, { ...request.init, signal: AbortSignal.timeout(35e3) });
-      if (!response.ok) throw new Error(`BFF ${className}.${method} failed (${response.status})`);
+      if (!response.ok) throw bffError(response.status, className, method, (name) => {
+        var _a;
+        return (_a = response.headers) == null ? void 0 : _a.get(name);
+      });
       return response.json();
     };
   }
@@ -349,7 +368,7 @@ var PytinctureRuntime = (() => {
       request.open(init.method, url, false);
       for (const [name, value] of Object.entries(init.headers)) request.setRequestHeader(name, value);
       request.send((_a = init.body) != null ? _a : null);
-      if (request.status < 200 || request.status >= 300) throw new Error(`BFF ${className}.${method} failed (${request.status})`);
+      if (request.status < 200 || request.status >= 300) throw bffError(request.status, className, method, (name) => request.getResponseHeader(name));
       return JSON.parse(request.responseText);
     };
   }
@@ -360,7 +379,10 @@ var PytinctureRuntime = (() => {
       const response = await fetch(url, { ...init, signal: controller.signal });
       if (!response.ok) {
         controller.abort();
-        throw new Error(`BFF ${className}.${method} failed (${response.status})`);
+        throw bffError(response.status, className, method, (name) => {
+          var _a;
+          return (_a = response.headers) == null ? void 0 : _a.get(name);
+        });
       }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -611,7 +633,7 @@ import ${manifest.entrypoint} as _pytincture_client`));
 
   // pytincture.js
   var FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
-  var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc10";
+  var PYTINCTURE_RUNTIME_VERSION = "1.0.0rc13";
   var BUILTIN_WIDGET_WHEEL_LOCKS = Object.freeze({
     "dhxpyt==0.9.18": "https://files.pythonhosted.org/packages/0c/e7/b48e045156c7b4bf20778597991d7dfe591fd46ada5267b747e2d5977244/dhxpyt-0.9.18-py3-none-any.whl#sha256=acd8db34547c6b61c83a01958e9545ee724564859e5bcb53713ae3c872234fbe"
   });
@@ -637,10 +659,14 @@ import ${manifest.entrypoint} as _pytincture_client`));
       ]
     }
   });
-  var CSRF_COOKIE_NAMES = Object.freeze([
-    "__Host-pytincture-csrf",
-    "pytincture-dev-csrf"
-  ]);
+  var CSRF_COOKIE_NAMESPACE = "[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?";
+  var CSRF_COOKIE_NAME_PATTERN = new RegExp(
+    `^(?:__Host-(${CSRF_COOKIE_NAMESPACE})-csrf|(${CSRF_COOKIE_NAMESPACE})-dev-csrf)$`
+  );
+  function isCsrfCookieName(cookieName) {
+    const match = CSRF_COOKIE_NAME_PATTERN.exec(String(cookieName));
+    return Boolean(match) && !(match[1] || match[2]).includes("--");
+  }
   var DEFAULT_CONFIG = {
     runtime: "pyodide",
     deliveryMode: "legacy-package",
@@ -1069,7 +1095,7 @@ import ${manifest.entrypoint} as _pytincture_client`));
   }
   function normalizeCsrfCookieName(cookieName) {
     const selected = cookieName || defaultCsrfCookieName();
-    if (!CSRF_COOKIE_NAMES.includes(selected)) {
+    if (!isCsrfCookieName(selected)) {
       throw new Error("Unsupported Pytincture CSRF cookie name.");
     }
     return selected;
@@ -1450,19 +1476,30 @@ import ${manifest.entrypoint} as _pytincture_client`));
     }
   }
   async function waitForServiceWorkerControl(registration) {
-    if (navigator.serviceWorker.controller) {
+    if (!window.location.href.startsWith(registration.scope)) {
       return registration;
     }
-    await Promise.race([
-      new Promise((resolve) => {
-        const handleControllerChange = () => {
-          navigator.serviceWorker.removeEventListener("controllerchange", handleControllerChange);
-          resolve(registration);
-        };
-        navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
-      }),
-      new Promise((resolve) => setTimeout(() => resolve(registration), 5e3))
-    ]);
+    const isControlled = () => {
+      var _a;
+      const controller = navigator.serviceWorker.controller;
+      return controller && controller.scriptURL === ((_a = registration.active) == null ? void 0 : _a.scriptURL);
+    };
+    if (isControlled()) {
+      return registration;
+    }
+    await new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        navigator.serviceWorker.removeEventListener("controllerchange", handleControllerChange);
+        resolve();
+      };
+      const handleControllerChange = () => {
+        if (isControlled()) finish();
+      };
+      const timer = setTimeout(finish, 5e3);
+      navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
+      handleControllerChange();
+    });
     return registration;
   }
   async function waitForServiceWorkerActivation(registration) {
@@ -1473,19 +1510,19 @@ import ${manifest.entrypoint} as _pytincture_client`));
     if (!worker) {
       return registration;
     }
-    await Promise.race([
-      new Promise((resolve) => {
-        const handleStateChange = () => {
-          if (worker.state === "activated" || worker.state === "redundant") {
-            worker.removeEventListener("statechange", handleStateChange);
-            resolve(registration);
-          }
-        };
-        worker.addEventListener("statechange", handleStateChange);
-        handleStateChange();
-      }),
-      new Promise((resolve) => setTimeout(() => resolve(registration), 5e3))
-    ]);
+    await new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        worker.removeEventListener("statechange", handleStateChange);
+        resolve();
+      };
+      const handleStateChange = () => {
+        if (worker.state === "activated" || worker.state === "redundant") finish();
+      };
+      const timer = setTimeout(finish, 5e3);
+      worker.addEventListener("statechange", handleStateChange);
+      handleStateChange();
+    });
     return registration;
   }
   function ownedCachePrefix(config) {
@@ -1555,7 +1592,12 @@ import ${manifest.entrypoint} as _pytincture_client`));
     return removed;
   }
   async function warmPyodideCache(config) {
+    var _a;
     if (!config.enableServiceWorker || !config.warmPyodideCache) {
+      return;
+    }
+    const controller = typeof navigator !== "undefined" && ((_a = navigator.serviceWorker) == null ? void 0 : _a.controller);
+    if (!controller || new URL(controller.scriptURL).pathname !== new URL(config.serviceWorkerUrl, window.location.href).pathname) {
       return;
     }
     if (typeof caches === "undefined") {
@@ -1700,7 +1742,7 @@ await micropip.install(${libLiteral}, deps=False)
   }
   async function downloadPackagedApp(config) {
     var _a, _b;
-    const archiveUrl = withRequestUuid(`${config.application}/appcode/appcode.pyt`, config.requestUuid);
+    const archiveUrl = withRequestUuid(`/${config.application}/appcode/appcode.pyt`, config.requestUuid);
     const response = await fetch(archiveUrl);
     const correlationId = ((_b = (_a = response.headers) == null ? void 0 : _a.get) == null ? void 0 : _b.call(_a, "x-request-id")) || null;
     if (!response.ok) {
@@ -2098,7 +2140,12 @@ json.dumps({
       config.pyodideBaseUrl,
       () => operations.preflightConfig(config)
     );
-    await operations.ensureServiceWorker(config);
+    await measureRuntimePhase(
+      config,
+      "service-worker",
+      config.serviceWorkerUrl,
+      () => operations.ensureServiceWorker(config)
+    );
     if (config.loadMaterialIcons) {
       await operations.ensureMaterialIcons(
         config.materialIconsUrl,
@@ -2190,7 +2237,7 @@ output.getvalue()`);
         downloaded = await runLifecycleStage(
           config,
           LIFECYCLE_STAGES.ARCHIVE_DOWNLOAD,
-          `${config.application}/appcode/appcode.pyt`,
+          `/${config.application}/appcode/appcode.pyt`,
           () => operations.downloadPackagedApp(config)
         );
       } catch (error) {

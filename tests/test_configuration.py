@@ -1045,6 +1045,13 @@ def test_microsoft_auth_requires_explicit_tenant(tmp_path):
             "cannot exceed max_request_body_bytes",
         ),
         ({"session_same_site": "none", "session_https_only": False}, "https"),
+        ({"cookie_namespace": ""}, "cookie_namespace"),
+        ({"cookie_namespace": "Monguana"}, "cookie_namespace"),
+        ({"cookie_namespace": "1app"}, "cookie_namespace"),
+        ({"cookie_namespace": "app-"}, "cookie_namespace"),
+        ({"cookie_namespace": "my--app"}, "cookie_namespace"),
+        ({"cookie_namespace": "app;evil"}, "cookie_namespace"),
+        ({"cookie_namespace": "a" * 33}, "cookie_namespace"),
         (
             {"enable_google_auth": True, "session_secret": "0123456789abcdef" * 2},
             "Google",
@@ -1842,3 +1849,29 @@ def test_log_level_is_normalized_and_validated(tmp_path):
     assert PytinctureConfig(modules_path=str(tmp_path), log_level="warning").log_level == "WARNING"
     with pytest.raises(ValueError, match="log_level"):
         PytinctureConfig(modules_path=str(tmp_path), log_level="verbose")
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_service_worker_configuration_round_trip_and_app_isolation(tmp_path, enabled):
+    (tmp_path / "demo.py").write_text("value = 1\n")
+    config = PytinctureConfig.from_env(
+        {"MODULES_PATH": str(tmp_path), "PYTINCTURE_ENABLE_SERVICE_WORKER": str(enabled).lower()}
+    )
+    assert config.enable_service_worker is enabled
+    assert config.to_environ()["PYTINCTURE_ENABLE_SERVICE_WORKER"] == str(enabled).lower()
+    assert PytinctureConfig(modules_path=str(tmp_path)).enable_service_worker is True
+    other = PytinctureConfig(modules_path=str(tmp_path), enable_service_worker=not enabled)
+    with TestClient(create_app(config)) as client, TestClient(create_app(other)) as other_client:
+        assert f"enableServiceWorker: {str(enabled).lower()}" in client.get("/demo/").text
+        assert f"enableServiceWorker: {str(not enabled).lower()}" in other_client.get("/demo/").text
+        assert f"enableServiceWorker: {str(enabled).lower()}" in client.get("/demo/").text
+
+
+def test_service_worker_option_preserves_existing_positional_configuration(tmp_path):
+    (tmp_path / "favicon.ico").write_bytes(b"favicon")
+    config = PytinctureConfig(
+        str(tmp_path), False, None, "pyodide", "legacy-package", False, "favicon.ico",
+        enable_service_worker=False,
+    )
+    assert config.favicon_folder == str(tmp_path / "favicon.ico")
+    assert config.enable_service_worker is False

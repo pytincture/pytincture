@@ -89,7 +89,7 @@ Two limits remain explicit architecture rather than hidden requirements:
 
 The machine-readable tracking record is
 [`security/review-2026-09-02-capacity.json`](security/review-2026-09-02-capacity.json)
-and will be updated as each linked issue is completed.
+and records the completed issue dispositions and validation evidence.
 
 ## 2026-09-01 follow-up review disposition
 

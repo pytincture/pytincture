@@ -18,8 +18,10 @@ by Pytincture 1.x.
 - Public methods are operations. Public assigned/annotated attributes are
   read-only `GET` operations.
 - Private names beginning with `_` are not exported.
-- Module identifiers are relative POSIX-style paths under `MODULES_PATH` and
-  include `.py`.
+- Module identifiers are relative POSIX-style paths under `MODULES_PATH`.
+  Source/registry identifiers include `.py`; class-call URLs accept both the
+  extensionless form and the historical `.py` form, including nested modules.
+  Swagger uses extensionless paths.
 - Static manifest validation occurs before application code is imported.
 - Duplicate exported class definitions and any later binding of the exported
   class or one of its members reject that source file before import. Manifest
@@ -163,6 +165,10 @@ to the application login page and returning `None`. A rejected replay proof may
 refill and retry once before a remaining 409 becomes a typed error.
 
 `@bff_stream()` defaults to `text/event-stream` and newline-delimited JSON.
+String values are JSON-quoted and escaped, so `"123"` remains a string and an
+embedded newline stays inside one record. Existing pre-encoded byte chunks
+retain their newline framing. Code yielding hand-encoded JSON or SSE as text
+must use `raw=True` and include its own record delimiters.
 `raw=True` forwards string/byte chunks without JSON framing. The declared
 `media_type` is preserved.
 
@@ -192,7 +198,9 @@ Generated browser classes preserve the exported class, method, and attribute
 names. They construct the route from the module-relative identifier and call
 the declared HTTP method. Sync methods retain synchronous browser requests for
 the 1.x compatibility period and receive an additive `<method>_async`
-companion. Async and streaming methods use deadline-bounded asynchronous
+companion when that name is not already declared by the class. Exported names
+take precedence over generated companions and internal transport helpers.
+Async and streaming methods use deadline-bounded asynchronous
 fetch/iteration behavior. Each generated BFF module exposes
 `PytinctureBFFError` for callers that want to catch the typed failure.
 Authentication redirects and optional replay-token refill are runtime concerns
@@ -264,3 +272,14 @@ or `enable_dev_email_login`) and hides them otherwise. An explicit boolean
 overrides that default; `api_docs_scope="public"` still excludes session methods. Module docs are at `/{application}/{extensionless-module}/bff-docs`,
 including nested module folders; aggregate docs return 404. Swagger operations
 are class/method paths relative to an extensionless module class-call server URL.
+
+## RC11 limit diagnostics
+
+Framework resource failures add `limit` metadata and the `X-Pytincture-Limit`,
+`X-Pytincture-Limit-Value`, and optional `X-Pytincture-Limit-Observed` headers.
+The readable `detail` remains a string; clients must not depend on its exact
+wording. The response status remains authoritative. Counts are lower bounds
+and may be null when only the threshold is known. See the
+[configuration reference](../configuration.md#rc11-resource-limits-and-diagnostics).
+After streaming headers start, precise limit metadata is logged rather than
+injected into application stream records.

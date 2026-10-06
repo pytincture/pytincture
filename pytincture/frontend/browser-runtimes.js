@@ -222,7 +222,7 @@ function bffRequest(config, module, className, method, args, options = {}) {
     const cookie = cookies.find(value => value.startsWith(`${cookieName}=`));
     const csrf = cookie ? decodeURIComponent(cookie.slice(cookieName.length + 1)) : "";
     const httpMethod = options.method || "POST";
-    if (!["POST", "GET"].includes(httpMethod)) throw new Error("Unsupported browser BFF HTTP method");
+    if (!["POST", "GET", "PUT", "PATCH", "DELETE"].includes(httpMethod)) throw new Error("Unsupported browser BFF HTTP method");
     return {
         url: `/${config.application}/classcall/${module}/${className}/${method}`,
         init: {
@@ -233,12 +233,30 @@ function bffRequest(config, module, className, method, args, options = {}) {
     };
 }
 
+function bffError(status, className, method, getHeader) {
+    const setting = String(getHeader('X-Pytincture-Limit') || '');
+    const value = String(getHeader('X-Pytincture-Limit-Value') || '');
+    const observed = String(getHeader('X-Pytincture-Limit-Observed') || '');
+    let message = `BFF ${className}.${method} failed (${status})`;
+    const valid = /^(?:BFF_[A-Z0-9_]{1,124}|MAX_REQUEST_BODY_BYTES)$/.test(setting)
+        && /^[0-9]{1,24}(?:\.[0-9]{1,6})?$/.test(value);
+    if (valid) {
+        message += `: ${setting}=${value}`;
+        if (/^[0-9]{1,24}(?:\.[0-9]{1,6})?$/.test(observed)) message += `; observed at least ${observed}`;
+    }
+    const error = new Error(message);
+    error.status_code = status;
+    error.limit_setting = valid ? setting : null;
+    error.limit_value = valid ? value : null;
+    return error;
+}
+
 export function createBffCaller(config) {
     if (!/^[A-Za-z_]\w*$/.test(config.application || "")) throw new Error("A BFF application is required");
     return async (module, className, method, args = {}, options = {}) => {
         const request = bffRequest(config, module, className, method, args, options);
         const response = await fetch(request.url, {...request.init, signal: AbortSignal.timeout(35000)});
-        if (!response.ok) throw new Error(`BFF ${className}.${method} failed (${response.status})`);
+        if (!response.ok) throw bffError(response.status, className, method, name => response.headers?.get(name));
         return response.json();
     };
 }
@@ -250,7 +268,7 @@ export function createBffSyncCaller(config) {
         request.open(init.method, url, false);
         for (const [name, value] of Object.entries(init.headers)) request.setRequestHeader(name, value);
         request.send(init.body ?? null);
-        if (request.status < 200 || request.status >= 300) throw new Error(`BFF ${className}.${method} failed (${request.status})`);
+        if (request.status < 200 || request.status >= 300) throw bffError(request.status, className, method, name => request.getResponseHeader(name));
         return JSON.parse(request.responseText);
     };
 }
@@ -260,7 +278,7 @@ export function createBffStreamCaller(config) {
         const {url, init} = bffRequest(config, module, className, method, args, options);
         const controller = new AbortController();
         const response = await fetch(url, {...init, signal: controller.signal});
-        if (!response.ok) { controller.abort(); throw new Error(`BFF ${className}.${method} failed (${response.status})`); }
+        if (!response.ok) { controller.abort(); throw bffError(response.status, className, method, name => response.headers?.get(name)); }
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "", done = false, closed = false;

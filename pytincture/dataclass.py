@@ -1460,12 +1460,29 @@ def generate_stub_classes(
 class PytinctureBFFError(RuntimeError):
     \"\"\"A generated BFF request failed without exposing its response body.\"\"\"
 
-    def __init__(self, status_code, operation, correlation_id=None):
+    def __init__(self, status_code, operation, correlation_id=None, limit_setting=None, limit_value=None, limit_observed=None):
         self.status_code = int(status_code)
         self.status = self.status_code
         self.operation = str(operation)
         self.correlation_id = str(correlation_id) if correlation_id else None
+        self.limit_setting = None
+        self.limit_value = None
+        self.limit_observed = None
+        setting = str(limit_setting or "")
+        value = str(limit_value or "")
+        observed = str(limit_observed or "")
+        if (0 < len(setting) <= 128 and (setting.startswith("BFF_") or setting == "MAX_REQUEST_BODY_BYTES")
+                and all(char in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for char in setting)
+                and 0 < len(value) <= 32 and value.replace(".", "", 1).isdigit()):
+            self.limit_setting = setting
+            self.limit_value = value
+            if 0 < len(observed) <= 32 and observed.replace(".", "", 1).isdigit():
+                self.limit_observed = observed
         message = f"BFF operation {self.operation} failed with HTTP {self.status_code}"
+        if self.limit_setting:
+            message += f": {self.limit_setting}={self.limit_value}"
+            if self.limit_observed:
+                message += f"; observed at least {self.limit_observed}"
         if self.correlation_id:
             message += f" (request {self.correlation_id})"
         super().__init__(message)
@@ -1504,6 +1521,7 @@ class PytinctureBFFError(RuntimeError):
                 file_path, class_name, source_code=code
             )
             class_imports.update(used_imports)
+            helper_start = len(stub_class_code)
             stub_class_code += f"\nclass {class_name}:\n"
             stub_class_code += f"    _pytincture_replay_enabled = {replay_enabled!r}\n"
             stub_class_code += f"    _pytincture_replay_capsule = {replay_capsule!r}\n"
@@ -1516,13 +1534,17 @@ class PytinctureBFFError(RuntimeError):
             stub_class_code += "    def _bff_operation(self, url):\n"
             stub_class_code += "        method_name = str(url).rstrip('/').rsplit('/', 1)[-1]\n"
             stub_class_code += "        return f'{self.__class__.__name__}.{method_name}'\n"
-            stub_class_code += "    def _raise_for_bff_status(self, status, url, correlation_id=None):\n"
+            stub_class_code += "    def _raise_for_bff_status(self, status, url, correlation_id=None, get_header=None):\n"
             stub_class_code += "        if not 200 <= int(status) < 300:\n"
-            stub_class_code += "            raise PytinctureBFFError(status, self._bff_operation(url), correlation_id)\n"
+            stub_class_code += "            get_header = get_header or (lambda name: None)\n"
+            stub_class_code += "            raise PytinctureBFFError(status, self._bff_operation(url), correlation_id, get_header('X-Pytincture-Limit'), get_header('X-Pytincture-Limit-Value'), get_header('X-Pytincture-Limit-Observed'))\n"
             stub_class_code += "    def _csrf_token(self):\n"
             stub_class_code += "        from js import window\n"
             stub_class_code += "        cookie_name = str(getattr(window, '__pytinctureCsrfCookieName', ''))\n"
-            stub_class_code += "        if cookie_name not in {'__Host-pytincture-csrf', 'pytincture-dev-csrf'}:\n"
+            stub_class_code += "        import re\n"
+            stub_class_code += "        namespace = '[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?'\n"
+            stub_class_code += "        match = re.fullmatch(f'__Host-({namespace})-csrf|({namespace})-dev-csrf', cookie_name)\n"
+            stub_class_code += "        if match is None or '--' in (match.group(1) or match.group(2)):\n"
             stub_class_code += "            cookie_name = '__Host-pytincture-csrf' if str(window.location.href).lower().startswith('https://') else 'pytincture-dev-csrf'\n"
             stub_class_code += "        for cookie in str(document.cookie).split(';'):\n"
             stub_class_code += "            name, separator, value = cookie.strip().partition('=')\n"
@@ -1671,7 +1693,7 @@ class PytinctureBFFError(RuntimeError):
             stub_class_code += f"            redirect_url = current_url + '/login'\n"
             stub_class_code += f"            window.location.href = redirect_url\n"
             stub_class_code += f"            return 'null'\n"
-            stub_class_code += "        self._raise_for_bff_status(req.status, url, req.getResponseHeader('X-Request-ID'))\n"
+            stub_class_code += "        self._raise_for_bff_status(req.status, url, req.getResponseHeader('X-Request-ID'), req.getResponseHeader)\n"
             stub_class_code += f"        return StringIO(req.response).getvalue()\n"
             stub_class_code += f"\n"
             stub_class_code += f"    async def fetch(self, url, payload=None, method='GET', _replay_retry=True):\n"
@@ -1698,7 +1720,7 @@ class PytinctureBFFError(RuntimeError):
             stub_class_code += f"                redirect_url = current_url + '/login'\n"
             stub_class_code += f"                window.location.href = redirect_url\n"
             stub_class_code += f"                return 'null'\n"
-            stub_class_code += "            self._raise_for_bff_status(response.status, url, response.headers.get('X-Request-ID'))\n"
+            stub_class_code += "            self._raise_for_bff_status(response.status, url, response.headers.get('X-Request-ID'), response.headers.get)\n"
             stub_class_code += "            self._schedule_pytincture_state_refill()\n"
             stub_class_code += f"            return await self._await_bff(response.text())\n"
             stub_class_code += "        finally:\n"
@@ -1747,7 +1769,7 @@ class PytinctureBFFError(RuntimeError):
                 stub_class_code += f"                redirect_url = current_url + '/login'\n"
                 stub_class_code += f"                window.location.href = redirect_url\n"
                 stub_class_code += f"                return\n"
-                stub_class_code += "            self._raise_for_bff_status(response.status, url, response.headers.get('X-Request-ID'))\n"
+                stub_class_code += "            self._raise_for_bff_status(response.status, url, response.headers.get('X-Request-ID'), response.headers.get)\n"
                 stub_class_code += "            self._schedule_pytincture_state_refill()\n"
                 stub_class_code += f"            reader = response.body.getReader()\n"
                 stub_class_code += f"            decoder = TextDecoder.new()\n"
@@ -1769,6 +1791,24 @@ class PytinctureBFFError(RuntimeError):
                 for node in class_node.body
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             }
+            declared_member_names.update(
+                target.id
+                for node in class_node.body
+                if isinstance(node, (ast.Assign, ast.AnnAssign))
+                for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+                if isinstance(target, ast.Name)
+            )
+            # Keep the historical transport names when available, but never
+            # let an exported member replace the transport it needs to call.
+            transport_names = {
+                name: f"_pytincture_{name}" if name in declared_member_names else name
+                for name in ("fetch", "fetch_sync", "fetch_stream")
+            }
+            helpers = stub_class_code[helper_start:]
+            for name, transport_name in transport_names.items():
+                helpers = helpers.replace(f"def {name}(", f"def {transport_name}(")
+                helpers = helpers.replace(f"self.{name}(", f"self.{transport_name}(")
+            stub_class_code = stub_class_code[:helper_start] + helpers
             for node in class_node.body:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith('_'):
                     is_streaming = node.name in streaming_methods
@@ -1784,7 +1824,7 @@ class PytinctureBFFError(RuntimeError):
                         call_url = f"{application_prefix}/classcall/{file_identifier}/{class_name}/{node.name}"
                         stub_class_code += f"        url = {call_url!r}\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
-                        stub_class_code += f"        stream_iter = self.fetch_stream(url, payload, {request_method!r})\n"
+                        stub_class_code += f"        stream_iter = self.{transport_names['fetch_stream']}(url, payload, {request_method!r})\n"
                         if stream_config.get("raw"):
                             stub_class_code +=  "        async for chunk in stream_iter:\n"
                             stub_class_code +=  "            if chunk:\n"
@@ -1808,31 +1848,32 @@ class PytinctureBFFError(RuntimeError):
                         call_url = f"{application_prefix}/classcall/{file_identifier}/{class_name}/{node.name}"
                         stub_class_code += f"        url = {call_url!r}\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
-                        stub_class_code += f"        response = await self.fetch(url, payload, {request_method!r})\n"
+                        stub_class_code += f"        response = await self.{transport_names['fetch']}(url, payload, {request_method!r})\n"
                         stub_class_code +=  "        return json.loads(response)\n"
                     else:
                         stub_class_code += f"    def {node.name}(self, *args, **kwargs):\n"
                         call_url = f"{application_prefix}/classcall/{file_identifier}/{class_name}/{node.name}"
                         stub_class_code += f"        url = {call_url!r}\n"
                         stub_class_code +=  "        payload = {'args': args, 'kwargs': kwargs}\n"
-                        stub_class_code += f"        response = self.fetch_sync(url, payload, {request_method!r})\n"
+                        stub_class_code += f"        response = self.{transport_names['fetch_sync']}(url, payload, {request_method!r})\n"
                         stub_class_code +=  "        return json.loads(response)\n"
                         async_companion = f"{node.name}_async"
                         if async_companion not in declared_member_names:
                             stub_class_code += f"    async def {async_companion}(self, *args, **kwargs):\n"
                             stub_class_code += f"        url = {call_url!r}\n"
                             stub_class_code += "        payload = {'args': args, 'kwargs': kwargs}\n"
-                            stub_class_code += f"        response = await self.fetch(url, payload, {request_method!r})\n"
+                            stub_class_code += f"        response = await self.{transport_names['fetch']}(url, payload, {request_method!r})\n"
                             stub_class_code += "        return json.loads(response)\n"
-                elif isinstance(node, ast.Assign):
-                    for target in node.targets:
-                        if isinstance(target, ast.Name):
+                elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                    for target in targets:
+                        if isinstance(target, ast.Name) and not target.id.startswith('_'):
                             property_name = target.id
                             stub_class_code +=  "    @property\n"
                             stub_class_code += f"    def {property_name}(self):\n"
                             call_url = f"{application_prefix}/classcall/{file_identifier}/{class_name}/{property_name}"
                             stub_class_code += f"        url = {call_url!r}\n"
-                            stub_class_code +=  "        response = self.fetch_sync(url)\n"
+                            stub_class_code += f"        response = self.{transport_names['fetch_sync']}(url)\n"
                             stub_class_code +=  "        return json.loads(response)\n"
     all_imports.add("import json")
     all_imports.add("import base64")

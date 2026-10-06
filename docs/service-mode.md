@@ -21,14 +21,15 @@ browser entrypoint from source without importing or executing the module on the
 server. The supported forms are:
 
 - a top-level class or callable with the same name as the application;
-- a top-level class directly inheriting from `dhxpyt.layout.MainWindow`,
-  including normal import aliases; or
+- a `MainWindow` subclass, including aliases and indirect inheritance resolved
+  after importing the browser module; or
 - explicit literal metadata such as `APP_ENTRYPOINT = "Dashboard"` or
   `APP_CONFIG = {"entrypoint": "Dashboard"}`.
 
-Explicit metadata must name a top-level class or function. Dynamic entrypoint
-expressions and inheritance patterns that cannot be resolved statically return
-a clear validation error; add literal metadata for those applications. Keep
+Explicit metadata must name a module-level callable binding, including supported
+imports and simple aliases. If static discovery cannot choose a class, the
+browser inspects `MainWindow` ancestry, preferring classes defined in the module
+over imported classes. Use literal metadata to disambiguate an entrypoint. Keep
 secrets and database clients in BFF/server modules; never put them in browser
 files.
 
@@ -52,18 +53,23 @@ supported compatibility launcher for existing code.
 
 ## Browser delivery
 
-`GET /{application}` returns the loader page. It fetches
-`/{application}/appcode/appcode.pyt`, a ZIP archive containing only the
-entrypoint, reachable local imports, configured browser files, and generated
-BFF stubs. Frontend and backend-hosted files receive the service-instance UUID
+`GET /{application}` redirects to `/{application}/`, which returns the loader
+page within its application-specific service-worker scope. Default legacy Pyodide
+delivery fetches `/{application}/appcode/appcode.pyt`, containing the entrypoint,
+reachable local imports, discovered installed pure-Python dependencies and their
+resources, configured browser files, and generated BFF stubs. Opt-in
+[portable delivery](browser-runtimes.md) uses a prebuilt bundle manifest.
+Frontend and backend-hosted files receive the service-instance UUID
 as a query parameter for cache invalidation; navigation URLs remain clean.
 
-The widgetset resolution order is:
+The legacy widgetset resolution order is:
 
-1. install the application-declared real version from the package index;
-2. request that same real version from the Pytincture backend;
-3. request `PYTINCTURE_DEV_WHEEL_VERSION` from the backend only as an explicit
-   development fallback (`99.99.99` by default).
+1. use an explicit hash-locked `widgetSource`, if configured (no fallback);
+2. otherwise try the application-declared version from the backend, then its
+   permitted `PYTINCTURE_DEV_WHEEL_VERSION` fallback (`99.99.99` by default);
+3. use the framework's complete-wheel lock for its built-in compatibility widget;
+4. use an exact custom public-index pin only when explicitly allowed by service
+   policy; otherwise fail. See [Widgetset packaging](widgetset-packaging.md).
 
 The backend authorizes only the declared widgetset version and that configured
 development version. Stale or arbitrary same-name wheel versions are not

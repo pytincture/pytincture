@@ -3,10 +3,10 @@
 <head>
     ***FAVICON_LINK***
     <script type="text/javascript">
-        window.languagePluginUrl = './***APPLICATION***/frontend/pyodide/0.29.3/full/';
+        window.languagePluginUrl = '/***APPLICATION***/frontend/pyodide/0.29.3/full/';
     </script>
     ***RUNTIME_PRELOAD***
-    <script src="./***APPLICATION***/frontend/pytincture.js?uuid=***REQUEST_UUID***"></script>
+    <script src="/***APPLICATION***/frontend/pytincture.js?uuid=***REQUEST_UUID***"></script>
 </head>
 <body>
     <script>
@@ -24,7 +24,7 @@
         requestUuid: "***REQUEST_UUID***",
         csrfCookieName: ***CSRF_COOKIE_NAME_JSON***,
         enableBackendLogging: ***ENABLE_BACKEND_LOGGING***,
-        enableServiceWorker: true,
+        enableServiceWorker: ***ENABLE_SERVICE_WORKER***,
         loadingTitle: ***LOADING_TITLE_JSON***
       });
     </script>

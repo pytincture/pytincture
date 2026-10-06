@@ -38,7 +38,9 @@ module first and retain route-level tests for observable HTTP behavior.
   widgetset does not execute application modules.
 - Serving a page or appcode archive never imports the browser entrypoint on the
   server. Entrypoint discovery accepts documented static aliases and literal
-  metadata and rejects ambiguous dynamic patterns.
+  metadata; the browser can resolve indirect `MainWindow` subclasses after
+  import. Explicit metadata disambiguates the intended callable. See
+  [service entrypoints](service-mode.md#application-layout).
 - Mutable BFF and storage state belongs to an application instance or an
   explicitly constructed store.
 - Routes, operation IDs, session schema, and public imports remain governed by

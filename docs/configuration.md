@@ -26,7 +26,7 @@ app = create_app(config)
 
 ## Browser permissions
 
-Available in the unreleased `1.0.0rc8` development version.
+Available since `1.0.0rc8`.
 
 Camera, microphone, geolocation, and the Payment Request API are blocked by
 the service's `Permissions-Policy` header by default. Enable only the features
@@ -209,6 +209,7 @@ The contract test checks every row in this table against the dataclass model.
 | `browser_runtime` | `PYTINCTURE_BROWSER_RUNTIME` | Default engine: pyodide or micropython. MicroPython requires explicit portable-bundle delivery. |
 | `delivery_mode` | `PYTINCTURE_DELIVERY_MODE` | Application delivery: legacy-package (default) or portable-bundle; independent of the engine. |
 | `allow_runtime_selection` | `PYTINCTURE_ALLOW_RUNTIME_SELECTION` | Development/testing only: allow the runtime query parameter; keep false in production. |
+| `enable_service_worker` | `PYTINCTURE_ENABLE_SERVICE_WORKER` | Enable application-scoped framework asset caching in the browser. |
 | `favicon_folder` | `PYTINCTURE_FAVICON_FOLDER` | Optional favicon file/directory. |
 | `cors_allowed_origins` | `CORS_ALLOWED_ORIGINS` | Allowed browser origins. |
 | `browser_connect_origins` | `PYTINCTURE_BROWSER_CONNECT_ORIGINS` | Exact additional HTTPS/WSS origins permitted by browser connect-src. |
@@ -269,6 +270,7 @@ The contract test checks every row in this table against the dataclass model.
 | `session_absolute_max_age_seconds` | `AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS` | Absolute authenticated session lifetime. |
 | `session_https_only` | `AUTH_SESSION_HTTPS_ONLY` | Secure-cookie requirement; derived when omitted. |
 | `session_same_site` | `AUTH_SESSION_SAME_SITE` | Cookie SameSite policy. |
+| `cookie_namespace` | `AUTH_COOKIE_NAMESPACE` | Stem of the session, CSRF, and SAML handshake cookie names; distinct per application sharing a host. |
 | `session_max_claim_count` | `AUTH_SESSION_MAX_CLAIM_COUNT` | Maximum keys retained in an authenticated session identity. |
 | `session_max_identity_bytes` | `AUTH_SESSION_MAX_IDENTITY_BYTES` | Maximum canonical JSON bytes retained for an authenticated identity. |
 | `session_max_cookie_bytes` | `AUTH_SESSION_MAX_COOKIE_BYTES` | Maximum signed browser-session cookie value bytes. |
@@ -464,3 +466,46 @@ or `False` on the class to override; `None` restores inheritance. The stricter
 `api_docs_scope="public"` and `api_docs_mode="disabled"` settings still win.
 This only changes documentation visibility; calling methods still requires the
 same session or scoped token permissions.
+
+## RC11 resource limits and diagnostics
+
+RC11 raises the following default payload ceilings. All values remain configurable;
+existing explicit environment values and typed overrides retain precedence.
+
+| Setting | RC10 default | RC11 default |
+| --- | ---: | ---: |
+| `MAX_REQUEST_BODY_BYTES` | 2097152 (2 MiB) | 16777216 (16 MiB) |
+| `BFF_REQUEST_MAX_BYTES` | 1048576 (1 MiB) | 8388608 (8 MiB) |
+| `BFF_REQUEST_MAX_ITEMS` | 10000 | 100000 |
+| `BFF_RESULT_MAX_BYTES` | 10485760 (10 MiB) | 52428800 (50 MiB) |
+| `BFF_RESULT_MAX_ITEMS` | 10000 | 1000000 |
+| `BFF_STREAM_MAX_BYTES` | 10485760 (10 MiB) | 52428800 (50 MiB) |
+| `BFF_STREAM_MAX_ITEMS` | 10000 | 1000000 |
+
+Items count entries across nested lists and object fields, not characters or
+bytes. Counts reset per response; the pre/post-JSON checks have separate budgets.
+Streams cap emitted records and the aggregate container items in each record.
+`BFF_RESULT_MAX_DEPTH` also bounds JSON structures in stream records. The global
+request cap applies to all routes, including authentication uploads; dedicated
+password, identity, session and SAML limits remain unchanged. Larger payloads
+can consume more memory per admitted call. Concurrency and timeout defaults
+remain bounded and unchanged; deployments can retain RC10 payload caps explicitly.
+
+A limit failure retains a readable `detail` and adds `limit` metadata containing
+`setting`, `limit`, `observed`, `stage`, and `observed_is_lower_bound`. The count
+is a lower bound at the point processing stopped, not a claim that the full
+payload was traversed. A null observed count means no count was measured (for
+example, queue/deadline rejection). Diagnostics include no submitted values,
+object field names, source paths, tokens or credentials.
+
+`X-Pytincture-Limit`, `X-Pytincture-Limit-Value`, and optional
+`X-Pytincture-Limit-Observed` headers let generated and portable clients expose
+this information without consuming untrusted error bodies. The generated
+`PytinctureBFFError` exposes `limit_setting`, `limit_value`, and `limit_observed`.
+Rebuild prebuilt appcode/portable bundles to update their generated client stubs.
+Only typed framework limit diagnostics bypass generic 5xx sanitization.
+
+Search `request.limit_exceeded` logs by request correlation ID. Once streaming
+headers have been sent, the server cannot replace the response status/body with
+a JSON error; search `bff.stream.limit_exceeded` and `bff.stream.finish` instead.
+Stream cleanup and response formats remain unchanged.

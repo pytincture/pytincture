@@ -9,6 +9,7 @@ from typing import Any
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
+from pytincture.backend.limit_diagnostics import LimitViolation
 from pytincture.backend.results import BFFResultLimitExceeded, encode_bff_result
 
 
@@ -130,7 +131,10 @@ class BoundedStreamingResponse(StreamingResponse):
                 if callable(close):
                     await close()
             else:
-                await self.close_unstarted_source()
+                try:
+                    await self.close_unstarted_source()
+                finally:
+                    self.on_send_timeout("disconnect", sent_bytes)
             raise
 
 
@@ -197,13 +201,15 @@ def serialize_stream_item(
     if isinstance(item, (bytes, bytearray)):
         data = bytes(item)
         if max_bytes is not None and len(data) > max_bytes:
-            raise BFFResultLimitExceeded("BFF stream byte limit exceeded")
+            raise BFFResultLimitExceeded.limit("BFF_STREAM_MAX_BYTES", max_bytes, len(item), "streaming")
         return data if raw or data.endswith(b"\n") else data + b"\n"
-    if isinstance(item, str):
+    if isinstance(item, str) and raw:
         if max_bytes is not None and len(item) > max_bytes:
-            raise BFFResultLimitExceeded("BFF stream byte limit exceeded")
+            raise BFFResultLimitExceeded.limit("BFF_STREAM_MAX_BYTES", max_bytes, len(item), "streaming")
         text = item
     else:
+        if max_bytes == 0:
+            raise BFFResultLimitExceeded.limit("BFF_STREAM_MAX_BYTES", 0, 1, "streaming")
         text = encode_bff_result(
             item,
             max_bytes=max_bytes if max_bytes is not None else 2**63 - 1,
@@ -225,6 +231,8 @@ def limited_sync_stream(
     max_seconds: float,
     max_bytes: int,
     max_items: int = 10_000,
+    max_depth: int = 32,
+    on_limit: Callable[[LimitViolation], None] | None = None,
     on_finish: Callable[[str, int], None] | None = None,
 ):
     started = time.monotonic()
@@ -242,19 +250,36 @@ def limited_sync_stream(
                 serialized = serialize_stream_item(
                     item,
                     raw,
-                    max_bytes=remaining_bytes,
+                    max_bytes=max(1, remaining_bytes),
+                    max_depth=max_depth,
                     max_items=max_items,
                 )
-            except BFFResultLimitExceeded:
-                reason = "byte-limit"
+            except BFFResultLimitExceeded as exc:
+                violation = exc.violation
+                if violation is None:
+                    reason = "invalid-result"
+                elif violation.setting.endswith("_MAX_ITEMS"):
+                    reason = "item-limit"
+                    violation = LimitViolation("BFF_STREAM_MAX_ITEMS", max_items, violation.observed, "streaming")
+                elif violation.setting.endswith("_MAX_DEPTH"):
+                    reason = "depth-limit"
+                else:
+                    reason = "byte-limit"
+                    violation = LimitViolation("BFF_STREAM_MAX_BYTES", max_bytes, output_bytes + violation.observed, "streaming")
+                if on_limit is not None and violation is not None:
+                    on_limit(violation)
                 return
             output_items += 1
             if output_items > max_items:
                 reason = "item-limit"
+                if on_limit is not None:
+                    on_limit(LimitViolation("BFF_STREAM_MAX_ITEMS", max_items, output_items, "streaming"))
                 return
             output_bytes += _serialized_size(serialized)
             if output_bytes > max_bytes:
                 reason = "byte-limit"
+                if on_limit is not None:
+                    on_limit(LimitViolation("BFF_STREAM_MAX_BYTES", max_bytes, output_bytes, "streaming"))
                 return
             yield serialized
     except GeneratorExit:
@@ -278,6 +303,8 @@ async def limited_async_stream(
     max_bytes: int,
     max_items: int = 10_000,
     idle_timeout_seconds: float = 30.0,
+    max_depth: int = 32,
+    on_limit: Callable[[LimitViolation], None] | None = None,
     on_finish: Callable[[str, int], None] | None = None,
 ):
     started = time.monotonic()
@@ -311,19 +338,36 @@ async def limited_async_stream(
                 serialized = serialize_stream_item(
                     item,
                     raw,
-                    max_bytes=remaining_bytes,
+                    max_bytes=max(1, remaining_bytes),
+                    max_depth=max_depth,
                     max_items=max_items,
                 )
-            except BFFResultLimitExceeded:
-                reason = "byte-limit"
+            except BFFResultLimitExceeded as exc:
+                violation = exc.violation
+                if violation is None:
+                    reason = "invalid-result"
+                elif violation.setting.endswith("_MAX_ITEMS"):
+                    reason = "item-limit"
+                    violation = LimitViolation("BFF_STREAM_MAX_ITEMS", max_items, violation.observed, "streaming")
+                elif violation.setting.endswith("_MAX_DEPTH"):
+                    reason = "depth-limit"
+                else:
+                    reason = "byte-limit"
+                    violation = LimitViolation("BFF_STREAM_MAX_BYTES", max_bytes, output_bytes + violation.observed, "streaming")
+                if on_limit is not None and violation is not None:
+                    on_limit(violation)
                 return
             output_items += 1
             if output_items > max_items:
                 reason = "item-limit"
+                if on_limit is not None:
+                    on_limit(LimitViolation("BFF_STREAM_MAX_ITEMS", max_items, output_items, "streaming"))
                 return
             output_bytes += _serialized_size(serialized)
             if output_bytes > max_bytes:
                 reason = "byte-limit"
+                if on_limit is not None:
+                    on_limit(LimitViolation("BFF_STREAM_MAX_BYTES", max_bytes, output_bytes, "streaming"))
                 return
             yield serialized
     except asyncio.CancelledError:
@@ -350,6 +394,8 @@ async def limited_thread_stream(
     max_bytes: int,
     max_items: int = 10_000,
     idle_timeout_seconds: float = 30.0,
+    max_depth: int = 32,
+    on_limit: Callable[[LimitViolation], None] | None = None,
     on_finish: Callable[[str, int], None] | None = None,
 ):
     """Iterate a legacy synchronous stream without losing worker accounting.
@@ -405,19 +451,36 @@ async def limited_thread_stream(
                 serialized = serialize_stream_item(
                     item,
                     raw,
-                    max_bytes=remaining_bytes,
+                    max_bytes=max(1, remaining_bytes),
+                    max_depth=max_depth,
                     max_items=max_items,
                 )
-            except BFFResultLimitExceeded:
-                reason = "byte-limit"
+            except BFFResultLimitExceeded as exc:
+                violation = exc.violation
+                if violation is None:
+                    reason = "invalid-result"
+                elif violation.setting.endswith("_MAX_ITEMS"):
+                    reason = "item-limit"
+                    violation = LimitViolation("BFF_STREAM_MAX_ITEMS", max_items, violation.observed, "streaming")
+                elif violation.setting.endswith("_MAX_DEPTH"):
+                    reason = "depth-limit"
+                else:
+                    reason = "byte-limit"
+                    violation = LimitViolation("BFF_STREAM_MAX_BYTES", max_bytes, output_bytes + violation.observed, "streaming")
+                if on_limit is not None and violation is not None:
+                    on_limit(violation)
                 return
             output_items += 1
             if output_items > max_items:
                 reason = "item-limit"
+                if on_limit is not None:
+                    on_limit(LimitViolation("BFF_STREAM_MAX_ITEMS", max_items, output_items, "streaming"))
                 return
             output_bytes += _serialized_size(serialized)
             if output_bytes > max_bytes:
                 reason = "byte-limit"
+                if on_limit is not None:
+                    on_limit(LimitViolation("BFF_STREAM_MAX_BYTES", max_bytes, output_bytes, "streaming"))
                 return
             yield serialized
     except (asyncio.CancelledError, GeneratorExit):
@@ -452,6 +515,8 @@ def as_streaming_response(
     max_items: int,
     idle_timeout_seconds: float,
     write_timeout_seconds: float = 30.0,
+    max_depth: int = 32,
+    on_limit: Callable[[LimitViolation], None] | None = None,
     on_finish: Callable[[str, int], None] | None = None,
 ) -> StreamingResponse:
     status_code = 200
@@ -486,6 +551,8 @@ def as_streaming_response(
             max_bytes=max_bytes,
             max_items=max_items,
             idle_timeout_seconds=idle_timeout_seconds,
+            max_depth=max_depth,
+            on_limit=on_limit,
             on_finish=finish_once,
         )
     else:
@@ -501,6 +568,8 @@ def as_streaming_response(
             max_bytes=max_bytes,
             max_items=max_items,
             idle_timeout_seconds=idle_timeout_seconds,
+            max_depth=max_depth,
+            on_limit=on_limit,
             on_finish=finish_once,
         )
 

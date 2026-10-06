@@ -5,6 +5,56 @@ set when a release is published.
 
 ## Unreleased
 
+## 1.0.0rc13 — unpublished
+
+- Add `cookie_namespace` / `AUTH_COOKIE_NAMESPACE` (default `pytincture`) so
+  services sharing a host can use distinct session, CSRF, and SAML handshake
+  cookie names (#375). Browsers scope cookies by host, not port, so two
+  services on one host previously signed each other out. HTTPS names keep the
+  `__Host-` prefix; the browser runtime and generated BFF clients accept
+  `__Host-<namespace>-csrf` and `<namespace>-dev-csrf` instead of the two fixed
+  names. Default cookie names are unchanged.
+
+## 1.0.0rc12 — 2026-10-05
+
+- Fix the five-second service-worker startup delay (#372): redirect application
+  pages to their scoped trailing-slash URLs while preserving existing entry
+  links. Keep BFF, appcode, auth, and frontend endpoints unchanged; use absolute
+  loader URLs, report service-worker timing, and clean up timed-out listeners.
+  Add `enable_service_worker` / `PYTINCTURE_ENABLE_SERVICE_WORKER` (default true).
+
+- Fix BFF admission cleanup when a stream disconnects before response headers.
+- Preserve Pydantic JSON serializers and field aliases while bounding lazy model
+  inputs before serialization.
+- Encode default streamed strings as JSON values, preserving their types and
+  embedded newlines. For hand-encoded text/SSE frames, use `bff_stream(raw=True)`;
+  existing pre-encoded byte frames keep their newline framing.
+- Support relative imports in nested BFF modules with package contexts isolated
+  by application source root.
+- Preserve PUT/PATCH/DELETE in portable BFF clients and avoid overwriting declared
+  methods with generated async companions.
+- Keep legacy BFF transport helpers separate from exported `fetch`, `fetch_sync`,
+  and `fetch_stream` members, and generate GET properties for annotated attributes.
+
+## 1.0.0rc11 — 2026-09-30
+
+- Refresh the hash-locked PyJWT dependency to 2.15.1 and urllib3 to 2.8.0
+  to resolve release dependency audit findings.
+
+- Report BFF request/result byte, item and depth limits with the exact setting,
+  effective threshold, observed lower bound and processing stage. Preserve
+  numeric diagnostics across isolated workers and partial async collections.
+- Expose safe limit metadata in JSON, structured logs and bounded response
+  headers; generated Python and portable browser clients include the setting
+  in exceptions without reading arbitrary error response bodies.
+- Distinguish BFF queue saturation, admission timeout, upload timeout and
+  execution timeout. Report stream limits in server logs after headers start,
+  including nested-item failures previously mislabeled as byte failures.
+- Raise ordinary result and stream defaults to 50 MiB and 1,000,000 items;
+  BFF requests to 8 MiB and 100,000 items; and the global request cap to 16 MiB.
+  Explicit overrides remain authoritative. Depth, execution time, concurrency,
+  password/login and session limits retain their previous defaults.
+
 ## 1.0.0rc10 — 2026-09-21
 
 - Add explicit `server-only-imports` to portable builds: skip server dependency

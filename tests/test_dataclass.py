@@ -808,7 +808,12 @@ def test_generated_bff_proxies_raise_safe_typed_errors_for_non_2xx(
     class BrowserResponse:
         def __init__(self, status):
             self.status = status
-            self.headers = Headers({"X-Request-ID": f"request-{status}"})
+            self.headers = Headers({
+                "X-Request-ID": f"request-{status}",
+                "X-Pytincture-Limit": "BFF_RESULT_MAX_ITEMS" if status == 413 else None,
+                "X-Pytincture-Limit-Value": "1000000" if status == 413 else None,
+                "X-Pytincture-Limit-Observed": "1000001" if status == 413 else None,
+            })
             self.body = types.SimpleNamespace(
                 getReader=lambda: pytest.fail("error response body was accessed")
             )
@@ -842,6 +847,8 @@ def test_generated_bff_proxies_raise_safe_typed_errors_for_non_2xx(
                 return f"request-{self.status}"
             if name == "X-Pytincture-Replay":
                 return "rejected" if self.status == 409 else None
+            if self.status == 413:
+                return {"X-Pytincture-Limit": "BFF_RESULT_MAX_ITEMS", "X-Pytincture-Limit-Value": "1000000", "X-Pytincture-Limit-Observed": "1000001"}.get(name)
             return None
 
     browser_state = {"status": 400}
@@ -913,6 +920,14 @@ def test_generated_bff_proxies_raise_safe_typed_errors_for_non_2xx(
             assert error.operation == operation
             assert error.correlation_id == f"request-{status}"
             assert "server-secret" not in str(error)
+            if status == 413:
+                assert error.limit_setting == "BFF_RESULT_MAX_ITEMS"
+                assert "BFF_RESULT_MAX_ITEMS=1000000; observed at least 1000001" in str(error)
+            else:
+                assert error.limit_setting is None
+    invalid = error_type(413, "Service.call", limit_setting="BFF_SECRET\r\nserver-secret", limit_value="100")
+    assert invalid.limit_setting is None
+    assert "server-secret" not in str(invalid)
 
 
 def test_generated_stream_keeps_moving_and_cleans_up_on_completion_and_early_exit(
@@ -1321,6 +1336,21 @@ def test_generated_stub_uses_only_the_runtime_selected_csrf_cookie(
 
     js_module.window.__pytinctureCsrfCookieName = "pytincture-dev-csrf"
     assert service._csrf_token() == "sibling-value"
+
+    # A service with its own AUTH_COOKIE_NAMESPACE (pytincture#375).
+    js_module.document.cookie = (
+        "__Host-pytincture-csrf=other-service; __Host-monguana-csrf=own-value; "
+        "monguana-dev-csrf=own-dev-value"
+    )
+    js_module.window.__pytinctureCsrfCookieName = "__Host-monguana-csrf"
+    assert service._csrf_token() == "own-value"
+    js_module.window.__pytinctureCsrfCookieName = "monguana-dev-csrf"
+    assert service._csrf_token() == "own-dev-value"
+
+    # Anything else falls back to the default name for the page's scheme.
+    for rejected in ("session", "__Host-monguana-session", "__Host-Bad-csrf", "a--b-dev-csrf"):
+        js_module.window.__pytinctureCsrfCookieName = rejected
+        assert service._csrf_token() == "other-service"
 
 
 def test_generated_stub_injects_opaque_replay_state_client(tmp_path, monkeypatch):

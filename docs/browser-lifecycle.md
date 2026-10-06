@@ -1,7 +1,8 @@
 # Browser startup lifecycle
 
 `runTinctureApp()` follows a deterministic sequence and resolves only after the
-application entrypoint completes. It emits these stages:
+application entrypoint completes. Default legacy Pyodide delivery emits these
+outer stages:
 
 1. `preflight`
 2. `runtime-load`
@@ -15,20 +16,28 @@ application entrypoint completes. It emits these stages:
 
 Pass `onLifecycleEvent(event)` to integrate a loading UI or diagnostics. The
 same event is dispatched on `window` as `pytincture:lifecycle`. Event types are
-`stage-start`, `stage-complete`, `compatibility`, `fallback`, `error`, and
-`ready`. Every event has a `stage`, `requestId`, and ISO `timestamp`.
+`stage-start`, `stage-complete`, `stage-failed`, `compatibility`, `fallback`,
+`error`, and `ready`. Every event has a `stage`, `requestId`, and ISO `timestamp`.
 
 ```javascript
 runTinctureApp({
   application: "example",
-  widgetlib: "dhxpyt==0.1.0",
+  widgetlib: "dhxpyt==0.9.18",
   onLifecycleEvent(event) {
     console.info(event.type, event.stage, event.requestId);
   },
 });
 ```
 
-The compatibility event reports the Pytincture runtime version, Pyodide and
+Portable delivery uses bundle download/installation and module-import phases
+instead of the legacy package-installation pipeline. Both paths also emit
+timed phases for runtime initialization and the first application frame.
+Use `pytinctureRuntime.getInfo()` for engine, delivery mode, bundle/profile
+identity, and startup timings; see [runtime identity and startup timing](browser-runtimes.md#runtime-identity-and-startup-timing)
+for the phase inventory. The first-frame marker does not prove application-specific
+data loading or rendering has finished.
+
+The legacy compatibility event reports the Pytincture runtime version, Pyodide and
 Python versions, installed widgetset version, verified asset-manifest source,
 loaded JavaScript/CSS asset counts, and whether DHTMLX exposed `window.dhx`
 when `dhxpyt` is used.
@@ -51,8 +60,10 @@ Startup rejects with `PytinctureLifecycleError`. Its public fields are:
 The runtime never includes response bodies in lifecycle errors. Application
 authors should likewise avoid placing secrets in exception messages.
 
-Automatic packaged-to-inline fallback occurs only when the archive endpoint
-returns HTTP 404 or 410, and emits an explicit `fallback` event. Network
+In legacy delivery, automatic packaged-to-inline fallback occurs only when the
+archive endpoint returns HTTP 404 or 410, and emits an explicit `fallback` event. Network
 errors, authorization failures, server failures, corrupt archives, and Python
 entrypoint exceptions stop startup at their actual stage. `mode: "package"`
 never falls back.
+
+Portable startup never silently switches engines or falls back to legacy delivery.

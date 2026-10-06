@@ -13,7 +13,7 @@ does not yet have automated qualification.
 | CPython | 3.14 | CI | Unit tests and editable installation. |
 | Pyodide | 0.29.3 browser distribution | CI | Bundled service/standalone runtime; Python 3.13. `pyodide-py` is not a backend dependency. |
 | MicroPython | 1.29.0-6 browser WASM | Experimental CI | Opt-in portable delivery; defined portable Python profile, not arbitrary CPython compatibility. |
-| dhxpyt | 0.9.18 browser fixture | CI | Complete PyPI wheel hash lock first, matching backend wheel second, `99.99.99` development wheel last. Applications may declare another compatible widgetset version or widgetset. |
+| dhxpyt | 0.9.18 browser fixture | CI | Legacy service mode prefers the matching backend wheel, then its permitted development fallback, then the built-in complete-wheel lock. Explicit `widgetSource` overrides this order. Other Widgetsets follow the [widget source policy](widgetset-packaging.md). |
 | Chromium | current Playwright build | CI | Authenticated service and standalone modes. |
 | Firefox | current Playwright build | CI | Authenticated service and standalone modes. |
 | WebKit | current Playwright build | CI | Authenticated service and standalone modes. |
@@ -33,6 +33,27 @@ versions for each release candidate.
 | Reverse proxy | Forwarded HTTPS scheme and stable host configuration | Header/topology integration CI and deployment runbook. |
 
 ## Version compatibility rules
+
+RC13 keeps the version-1 BFF contract, RC11 resource limits, and RC12 page and
+streaming behavior. It adds `cookie_namespace` / `AUTH_COOKIE_NAMESPACE`; the
+default, `pytincture`, keeps every existing cookie name, so nothing changes until
+a deployment sets it. Rebuild precompiled appcode and portable bundles before
+setting a namespace: the regenerated clients read the namespaced CSRF cookie.
+See [RC13 migration notes](migrations/0.10-to-1.0.md#rc12-to-rc13).
+
+RC12 keeps the version-1 BFF contract and RC11 resource limits. Application
+page links at `/app` redirect to `/app/` so the scoped service worker controls
+the document. BFF, authentication, and appcode endpoint paths stay the same. Rebuild
+precompiled appcode and portable bundles to receive the generated-client fixes.
+Default streamed strings now arrive as JSON string values; producers of
+hand-encoded JSON/SSE text must use `bff_stream(raw=True)` and supply their own
+delimiters. Existing raw streams and pre-encoded byte framing are preserved.
+See [RC12 migration notes](migrations/0.10-to-1.0.md#rc11-to-rc12).
+
+RC11 keeps the version-1 BFF contract and adds limit metadata and response
+headers. Rebuild precompiled appcode and portable bundles to get the updated
+client exception details. Existing explicit payload limits retain precedence;
+see [RC11 defaults](configuration.md#rc11-resource-limits-and-diagnostics).
 
 - Python and npm artifacts from one release must have semantically equivalent
   versions. Stable strings match; PEP 440 `1.0.0rc1` maps to npm SemVer

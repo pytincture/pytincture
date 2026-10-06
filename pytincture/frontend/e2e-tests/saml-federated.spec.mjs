@@ -94,7 +94,7 @@ test("Keycloak SAML login authenticates the packaged app and BFF", async ({ page
         await page.getByLabel("Username or email").fill("saml-user");
         await page.getByLabel("Password", { exact: true }).fill("acceptance-password");
         await Promise.all([
-            page.waitForURL("http://127.0.0.1:8084/e2e_app"),
+            page.waitForURL("http://127.0.0.1:8084/e2e_app/"),
             page.getByRole("button", { name: "Sign In" }).click(),
         ]);
         await expect(page.locator("#e2e-ready")).toBeVisible();
@@ -109,7 +109,7 @@ test("Keycloak SAML login authenticates the packaged app and BFF", async ({ page
 
         await page.reload();
         await expect(page.locator("#e2e-ready")).toBeVisible();
-        expect(page.url()).toBe("http://127.0.0.1:8084/e2e_app");
+        expect(page.url()).toBe("http://127.0.0.1:8084/e2e_app/");
 
         const csrfCookie = (await page.context().cookies()).find(
             cookie => cookie.name === "pytincture-dev-csrf",

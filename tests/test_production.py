@@ -1,9 +1,14 @@
 import base64
+import dataclasses
 import json
 import logging
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from pytincture import PytinctureConfig, create_app
@@ -83,7 +88,7 @@ def test_signed_session_cookie_is_portable_between_workers(tmp_path):
     ) as second_client:
         login(first_client)
         second_client.cookies.update(first_client.cookies)
-        response = second_client.get("/demo", follow_redirects=False)
+        response = second_client.get("/demo/", follow_redirects=False)
         assert response.status_code == 200
 
 
@@ -181,7 +186,7 @@ def test_local_revocations_are_worker_local_but_shared_store_propagates(tmp_path
             },
             follow_redirects=False,
         )
-        assert second_client.get("/demo", follow_redirects=False).status_code == 200
+        assert second_client.get("/demo/", follow_redirects=False).status_code == 200
 
     first, second = make_workers(tmp_path)
 
@@ -218,7 +223,7 @@ def test_local_revocations_are_worker_local_but_shared_store_propagates(tmp_path
     ) as second_client:
         login(first_client)
         second_client.cookies.update(first_client.cookies)
-        assert second_client.get("/demo", follow_redirects=False).status_code == 200
+        assert second_client.get("/demo/", follow_redirects=False).status_code == 200
         first_client.post(
             "/demo/auth/logout",
             headers={
@@ -228,7 +233,7 @@ def test_local_revocations_are_worker_local_but_shared_store_propagates(tmp_path
             },
             follow_redirects=False,
         )
-        rejected = second_client.get("/demo", follow_redirects=False)
+        rejected = second_client.get("/demo/", follow_redirects=False)
         assert rejected.status_code == 307
         assert rejected.headers["location"] == "/demo/login"
 
@@ -290,6 +295,81 @@ def test_http_development_uses_separate_unprefixed_cookie_names(tmp_path):
     assert "secure" not in session_cookie.lower()
     assert "domain=" not in session_cookie.lower()
 
+
+
+def test_cookie_namespace_separates_applications_sharing_a_host(tmp_path):
+    # Browsers scope cookies by host, not port: two applications on one host
+    # with the same cookie names sign each other out (pytincture#375).
+    names = {}
+    for namespace in ("monguana", "iguanaxterm"):
+        modules = tmp_path / namespace
+        modules.mkdir()
+        (modules / "demo.py").write_text('APP_TITLE = "Shared host"\n', encoding="utf-8")
+        service = create_app(
+            PytinctureConfig(
+                modules_path=str(modules),
+                default_application="demo",
+                enable_user_login=True,
+                enable_dev_email_login=True,
+                session_https_only=False,
+                cookie_namespace=namespace,
+                environment={"ALLOWED_EMAILS": "dev@example.com"},
+            )
+        )
+        backend = service.state.pytincture_backend
+        with TestClient(
+            service,
+            base_url="http://127.0.0.1",
+            client=("127.0.0.1", 50000),
+        ) as client:
+            response = client.get("/demo/login")
+        set_cookies = response.headers.get_list("set-cookie")
+        assert any(value.startswith(f"{namespace}-dev-session=") for value in set_cookies)
+        assert not any(value.startswith("pytincture-dev-") for value in set_cookies)
+        assert backend._saml_handshake_cookie_name("demo") == (
+            f"{namespace}-dev-saml-handshake-demo"
+        )
+        names[namespace] = (backend._SESSION_COOKIE, backend._CSRF_COOKIE)
+    assert names == {
+        "monguana": ("monguana-dev-session", "monguana-dev-csrf"),
+        "iguanaxterm": ("iguanaxterm-dev-session", "iguanaxterm-dev-csrf"),
+    }
+
+
+def test_cookie_namespace_keeps_the_host_prefix_in_production(tmp_path):
+    (tmp_path / "demo.py").write_text('APP_TITLE = "Production smoke"\n', encoding="utf-8")
+    config = dataclasses.replace(
+        production_config(tmp_path, https_only=True), cookie_namespace="monguana"
+    )
+    service = create_app(config)
+    backend = service.state.pytincture_backend
+    with TestClient(service, base_url="https://service.example") as client:
+        response = login(client)
+    cookie_headers = response.headers.get_list("set-cookie")
+    assert backend._SESSION_COOKIE == "__Host-monguana-session"
+    assert backend._CSRF_COOKIE == "__Host-monguana-csrf"
+    assert backend._saml_handshake_cookie_name("demo") == "__Host-monguana-saml-handshake-demo"
+    session_cookie = next(
+        value for value in cookie_headers if value.startswith("__Host-monguana-session=")
+    )
+    assert "secure" in session_cookie.lower()
+    assert "path=/" in session_cookie.lower()
+    assert "domain=" not in session_cookie.lower()
+    assert any(value.startswith("__Host-monguana-csrf=") for value in cookie_headers)
+    assert not any(value.startswith("__Host-pytincture-") for value in cookie_headers)
+
+
+def test_an_invalid_cookie_namespace_stops_the_backend_at_import():
+    environment = {**os.environ, "AUTH_COOKIE_NAMESPACE": "bad;name"}
+    result = subprocess.run(
+        [sys.executable, "-c", "import pytincture.backend.app"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode != 0
+    assert "cookie_namespace must be" in result.stderr
 
 def test_request_completion_log_is_structured(tmp_path, caplog):
     first, _ = make_workers(tmp_path)

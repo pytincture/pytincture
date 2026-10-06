@@ -157,6 +157,7 @@ from pytincture.backend.replay import (
     SharedReplayStoreAdapter,
     validate_atomic_replay_store,
 )
+from pytincture.backend.limit_diagnostics import LimitDetail, LimitViolation, limit_detail
 from pytincture.backend.results import (
     BFFResultLimitExceeded,
     encode_bff_result,
@@ -928,6 +929,20 @@ async def correlation_id_middleware(request: Request, call_next):
 
 @app.exception_handler(HTTPException)
 async def sanitized_http_exception_handler(request: Request, exc: HTTPException):
+    if isinstance(exc.detail, LimitDetail):
+        diagnostic = exc.detail
+        correlation_id = getattr(request.state, "correlation_id", request_correlation_id())
+        structured_log(
+            logger, logging.WARNING, "request.limit_exceeded",
+            correlation_id=correlation_id, status_code=exc.status_code,
+            setting=diagnostic.violation.setting, limit=diagnostic.violation.limit,
+            observed=diagnostic.violation.observed, stage=diagnostic.violation.stage,
+        )
+        return JSONResponse(
+            {**diagnostic.payload(), "correlation_id": correlation_id},
+            status_code=exc.status_code,
+            headers={**(exc.headers or {}), **diagnostic.headers()},
+        )
     if exc.status_code >= 500:
         correlation_id = getattr(
             request.state,
@@ -1093,7 +1108,7 @@ if allowed_origins:
         allow_credentials=True,
         allow_methods=allow_all_methods,
         allow_headers=allow_all_headers,
-        expose_headers=["X-Pytincture-SHA256", "X-Request-ID"],
+        expose_headers=["X-Pytincture-SHA256", "X-Request-ID", "X-Pytincture-Limit", "X-Pytincture-Limit-Value", "X-Pytincture-Limit-Observed"],
     )
 else:
     logger.info("CORS middleware disabled; set CORS_ALLOWED_ORIGINS to enable it")
@@ -2402,6 +2417,11 @@ def _locally_validated_auth_session(request: Request):
             _clear_auth_session(request)
             return None
 
+        # RC11 and older cookies contain a document-relative framework avatar.
+        # Preserve its target when the document moves from /app to /app/.
+        picture = user_session.get("picture")
+        if isinstance(picture, str) and re.fullmatch(r"[A-Za-z_]\w*/appcode/profile\.png", picture):
+            return {**user_session, "picture": "/" + picture}
         return user_session
 
 
@@ -2586,11 +2606,11 @@ async def _canonical_bff_arguments(
                 max_items=BFF_REQUEST_MAX_ITEMS,
             )
         except BFFRequestValidationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=exc.detail) from exc
     try:
         validate_bff_arguments(arguments, operation.get("parameters", ()))
     except BFFRequestValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=exc.detail) from exc
     return arguments
 
 
@@ -2610,14 +2630,14 @@ async def _buffer_bff_request_body(request: Request) -> bytes:
         if declared_length < 0:
             raise HTTPException(status_code=400, detail="Invalid Content-Length")
         if declared_length > BFF_REQUEST_MAX_BYTES:
-            raise HTTPException(status_code=413, detail="BFF request body is too large")
+            raise HTTPException(status_code=413, detail=limit_detail("BFF_REQUEST_MAX_BYTES", BFF_REQUEST_MAX_BYTES, declared_length, "Content-Length"))
 
     peer = request.client.host if request.client is not None else "unknown"
     peer_key = str(peer)[:255]
     if not BFF_REQUEST_INGRESS_PEER_GATE.try_acquire(peer_key):
         raise HTTPException(
             status_code=429,
-            detail="BFF upload concurrency exceeded",
+            detail=limit_detail("BFF_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER", BFF_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER, None, "admission"),
             headers={"Retry-After": "1"},
         )
     try:
@@ -2626,7 +2646,7 @@ async def _buffer_bff_request_body(request: Request) -> bytes:
         BFF_REQUEST_INGRESS_PEER_GATE.release(peer_key)
         raise HTTPException(
             status_code=503,
-            detail="BFF upload capacity is temporarily exhausted",
+            detail=limit_detail("BFF_REQUEST_INGRESS_MAX_QUEUE" if exc.reason == "queue-full" else "BFF_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS", BFF_REQUEST_INGRESS_MAX_QUEUE if exc.reason == "queue-full" else BFF_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS, None, "admission"),
             headers={"Retry-After": "1"},
         ) from exc
     except BaseException:
@@ -2639,13 +2659,13 @@ async def _buffer_bff_request_body(request: Request) -> bytes:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise HTTPException(status_code=408, detail="BFF request body timed out")
+                raise HTTPException(status_code=408, detail=limit_detail("BFF_REQUEST_INGRESS_TIMEOUT_SECONDS", BFF_REQUEST_INGRESS_TIMEOUT_SECONDS, None, "request buffering"))
             try:
                 message = await asyncio.wait_for(request.receive(), timeout=remaining)
             except asyncio.TimeoutError as exc:
                 raise HTTPException(
                     status_code=408,
-                    detail="BFF request body timed out",
+                    detail=limit_detail("BFF_REQUEST_INGRESS_TIMEOUT_SECONDS", BFF_REQUEST_INGRESS_TIMEOUT_SECONDS, None, "request buffering"),
                 ) from exc
             message_type = message.get("type")
             if message_type == "http.disconnect":
@@ -2659,7 +2679,7 @@ async def _buffer_bff_request_body(request: Request) -> bytes:
             if len(body) + len(chunk) > BFF_REQUEST_MAX_BYTES:
                 raise HTTPException(
                     status_code=413,
-                    detail="BFF request body is too large",
+                    detail=limit_detail("BFF_REQUEST_MAX_BYTES", BFF_REQUEST_MAX_BYTES, len(body) + len(chunk), "request buffering"),
                 )
             body.extend(chunk)
             if not message.get("more_body", False):
@@ -2822,7 +2842,7 @@ async def _admit_bff_call(request: Request):
     except AdmissionRejected as exc:
         raise HTTPException(
             status_code=503,
-            detail="BFF capacity is temporarily exhausted",
+            detail=limit_detail("BFF_MAX_QUEUE" if exc.reason == "queue-full" else "BFF_QUEUE_TIMEOUT_SECONDS", BFF_MAX_QUEUE if exc.reason == "queue-full" else BFF_QUEUE_TIMEOUT_SECONDS, None, "admission"),
             headers={"Retry-After": "1"},
         ) from exc
     request.state.bff_slot_held = True
@@ -2852,14 +2872,14 @@ async def _wait_for_bff_worker_task(
     remaining = _remaining_bff_seconds(request)
     if remaining <= 0:
         request.state.bff_deferred_task = task
-        raise HTTPException(status_code=504, detail=timeout_detail)
+        raise HTTPException(status_code=504, detail=limit_detail("BFF_CALL_TIMEOUT_SECONDS", BFF_CALL_TIMEOUT_SECONDS, None, "execution"))
     try:
         return await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
     except asyncio.TimeoutError as exc:
         # A Python thread cannot be killed safely. Keep its admission slot until
         # it actually exits so repeated timeouts cannot create unbounded work.
         request.state.bff_deferred_task = task
-        raise HTTPException(status_code=504, detail=timeout_detail) from exc
+        raise HTTPException(status_code=504, detail=limit_detail("BFF_CALL_TIMEOUT_SECONDS", BFF_CALL_TIMEOUT_SECONDS, None, "execution")) from exc
 
 
 async def _run_bff_thread_stage(request: Request, function: Callable, *args, **kwargs):
@@ -2867,7 +2887,7 @@ async def _run_bff_thread_stage(request: Request, function: Callable, *args, **k
     return await _wait_for_bff_worker_task(
         request,
         task,
-        timeout_detail="BFF call timed out",
+        timeout_detail=limit_detail("BFF_CALL_TIMEOUT_SECONDS", BFF_CALL_TIMEOUT_SECONDS, None, "execution"),
     )
 
 
@@ -2889,7 +2909,7 @@ async def _run_bff_async_stage(
         return await _wait_for_bff_worker_task(
             request,
             task,
-            timeout_detail=timeout_detail,
+            timeout_detail=limit_detail("BFF_CALL_TIMEOUT_SECONDS", BFF_CALL_TIMEOUT_SECONDS, None, "execution"),
         )
     try:
         return await asyncio.wait_for(
@@ -2897,7 +2917,7 @@ async def _run_bff_async_stage(
             timeout=_remaining_bff_seconds(request),
         )
     except asyncio.TimeoutError as exc:
-        raise HTTPException(status_code=504, detail=timeout_detail) from exc
+        raise HTTPException(status_code=504, detail=limit_detail("BFF_CALL_TIMEOUT_SECONDS", BFF_CALL_TIMEOUT_SECONDS, None, "execution")) from exc
 
 
 def _invoke_and_resolve_policy_hook(
@@ -4221,7 +4241,7 @@ async def _bounded_bff_result(
                 detail="Unsupported BFF response type",
             )
         if len(body) > BFF_RESULT_MAX_BYTES:
-            raise HTTPException(status_code=413, detail="BFF result byte limit exceeded")
+            raise HTTPException(status_code=413, detail=limit_detail("BFF_RESULT_MAX_BYTES", BFF_RESULT_MAX_BYTES, len(body), "response body"))
         return result
     try:
         converted, payload = await _run_bff_thread_stage(
@@ -4233,7 +4253,7 @@ async def _bounded_bff_result(
             max_items=BFF_RESULT_MAX_ITEMS,
         )
     except BFFResultLimitExceeded as exc:
-        raise HTTPException(status_code=413, detail=str(exc)) from exc
+        raise HTTPException(status_code=413, detail=exc.detail) from exc
     if return_raw:
         return converted
     return Response(content=payload, media_type="application/json")
@@ -4468,7 +4488,7 @@ async def class_call(
             policy_result = await _wait_for_bff_worker_task(
                 request,
                 task,
-                timeout_detail="BFF policy timed out",
+                timeout_detail=limit_detail("BFF_CALL_TIMEOUT_SECONDS", BFF_CALL_TIMEOUT_SECONDS, None, "execution"),
             )
         else:
             policy_result = await _run_bff_thread_stage(
@@ -4480,7 +4500,7 @@ async def class_call(
                     policy_result, timeout=_remaining_bff_seconds(request)
                 )
             except asyncio.TimeoutError as exc:
-                raise HTTPException(status_code=504, detail="BFF policy timed out") from exc
+                raise HTTPException(status_code=504, detail=limit_detail("BFF_CALL_TIMEOUT_SECONDS", BFF_CALL_TIMEOUT_SECONDS, None, "execution")) from exc
         if policy_result is False:
             raise HTTPException(status_code=403, detail="BFF policy denied the operation")
         if policy_result is not None and policy_result is not True:
@@ -4514,13 +4534,13 @@ async def class_call(
         except IsolatedExecutionRejected as exc:
             raise HTTPException(
                 status_code=503,
-                detail="Isolated BFF capacity is temporarily exhausted",
+                detail=limit_detail("BFF_ISOLATED_MAX_PER_USER" if exc.reason == "per-user" else "BFF_ISOLATED_MAX_CONCURRENCY", BFF_ISOLATED_MAX_PER_USER if exc.reason == "per-user" else BFF_ISOLATED_MAX_CONCURRENCY, None, "admission"),
                 headers={"Retry-After": "1"},
             ) from exc
         except IsolatedExecutionTimeout as exc:
-            raise HTTPException(status_code=504, detail="BFF call timed out") from exc
+            raise HTTPException(status_code=504, detail=limit_detail("BFF_CALL_TIMEOUT_SECONDS", BFF_CALL_TIMEOUT_SECONDS, None, "execution")) from exc
         except BFFResultLimitExceeded as exc:
-            raise HTTPException(status_code=413, detail=str(exc)) from exc
+            raise HTTPException(status_code=413, detail=exc.detail) from exc
         except IsolatedExecutionFailed as exc:
             raise RuntimeError("Isolated BFF execution failed") from exc
         if request.scope.get("pytincture.return_raw_result"):
@@ -4562,7 +4582,22 @@ async def class_call(
 
     if callable(func):
         def _as_streaming_response(result_obj):
+            def log_stream_limit(violation):
+                structured_log(
+                    logger, logging.WARNING, "bff.stream.limit_exceeded",
+                    correlation_id=getattr(request.state, "correlation_id", ""),
+                    setting=violation.setting, limit=violation.limit,
+                    observed=violation.observed, stage=violation.stage,
+                )
+
             def log_stream_finish(reason, output_bytes):
+                timed_setting = {
+                    "timeout": ("BFF_STREAM_MAX_SECONDS", BFF_STREAM_MAX_SECONDS),
+                    "idle-timeout": ("BFF_STREAM_IDLE_TIMEOUT_SECONDS", BFF_STREAM_IDLE_TIMEOUT_SECONDS),
+                    "write-timeout": ("BFF_STREAM_WRITE_TIMEOUT_SECONDS", BFF_STREAM_WRITE_TIMEOUT_SECONDS),
+                }.get(reason)
+                if timed_setting:
+                    log_stream_limit(LimitViolation(timed_setting[0], timed_setting[1], None, "streaming"))
                 structured_log(
                     logger,
                     logging.INFO,
@@ -4585,6 +4620,8 @@ async def class_call(
                 max_items=BFF_STREAM_MAX_ITEMS,
                 idle_timeout_seconds=BFF_STREAM_IDLE_TIMEOUT_SECONDS,
                 write_timeout_seconds=BFF_STREAM_WRITE_TIMEOUT_SECONDS,
+                max_depth=BFF_RESULT_MAX_DEPTH,
+                on_limit=log_stream_limit,
                 on_finish=log_stream_finish,
             )
             request.state.bff_stream_owns_slot = True
@@ -4604,7 +4641,7 @@ async def class_call(
                         if len(collected_items) >= BFF_RESULT_MAX_ITEMS:
                             raise HTTPException(
                                 status_code=413,
-                                detail="BFF result item limit exceeded",
+                                detail=limit_detail("BFF_RESULT_MAX_ITEMS", BFF_RESULT_MAX_ITEMS, len(collected_items) + 1, "async collection"),
                             )
                         try:
                             if BFF_ASYNC_EXECUTION_MODE == "worker-thread":
@@ -4630,15 +4667,27 @@ async def class_call(
                                     max_items=BFF_RESULT_MAX_ITEMS,
                                 )
                         except BFFResultLimitExceeded as exc:
+                            if (
+                                exc.violation is not None
+                                and exc.violation.setting == "BFF_RESULT_MAX_BYTES"
+                            ):
+                                # The encoder receives the remaining budget; report
+                                # the configured total and total bytes observed.
+                                exc = BFFResultLimitExceeded.limit(
+                                    "BFF_RESULT_MAX_BYTES",
+                                    BFF_RESULT_MAX_BYTES,
+                                    collected_bytes + exc.violation.observed,
+                                    "async collection",
+                                )
                             raise HTTPException(
                                 status_code=413,
-                                detail=str(exc),
+                                detail=exc.detail,
                             ) from exc
                         collected_bytes += len(encoded_item)
                         if collected_bytes > BFF_RESULT_MAX_BYTES:
                             raise HTTPException(
                                 status_code=413,
-                                detail="BFF result byte limit exceeded",
+                                detail=limit_detail("BFF_RESULT_MAX_BYTES", BFF_RESULT_MAX_BYTES, collected_bytes, "async collection"),
                             )
                         collected_items.append(item)
                 finally:
@@ -4977,16 +5026,16 @@ AUTH_SESSION_HTTPS_ONLY = os.getenv(
     "AUTH_SESSION_HTTPS_ONLY",
     "false" if DEV_EMAIL_LOGIN_ONLY else "true",
 ).lower() == "true"
-_SESSION_COOKIE = (
-    "__Host-pytincture-session"
+# Cookies are scoped by host, not port: applications sharing a host need
+# distinct names or each sign-in replaces the other's session.
+AUTH_COOKIE_NAMESPACE = _PYTINCTURE_CONFIG.cookie_namespace
+_COOKIE_PREFIX = (
+    f"__Host-{AUTH_COOKIE_NAMESPACE}-"
     if AUTH_SESSION_HTTPS_ONLY
-    else "pytincture-dev-session"
+    else f"{AUTH_COOKIE_NAMESPACE}-dev-"
 )
-_CSRF_COOKIE = (
-    "__Host-pytincture-csrf"
-    if AUTH_SESSION_HTTPS_ONLY
-    else "pytincture-dev-csrf"
-)
+_SESSION_COOKIE = f"{_COOKIE_PREFIX}session"
+_CSRF_COOKIE = f"{_COOKIE_PREFIX}csrf"
 
 if ALLOW_DEVELOPMENT_AUTH_ORIGIN:
     if not _authentication_enabled():
@@ -5091,7 +5140,7 @@ AUTH_SESSION_MAX_IDENTITY_BYTES = int(
 AUTH_SESSION_MAX_COOKIE_BYTES = int(
     os.getenv("AUTH_SESSION_MAX_COOKIE_BYTES", "3800")
 )
-MAX_REQUEST_BODY_BYTES = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(2 * 1024 * 1024)))
+MAX_REQUEST_BODY_BYTES = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(16 * 1024 * 1024)))
 if MAX_REQUEST_BODY_BYTES <= 0:
     raise RuntimeError("MAX_REQUEST_BODY_BYTES must be greater than zero")
 AUTH_REQUEST_INGRESS_MAX_CONCURRENCY = int(
@@ -5260,12 +5309,12 @@ BFF_REQUEST_INGRESS_MAX_QUEUE = int(
 BFF_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS = float(
     os.getenv("BFF_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS", "1")
 )
-BFF_REQUEST_MAX_BYTES = int(os.getenv("BFF_REQUEST_MAX_BYTES", str(1024 * 1024)))
+BFF_REQUEST_MAX_BYTES = int(os.getenv("BFF_REQUEST_MAX_BYTES", str(8 * 1024 * 1024)))
 BFF_REQUEST_MAX_DEPTH = int(os.getenv("BFF_REQUEST_MAX_DEPTH", "32"))
-BFF_REQUEST_MAX_ITEMS = int(os.getenv("BFF_REQUEST_MAX_ITEMS", "10000"))
-BFF_RESULT_MAX_BYTES = int(os.getenv("BFF_RESULT_MAX_BYTES", str(10 * 1024 * 1024)))
+BFF_REQUEST_MAX_ITEMS = int(os.getenv("BFF_REQUEST_MAX_ITEMS", "100000"))
+BFF_RESULT_MAX_BYTES = int(os.getenv("BFF_RESULT_MAX_BYTES", str(50 * 1024 * 1024)))
 BFF_RESULT_MAX_DEPTH = int(os.getenv("BFF_RESULT_MAX_DEPTH", "32"))
-BFF_RESULT_MAX_ITEMS = int(os.getenv("BFF_RESULT_MAX_ITEMS", "10000"))
+BFF_RESULT_MAX_ITEMS = int(os.getenv("BFF_RESULT_MAX_ITEMS", "1000000"))
 BFF_EXECUTION_MODE = os.getenv("BFF_EXECUTION_MODE", "trusted-thread").strip().lower()
 BFF_ASYNC_EXECUTION_MODE = os.getenv(
     "BFF_ASYNC_EXECUTION_MODE", "event-loop"
@@ -5280,8 +5329,8 @@ BFF_ISOLATED_MEMORY_BYTES = int(
     os.getenv("BFF_ISOLATED_MEMORY_BYTES", str(1024 * 1024 * 1024))
 )
 BFF_STREAM_MAX_SECONDS = float(os.getenv("BFF_STREAM_MAX_SECONDS", "300"))
-BFF_STREAM_MAX_BYTES = int(os.getenv("BFF_STREAM_MAX_BYTES", str(10 * 1024 * 1024)))
-BFF_STREAM_MAX_ITEMS = int(os.getenv("BFF_STREAM_MAX_ITEMS", "10000"))
+BFF_STREAM_MAX_BYTES = int(os.getenv("BFF_STREAM_MAX_BYTES", str(50 * 1024 * 1024)))
+BFF_STREAM_MAX_ITEMS = int(os.getenv("BFF_STREAM_MAX_ITEMS", "1000000"))
 BFF_STREAM_IDLE_TIMEOUT_SECONDS = float(os.getenv("BFF_STREAM_IDLE_TIMEOUT_SECONDS", "30"))
 BFF_STREAM_WRITE_TIMEOUT_SECONDS = float(
     os.getenv("BFF_STREAM_WRITE_TIMEOUT_SECONDS", "30")
@@ -5858,12 +5907,7 @@ def _get_saml_handshake_cookie_serializer() -> URLSafeTimedSerializer:
 
 
 def _saml_handshake_cookie_name(application: str) -> str:
-    prefix = (
-        "__Host-pytincture-saml-handshake-"
-        if AUTH_SESSION_HTTPS_ONLY
-        else "pytincture-dev-saml-handshake-"
-    )
-    return f"{prefix}{application}"
+    return f"{_COOKIE_PREFIX}saml-handshake-{application}"
 
 
 def _saml_handshake_cookie_path(application: str) -> str:
@@ -6774,7 +6818,7 @@ async def _saml_assertion_consumer(request: Request, application: str, provider_
     user_info = {
         "email": email_attr,
         "name": name_attr or "",
-        "picture": f"{application}/appcode/profile.png",
+        "picture": f"/{application}/appcode/profile.png",
         "auth_type": "saml",
         "auth_provider": provider["id"],
         "auth_provider_label": provider.get("label") or provider["id"],
@@ -7320,7 +7364,7 @@ async def auth_user_callback(request: Request, application: str):
 
     user_info = {
         **authenticated_claims,
-        "picture": f"{application}/appcode/profile.png",
+        "picture": f"/{application}/appcode/profile.png",
         "auth_type": "user",
         "roles": authenticated_claims.get("roles", authenticated_claims.get("role", [])),
     }
@@ -7335,7 +7379,7 @@ async def auth_user_callback(request: Request, application: str):
     )
 
     # See if we stored a "return_to" path earlier; default to "/{application}"
-    return_to = _sanitize_return_to(request.session.pop("return_to", None)) or f"/{application}"
+    return_to = _sanitize_return_to(request.session.pop("return_to", None)) or f"/{application}/"
     return RedirectResponse(url=return_to, status_code=303)
 
 # Pydantic model for MCP auth input
@@ -7386,7 +7430,7 @@ async def mcp_auth(request: Request, application: str):
     )
     user_info = {
         **authenticated_claims,
-        "picture": f"{application}/appcode/profile.png",
+        "picture": f"/{application}/appcode/profile.png",
         "auth_type": "user",
         "roles": authenticated_claims.get("roles", authenticated_claims.get("role", [])),
     }
@@ -7550,7 +7594,8 @@ def _browser_runtime_settings(application, request, entrypoint):
     return runtime, delivery, f"/{application}/appcode/{quote(normalized, safe='/._-')}"
 
 
-@app.get("/{application}", response_class=HTMLResponse, operation_id="getMainApp", responses={200: {"description": "HTMLResponse (modified index.html with widgetset)"}, 302: {"description": "RedirectResponse (to login if not authenticated)"}})
+@app.get("/{application}/", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/{application}", response_class=HTMLResponse, operation_id="getMainApp", responses={200: {"description": "HTMLResponse (modified index.html with widgetset)"}, 302: {"description": "RedirectResponse (to login if not authenticated)"}, 307: {"description": "Redirect to the application page with a trailing slash"}})
 async def main_app_route(response: Response, application: str, request: Request):
     """
     1) Check if user is in session.
@@ -7562,7 +7607,7 @@ async def main_app_route(response: Response, application: str, request: Request)
     except ValueError:
         raise HTTPException(status_code=404, detail="Application not found")
 
-    return_path = f"/{application}"
+    return_path = f"/{application}/"
     if "runtime" in request.query_params:
         return_path += "?runtime=" + quote(request.query_params["runtime"], safe="")
 
@@ -7602,6 +7647,16 @@ async def main_app_route(response: Response, application: str, request: Request)
     except UnsafePath:
         raise HTTPException(status_code=404, detail="Application not found")
     browser_runtime, delivery_mode, runtime_manifest_url = _browser_runtime_settings(application, request, secure_entrypoint)
+    # Keep the application document inside its /application/ worker scope.
+    # Existing entry URLs remain valid; API and asset routes do not change.
+    if not request.url.path.endswith("/"):
+        canonical_path = request.url.path + "/"
+        if request.url.query:
+            canonical_path += "?" + request.url.query
+        return RedirectResponse(
+            url=canonical_path, status_code=307,
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
     widgetset = get_widgetset(application, appcode_folder)
     try:
         widget_asset_manifest = None if runtime_manifest_url else _trusted_widget_manifest(widgetset)
@@ -7690,6 +7745,10 @@ async def main_app_route(response: Response, application: str, request: Request)
     index_html = index_html.replace(
         "***ENABLE_BACKEND_LOGGING***",
         _html_script_json(_browser_logging_available()),
+    )
+    index_html = index_html.replace(
+        "***ENABLE_SERVICE_WORKER***",
+        _html_script_json(os.getenv("PYTINCTURE_ENABLE_SERVICE_WORKER", "true").lower() == "true"),
     )
 
     index_html = index_html.replace(

@@ -1,7 +1,9 @@
 # @pytincture/runtime
 
-Standalone build of `pytincture.js`, the Pyodide bootstrapper used by the
-Pytincture framework. Production sites should export the verified, self-hosted
+Standalone build of `pytincture.js`, the browser bootstrapper used by the
+Pytincture framework. Legacy Pyodide delivery is the default; portable Pyodide
+and MicroPython are opt-in through [runtime configuration](../../docs/browser-runtimes.md).
+Production sites should export the verified, self-hosted
 runtime and Pyodide set from the Python wheel; exact CDN URLs remain an
 explicit convenience mode and require SRI.
 
@@ -43,16 +45,19 @@ class Demo(MainWindow):
 </html>
 ```
 
-What happens:
+What happens with default legacy Pyodide delivery:
 
 - The runtime loads Pyodide (default `./frontend/pyodide/0.29.3/full/`).
 - Installs `micropip` and any extra wheels listed in `#micropip-libs`.
 - Installs the default widget library (`dhxpyt`) or another package you configure.
-- For service apps, a failed PyPI widgetset install falls back to the backend wheel
-  for the requested version, then to the `99.99.99` development wheel.
+- For service apps, the runtime prefers the backend wheel for the requested
+  version, then its permitted development fallback, before the built-in
+  complete-wheel lock or an explicitly allowed public-index pin. An explicit
+  hash-locked `widgetSource` overrides this order and disables fallback.
 - Frontend assets share the service instance's `uuid` query parameter, which
-  rotates on restart, and UUID-bearing requests bypass the service-worker
-  cache. PyPI/micropip resolution stays canonical; only backend-hosted
+  rotates on restart. The service worker caches only its approved immutable
+  manifest assets, using that UUID in the cache namespace and canonical keys.
+  PyPI/micropip resolution stays canonical; only backend-hosted
   widgetset wheel candidates receive the instance UUID.
 - Auto-detects `<script type="text/python">` blocks, mounts them under `/appcode`, finds a `MainWindow` subclass (or explicit entrypoint), and runs it.
 - Startup rejects with a stage-specific `PytinctureLifecycleError`; inline
@@ -119,7 +124,7 @@ This package lives inside the main pytincture repository:
 
 ```bash
 cd pytincture/frontend
-npm install
+npm ci --ignore-scripts
 npm run build        # emits dist/pytincture.{js,min.js,esm.js}
 npm run build:watch  # rebuild on changes
 ```
@@ -140,17 +145,19 @@ credentials:
 
 ```bash
 cd pytincture/frontend
-npm ci
+npm ci --ignore-scripts
 npm run build
 npm pack --dry-run
 ```
 
-For controlled demos, an exact published version can be loaded from a CDN only
-with the matching SRI copied from the trusted release integrity manifest:
+For controlled demos, an exact version can be loaded from a CDN only after its
+npm publication completes, with matching SRI copied from the trusted release
+integrity manifest. A GitHub or PyPI release alone does not make this URL
+available; use the Python-wheel asset export while npm publication is pending:
 
 ```html
 <script
-  src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.10/dist/pytincture.min.js"
+  src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.13/dist/pytincture.min.js"
   integrity="sha384-<trusted-manifest-value>"
   crossorigin="anonymous"></script>
 ```
