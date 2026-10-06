@@ -1045,6 +1045,13 @@ def test_microsoft_auth_requires_explicit_tenant(tmp_path):
             "cannot exceed max_request_body_bytes",
         ),
         ({"session_same_site": "none", "session_https_only": False}, "https"),
+        ({"cookie_namespace": ""}, "cookie_namespace"),
+        ({"cookie_namespace": "Monguana"}, "cookie_namespace"),
+        ({"cookie_namespace": "1app"}, "cookie_namespace"),
+        ({"cookie_namespace": "app-"}, "cookie_namespace"),
+        ({"cookie_namespace": "my--app"}, "cookie_namespace"),
+        ({"cookie_namespace": "app;evil"}, "cookie_namespace"),
+        ({"cookie_namespace": "a" * 33}, "cookie_namespace"),
         (
             {"enable_google_auth": True, "session_secret": "0123456789abcdef" * 2},
             "Google",

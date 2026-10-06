@@ -35,10 +35,18 @@ const BUILTIN_WIDGET_ASSET_MANIFESTS = Object.freeze({
     },
 });
 
-const CSRF_COOKIE_NAMES = Object.freeze([
-    "__Host-pytincture-csrf",
-    "pytincture-dev-csrf",
-]);
+// Only Pytincture's own CSRF cookie shapes: "__Host-<namespace>-csrf" over
+// HTTPS and "<namespace>-dev-csrf" for local HTTP, where the namespace is the
+// server's AUTH_COOKIE_NAMESPACE (default "pytincture") and follows its rule.
+const CSRF_COOKIE_NAMESPACE = "[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?";
+const CSRF_COOKIE_NAME_PATTERN = new RegExp(
+    `^(?:__Host-(${CSRF_COOKIE_NAMESPACE})-csrf|(${CSRF_COOKIE_NAMESPACE})-dev-csrf)$`,
+);
+
+function isCsrfCookieName(cookieName) {
+    const match = CSRF_COOKIE_NAME_PATTERN.exec(String(cookieName));
+    return Boolean(match) && !(match[1] || match[2]).includes("--");
+}
 
 const DEFAULT_CONFIG = {
     runtime: "pyodide",
@@ -480,7 +488,7 @@ function defaultCsrfCookieName() {
 
 function normalizeCsrfCookieName(cookieName) {
     const selected = cookieName || defaultCsrfCookieName();
-    if (!CSRF_COOKIE_NAMES.includes(selected)) {
+    if (!isCsrfCookieName(selected)) {
         throw new Error("Unsupported Pytincture CSRF cookie name.");
     }
     return selected;

@@ -197,6 +197,36 @@ test("CSRF cookie selection uses one explicit runtime mode", () => {
     );
 });
 
+test("CSRF cookie selection accepts a service's own cookie namespace", () => {
+    // AUTH_COOKIE_NAMESPACE (pytincture#375): services sharing a host keep
+    // separate cookies, so the runtime must read the one the page names.
+    const cookies = [
+        "__Host-pytincture-csrf=other-service",
+        "__Host-monguana-csrf=own-value",
+        "monguana-dev-csrf=own-dev-value",
+    ].join("; ");
+    assert.equal(readCookieValue(cookies, "__Host-monguana-csrf"), "own-value");
+    assert.equal(readCookieValue(cookies, "monguana-dev-csrf"), "own-dev-value");
+    assert.equal(normalizeCsrfCookieName("__Host-iguana-xterm-csrf"), "__Host-iguana-xterm-csrf");
+    for (const rejected of [
+        "session",
+        "monguana-csrf",
+        "__Host-monguana-session",
+        "__Host-Monguana-csrf",
+        "__Host-1app-csrf",
+        "__Host-app--x-csrf",
+        "app--x-dev-csrf",
+        "-dev-csrf",
+        `__Host-${"a".repeat(33)}-csrf`,
+    ]) {
+        assert.throws(
+            () => normalizeCsrfCookieName(rejected),
+            /Unsupported Pytincture CSRF cookie name/,
+            rejected,
+        );
+    }
+});
+
 test("the built-in dhxpyt release verifies the complete PyPI wheel", async () => {
     const calls = [];
     const pyodide = fakePyodide();

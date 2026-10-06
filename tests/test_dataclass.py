@@ -1337,6 +1337,21 @@ def test_generated_stub_uses_only_the_runtime_selected_csrf_cookie(
     js_module.window.__pytinctureCsrfCookieName = "pytincture-dev-csrf"
     assert service._csrf_token() == "sibling-value"
 
+    # A service with its own AUTH_COOKIE_NAMESPACE (pytincture#375).
+    js_module.document.cookie = (
+        "__Host-pytincture-csrf=other-service; __Host-monguana-csrf=own-value; "
+        "monguana-dev-csrf=own-dev-value"
+    )
+    js_module.window.__pytinctureCsrfCookieName = "__Host-monguana-csrf"
+    assert service._csrf_token() == "own-value"
+    js_module.window.__pytinctureCsrfCookieName = "monguana-dev-csrf"
+    assert service._csrf_token() == "own-dev-value"
+
+    # Anything else falls back to the default name for the page's scheme.
+    for rejected in ("session", "__Host-monguana-session", "__Host-Bad-csrf", "a--b-dev-csrf"):
+        js_module.window.__pytinctureCsrfCookieName = rejected
+        assert service._csrf_token() == "other-service"
+
 
 def test_generated_stub_injects_opaque_replay_state_client(tmp_path, monkeypatch):
     file_path = tmp_path / "service.py"

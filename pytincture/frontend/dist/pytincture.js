@@ -659,10 +659,14 @@ import ${manifest.entrypoint} as _pytincture_client`));
       ]
     }
   });
-  var CSRF_COOKIE_NAMES = Object.freeze([
-    "__Host-pytincture-csrf",
-    "pytincture-dev-csrf"
-  ]);
+  var CSRF_COOKIE_NAMESPACE = "[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?";
+  var CSRF_COOKIE_NAME_PATTERN = new RegExp(
+    `^(?:__Host-(${CSRF_COOKIE_NAMESPACE})-csrf|(${CSRF_COOKIE_NAMESPACE})-dev-csrf)$`
+  );
+  function isCsrfCookieName(cookieName) {
+    const match = CSRF_COOKIE_NAME_PATTERN.exec(String(cookieName));
+    return Boolean(match) && !(match[1] || match[2]).includes("--");
+  }
   var DEFAULT_CONFIG = {
     runtime: "pyodide",
     deliveryMode: "legacy-package",
@@ -1091,7 +1095,7 @@ import ${manifest.entrypoint} as _pytincture_client`));
   }
   function normalizeCsrfCookieName(cookieName) {
     const selected = cookieName || defaultCsrfCookieName();
-    if (!CSRF_COOKIE_NAMES.includes(selected)) {
+    if (!isCsrfCookieName(selected)) {
       throw new Error("Unsupported Pytincture CSRF cookie name.");
     }
     return selected;

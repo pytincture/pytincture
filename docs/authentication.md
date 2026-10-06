@@ -19,6 +19,19 @@ The hosted page passes the exact CSRF cookie name to the browser runtime;
 generated BFF clients and optional browser logging read only that name, never
 whichever production/development alias appears first in browser cookie order.
 
+Browsers scope cookies by host, never by port. Two Pytincture services on one
+host — `127.0.0.1:8765` and `127.0.0.1:8766`, or two ports of one internal
+name — would otherwise share these cookies, and signing in to one would sign
+the user out of the other. Give each such service its own
+`AUTH_COOKIE_NAMESPACE` (`cookie_namespace`): with `monguana`, the cookies
+become `__Host-monguana-session`, `__Host-monguana-csrf`, and
+`__Host-monguana-saml-handshake-*` (`monguana-dev-*` over local HTTP). The
+default, `pytincture`, keeps the names above. A namespace is 1-32 lowercase
+letters, digits, or single hyphens, starting with a letter; the browser runtime
+and generated clients accept only CSRF names of exactly these two shapes.
+Changing it signs existing users out once, since their old cookies are no
+longer read.
+
 Local HTTP auth testing can explicitly set
 `PYTINCTURE_ALLOW_DEVELOPMENT_AUTH_ORIGIN=true` and
 `AUTH_SESSION_HTTPS_ONLY=false`. The supported launcher confines this mode to a

@@ -270,6 +270,7 @@ The contract test checks every row in this table against the dataclass model.
 | `session_absolute_max_age_seconds` | `AUTH_SESSION_ABSOLUTE_MAX_AGE_SECONDS` | Absolute authenticated session lifetime. |
 | `session_https_only` | `AUTH_SESSION_HTTPS_ONLY` | Secure-cookie requirement; derived when omitted. |
 | `session_same_site` | `AUTH_SESSION_SAME_SITE` | Cookie SameSite policy. |
+| `cookie_namespace` | `AUTH_COOKIE_NAMESPACE` | Stem of the session, CSRF, and SAML handshake cookie names; distinct per application sharing a host. |
 | `session_max_claim_count` | `AUTH_SESSION_MAX_CLAIM_COUNT` | Maximum keys retained in an authenticated session identity. |
 | `session_max_identity_bytes` | `AUTH_SESSION_MAX_IDENTITY_BYTES` | Maximum canonical JSON bytes retained for an authenticated identity. |
 | `session_max_cookie_bytes` | `AUTH_SESSION_MAX_COOKIE_BYTES` | Maximum signed browser-session cookie value bytes. |
