@@ -30,14 +30,18 @@ request, or server failures.
 | Python in Pyodide | 3.13 |
 | dhxpyt | 0.9.18 |
 | Keycloak | 26.7.2, digest pinned in CI |
-| Playwright | 1.62.1 |
-| Browser engines | Playwright 1.62.1 Chromium, Firefox, and WebKit builds |
+| Playwright | 1.63.0 |
+| Browser engines | Playwright 1.63.0 Chromium, Firefox, and WebKit builds |
 
 The backend test environment installs the current checkout. It downloads the
 exact dhxpyt wheel without installing its server-side dependencies. It exposes
-that wheel under an intentionally unpublished `0.9.18+backend` candidate, then
-forces the browser's initial package-index lookup to fail so the deployed
-backend wheel path is exercised.
+that wheel under an intentionally unpublished `0.9.18+backend` candidate so the
+deployment-owned backend wheel path is exercised without relying on a public
+package-index release. Service mode tries the backend wheel first.
+
+Separate [real-application conformance tests](../tests/conformance/README.md)
+exercise legacy Pyodide, portable Pyodide, and portable MicroPython in Chromium.
+That portable matrix does not imply MicroPython qualification in Firefox or WebKit.
 
 ## Running locally
 

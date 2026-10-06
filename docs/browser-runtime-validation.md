@@ -1,5 +1,10 @@
 # Full application runtime conformance — 2026-09-20
 
+This is the historical RC8 qualification report. Its commits, counts, and local
+coverage limits describe that run. For subsequent candidates, including RC10,
+use the [current release evidence](release-qualification.md) and the
+[reproducible conformance suite](../tests/conformance/README.md).
+
 The complete Book Library example and Wawesome Chat passed automated Playwright
 Chromium tests in all three supported configurations. The final matrix used new
 checkouts from pinned public commits, hash-checked integration patches, rebuilt

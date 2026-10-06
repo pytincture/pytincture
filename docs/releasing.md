@@ -9,8 +9,8 @@ Only a maintained release commit with green required CI is publishable.
    the exact hash-bearing graph.
 2. Update `CHANGELOG.md`, compatibility versions, migration notes, and the
    release qualification record.
-3. After the complete 1.0 CI workflow is on `main`, apply and verify the full
-   branch-protection contract with an administration token:
+3. Audit the live branch protection against the release contract before final
+   1.0 qualification. An administrator can apply the target policy with:
    `GITHUB_TOKEN=... python scripts/repository_policy.py --profile release --apply`.
    The policy requires one CODEOWNER approval, dismisses stale approvals, and
    requires approval from someone other than the last pusher. Keep at least two

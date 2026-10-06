@@ -26,7 +26,7 @@ app = create_app(config)
 
 ## Browser permissions
 
-Available in the unreleased `1.0.0rc8` development version.
+Available since `1.0.0rc8`.
 
 Camera, microphone, geolocation, and the Payment Request API are blocked by
 the service's `Permissions-Policy` header by default. Enable only the features

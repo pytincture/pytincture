@@ -1,6 +1,8 @@
 # `appcode.pyt` browser-package contract — version 1
 
-Service mode downloads the browser application from:
+Service mode with default legacy Pyodide delivery downloads the browser
+application from the following endpoint. Opt-in [portable bundles](../browser-runtimes.md)
+use a separate manifest and do not replace this contract.
 
 ```text
 GET /{application}/appcode/appcode.pyt
@@ -14,10 +16,13 @@ suffix is a transport convention; the payload is a standard ZIP archive.
 - All member names are relative, POSIX-style paths with no leading slash or
   parent traversal.
 - `{application}.py` is the required entrypoint at the archive root.
-- The service discovers the callable without executing this file. A callable
-  named for the application, a direct `MainWindow` subclass, or literal
-  `APP_ENTRYPOINT`/`APP_CONFIG["entrypoint"]` metadata identifies it.
+- The service discovers entrypoint metadata without executing this file. A
+  callable named for the application, a direct `MainWindow` subclass, or literal
+  `APP_ENTRYPOINT`/`APP_CONFIG["entrypoint"]` metadata identifies it. Browser
+  discovery also supports imported aliases and indirect `MainWindow` subclasses.
 - Statically reachable local Python imports are included recursively.
+- Discovered installed pure-Python dependencies include their source, package
+  data, and selected distribution metadata, subject to the same size/path limits.
 - Import traversal stops at a proven BFF module: the module is emitted as a
   proxy, while imports used only by its server implementation are excluded.
 - Package `__init__.py` files implicitly executed by ordinary browser modules
@@ -29,9 +34,10 @@ suffix is a transport convention; the payload is a standard ZIP archive.
   and `__pycache__` are excluded from automatic discovery.
 - Hidden files and high-confidence credential, private-key, database, and
   backup filenames are rejected from explicit browser-file selection.
-- Symlinked files/directories are never packaged. Every member is opened
-  relative to the canonical modules root with no-follow semantics where the
-  operating system supports them.
+- Symlinked files/directories are never packaged. Local members are opened
+  relative to the canonical modules root; installed dependency members are read
+  from their distribution root. Both use contained, no-follow file reads where
+  the operating system supports them.
 
 Pytincture transforms Python source as it packages it. Exported BFF classes
 become browser proxies while ordinary browser code and required imports remain
@@ -40,7 +46,8 @@ available. Archive member ordering and compression level are not contractual.
 Construction is subject to configured file-count, individual-file,
 aggregate-source, build-concurrency, and admission-wait limits. Public archives
 without session-specific replay material may be served from a bounded
-per-worker cache. A warm lookup validates the digest-bearing source fingerprint
+per-worker cache. Archives containing discovered installed dependencies bypass
+this dynamic cache. A warm lookup validates the digest-bearing source fingerprint
 through no-follow file identity metadata and relevant directory metadata before
 returning immutable cached bytes, without rereading or rehashing unchanged
 sources. The LRU has independent entry-count and aggregate-byte limits. Limit
@@ -76,8 +83,8 @@ cannot be combined with required prebuilt appcode.
 The archive is delivered under the application's authentication policy. Its
 contents are visible to the browser and must never contain server secrets.
 Python source is included only when it is the entrypoint, reachable through
-static local imports, or explicitly selected. Dynamic imports must be declared
-through `PYTINCTURE_BROWSER_FILES`.
+static local imports or discovered installed dependencies, or explicitly selected.
+Dynamic local imports must be declared through `PYTINCTURE_BROWSER_FILES`.
 
 Public assets served separately by `/{application}/appcode/{asset_path}` are
 unauthenticated and are not implicitly part of this archive contract. The
