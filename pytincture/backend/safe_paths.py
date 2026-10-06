@@ -220,9 +220,24 @@ def resolve_contained_path(
     return final
 
 
+def _open_resolved_nofollow(root: str, normalized: str) -> int:
+    """Open a validated contained path directly, for platforms without dir_fd."""
+    path = resolve_contained_path(root, normalized)
+    return os.open(
+        path,
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0),
+    )
+
+
 def _open_relative_nofollow(root: str, relative_path: str) -> int:
     """Open a file through no-follow directory descriptors when supported."""
     normalized = normalize_relative_path(relative_path)
+    if os.open not in os.supports_dir_fd:
+        # Windows has no dir_fd, and os.open() cannot open a directory there
+        # at all: it raises PermissionError at the root, before the except
+        # below could apply. open_contained_file() still checks the opened
+        # file's identity against the resolved path.
+        return _open_resolved_nofollow(root, normalized)
     parts = normalized.split("/")
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     directory = getattr(os, "O_DIRECTORY", 0)
@@ -245,11 +260,7 @@ def _open_relative_nofollow(root: str, relative_path: str) -> int:
         )
         return file_fd
     except (NotImplementedError, TypeError):
-        path = resolve_contained_path(root, normalized)
-        return os.open(
-            path,
-            os.O_RDONLY | nofollow | getattr(os, "O_BINARY", 0),
-        )
+        return _open_resolved_nofollow(root, normalized)
     finally:
         for descriptor in reversed(descriptors):
             try:
