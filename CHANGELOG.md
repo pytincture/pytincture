@@ -5,11 +5,15 @@ set when a release is published.
 
 ## Unreleased
 
-- Let development email login and other password-free setups run without
-  `pytincture[password]`: when `AUTH_PASSWORD_HASHES` configures no accounts,
-  password verification fails without the Argon2 dummy-hash check, which only
-  equalizes work between known and unknown accounts. It previously raised
-  "install pytincture[password]" on every login attempt.
+## 1.0.0rc13 — unpublished
+
+- Add `cookie_namespace` / `AUTH_COOKIE_NAMESPACE` (default `pytincture`) so
+  services sharing a host can use distinct session, CSRF, and SAML handshake
+  cookie names (#375). Browsers scope cookies by host, not port, so two
+  services on one host previously signed each other out. HTTPS names keep the
+  `__Host-` prefix; the browser runtime and generated BFF clients accept
+  `__Host-<namespace>-csrf` and `<namespace>-dev-csrf` instead of the two fixed
+  names. Default cookie names are unchanged.
 
 ## 1.0.0rc12 — 2026-10-05
 
