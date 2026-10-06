@@ -122,6 +122,13 @@ def verify_password(email: str, password: str, raw_hashes: str) -> bool:
         raise RuntimeError("AUTH_PASSWORD_HASHES must be a JSON object") from exc
     if not isinstance(password_hashes, dict):
         raise RuntimeError("AUTH_PASSWORD_HASHES must be a JSON object")
+    if not password_hashes:
+        # No account has a password, so every email fails the same way and
+        # there is no known/unknown difference for the dummy hash to hide.
+        # Skipping it also keeps password-free logins (loopback development
+        # email login, an AUTH_USER_CLAIMS-only setup) from needing the
+        # optional argon2 dependency.
+        return False
     configured_hash = password_hashes.get(email) or password_hashes.get(
         email.casefold()
     )

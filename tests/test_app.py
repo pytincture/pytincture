@@ -493,6 +493,33 @@ def test_development_email_login_accepts_literal_loopback_peer_and_host(
     assert response.status_code == 303
 
 
+def test_development_email_login_works_without_password_extra(monkeypatch):
+    import pytincture.backend.app as backend_app
+
+    # No AUTH_PASSWORD_HASHES and no argon2/bcrypt: the development login
+    # must not fail on the optional pytincture[password] dependency.
+    monkeypatch.setitem(sys.modules, "argon2", None)
+    monkeypatch.setitem(sys.modules, "bcrypt", None)
+    monkeypatch.delenv("AUTH_PASSWORD_HASHES", raising=False)
+    # Own limiter: a login from 127.0.0.1 would otherwise count against the
+    # shared one and push a later test into 429.
+    monkeypatch.setattr(
+        backend_app, "AUTH_LOGIN_RATE_LIMITER", backend_app.SlidingWindowRateLimiter(100, 60)
+    )
+    monkeypatch.setattr(backend_app, "ENABLE_GOOGLE_AUTH", False)
+    monkeypatch.setattr(backend_app, "ENABLE_USER_LOGIN", True)
+    monkeypatch.setattr(backend_app, "ENABLE_DEV_EMAIL_LOGIN", True)
+    monkeypatch.setenv("ALLOWED_EMAILS", "person@example.com")
+    with TestClient(app, base_url="https://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        response = _password_login(
+            client,
+            email="person@example.com",
+            password="ignored",
+            follow_redirects=False,
+        )
+    assert response.status_code == 303
+
+
 def test_development_email_login_accepts_ipv6_literal_loopback_request():
     import pytincture.backend.app as backend_app
 

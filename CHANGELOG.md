@@ -5,6 +5,12 @@ set when a release is published.
 
 ## Unreleased
 
+- Let development email login and other password-free setups run without
+  `pytincture[password]`: when `AUTH_PASSWORD_HASHES` configures no accounts,
+  password verification fails without the Argon2 dummy-hash check, which only
+  equalizes work between known and unknown accounts. It previously raised
+  "install pytincture[password]" on every login attempt.
+
 ## 1.0.0rc12 — 2026-10-05
 
 - Fix the five-second service-worker startup delay (#372): redirect application
