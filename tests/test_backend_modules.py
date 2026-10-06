@@ -868,6 +868,49 @@ def test_secure_stat_reads_metadata_without_reading_file_contents(tmp_path, monk
     assert metadata.path == str(target.resolve())
 
 
+
+def _like_windows(monkeypatch):
+    """No dir_fd, and os.open() on a directory is refused, as on Windows."""
+    import os
+    import stat as stat_module
+
+    import pytincture.backend.safe_paths as safe_paths
+
+    real_open = os.open
+
+    def windows_open(path, flags, mode=0o777, *, dir_fd=None):
+        if dir_fd is not None:
+            raise NotImplementedError("dir_fd unavailable on this platform")
+        if stat_module.S_ISDIR(os.stat(path).st_mode):
+            raise PermissionError(13, "Permission denied", path)
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(safe_paths.os, "supports_dir_fd", set())
+    monkeypatch.setattr(safe_paths.os, "open", windows_open)
+
+
+def test_secure_read_works_without_directory_descriptors(tmp_path, monkeypatch):
+    _like_windows(monkeypatch)
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "worker.py").write_bytes(b"value = 42\r\n")
+
+    secure = read_contained_file(str(tmp_path), "package/worker.py")
+    assert secure.content == b"value = 42\r\n"
+    with pytest.raises(UnsafePath):
+        read_contained_file(str(tmp_path), "../outside.py")
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "symlink"), reason="symlinks unavailable")
+def test_secure_read_without_directory_descriptors_still_rejects_symlinks(tmp_path, monkeypatch):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
+    outside.write_text("secret = True\n", encoding="utf-8")
+    (tmp_path / "linked.py").symlink_to(outside)
+    _like_windows(monkeypatch)
+
+    with pytest.raises(UnsafePath, match="symlinks"):
+        read_contained_file(str(tmp_path), "linked.py")
+
 @pytest.mark.skipif(not hasattr(__import__("os"), "symlink"), reason="symlinks unavailable")
 def test_secure_read_rejects_file_and_directory_symlinks(tmp_path):
     outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
