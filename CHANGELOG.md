@@ -5,6 +5,14 @@ set when a release is published.
 
 ## Unreleased
 
+- Discover a widgetset installed in editable mode (`pip install -e`). Its
+  RECORD lists only the `.pth` file and the setuptools finder, never the
+  package source, and the finder is invisible to `PathFinder`, so an app that
+  imported the widgetset by name resolved no widgetset at all. Editable
+  installs are now located through `importlib.util.find_spec`, without
+  importing the package, and trusted only inside the project directory
+  recorded in `direct_url.json`.
+
 ## 1.0.0rc12 — 2026-10-05
 
 - Fix the five-second service-worker startup delay (#372): redirect application

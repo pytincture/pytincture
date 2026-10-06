@@ -4,6 +4,7 @@ import ast
 import fnmatch
 import hashlib
 import importlib.metadata as importlib_metadata
+import importlib.util
 import io
 import json
 import math
@@ -20,6 +21,8 @@ from dataclasses import dataclass
 from importlib.machinery import PathFinder
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from fastapi import HTTPException
 from packaging.utils import canonicalize_name
@@ -544,6 +547,63 @@ def _valid_widget_spec(widgetset: object, version: object) -> str | None:
     return f"{widgetset.strip()}=={version.strip()}"
 
 
+def _editable_project_root(distribution) -> Path | None:
+    """The project directory of a PEP 610 editable install, else None."""
+
+    try:
+        raw = distribution.read_text("direct_url.json")
+        direct_url = json.loads(raw) if raw else None
+    except (OSError, ValueError):
+        return None
+    if not isinstance(direct_url, dict):
+        return None
+    dir_info = direct_url.get("dir_info")
+    if not isinstance(dir_info, dict) or dir_info.get("editable") is not True:
+        return None
+    url = direct_url.get("url")
+    if not isinstance(url, str):
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
+        return None
+    try:
+        root = Path(url2pathname(unquote(parsed.path))).resolve()
+    except (OSError, ValueError):
+        return None
+    return root if root.is_dir() else None
+
+
+def _editable_module_source(module_name: str, project_root: Path) -> Path | None:
+    """Locate a top-level module of an editable install without importing it.
+
+    Editable installs record only their .pth file and finder in RECORD, so the
+    package source is never an owned file. Setuptools' finder-based editable
+    mode is also invisible to PathFinder. ``importlib.util.find_spec`` on a
+    top-level name consults the meta-path finders (already loaded from the
+    .pth at interpreter start) and does not execute the package. The result
+    is trusted only inside the project directory recorded in direct_url.json,
+    which keeps the ownership check RECORD provides for regular installs.
+    """
+
+    if "." in module_name:
+        return None
+    try:
+        spec = importlib.util.find_spec(module_name)
+    except (ImportError, ValueError):
+        return None
+    if spec is None or not spec.origin or spec.origin in {"built-in", "frozen"}:
+        return None
+    try:
+        origin = Path(spec.origin).resolve()
+    except (OSError, ValueError):
+        return None
+    if origin.name not in {"__init__.py", f"{module_name}.py"}:
+        return None
+    if not origin.is_relative_to(project_root):
+        return None
+    return origin
+
+
 def _installed_widget_metadata(
     module_name: str,
     distribution_names: tuple[str, ...] | list[str],
@@ -566,13 +626,19 @@ def _installed_widget_metadata(
             str(path).replace("\\", "/"): path
             for path in distribution.files or ()
         }
-        for relative in (f"{module_name}/__init__.py", f"{module_name}.py"):
-            owned_path = owned_files.get(relative)
-            if owned_path is None:
-                continue
-            widgetset, _declared_version = _literal_external_metadata(
-                Path(distribution.locate_file(owned_path))
-            )
+        owned_sources = [
+            Path(distribution.locate_file(owned_files[relative]))
+            for relative in (f"{module_name}/__init__.py", f"{module_name}.py")
+            if relative in owned_files
+        ]
+        if not owned_sources:
+            project_root = _editable_project_root(distribution)
+            if project_root is not None:
+                editable_source = _editable_module_source(module_name, project_root)
+                if editable_source is not None:
+                    owned_sources.append(editable_source)
+        for source in owned_sources:
+            widgetset, _declared_version = _literal_external_metadata(source)
             spec = _valid_widget_spec(widgetset, distribution.version)
             if spec:
                 discovered_specs.add(spec)
