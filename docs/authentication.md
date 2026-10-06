@@ -69,7 +69,9 @@ IP; forwarded headers cannot enable it. Typed configuration rejects this mode
 with proxy trust, public host/origin settings, or a production identity
 provider. With `launch_service()`, the development mode automatically binds to
 `127.0.0.1` unless another literal loopback `host` is supplied, and a routable
-bind is rejected. It must never be enabled in production.
+bind is rejected. It must never be enabled in production. With no
+`AUTH_PASSWORD_HASHES` configured it needs no `pytincture[password]` install:
+password verification only runs Argon2 when at least one account has a hash.
 `LOGIN_HELP_TEXT` is escaped plain text suitable for disposable demo
 credentials.
 
