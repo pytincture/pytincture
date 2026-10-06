@@ -10,8 +10,9 @@ every gate below has durable evidence.
 [PR #376](https://github.com/pytincture/pytincture/pull/376) prepares
 `1.0.0rc13` (npm `1.0.0-rc.13`) with configurable cookie names for services
 that share a host (#375). The RC12 integrity manifest is retired unchanged, as
-RC12 is published; RC13's browser assets have their own manifest. The versioned
-RC13 commit must pass its own PR checks before merge.
+RC12 is published; RC13's browser assets have their own manifest. The merged
+RC13 preparation is on `main`; subsequent changes must pass the PR checks before
+joining that candidate.
 
 RC13 has no publication or observation evidence yet. Publication remains a
 separate step; this preparation does not authorize a tag, GitHub release, or
@@ -395,13 +396,14 @@ The repository labels `priority:P0`, `priority:P1`, `security:critical`,
 `security:high`, and `release-blocker` are release-blocking. Release-event CI
 audits open issues for those labels before publishing.
 
-The versioned `contracts/repository-policy-v1.json` defines branch protection.
-The bootstrap profile protects the current stack with its available checks.
-After the final CI workflow reaches `main`, an administrator applies and audits
-the release profile, which requires every Python, JavaScript, browser,
-artifact, optional-extra, security, production, and upgrade/rollback check,
+The versioned `contracts/repository-policy-v1.json` defines the target branch
+protection. The complete CI workflow is on `main`; an administrator must apply
+and audit the release profile before final 1.0 qualification. It requires every
+Python, JavaScript, browser, artifact, optional-extra, security, production, and
+upgrade/rollback check,
 including the repository/history secret scan, plus a fresh CODEOWNER approval
 from someone other than the last pusher.
+
 The built-in Actions token cannot read administration policy, so the resulting
 audit URL is recorded under `repository_policy_reviews` rather than relying on
 an under-privileged CI API call.
@@ -413,10 +415,12 @@ its tracking issue is accidentally closed.
 
 ## RC sequence
 
-1. Merge the complete roadmap chain and set the canonical Python version to
-   `1.0.0rc1`.
-2. Run `npm run build`. Python/browser runtime versions remain `1.0.0rc1`; npm
-   metadata uses the SemVer-equivalent `1.0.0-rc.1`.
+1. Merge the candidate changes and select the next unused canonical Python
+   version with `scripts/set_release_version.py`. RC1–RC12 are already published;
+   do not reuse their immutable versions.
+2. Build synchronized artifacts. For example, Python/browser version
+   `1.0.0rc13` maps to npm `1.0.0-rc.13`; use the chosen next version for a new
+   candidate. See the [release procedure](releasing.md).
 3. Push the signed tag and wait for tag-triggered version/qualification gates,
    blocker audit, and full CI. Then publish the GitHub prerelease. Copy artifact
    hashes and CI evidence into the qualification record in a follow-up PR.
@@ -445,11 +449,13 @@ from the evidence record.
 
 ```bash
 python scripts/check_release_gates.py
-python scripts/check_release_gates.py --release-ref v1.0.0rc1
+python scripts/check_release_gates.py --release-ref v1.0.0rc13
 python scripts/check_release_gates.py --release-ref v1.0.0
 GITHUB_TOKEN=... python scripts/audit_release_blockers.py
 ```
 
 The first command validates static controls and version alignment; it does not
-declare the final release ready. The final command succeeds only when the
-GitHub issue audit finds no labeled blocker.
+declare the final release ready. The RC command must match the version in the
+checkout. The `v1.0.0` check is for the final release checkout and must fail
+while its qualification gates remain incomplete. The last command succeeds
+only when the GitHub issue audit finds no labeled blocker.
