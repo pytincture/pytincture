@@ -18,8 +18,10 @@ by Pytincture 1.x.
 - Public methods are operations. Public assigned/annotated attributes are
   read-only `GET` operations.
 - Private names beginning with `_` are not exported.
-- Module identifiers are relative POSIX-style paths under `MODULES_PATH` and
-  include `.py`.
+- Module identifiers are relative POSIX-style paths under `MODULES_PATH`.
+  Source/registry identifiers include `.py`; class-call URLs accept both the
+  extensionless form and the historical `.py` form, including nested modules.
+  Swagger uses extensionless paths.
 - Static manifest validation occurs before application code is imported.
 - Duplicate exported class definitions and any later binding of the exported
   class or one of its members reject that source file before import. Manifest

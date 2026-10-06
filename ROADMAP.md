@@ -5,6 +5,11 @@ and standalone browser applications predictable to build, deploy, operate, and
 upgrade. New widget features are secondary to compatibility, diagnostics,
 security, and repeatable releases.
 
+The 1.0 contracts, application factory, browser CI, and artifact verification
+are implemented. RC13 is in development; [release qualification](docs/release-qualification.md)
+tracks published candidates and the remaining final-release gates. The 0.11–0.14
+milestones below preserve the original plan rather than future version numbers.
+
 ## 1.0 stability contract
 
 Pytincture 1.x will provide:
@@ -25,7 +30,7 @@ compatibility contract.
 
 ## Supported product modes
 
-The 1.0 test and documentation matrix will cover:
+The current test and documentation matrix covers:
 
 1. **Service mode**: FastAPI delivery, packaged browser application, BFF calls,
    authentication, public assets, and optional MCP integration.
@@ -33,7 +38,7 @@ The 1.0 test and documentation matrix will cover:
    micropip dependencies, and a configurable widgetset without a Pytincture
    backend.
 
-## Milestones
+## Original milestone plan
 
 ### 0.11 — Public contracts and continuous integration
 
