@@ -6,6 +6,9 @@ inline Python, and starts the selected entrypoint. It does not require a
 Pytincture service and provides no BFF, server authentication, or private
 Python.
 
+This guide describes default legacy Pyodide delivery. For opt-in portable
+Pyodide or MicroPython bundles, see [browser runtimes](browser-runtimes.md).
+
 A static companion origin may optionally expose a widget wheel using the
 `/{application}/appcode/{package}-{version}-py3-none-any.whl` convention. Set
 `application` and `devWidgetHost` in the inline runtime configuration to enable
@@ -18,13 +21,13 @@ Install the exact Pytincture release, then export its verified browser assets
 into the static site's `frontend/` directory:
 
 ```bash
-python -m pip install 'pytincture==1.0.0rc7'
+python -m pip install 'pytincture==1.0.0rc12'
 python -m pytincture.assets ./public/frontend
 ```
 
 The export command verifies every runtime, Pyodide, WASM, standard-library,
 and icon asset against the versioned
-`frontend/integrity/pytincture-1.0.0rc7.json` manifest before copying it. This
+`frontend/integrity/pytincture-1.0.0rc12.json` manifest before copying it. This
 self-hosted layout is the production default. Set configuration before loading
 the runtime:
 
@@ -93,7 +96,7 @@ from the release integrity manifest into trusted HTML/configuration:
   };
 </script>
 <script
-  src="https://cdn.example/pytincture/1.0.0rc7/pytincture.min.js"
+  src="https://cdn.example/pytincture/1.0.0rc12/pytincture.min.js"
   integrity="sha384-<trusted-manifest-value>"
   crossorigin="anonymous"></script>
 ```

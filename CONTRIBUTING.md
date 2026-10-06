@@ -1,14 +1,13 @@
 # Contributing
 
-Use Python 3.13, Node 24, and a branch from current `main` (or the documented
-stack base for roadmap PRs).
+Use Python 3.13, Node 24, and a branch from current `main`.
 
 ```bash
 python3.13 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 cd pytincture/frontend
-npm ci
+npm ci --ignore-scripts
 cd ../..
 ```
 

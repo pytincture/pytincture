@@ -380,14 +380,17 @@ claim validation of an unavailable client application.
 ## Upgrading portable applications to RC9
 
 Legacy Pyodide remains the default and requires no runtime-selection change.
-For portable applications, rebuild the bundle and serve the RC9 framework/browser
-runtime together. RC9 resource manifests reference verified asset bytes instead
+For portable applications, rebuild the bundle and serve matching framework/browser
+runtime versions together. This RC9 migration also applies when upgrading from
+RC8 to RC10 or later. RC9 resource manifests reference verified asset bytes instead
 of duplicating them as Base64; older loaders cannot read this new representation.
 The updated loader continues accepting older inline-Base64 bundles.
 
 Remove temporary substitutes for the standard-library and FFI features now
 provided by the framework before testing those implementations. Keep explicit
-substitutes for application-specific server-only modules. New bundles use portable
+substitutes when a browser implementation is needed. On RC10 or later, use
+[`server-only-imports`](#server-only-import-boundaries-rc10) for guarded server-only
+imports that should take their existing `ImportError` fallback. New bundles use portable
 profile 2: `uuid4()` returns a UUID object, so use `str(uuid4())` where a string is
 required. Existing profile-1 bundles keep their own embedded implementation.
 Nested f-strings now run through the MicroPython compatibility transformation;

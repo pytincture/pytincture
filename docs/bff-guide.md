@@ -34,8 +34,10 @@ methods. Private names and undecorated classes are never registered.
 Methods default to POST. Declaring GET is an explicit contract that the method
 is parameterless, read-only, safe to repeat, and bodyless.
 Cookie-authenticated state-changing calls include the CSRF token automatically.
-All state-changing calls use one canonical `{ "args": [], "kwargs": {} }`
-JSON object. Generated clients encode it once. Pytincture rejects aliases,
+State-changing calls accept named JSON arguments, such as `{"page": 1}`, or
+the legacy `{ "args": [], "kwargs": {} }` envelope used by existing proxies.
+Swagger shows named arguments. See the [request contract](contracts/bff-v1.md)
+for variadic arguments and envelope disambiguation. Pytincture rejects
 duplicate keys, non-finite values, excessive nesting/items, and static
 signature/type mismatches before importing or constructing application code.
 Pytincture also validates exact Origin and
