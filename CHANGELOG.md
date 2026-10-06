@@ -5,6 +5,8 @@ set when a release is published.
 
 ## Unreleased
 
+## 1.0.0rc13 — unpublished
+
 - Add `cookie_namespace` / `AUTH_COOKIE_NAMESPACE` (default `pytincture`) so
   services sharing a host can use distinct session, CSRF, and SAML handshake
   cookie names (#375). Browsers scope cookies by host, not port, so two

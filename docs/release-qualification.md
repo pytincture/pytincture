@@ -5,6 +5,18 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
+## RC13 preparation — unpublished
+
+[PR #376](https://github.com/pytincture/pytincture/pull/376) prepares
+`1.0.0rc13` (npm `1.0.0-rc.13`) with configurable cookie names for services
+that share a host (#375). The RC12 integrity manifest is retired unchanged, as
+RC12 is published; RC13's browser assets have their own manifest. The versioned
+RC13 commit must pass its own PR checks before merge.
+
+RC13 has no publication or observation evidence yet. Publication remains a
+separate step; this preparation does not authorize a tag, GitHub release, or
+package upload.
+
 ## RC12 publication — 2026-10-05
 
 `1.0.0rc12` was published on 2026-10-05 from
