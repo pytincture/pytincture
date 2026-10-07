@@ -5,7 +5,7 @@ set when a release is published.
 
 ## Unreleased
 
-## 1.0.0rc13 — unpublished
+## 1.0.0rc13 — 2026-10-07
 
 - Add opt-in Microsoft sign-in across organizations using a platform-owned
   registration. Keep explicit-tenant login as the default, validate tenant
@@ -16,7 +16,6 @@ set when a release is published.
 - Support contained application-file opens on Windows, editable widget package
   discovery, and loopback development email login without the password extra
   (#377, #379, #378).
-
 - Add `cookie_namespace` / `AUTH_COOKIE_NAMESPACE` (default `pytincture`) so
   services sharing a host can use distinct session, CSRF, and SAML handshake
   cookie names (#375). Browsers scope cookies by host, not port, so two
