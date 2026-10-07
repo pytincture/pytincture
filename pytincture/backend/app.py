@@ -85,6 +85,11 @@ from pytincture.backend.application_admission import (
     identity_is_admitted,
     parse_application_admission,
 )
+from pytincture.backend.microsoft import (
+    microsoft_organizations_client_cls,
+    valid_microsoft_organization_identity,
+    valid_microsoft_tenant_id,
+)
 from pytincture.backend.bff import BFFRegistry
 from pytincture.backend.bff import build_bff_registry as _build_bff_registry
 from pytincture.backend.bff_requests import (
@@ -6380,25 +6385,26 @@ if ENABLE_GOOGLE_AUTH or ENABLE_MICROSOFT_AUTH:
         )
     if ENABLE_MICROSOFT_AUTH:
         microsoft_tenant_id = config.get("MICROSOFT_TENANT_ID")
-        if (
-            not microsoft_tenant_id
-            or str(microsoft_tenant_id).casefold()
-            in {"common", "organizations", "consumers"}
-            or re.fullmatch(
-                r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?",
-                str(microsoft_tenant_id),
-            )
-            is None
+        if not valid_microsoft_tenant_id(
+            str(microsoft_tenant_id or ""),
+            allow_multitenant=_PYTINCTURE_CONFIG.microsoft_allow_multitenant,
         ):
             raise RuntimeError(
-                "Microsoft authentication requires one explicit MICROSOFT_TENANT_ID"
+                "Microsoft authentication requires an explicit MICROSOFT_TENANT_ID, "
+                "or organizations with MICROSOFT_ALLOW_MULTITENANT=true"
             )
+        microsoft_tenant_id = str(microsoft_tenant_id).strip()
+        microsoft_client_options = {}
+        if microsoft_tenant_id.casefold() == "organizations":
+            microsoft_tenant_id = "organizations"
+            microsoft_client_options["client_cls"] = microsoft_organizations_client_cls()
         oauth.register(
             name="microsoft",
             client_id=config.get("MICROSOFT_CLIENT_ID"),
             client_secret=config.get("MICROSOFT_CLIENT_SECRET"),
             server_metadata_url=f"https://login.microsoftonline.com/{microsoft_tenant_id}/v2.0/.well-known/openid-configuration",
             client_kwargs=_oauth_client_kwargs(_MICROSOFT_OIDC_SCOPES),
+            **microsoft_client_options,
         )
 else:
     oauth = None
@@ -7097,12 +7103,20 @@ async def auth_microsoft_callback(request: Request, application: str):
 
     microsoft_tenant_id = os.getenv("MICROSOFT_TENANT_ID", "").strip()
     expected_issuer = f"https://login.microsoftonline.com/{microsoft_tenant_id}/v2.0"
-    if (
-        not microsoft_tenant_id
-        or str(user_info.get("tid") or "") != microsoft_tenant_id
-        or str(user_info.get("iss") or "").rstrip("/") != expected_issuer
-        or not str(user_info.get("sub") or user_info.get("oid") or "")
-    ):
+    multitenant = (
+        _PYTINCTURE_CONFIG.microsoft_allow_multitenant
+        and microsoft_tenant_id.casefold() == "organizations"
+    )
+    if multitenant:
+        valid_identity = valid_microsoft_organization_identity(user_info)
+    else:
+        valid_identity = (
+            bool(microsoft_tenant_id)
+            and str(user_info.get("tid") or "") == microsoft_tenant_id
+            and str(user_info.get("iss") or "").rstrip("/") == expected_issuer
+            and bool(str(user_info.get("sub") or user_info.get("oid") or ""))
+        )
+    if not valid_identity:
         return JSONResponse({"error": "Invalid tenant or identity claims"}, status_code=401)
     if not user_info.get("sub") and user_info.get("oid"):
         user_info = {**user_info, "sub": user_info["oid"]}

@@ -17,3 +17,7 @@ b697cdfa59ba60b3e5c5c3456bca1703bc3c8d7f:tests/test_configuration.py:generic-api
 # Replaced with a freshly generated key; never used as a deployed credential.
 # Limit this exception to the exact original commit, test file, rule and line.
 3647ee85454bdff6fb61759167e20fa5af9cd845:tests/test_bff_api_access.py:generic-api-key:33
+
+# Historical, synthetic session key in the Microsoft configuration roundtrip
+# test. Replaced with a generated value; never used as a deployed credential.
+1c9ad72716c450c96221a7d2a53287653970c788:tests/test_configuration.py:generic-api-key:1010

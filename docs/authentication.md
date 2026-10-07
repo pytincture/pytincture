@@ -92,8 +92,17 @@ checks remain stateless and require neither Redis nor sticky routing.
 ## OAuth/OIDC
 
 Set the Google or Microsoft enable flag and client credentials. Microsoft also
-requires `MICROSOFT_TENANT_ID`; the multi-tenant `common` issuer is not
-accepted. Google callbacks require a verified email and both providers retain
+requires `MICROSOFT_TENANT_ID`. Existing deployments continue to accept only
+their configured tenant. To accept work or school accounts from other
+organizations, set `MICROSOFT_ALLOW_MULTITENANT=true` and
+`MICROSOFT_TENANT_ID=organizations`, and register the Microsoft application for
+accounts in any organizational directory. The `common` and `consumers`
+authorities remain unsupported. Microsoft organization login validates the
+tenant-specific issuer and signing-key issuer along with the standard OIDC
+checks. Customers use your registration; their administrator may still need
+to approve it. Use application-admission tenant rules and BFF authorization to
+control customer access; enabling login alone does not separate customer data.
+Google callbacks require a verified email and both providers retain
 the immutable issuer/subject identity in the signed session. Microsoft also
 retains the tenant-scoped immutable Entra object id as `oid`. For sensitive
 authorization, use tenant plus `oid` (the `object_ids` application-admission

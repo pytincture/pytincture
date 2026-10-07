@@ -7,6 +7,16 @@ set when a release is published.
 
 ## 1.0.0rc13 — unpublished
 
+- Add opt-in Microsoft sign-in across organizations using a platform-owned
+  registration. Keep explicit-tenant login as the default, validate tenant
+  and signing-key issuers, and preserve application admission rules (#382).
+- Update Swagger UI and its locked asset integrity, the CodeMirror browser
+  acceptance fixture, the conformance multidict dependency, and setup-uv
+  (#373, #360, #380, #366).
+- Support contained application-file opens on Windows, editable widget package
+  discovery, and loopback development email login without the password extra
+  (#377, #379, #378).
+
 - Add `cookie_namespace` / `AUTH_COOKIE_NAMESPACE` (default `pytincture`) so
   services sharing a host can use distinct session, CSRF, and SAML handshake
   cookie names (#375). Browsers scope cookies by host, not port, so two
