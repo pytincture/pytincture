@@ -9,7 +9,18 @@ const packageRoot = path.join(__dirname, "node_modules", "swagger-ui-dist");
 const outputRoot = path.join(__dirname, "vendor", "swagger-ui");
 const repositoryRoot = path.resolve(__dirname, "..", "..");
 const manifestPath = path.join(repositoryRoot, "security", "swagger-ui-assets.json");
-const version = "5.32.15";
+const installedPackage = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8"));
+const packageLock = JSON.parse(await readFile(path.join(__dirname, "package-lock.json"), "utf8"));
+const lockedPackage = packageLock.packages["node_modules/swagger-ui-dist"];
+const declaredPackage = JSON.parse(await readFile(path.join(__dirname, "package.json"), "utf8"));
+const version = installedPackage.version;
+if (
+    version !== declaredPackage.devDependencies["swagger-ui-dist"]
+    || version !== lockedPackage?.version
+    || !lockedPackage.integrity?.startsWith("sha512-")
+) {
+    throw new Error("Swagger UI must match its exact package and lockfile versions with integrity.");
+}
 const files = ["LICENSE", "swagger-ui-bundle.js", "swagger-ui.css"];
 
 async function sha256(filePath) {
@@ -35,7 +46,7 @@ const manifest = {
     version,
     license: "Apache-2.0",
     source: `https://registry.npmjs.org/swagger-ui-dist/-/swagger-ui-dist-${version}.tgz`,
-    npm_integrity: "sha512-TSFER+rFQlf1nzk6WvKkMaHTxAPQ3eAAxigFThnxQedSREanfZgSbJFayZVs/ULnSbNdrJOb99vLD6xpb3R3eg==",
+    npm_integrity: lockedPackage.integrity,
     assets,
 };
 await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
