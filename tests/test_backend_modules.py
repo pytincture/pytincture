@@ -609,6 +609,20 @@ def test_password_extra_has_actionable_install_hint(monkeypatch):
         )
 
 
+@pytest.mark.parametrize("raw_hashes", ["", "  ", "{}"])
+def test_password_verifier_without_configured_hashes_needs_no_password_extra(
+    monkeypatch, raw_hashes
+):
+    monkeypatch.setitem(sys.modules, "argon2", None)
+    monkeypatch.setitem(sys.modules, "bcrypt", None)
+    assert not verify_password("user@example.com", "password", raw_hashes)
+
+
+def test_password_verifier_still_validates_the_hash_config_shape():
+    with pytest.raises(RuntimeError, match="JSON object"):
+        verify_password("user@example.com", "password", "[]")
+
+
 def test_password_verifier_uses_equal_work_for_unknown_and_oversized_bcrypt(
     monkeypatch,
 ):
