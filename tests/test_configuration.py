@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import threading
@@ -1007,7 +1008,7 @@ def test_microsoft_multitenant_configuration_roundtrips(tmp_path):
         "MODULES_PATH": str(tmp_path), "ENABLE_MICROSOFT_AUTH": "true",
         "MICROSOFT_CLIENT_ID": "client", "MICROSOFT_CLIENT_SECRET": "secret",
         "MICROSOFT_TENANT_ID": "organizations", "MICROSOFT_ALLOW_MULTITENANT": "true",
-        "SAML_SECRET_KEY": "0123456789abcdef" * 2,
+        "SAML_SECRET_KEY": secrets.token_urlsafe(48),
         "PYTINCTURE_ALLOWED_HOSTS": "service.example",
         "PYTINCTURE_CANONICAL_ORIGIN": "https://service.example",
     })
