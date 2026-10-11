@@ -1246,10 +1246,12 @@ def build_bff_registry(modules_root: Optional[str] = None) -> Dict[tuple[str, st
 
 
 BFF_REGISTRY_ROOT = os.path.realpath(MODULE_PATH)
+BFF_CACHE_REVALIDATION = _PYTINCTURE_CONFIG.bff_cache_revalidation
 _BFF_REGISTRY_STATE = BFFRegistry(
     BFF_REGISTRY_ROOT,
     get_bff_manifest,
     autoload=False,
+    revalidate=BFF_CACHE_REVALIDATION,
 )
 BFF_REGISTRY = _BFF_REGISTRY_STATE.operations
 BFF_REGISTRY_FAILURES: Dict[str, str] = {}
@@ -1892,10 +1894,11 @@ class _ApplicationGraphSnapshot:
 class _ApplicationGraphCache:
     """Bounded per-worker cache for application BFF membership graphs."""
 
-    def __init__(self, max_entries: int):
+    def __init__(self, max_entries: int, *, revalidate: bool = True):
         if max_entries <= 0:
             raise ValueError("application graph cache size must be positive")
         self.max_entries = max_entries
+        self.revalidate = revalidate
         self._entries: OrderedDict[
             tuple[Any, ...], _ApplicationGraphSnapshot
         ] = OrderedDict()
@@ -1974,7 +1977,9 @@ class _ApplicationGraphCache:
             snapshot = self._entries.get(key)
         if snapshot is None:
             return None
-        current = self._is_current(modules_root, snapshot)
+        # Cold discovery is always validated. Only warm freshness checks can
+        # be disabled for deployments whose application files do not change.
+        current = not self.revalidate or self._is_current(modules_root, snapshot)
         with self._lock:
             if self._entries.get(key) is not snapshot:
                 return None
@@ -5548,7 +5553,8 @@ APPCODE_PREBUILT_VERIFICATION_CACHE = _PrebuiltAppcodeVerificationCache(
     APPCODE_CACHE_ENTRIES
 )
 APPLICATION_GRAPH_CACHE = _ApplicationGraphCache(
-    BFF_APPLICATION_GRAPH_CACHE_ENTRIES
+    BFF_APPLICATION_GRAPH_CACHE_ENTRIES,
+    revalidate=BFF_CACHE_REVALIDATION,
 )
 APPCODE_BUILD_GATE = threading.BoundedSemaphore(APPCODE_BUILD_MAX_CONCURRENCY)
 APPCODE_DOWNLOAD_GATE = AsyncAdmissionGate(

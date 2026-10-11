@@ -121,3 +121,68 @@ one and multiple Uvicorn worker processes for the intended hardware, including
 an I/O-bound workload; increasing worker threads is not a substitute for
 measuring process capacity. Keep the example's latency budget unchanged when
 assessing this optimization.
+
+### Optional cache revalidation
+
+`BFF_CACHE_REVALIDATION=true` is the default. It preserves registry source-digest
+checks and application-graph source/directory freshness checks on warm calls.
+An immutable-code benchmark can explicitly opt out.
+
+For the pinned example at `d135b4f`, first forward the setting in its explicit
+`PytinctureConfig(...)` constructor in `example/run.py`:
+
+```python
+bff_cache_revalidation={"true": True, "false": False}[
+    os.getenv("BFF_CACHE_REVALIDATION", "true").strip().lower()
+],
+```
+
+Applications using `PytinctureConfig.from_env()` already read the environment
+setting. An explicit `PytinctureConfig(...)` keeps its typed defaults unless
+the field is passed; an environment variable alone does not override it.
+
+```bash
+# Run in the example checkout, using the candidate Pytincture installation.
+BFF_CACHE_REVALIDATION=true python tests/load_test.py --output validation-on.json
+BFF_CACHE_REVALIDATION=false python tests/load_test.py --output validation-off.json
+```
+
+The typed equivalent is `PytinctureConfig(bff_cache_revalidation=False, ...)`.
+The setting is per application/worker, not a client-controlled request flag.
+Both runs should use the same code, dependencies, worker count, workload, and
+limits. The existing default CI/security tests keep revalidation enabled;
+targeted regression tests also exercise the disabled mode.
+
+With `false`, warm registry and application-graph snapshots are reused without
+checking whether files changed. Cold discovery and graph consistency checks
+still run, and graph-cache eviction can cause another validated discovery.
+Before each execution, the BFF source is still opened through the contained-file
+loader, its digest must match the registry, and its current runtime export is
+verified. Modules/instances remain fresh. Authentication, application/method
+permissions, CSRF/replay proofs, policy decisions, request/result limits,
+timeouts, and admission controls are unchanged.
+
+This setting requires immutable application files and a restart of **every
+worker after any application-code change**. It is unsuitable for development
+with live edits: a removed application import can leave old BFF membership
+permissions cached, newly added exports may be unavailable, and an edited BFF
+file will fail execution verification rather than automatically loading its
+new version. Explicit registry reload alone is not a substitute for refreshing
+the whole worker. Disabling this option never permits sending a result that
+fails response validation.
+
+The [recorded on/off comparison](benchmarks/bff-cache-revalidation-385.json)
+uses the same candidate code, Python 3.13.5, and local one-process example as
+above, including the explicit example configuration change:
+
+| Active callers | Revalidation on requests/s | Off requests/s | On p95 | Off p95 |
+| --- | ---: | ---: | ---: | ---: |
+| 50 | 68.6 | 69.4 | 840 ms | 962 ms |
+| 100 | 68.4 | 72.6 | 1,608 ms | 1,473 ms |
+| 250 | 65.4 | 65.2 | 3,986 ms | 4,155 ms |
+
+Both runs had zero request errors. This single comparison shows no consistent
+speedup from opting out, and neither mode meets the one-second p95 target at
+100/250 callers. Keep the default enabled unless measurements on the intended
+immutable workload justify the tradeoff; this switch is not a demonstrated fix
+for the remaining concurrency bottleneck.

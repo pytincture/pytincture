@@ -689,6 +689,12 @@ class PytinctureConfig:
         "BFF_EXECUTION_MODE",
         "BFF execution mode: trusted-thread or isolated-process.",
     )
+    bff_cache_revalidation: bool = _setting(
+        True,
+        "BFF_CACHE_REVALIDATION",
+        "Revalidate cached BFF registry and application-graph freshness before reuse (default true). Disable only for immutable code; restart after changes. Execution source verification and request/result protections remain enabled.",
+        kw_only=True,
+    )
     bff_async_execution_mode: str = _setting(
         "event-loop",
         "BFF_ASYNC_EXECUTION_MODE",
@@ -1059,6 +1065,7 @@ class PytinctureConfig:
         for name in (
             "enable_service_worker", "allow_runtime_selection",
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
+            "bff_cache_revalidation",
         ):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a boolean")
@@ -1691,6 +1698,7 @@ class PytinctureConfig:
         values = {}
         boolean_fields = {
             "enable_service_worker",
+            "bff_cache_revalidation",
             "allow_runtime_selection",
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
             "require_readonly_modules_path",

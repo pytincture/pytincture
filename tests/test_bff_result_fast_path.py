@@ -131,7 +131,8 @@ def test_fallback_does_not_consume_a_generator_twice():
 
 
 @pytest.mark.parametrize('method', ['oversize', 'deep', 'wide'])
-def test_rejected_result_never_sends_success_headers_or_result_content(tmp_path, method):
+@pytest.mark.parametrize('revalidate', [True, False])
+def test_rejected_result_never_sends_success_headers_or_result_content(tmp_path, method, revalidate):
     from fastapi.testclient import TestClient
     from pytincture import PytinctureConfig, create_app
 
@@ -144,6 +145,7 @@ class Data:
     def wide(self): return ["PRIVATE_RESULT"] * 10
 ''')
     app = create_app(PytinctureConfig(modules_path=str(tmp_path),
+        bff_cache_revalidation=revalidate,
         bff_result_max_bytes=128, bff_result_max_depth=2, bff_result_max_items=5))
     statuses = []
     frames = []

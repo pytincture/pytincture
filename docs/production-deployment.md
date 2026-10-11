@@ -107,8 +107,14 @@ Resource admission counters, the appcode cache, and the application BFF graph
 cache are bounded, disposable, and local to each worker. The archive LRU is
 independently capped by `APPCODE_CACHE_ENTRIES` and
 `APPCODE_CACHE_MAX_BYTES`; graph snapshots are capped by
-`BFF_APPLICATION_GRAPH_CACHE_ENTRIES` and revalidate secure source/directory
-metadata before every reuse. Cold graph discovery is bounded by the appcode
+`BFF_APPLICATION_GRAPH_CACHE_ENTRIES` and, by default, revalidate secure
+source/directory metadata before every reuse. `BFF_CACHE_REVALIDATION=false`
+opts out of warm registry/graph freshness checks for immutable-code deployments
+or benchmarks; restart every worker after any application-code change. Changes
+to application imports may otherwise leave old membership permissions cached.
+Execution source/digest checks and request/response protections remain enabled.
+See [the performance comparison](performance.md#optional-cache-revalidation).
+Cold graph discovery is bounded by the appcode
 file/byte settings plus `BFF_APPLICATION_GRAPH_MAX_DIRECTORIES` and
 `BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES`. Warm archive-cache validation uses
 the same bounds, stats only the relevant discovery snapshot rather than

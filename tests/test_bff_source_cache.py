@@ -93,7 +93,8 @@ def test_large_source_is_not_retained_in_compile_cache(tmp_path):
     assert source_loading._cached_compile_source.cache_info().currsize == 0
 
 
-def test_warm_source_cache_never_caches_request_policy_decisions(tmp_path):
+@pytest.mark.parametrize('revalidate', [True, False])
+def test_warm_source_cache_never_caches_request_policy_decisions(tmp_path, revalidate):
     from fastapi.testclient import TestClient
     from pytincture import PytinctureConfig, create_app
 
@@ -103,7 +104,7 @@ def test_warm_source_cache_never_caches_request_policy_decisions(tmp_path):
 class Data:
     def read(self): return "PRIVATE_RESULT"
 ''')
-    app = create_app(PytinctureConfig(modules_path=str(tmp_path)))
+    app = create_app(PytinctureConfig(modules_path=str(tmp_path), bff_cache_revalidation=revalidate))
     decisions = iter([True, False, True])
     app.state.pytincture_backend.set_bff_policy_hook(lambda **kwargs: next(decisions))
     with TestClient(app) as client:

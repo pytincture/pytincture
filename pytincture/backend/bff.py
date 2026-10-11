@@ -110,8 +110,10 @@ class BFFRegistry:
         ] = get_bff_manifest,
         *,
         autoload: bool = True,
+        revalidate: bool = True,
     ):
         self._manifest_loader = manifest_loader
+        self.revalidate = revalidate
         self.root = canonical_root(modules_root)
         self.operations: dict[BFFKey, BFFOperation] = {}
         self.failures: BFFRegistryFailures = {}
@@ -145,6 +147,10 @@ class BFFRegistry:
             operation = self.operations.get(key)
             if operation is None:
                 return None
+            if not self.revalidate:
+                # Opt-in immutable-code mode skips registry freshness only.
+                # Execution must still verify the source against this digest.
+                return operation
             try:
                 current = read_contained_file(root, key[0])
             except (OSError, UnsafePath):
