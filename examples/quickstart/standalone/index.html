@@ -9,7 +9,7 @@
     window.pytinctureAutoStartConfig = {
       mode: "inline",
       entrypoint: "Hello",
-      widgetlib: "dhxpyt==0.9.18"
+      widgetlib: "wapyt==0.2.0.dev1"
     };
   </script>
   <script src="./frontend/dist/pytincture.min.js"></script>
@@ -18,7 +18,7 @@
   <div id="maindiv"></div>
   <script type="text/python">
 import js
-from dhxpyt.layout import MainWindow
+from wapyt import MainWindow
 
 class Hello(MainWindow):
     def load_ui(self):

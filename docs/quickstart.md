@@ -21,12 +21,19 @@ python -m uvicorn service:app --port 8070
 
 Open <http://127.0.0.1:8070/>. The root redirects to `/hello/` without adding a
 cache UUID to the visible URL. Pytincture downloads the application package,
-starts bundled Pyodide, installs `dhxpyt==0.9.18`, and calls `hello.load_ui()`.
+starts bundled Pyodide, installs `wapyt==0.2.0.dev1`, and calls `hello.load_ui()`.
 
 The example has three files: [`service.py`](../examples/quickstart/service/service.py)
 creates the ASGI app, [`hello.py`](../examples/quickstart/service/hello.py) runs
 in the browser, and [`widget.py`](../examples/quickstart/service/widget.py)
 declares browser widget metadata. Continue with [service mode](service-mode.md).
+
+The quickstart uses [wapyt](https://github.com/WAwesome-AI/wa_pytincture_widgetset),
+an MIT-licensed pluggable widgetset. A service does not fetch a pluggable
+widgetset from PyPI unless told to, so `service.py` lists the exact release in
+`widget_public_index_allowlist`. A deployment that should not reach PyPI keeps
+the wheel beside the application modules instead; see
+[widgetset packaging](widgetset-packaging.md).
 
 ## Standalone mode
 
