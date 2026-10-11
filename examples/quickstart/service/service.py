@@ -9,6 +9,6 @@ app = create_app(
         modules_path=str(HERE),
         default_application="hello",
         # wapyt is a pluggable widgetset, so trust its exact PyPI release.
-        widget_public_index_allowlist=("wapyt==0.2.0.dev1",),
+        widget_public_index_allowlist=("wapyt==0.2.0",),
     )
 )
