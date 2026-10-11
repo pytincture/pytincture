@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Private Pytincture HTTP service with Lambda Web Adapter response streaming.
+  Uses the application's normal ASGI entrypoint without a Mangum handler.
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+  com.aws.cloudformation.Context:
+    ref:
+      - at: ../../docs/aws-lambda.md
+        has: Packaging, private invocation, production ingress and compatibility limits
+Parameters:
+  CodeBucket:
+    Type: String
+    Description: Existing private artifact bucket in this region; not managed by this stack
+    MinLength: 3
+  CodeKey:
+    Type: String
+    Description: Immutable key for the Linux ARM64 Python 3.13 application ZIP
+    MinLength: 1
+  DefaultApplication:
+    Type: String
+    Description: Application module under apps, without the .py extension
+    AllowedPattern: '[A-Za-z_][A-Za-z0-9_]*'
+  ASGIApplication:
+    Type: String
+    Default: service:app
+    Description: Import target for the application's configured ASGI app
+    AllowedPattern: '[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_.]*'
+  AllowedHosts:
+    Type: String
+    Default: 127.0.0.1,localhost
+    Description: Pytincture allowed hosts; loopback defaults match the private forwarder
+    MinLength: 1
+  MemorySize:
+    Type: Number
+    Default: 1024
+    MinValue: 128
+    MaxValue: 10240
+  ReservedConcurrency:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 100
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Bounded retention for invocation evidence; retain logs across stack removal
+        must:
+          - Keep the execution role's log permissions scoped to this group
+    Properties:
+      RetentionInDays: 7
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Log-only baseline; application owners add explicit backend service permissions
+        must:
+          - No browser credentials or AWS account-wide application permissions
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: own-logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt LogGroup.Arn
+  Function:
+    Type: AWS::Lambda::Function
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Run ordinary Uvicorn and preserve incremental ASGI response bodies
+        must:
+          - Keep response_stream enabled and use a streaming invocation API or ingress
+          - Package Linux ARM64 dependencies and an executable run.sh at the ZIP root
+          - BFF stream deadlines must remain below the Lambda and ingress deadlines
+          - Public ingress requires application authentication and explicit origin configuration
+    Properties:
+      Description: Pytincture ASGI service with Lambda Web Adapter streaming
+      Runtime: python3.13
+      Architectures: [arm64]
+      Handler: run.sh
+      Role: !GetAtt ExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref CodeKey
+      MemorySize: !Ref MemorySize
+      Timeout: 90
+      ReservedConcurrentExecutions: !Ref ReservedConcurrency
+      Layers:
+        # Published commercial-region ARM64 layer; validate availability before deploying.
+        - !Sub arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerArm64:30
+      LoggingConfig:
+        LogGroup: !Ref LogGroup
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          AWS_LWA_PORT: '8080'
+          AWS_LWA_READINESS_CHECK_PATH: /readyz
+          AWS_LWA_READINESS_CHECK_HEALTHY_STATUS: '200'
+          AWS_LWA_INVOKE_MODE: response_stream
+          AWS_LWA_ENABLE_COMPRESSION: 'false'
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTINCTURE_ASGI_APP: !Ref ASGIApplication
+          PYTINCTURE_DEFAULT_APPLICATION: !Ref DefaultApplication
+          PYTINCTURE_ALLOWED_HOSTS: !Ref AllowedHosts
+          BFF_STREAM_MAX_SECONDS: '60'
+          BFF_STREAM_IDLE_TIMEOUT_SECONDS: '25'
+          BFF_STREAM_WRITE_TIMEOUT_SECONDS: '15'
+          # Ingress requests are buffered and base64 may add overhead.
+          MAX_REQUEST_BODY_BYTES: '1048576'
+Outputs:
+  FunctionName:
+    Description: Pass this name to scripts/lambda_forward.py --function
+    Value: !Ref Function
+  FunctionArn:
+    Description: Scope the local caller's lambda:InvokeFunction permission to this ARN
+    Value: !GetAtt Function.Arn
+  LogGroupName:
+    Description: Retained execution logs; use aws logs tail to verify actual invocations
+    Value: !Ref LogGroup
+  ExecutionRoleArn:
+    Description: Log-only execution role; extend its policies for application dependencies
+    Value: !GetAtt ExecutionRole.Arn

@@ -5,6 +5,11 @@ service at the origin root behind a TLS-terminating reverse proxy. A URL path
 prefix is not supported because application, BFF, frontend, and service-worker
 routes intentionally share the root scope.
 
+For Lambda with live streaming, use the [Web Adapter deployment recipe](aws-lambda.md).
+It includes a private deployment template, the verified Bedrock example, and
+the remaining production qualification boundaries. The
+[Mangum assessment](mangum.md) covers the buffered alternative.
+
 The security behaviors Pytincture intentionally retains, including stateless
 browser-carried sessions and optional Redis, are recorded in
 [`security/accepted-architecture.md`](../security/accepted-architecture.md).
