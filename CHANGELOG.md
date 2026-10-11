@@ -5,6 +5,13 @@ set when a release is published.
 
 ## Unreleased
 
+- Reduce BFF result processing and source-analysis overhead (#385). Plain JSON
+  results use a bounded private snapshot and a conservatively pre-sized fast
+  encoder; complex values and uncertain sizes retain compatibility conversion
+  and incremental byte checks. Cache only bounded compilation/source-analysis
+  work, preserving fresh modules, per-request authorization, source verification,
+  serialization limits, and streaming behavior.
+
 ## 1.0.0rc13 — 2026-10-07
 
 - Add opt-in Microsoft sign-in across organizations using a platform-owned
