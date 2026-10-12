@@ -6,13 +6,13 @@
       "url": "https://github.com/pytincture/pytincture_example.git",
       "commit": "0971ee3ba7087dc310003c1d3812b92331c7fe95",
       "patch": "example.patch",
-      "patch_sha256": "0f65981ccae09b47d8d9aafa069f71f600b2dcca66a3265cd5c2c4aca47d4698"
+      "patch_sha256": "8e4a3783d0dbe8c9c3dd457f92957bc956fa5febd4aab0894141be58fe2ceffd"
     },
     "chat": {
       "url": "https://github.com/WAwesome-AI/wAwesomeChat.git",
       "commit": "23085c7b58b539ef270200e35c84c33cba946a69",
       "patch": "chat.patch",
-      "patch_sha256": "917725c77932b677d79972cba5611658b4983e9ba04ad9bf904941991441f7f7"
+      "patch_sha256": "82859da95dfe1ce64ddb7a563ea251bb2f551b6c75193135d5aa8772d902ea8b"
     },
     "wapyt": {
       "url": "https://github.com/WAwesome-AI/wa_pytincture_widgetset.git",

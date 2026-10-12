@@ -1904,7 +1904,7 @@ new file mode 100644
 index 0000000..658f0db
 --- /dev/null
 +++ b/tests/runtime_server.py
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,63 @@
 +"""Isolated authenticated local browser validation server (no production DB)."""
 +import os
 +import secrets
@@ -1929,6 +1929,7 @@ index 0000000..658f0db
 +app = create_app(PytinctureConfig(
 +    modules_path=str(MODULES), default_application='chat',
 +    browser_runtime='pyodide', allow_runtime_selection=True,
++    browser_log_rate_limit_attempts=int(os.getenv("BROWSER_LOG_RATE_LIMIT_ATTEMPTS", "1000")),
 +    delivery_mode=os.getenv('PYTINCTURE_TEST_DELIVERY_MODE', 'portable-bundle'),
 +    allow_microphone=True,
 +    enable_user_login=True, allow_development_auth_origin=True,
