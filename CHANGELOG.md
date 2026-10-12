@@ -5,6 +5,8 @@ set when a release is published.
 
 ## Unreleased
 
+## 1.0.0rc14 — 2026-10-12
+
 - Reduce BFF result processing and source-analysis overhead (#385). Plain JSON
   results use a bounded private snapshot and a conservatively pre-sized fast
   encoder; complex values and uncertain sizes retain compatibility conversion
@@ -24,6 +26,9 @@ set when a release is published.
 - Add opt-in `PYTINCTURE_BROWSER_FRAME_ORIGINS` and
   `PYTINCTURE_BROWSER_ALLOW_BLOB_FRAMES` controls for iframe sources. Keep the
   existing CSP by default and preserve frame-ancestor and object/embed guards.
+
+- Move the maintained service and standalone quickstarts to MIT-licensed
+  `wapyt==0.2.0` with an explicit service widget allowlist (#384).
 
 ## 1.0.0rc13 — 2026-10-07
 

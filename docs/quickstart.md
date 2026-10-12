@@ -13,8 +13,8 @@ Requirements: Python 3.13 or 3.14.
 ```bash
 python3.13 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'pytincture==1.0.0rc12'
-git clone --branch v1.0.0rc12 https://github.com/pytincture/pytincture.git
+python -m pip install 'pytincture==1.0.0rc14'
+git clone --branch v1.0.0rc14 https://github.com/pytincture/pytincture.git
 cd pytincture/examples/quickstart/service
 python -m uvicorn service:app --port 8070
 ```
@@ -41,8 +41,8 @@ Requirements: Pytincture installed while preparing the static site. The
 deployed host itself only needs a static HTTP server.
 
 ```bash
-python -m pip install 'pytincture==1.0.0rc12'
-git clone --branch v1.0.0rc12 https://github.com/pytincture/pytincture.git
+python -m pip install 'pytincture==1.0.0rc14'
+git clone --branch v1.0.0rc14 https://github.com/pytincture/pytincture.git
 cd pytincture/examples/quickstart/standalone
 python -m pytincture.assets ./frontend
 python3 -m http.server 8000
