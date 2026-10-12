@@ -21,6 +21,9 @@ set when a release is published.
   automated transport checks. Document the live AWS evidence and remaining
   production qualification boundaries; no AWS SDK dependency is added to the
   framework package.
+- Add opt-in `PYTINCTURE_BROWSER_FRAME_ORIGINS` and
+  `PYTINCTURE_BROWSER_ALLOW_BLOB_FRAMES` controls for iframe sources. Keep the
+  existing CSP by default and preserve frame-ancestor and object/embed guards.
 
 ## 1.0.0rc13 — 2026-10-07
 

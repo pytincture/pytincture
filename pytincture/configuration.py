@@ -273,6 +273,16 @@ class PytinctureConfig:
         (), "PYTINCTURE_BROWSER_FONT_ORIGINS",
         "Exact additional HTTPS origins permitted by browser font-src; independent of other asset types.",
     )
+    browser_frame_origins: tuple[str, ...] = _setting(
+        (), "PYTINCTURE_BROWSER_FRAME_ORIGINS",
+        "Exact additional HTTPS origins permitted by browser frame-src; does not change frame-ancestors or object-src.",
+        kw_only=True,
+    )
+    browser_allow_blob_frames: bool = _setting(
+        False, "PYTINCTURE_BROWSER_ALLOW_BLOB_FRAMES",
+        "Explicitly allow blob: URLs in browser frame-src; default false. Does not allow object/embed elements.",
+        kw_only=True,
+    )
     allow_camera: bool = _setting(
         False, "PYTINCTURE_ALLOW_CAMERA",
         "Allow same-origin camera requests through Permissions-Policy; default false.",
@@ -1064,6 +1074,7 @@ class PytinctureConfig:
             raise ValueError("browser_runtime must be pyodide or micropython")
         for name in (
             "enable_service_worker", "allow_runtime_selection",
+            "browser_allow_blob_frames",
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
             "bff_cache_revalidation",
         ):
@@ -1079,6 +1090,7 @@ class PytinctureConfig:
         for name in (
             "cors_allowed_origins",
             "browser_connect_origins", "browser_script_origins", "browser_style_origins", "browser_font_origins",
+            "browser_frame_origins",
             "allowed_hosts",
             "previous_session_secrets",
             "widget_public_index_allowlist",
@@ -1111,7 +1123,7 @@ class PytinctureConfig:
             "browser_connect_origins",
             canonical_browser_connect_origins(self.browser_connect_origins),
         )
-        for kind in ("script", "style", "font"):
+        for kind in ("script", "style", "font", "frame"):
             name = f"browser_{kind}_origins"
             origins = canonical_browser_connect_origins(getattr(self, name))
             if any(not origin.startswith("https://") for origin in origins):
@@ -1699,6 +1711,7 @@ class PytinctureConfig:
         boolean_fields = {
             "enable_service_worker",
             "bff_cache_revalidation",
+            "browser_allow_blob_frames",
             "allow_runtime_selection",
             "allow_camera", "allow_microphone", "allow_geolocation", "allow_payment",
             "require_readonly_modules_path",
@@ -1801,6 +1814,7 @@ class PytinctureConfig:
         tuple_fields = {
             "cors_allowed_origins", "allowed_hosts", "previous_session_secrets",
             "browser_connect_origins", "browser_script_origins", "browser_style_origins", "browser_font_origins",
+            "browser_frame_origins",
             "widget_public_index_allowlist",
             "mcp_allowed_hosts", "mcp_allowed_origins",
         }
@@ -1823,6 +1837,7 @@ class PytinctureConfig:
                     if definition.name in {
                         "previous_session_secrets",
                         "browser_connect_origins", "browser_script_origins", "browser_style_origins", "browser_font_origins",
+                        "browser_frame_origins",
                         "widget_public_index_allowlist",
                         "mcp_allowed_hosts",
                         "mcp_allowed_origins",
