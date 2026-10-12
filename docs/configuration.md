@@ -155,6 +155,42 @@ origin-only HTTPS/WSS values: credentials, wildcards, paths, queries, fragments,
 and ambiguous strings are rejected. This does not add those hosts to
 `script-src`.
 
+Service-page frames retain the existing `default-src 'self'` fallback unless
+frame settings are configured. Add exact HTTPS iframe origins with
+`browser_frame_origins` / `PYTINCTURE_BROWSER_FRAME_ORIGINS` (a JSON array or
+comma-separated origins). To explicitly allow application-created blob URLs
+in iframes, opt in with:
+
+```python
+config = PytinctureConfig(
+    modules_path="/path/to/application",
+    browser_allow_blob_frames=True,
+)
+```
+
+Or set `PYTINCTURE_BROWSER_ALLOW_BLOB_FRAMES=true` when using
+`PytinctureConfig.from_env()`. With no external frame origins, this emits
+`frame-src 'self' blob:;`. An explicit `PytinctureConfig(...)` constructor needs
+the field passed directly; an environment variable does not override that
+object's defaults. Both controls are scoped to one configured service instance.
+
+`blob:` is a scheme, not an HTTPS origin, so it uses its own boolean setting
+(default `false`). Wildcards, HTTP/WSS URLs, paths, credentials, and arbitrary
+CSP expressions are rejected in `browser_frame_origins`. The opt-in only
+changes `frame-src`: `frame-ancestors 'none'` still protects the application
+from being embedded, and `object-src 'none'` still blocks `<object>`/`<embed>`.
+Consequently it does not fix an `object-src` violation from an embedded PDF
+viewer. Blob HTML can contain active content; use this for trusted generated
+content, not as a sanitizer for user-supplied HTML. A reverse proxy's additional
+CSP must also permit the intended frame source. See the
+[frame-src specification](https://w3c.github.io/webappsec-csp/#directive-frame-src).
+
+Test the actual artifact viewer in each supported browser. In browser checks,
+Chromium and Firefox render blob HTML iframes with this opt-in; WebKit additionally
+blocks them through the inherited `frame-ancestors 'none'` policy. This setting
+does not relax that protection. PDF viewer behavior also varies by browser, so
+allowing the frame source alone is not a guarantee that a PDF viewer can render.
+
 High-trust deployments can set `widget_trust_policy` to a JSON document or a
 path to one. The policy is loaded and canonicalized at startup, then acts as an
 exact allowlist for widget distribution, version, executable/style paths, and
@@ -216,6 +252,8 @@ The contract test checks every row in this table against the dataclass model.
 | `browser_script_origins` | `PYTINCTURE_BROWSER_SCRIPT_ORIGINS` | Exact additional HTTPS origins permitted by browser script-src; independent of other asset types. |
 | `browser_style_origins` | `PYTINCTURE_BROWSER_STYLE_ORIGINS` | Exact additional HTTPS origins permitted by browser style-src; independent of other asset types. |
 | `browser_font_origins` | `PYTINCTURE_BROWSER_FONT_ORIGINS` | Exact additional HTTPS origins permitted by browser font-src; independent of other asset types. |
+| `browser_frame_origins` | `PYTINCTURE_BROWSER_FRAME_ORIGINS` | Exact additional HTTPS origins permitted by browser frame-src; does not change frame-ancestors or object-src. |
+| `browser_allow_blob_frames` | `PYTINCTURE_BROWSER_ALLOW_BLOB_FRAMES` | Explicitly allow blob: URLs in browser frame-src; default false. Does not allow object/embed elements. |
 | `allow_camera` | `PYTINCTURE_ALLOW_CAMERA` | Allow same-origin camera requests through Permissions-Policy; default false. |
 | `allow_microphone` | `PYTINCTURE_ALLOW_MICROPHONE` | Allow same-origin microphone requests through Permissions-Policy; default false. |
 | `allow_geolocation` | `PYTINCTURE_ALLOW_GEOLOCATION` | Allow same-origin geolocation requests through Permissions-Policy; default false. |

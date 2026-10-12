@@ -5,6 +5,10 @@ set when a release is published.
 
 ## Unreleased
 
+- Add opt-in `PYTINCTURE_BROWSER_FRAME_ORIGINS` and
+  `PYTINCTURE_BROWSER_ALLOW_BLOB_FRAMES` controls for iframe sources. Keep the
+  existing CSP by default and preserve frame-ancestor and object/embed guards.
+
 ## 1.0.0rc13 — 2026-10-07
 
 - Add opt-in Microsoft sign-in across organizations using a platform-owned

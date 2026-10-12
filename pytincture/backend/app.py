@@ -316,8 +316,16 @@ def _service_content_security_policy() -> str:
     script_sources = " ".join(_PYTINCTURE_CONFIG.browser_script_origins)
     style_sources = " ".join(_PYTINCTURE_CONFIG.browser_style_origins)
     font_sources = " ".join(_PYTINCTURE_CONFIG.browser_font_origins)
+    frame_policy = ""
+    if _PYTINCTURE_CONFIG.browser_frame_origins or _PYTINCTURE_CONFIG.browser_allow_blob_frames:
+        frame_sources = ["'self'"]
+        if _PYTINCTURE_CONFIG.browser_allow_blob_frames:
+            frame_sources.append("blob:")
+        frame_sources.extend(_PYTINCTURE_CONFIG.browser_frame_origins)
+        frame_policy = f"frame-src {' '.join(frame_sources)}; "
     return (
         "default-src 'self'; object-src 'none'; base-uri 'self'; "
+        f"{frame_policy}"
         "frame-ancestors 'none'; form-action 'self'; "
         f"script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:{' ' + script_sources if script_sources else ''}; "
         f"style-src 'self' 'unsafe-inline'{' ' + style_sources if style_sources else ''}; "
