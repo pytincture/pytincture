@@ -1,6 +1,6 @@
 import js
 import widget
-from dhxpyt.layout import MainWindow
+from wapyt import MainWindow
 
 
 class hello(MainWindow):
