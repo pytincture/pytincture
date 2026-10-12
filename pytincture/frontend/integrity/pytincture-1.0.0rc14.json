@@ -83,8 +83,8 @@
     },
     {
       "path": "pyodide/0.29.3/sbom.json",
-      "sha256": "8f452139a991a32a3d4f524b657116dcab1473c5d5051232935ac4a909bf425d",
-      "sri": "sha384-n+zoGekEI1Cv8jvaDze2M3kFem4h922zNbN7dtk3znjqJZJPz1UWHb6IF3thkmOO"
+      "sha256": "1d9d0540b5c22b4c40aa0e6c0ebd2f7439ecc32b88027c8aef6d1df1e2e8fcce",
+      "sri": "sha384-HicChteua8JWkOdnQT69Je3/ypOtWU51C8VZ2GGdWN1cq7BS3H1BTbXAEPLnlJDv"
     },
     {
       "path": "pyodide/0.29.3/full/micropip-0.11.0-py3-none-any.whl",
@@ -118,8 +118,8 @@
     },
     {
       "path": "pyodide/0.29.3/full/python_stdlib.zip",
-      "sha256": "4298b6ee445cb724c3973437da47789752b9e6ff4e26619026b283ec801fc46b",
-      "sri": "sha384-N6oQlVvCCt2KTb4E08U9ctVKPkEv8zlBwyOwgAG1fmS3H5XQA4j0lLbWa+kDvlsU"
+      "sha256": "f46ab6bb6f3959d1acae36e85b3540487c5fb47275cb43ac4d52e078f4ec2478",
+      "sri": "sha384-imdTIAbxqWyJl3FQQcHlSKqCxGVuLcl/COixxxt5do7/Rql61d25sKULG9yagmF5"
     }
   ]
 }

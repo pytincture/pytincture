@@ -9,8 +9,7 @@
   "exact_core_files": [
     "pyodide.asm.js",
     "pyodide.asm.wasm",
-    "pyodide.js",
-    "python_stdlib.zip"
+    "pyodide.js"
   ],
   "lock_metadata_corrections": {
     "info.version": {
@@ -18,5 +17,14 @@
       "vendored": "0.29.3",
       "reason": "The official 0.29.3 core archive carries stale development-version metadata; all 375 package entries are byte-for-byte equivalent after this correction."
     }
+  },
+  "stdlib_patch": {
+    "member": "tarfile.py",
+    "patch": "security/patches/pyodide-tarfile-links.patch",
+    "original_sha256": "801a7289a4ddbeceadaf61dcfdf47c2db36350e66fa7552c7e082f32702a26f4",
+    "patched_sha256": "f6330970666d830ad71a4dad88a2c333193c5a5c64f86036bc6284c52fbda0dd",
+    "patch_sha256": "d05326a0fbf7128fed306b01be3d52609347048cf6841c9dabe4205dedbfd9a7",
+    "upstream_fix": "https://github.com/python/cpython/commit/b8f23e307097552eaea2604383a12ab280520d0d",
+    "reason": "Backport CVE-2026-82049 hard-link target resolution and prevent symlink relocation in the no-os.link fallback used by Pyodide. Only tarfile.py differs from the official stdlib."
   }
 }

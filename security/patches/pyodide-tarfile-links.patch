@@ -1,0 +1,50 @@
+--- a/tarfile.py
++++ b/tarfile.py
+@@ -2579,18 +2579,36 @@
+                     # Avoid FileExistsError on following os.symlink.
+                     os.unlink(targetpath)
+                 os.symlink(tarinfo.linkname, targetpath)
++                return
++            elif os.path.exists(tarinfo._link_target):
++                # CPython gh-157192 (CVE-2026-82049): link the resolved file,
++                # not a symlink whose relative target changes when relocated.
++                os.link(os.path.realpath(tarinfo._link_target), targetpath)
++                return
++        except symlink_exception:
++            pass
++
++        try:
++            source = self._find_link_target(tarinfo)
++            if tarinfo.islnk():
++                # Pyodide has no os.link. Follow archive links to file data;
++                # recreating a relative symlink at targetpath can escape the
++                # extraction directory even when the original link was safe.
++                seen = set()
++                while source.islnk() or source.issym():
++                    if source.offset in seen:
++                        raise ExtractError("cyclic link target in archive")
++                    seen.add(source.offset)
++                    source = self._find_link_target(source)
++                if not source.isfile():
++                    raise ExtractError("hard link target is not a regular file")
++                # The caller applies the filtered hard link's attributes.
++                # Do not apply the unfiltered source member's attributes.
++                self.makefile(source, targetpath)
+             else:
+-                if os.path.exists(tarinfo._link_target):
+-                    os.link(tarinfo._link_target, targetpath)
+-                else:
+-                    self._extract_member(self._find_link_target(tarinfo),
+-                                         targetpath)
+-        except symlink_exception:
+-            try:
+-                self._extract_member(self._find_link_target(tarinfo),
+-                                     targetpath)
+-            except KeyError:
+-                raise ExtractError("unable to resolve link inside archive") from None
++                self._extract_member(source, targetpath)
++        except KeyError:
++            raise ExtractError("unable to resolve link inside archive") from None
+ 
+     def chown(self, tarinfo, targetpath, numeric_owner):
+         """Set owner of targetpath according to tarinfo. If numeric_owner

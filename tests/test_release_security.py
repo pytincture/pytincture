@@ -132,8 +132,8 @@ def test_upstream_pyodide_manifest_pins_official_release_archive():
         "pyodide.js",
         "pyodide.asm.js",
         "pyodide.asm.wasm",
-        "python_stdlib.zip",
     }
+    assert manifest["stdlib_patch"]["member"] == "tarfile.py"
 
 
 def test_secret_scanner_detects_seeded_credentials_without_returning_values(tmp_path):
