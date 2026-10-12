@@ -319,6 +319,7 @@ The contract test checks every row in this table against the dataclass model.
 | `bff_result_max_depth` | `BFF_RESULT_MAX_DEPTH` | Maximum ordinary BFF result nesting depth. |
 | `bff_result_max_items` | `BFF_RESULT_MAX_ITEMS` | Maximum aggregate ordinary BFF result items. |
 | `bff_execution_mode` | `BFF_EXECUTION_MODE` | BFF execution mode: trusted-thread or isolated-process. |
+| `bff_cache_revalidation` | `BFF_CACHE_REVALIDATION` | Revalidate cached BFF registry and application-graph freshness before reuse (default true). Disable only for immutable code; restart after changes. Execution source verification and request/result protections remain enabled. |
 | `bff_async_execution_mode` | `BFF_ASYNC_EXECUTION_MODE` | Trusted async BFF stage mode: event-loop or worker-thread. |
 | `bff_isolated_max_concurrency` | `BFF_ISOLATED_MAX_CONCURRENCY` | Concurrent optional isolated BFF child processes per worker. |
 | `bff_isolated_max_per_user` | `BFF_ISOLATED_MAX_PER_USER` | Concurrent optional isolated BFF child processes per stable authenticated identity. Multiple sessions share this allowance. |

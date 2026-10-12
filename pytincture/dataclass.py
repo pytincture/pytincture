@@ -1,4 +1,5 @@
 import ast
+from functools import lru_cache
 from copy import deepcopy
 from decimal import Subnormal
 import hashlib
@@ -748,6 +749,30 @@ def _constructor_accepts_user_argument(cls) -> Optional[inspect.Parameter]:
     return None
 
 
+def _class_definition_hashes(source: str, class_name: str):
+    """Analyze source only; runtime bindings are checked separately per class."""
+    parsed = ast.parse(source)
+    class_node = next(
+        node for node in parsed.body
+        if isinstance(node, ast.ClassDef) and node.name == class_name
+    )
+    members = []
+    for member in class_node.body:
+        if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            members.append((member.name, _definition_identity(member)["sha256"]))
+        elif isinstance(member, (ast.Assign, ast.AnnAssign)):
+            targets = member.targets if isinstance(member, ast.Assign) else [member.target]
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    members.append((target.id, _definition_identity(member)["sha256"]))
+    return _definition_identity(class_node)["sha256"], tuple(members)
+
+
+# Bound both entry count and retained source size. Values contain no live class,
+# attribute, user, authorization, or policy objects.
+_cached_class_definition_hashes = lru_cache(maxsize=128)(_class_definition_hashes)
+
+
 def _runtime_bff_definition_identity(cls) -> Dict[str, Any]:
     """Capture the decorated class source and direct runtime member identities."""
     identity: Dict[str, Any] = {
@@ -762,25 +787,17 @@ def _runtime_bff_definition_identity(cls) -> Dict[str, Any]:
         source_path = inspect.getsourcefile(cls) or inspect.getfile(cls)
         identity["source_path"] = os.path.realpath(source_path)
         source = textwrap.dedent(inspect.getsource(cls))
-        parsed = ast.parse(source, filename=source_path)
-        class_node = next(
-            node
-            for node in parsed.body
-            if isinstance(node, ast.ClassDef) and node.name == cls.__name__
+        analyze = (
+            _cached_class_definition_hashes
+            if sys.getsizeof(source) <= 64 * 1024
+            else _class_definition_hashes
         )
+        class_sha256, members = analyze(source, cls.__name__)
     except (OSError, TypeError, SyntaxError, StopIteration):
         return identity
 
-    identity["class_sha256"] = _definition_identity(class_node)["sha256"]
-    member_sha256: Dict[str, str] = {}
-    for member in class_node.body:
-        if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            member_sha256[member.name] = _definition_identity(member)["sha256"]
-        elif isinstance(member, (ast.Assign, ast.AnnAssign)):
-            targets = member.targets if isinstance(member, ast.Assign) else [member.target]
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    member_sha256[target.id] = _definition_identity(member)["sha256"]
+    identity["class_sha256"] = class_sha256
+    member_sha256 = dict(members)
     identity["member_sha256"] = member_sha256
     identity["runtime_attributes"] = {
         member_name: vars(cls)[member_name]

@@ -94,8 +94,9 @@ def test_token_issuance_requires_login_csrf_and_valid_scope(tmp_path):
         assert client.post('/demo/auth/bff-token', json={'scope': 'public'}, headers={**headers, 'Origin': 'https://evil.test'}).status_code == 403
 
 
-def test_bearer_tokens_are_app_scoped_expiring_and_public_tokens_cannot_escalate(tmp_path, monkeypatch):
-    app = service(tmp_path)
+@pytest.mark.parametrize('revalidate', [True, False])
+def test_bearer_tokens_are_app_scoped_expiring_and_public_tokens_cannot_escalate(tmp_path, monkeypatch, revalidate):
+    app = service(tmp_path, bff_cache_revalidation=revalidate)
     backend = app.state.pytincture_backend
     with client_for(app) as browser, client_for(app) as api:
         headers = login(browser)
