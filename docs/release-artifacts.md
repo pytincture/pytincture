@@ -19,7 +19,7 @@ It does not duplicate the Pyodide distribution.
 ## Dependency model
 
 The base package installs the FastAPI/Starlette service core. For the latest
-published candidate, use `pip install 'pytincture==1.0.0rc12'`; an unpinned install
+published candidate, use `pip install 'pytincture==1.0.0rc14'`; an unpinned install
 selects the latest stable release. Optional features have explicit extras:
 
 | Extra | Required for |

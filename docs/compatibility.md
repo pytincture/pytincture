@@ -14,6 +14,7 @@ does not yet have automated qualification.
 | Pyodide | 0.29.3 browser distribution | CI | Bundled service/standalone runtime; Python 3.13. `pyodide-py` is not a backend dependency. |
 | MicroPython | 1.29.0-6 browser WASM | Experimental CI | Opt-in portable delivery; defined portable Python profile, not arbitrary CPython compatibility. |
 | dhxpyt | 0.9.18 browser fixture | CI | Legacy service mode prefers the matching backend wheel, then its permitted development fallback, then the built-in complete-wheel lock. Explicit `widgetSource` overrides this order. Other Widgetsets follow the [widget source policy](widgetset-packaging.md). |
+| wapyt | 0.2.0 quickstart fixture | CI | Service and standalone examples; exact service allowlist or a local wheel is required. |
 | Chromium | current Playwright build | CI | Authenticated service and standalone modes. |
 | Firefox | current Playwright build | CI | Authenticated service and standalone modes. |
 | WebKit | current Playwright build | CI | Authenticated service and standalone modes. |
@@ -33,6 +34,17 @@ versions for each release candidate.
 | Reverse proxy | Forwarded HTTPS scheme and stable host configuration | Header/topology integration CI and deployment runbook. |
 
 ## Version compatibility rules
+
+RC14 preserves the version-1 BFF contract and existing defaults. BFF result and
+source-analysis optimizations retain authorization, source checks and response
+limits. `BFF_CACHE_REVALIDATION` defaults to `true`; immutable-code deployments
+that disable it must restart workers after code changes. Frame sources remain
+unchanged unless the service opts into the new HTTPS-origin or blob-frame
+controls. WebKit's inherited frame-ancestor restriction remains in force.
+The maintained quickstarts now pin `wapyt==0.2.0`; dhxpyt remains supported.
+The Lambda Web Adapter recipe preserves streaming, with deployment qualification
+limits described in [the guide](aws-lambda.md).
+See [RC14 migration notes](migrations/0.10-to-1.0.md#rc13-to-rc14).
 
 RC13 keeps the version-1 BFF contract, RC11 resource limits, and RC12 page and
 streaming behavior. It adds `cookie_namespace` / `AUTH_COOKIE_NAMESPACE`; the

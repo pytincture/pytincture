@@ -5,18 +5,29 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## RC13 preparation — unpublished
+## RC14 preparation — unpublished
 
-[PR #376](https://github.com/pytincture/pytincture/pull/376) prepares
-`1.0.0rc13` (npm `1.0.0-rc.13`) with configurable cookie names for services
-that share a host (#375). The RC12 integrity manifest is retired unchanged, as
-RC12 is published; RC13's browser assets have their own manifest. The merged
-RC13 preparation is on `main`; subsequent changes must pass the PR checks before
-joining that candidate.
+RC14 integrates the wapyt quickstarts (#384), BFF overhead improvements (#386,
+related to #385), Lambda streaming recipe (#387), and opt-in frame CSP controls
+(#388). The RC13 integrity manifest is retired unchanged; RC14 has a separate
+versioned manifest. Full combined CI, signed-tag qualification and release
+artifact attestation must pass before package publication.
 
-RC13 has no publication or observation evidence yet. Publication remains a
-separate step; this preparation does not authorize a tag, GitHub release, or
-package upload.
+The final 1.0 target is October 17, 2026, tentatively. This announcement does not
+change observation evidence or final-release approvals. The concurrency target
+in #385 and actual application PDF/browser validation are not claimed resolved.
+
+## RC13 publication — 2026-10-07
+
+`1.0.0rc13` was published from `0cae8c7b1f971cdad89987cbe3866f3447d39d5e`.
+All main, signed-tag and release checks passed, followed by protected PyPI
+publication. Public wheel/sdist hashes match the retained attested artifacts,
+and a fresh Python 3.13 public-index installation passed the release smoke test.
+See [release CI](https://github.com/pytincture/pytincture/actions/runs/37627280842),
+[PyPI publication](https://github.com/pytincture/pytincture/actions/runs/37628369421),
+and [the release artifacts](https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc13).
+The detailed record is in `release/qualification.json`; npm publication remains
+an independently approved distribution step.
 
 ## RC12 publication — 2026-10-05
 

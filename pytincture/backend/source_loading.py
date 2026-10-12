@@ -7,12 +7,25 @@ import os
 import re
 import sys
 from importlib.machinery import ModuleSpec, SourceFileLoader
+from functools import lru_cache
 
 from pytincture.backend.safe_paths import (
     canonical_root,
     decode_python_source,
     read_contained_file,
 )
+
+
+# Retain only small, immutable compilation inputs, never modules or instances.
+# Every load still opens/verifies the source and executes in a fresh namespace.
+_COMPILED_SOURCE_MAX_BYTES = 64 * 1024
+
+
+def _compile_source(source: bytes, filename: str):
+    return compile(decode_python_source(source), filename, "exec")
+
+
+_cached_compile_source = lru_cache(maxsize=128)(_compile_source)
 
 
 def build_dynamic_module_name(
@@ -78,8 +91,12 @@ def load_source_module(
     previous_module = sys.modules.get(spec.name)
     sys.modules[spec.name] = module
     try:
-        source = decode_python_source(secure_file.content)
-        exec(compile(source, secure_file.path, "exec"), module.__dict__)
+        compiler = (
+            _cached_compile_source
+            if len(secure_file.content) <= _COMPILED_SOURCE_MAX_BYTES
+            else _compile_source
+        )
+        exec(compiler(secure_file.content, secure_file.path), module.__dict__)
     except Exception:
         if previous_module is None:
             sys.modules.pop(spec.name, None)

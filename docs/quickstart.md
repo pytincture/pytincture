@@ -13,20 +13,27 @@ Requirements: Python 3.13 or 3.14.
 ```bash
 python3.13 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'pytincture==1.0.0rc12'
-git clone --branch v1.0.0rc12 https://github.com/pytincture/pytincture.git
+python -m pip install 'pytincture==1.0.0rc14'
+git clone --branch v1.0.0rc14 https://github.com/pytincture/pytincture.git
 cd pytincture/examples/quickstart/service
 python -m uvicorn service:app --port 8070
 ```
 
 Open <http://127.0.0.1:8070/>. The root redirects to `/hello/` without adding a
 cache UUID to the visible URL. Pytincture downloads the application package,
-starts bundled Pyodide, installs `dhxpyt==0.9.18`, and calls `hello.load_ui()`.
+starts bundled Pyodide, installs `wapyt==0.2.0`, and calls `hello.load_ui()`.
 
 The example has three files: [`service.py`](../examples/quickstart/service/service.py)
 creates the ASGI app, [`hello.py`](../examples/quickstart/service/hello.py) runs
 in the browser, and [`widget.py`](../examples/quickstart/service/widget.py)
 declares browser widget metadata. Continue with [service mode](service-mode.md).
+
+The quickstart uses [wapyt](https://github.com/WAwesome-AI/wa_pytincture_widgetset),
+an MIT-licensed pluggable widgetset. A service does not fetch a pluggable
+widgetset from PyPI unless told to, so `service.py` lists the exact release in
+`widget_public_index_allowlist`. A deployment that should not reach PyPI keeps
+the wheel beside the application modules instead; see
+[widgetset packaging](widgetset-packaging.md).
 
 ## Standalone mode
 
@@ -34,8 +41,8 @@ Requirements: Pytincture installed while preparing the static site. The
 deployed host itself only needs a static HTTP server.
 
 ```bash
-python -m pip install 'pytincture==1.0.0rc12'
-git clone --branch v1.0.0rc12 https://github.com/pytincture/pytincture.git
+python -m pip install 'pytincture==1.0.0rc14'
+git clone --branch v1.0.0rc14 https://github.com/pytincture/pytincture.git
 cd pytincture/examples/quickstart/standalone
 python -m pytincture.assets ./frontend
 python3 -m http.server 8000

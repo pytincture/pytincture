@@ -39,6 +39,8 @@ class _ResultBudget:
     max_depth: int
     max_items: int
     items: int = 0
+    native_json: bool = True
+    json_size_upper_bound: int = 0
 
     def add_items(self, count: int) -> None:
         self.items += count
@@ -150,6 +152,29 @@ def _materialize_bounded_result(
 
     if depth > budget.max_depth:
         raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_DEPTH", budget.max_depth, depth, "materialization")
+    # Exact builtins need no FastAPI conversion. Track a conservative wire-size
+    # bound while copying the containers, so the C encoder can only receive a
+    # private, already bounded snapshot with no user-defined serialization.
+    kind = type(value)
+    if kind is str:
+        if len(value) > budget.max_bytes:
+            raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_BYTES", budget.max_bytes, len(value), "materialization")
+        # JSON escaping uses at most six UTF-8 bytes per input code point.
+        budget.json_size_upper_bound += 2 + 6 * len(value)
+        return value
+    if kind is int:
+        # 30103 / 100000 is an upper bound on log10(2).
+        budget.json_size_upper_bound += value.bit_length() * 30103 // 100000 + 1 + (value < 0)
+        return value
+    if kind is float:
+        budget.json_size_upper_bound += 32
+        return value
+    if value is None or kind is bool:
+        budget.json_size_upper_bound += 5
+        return value
+    if kind not in (dict, list):
+        budget.native_json = False
+
     if isinstance(value, AsyncIterable):
         raise BFFResultLimitExceeded(
             "Async BFF result iterables require an explicit streaming export"
@@ -169,6 +194,42 @@ def _materialize_bounded_result(
     identity = id(value)
     if identity in active:
         raise BFFResultLimitExceeded("BFF result contains a circular reference")
+
+    if kind in (dict, list):
+        original_size = len(value)
+        budget.add_items(original_size)
+        active.add(identity)
+        try:
+            if kind is dict:
+                result = {}
+                for index, (key, item) in enumerate(value.items()):
+                    if index >= original_size:
+                        budget.add_items(1)
+                    if type(key) is not str or key.startswith("_sa"):
+                        # Preserve FastAPI key conversion / SQLAlchemy filtering.
+                        budget.native_json = False
+                    prepared_key = _materialize_bounded_result(
+                        key, budget=budget, depth=depth + 1, active=active,
+                    )
+                    result[prepared_key] = _materialize_bounded_result(
+                        item, budget=budget, depth=depth + 1, active=active,
+                    )
+                budget.json_size_upper_bound += len(result) * 2  # colon + space
+            else:
+                result = []
+                for index, item in enumerate(value):
+                    if index >= original_size:
+                        budget.add_items(1)
+                    result.append(_materialize_bounded_result(
+                        item, budget=budget, depth=depth + 1, active=active,
+                    ))
+            # Account for the actual private snapshot, including any growth of
+            # the caller's container during traversal. A second shape walk is
+            # unnecessary only if these counters describe what we will encode.
+            budget.json_size_upper_bound += 2 + max(0, len(result) - 1) * 2
+            return result
+        finally:
+            active.remove(identity)
 
     if isinstance(value, BaseModel):
         active.add(identity)
@@ -336,25 +397,33 @@ def prepare_bff_result(
 
     if min(max_bytes, max_depth, max_items) <= 0:
         raise ValueError("BFF result limits must be greater than zero")
-    materialized = _materialize_bounded_result(
-        value,
-        budget=_ResultBudget(
+    budget = _ResultBudget(max_bytes, max_depth, max_items)
+    materialized = _materialize_bounded_result(value, budget=budget)
+    if budget.native_json:
+        # Materialization already checked the shape of this exact-builtin
+        # snapshot. Conversion would only copy and rewalk the same structure.
+        converted = materialized
+    else:
+        converted = jsonable_encoder(materialized)
+        _validate_result_shape(
+            converted,
             max_bytes=max_bytes,
             max_depth=max_depth,
             max_items=max_items,
-        ),
-    )
-    converted = jsonable_encoder(materialized)
-    _validate_result_shape(
-        converted,
-        max_bytes=max_bytes,
-        max_depth=max_depth,
-        max_items=max_items,
-    )
+        )
     encoder_options = {"ensure_ascii": False, "allow_nan": False}
     if compact:
         encoder_options["separators"] = (",", ":")
     encoder = json.JSONEncoder(**encoder_options)
+    if budget.native_json and budget.json_size_upper_bound <= max_bytes:
+        # The bound is checked BEFORE allocating the complete JSON string or
+        # UTF-8 bytes. NaN/infinity and invalid Unicode still fail here, before
+        # any Response is constructed. Larger/uncertain bounds use the original
+        # incremental encoder so conservative estimates never reject valid data.
+        payload = encoder.encode(converted).encode("utf-8")
+        if len(payload) > max_bytes:  # Defensive invariant, never the admission check.
+            raise BFFResultLimitExceeded.limit("BFF_RESULT_MAX_BYTES", max_bytes, len(payload), "JSON encoding")
+        return converted, payload
     output = bytearray()
     for chunk in encoder.iterencode(converted):
         encoded = chunk.encode("utf-8")

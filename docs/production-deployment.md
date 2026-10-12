@@ -5,6 +5,11 @@ service at the origin root behind a TLS-terminating reverse proxy. A URL path
 prefix is not supported because application, BFF, frontend, and service-worker
 routes intentionally share the root scope.
 
+For Lambda with live streaming, use the [Web Adapter deployment recipe](aws-lambda.md).
+It includes a private deployment template, the verified Bedrock example, and
+the remaining production qualification boundaries. The
+[Mangum assessment](mangum.md) covers the buffered alternative.
+
 The security behaviors Pytincture intentionally retains, including stateless
 browser-carried sessions and optional Redis, are recorded in
 [`security/accepted-architecture.md`](../security/accepted-architecture.md).
@@ -107,8 +112,14 @@ Resource admission counters, the appcode cache, and the application BFF graph
 cache are bounded, disposable, and local to each worker. The archive LRU is
 independently capped by `APPCODE_CACHE_ENTRIES` and
 `APPCODE_CACHE_MAX_BYTES`; graph snapshots are capped by
-`BFF_APPLICATION_GRAPH_CACHE_ENTRIES` and revalidate secure source/directory
-metadata before every reuse. Cold graph discovery is bounded by the appcode
+`BFF_APPLICATION_GRAPH_CACHE_ENTRIES` and, by default, revalidate secure
+source/directory metadata before every reuse. `BFF_CACHE_REVALIDATION=false`
+opts out of warm registry/graph freshness checks for immutable-code deployments
+or benchmarks; restart every worker after any application-code change. Changes
+to application imports may otherwise leave old membership permissions cached.
+Execution source/digest checks and request/response protections remain enabled.
+See [the performance comparison](performance.md#optional-cache-revalidation).
+Cold graph discovery is bounded by the appcode
 file/byte settings plus `BFF_APPLICATION_GRAPH_MAX_DIRECTORIES` and
 `BFF_APPLICATION_GRAPH_MAX_SCANNED_FILES`. Warm archive-cache validation uses
 the same bounds, stats only the relevant discovery snapshot rather than

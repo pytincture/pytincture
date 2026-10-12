@@ -1,0 +1,49 @@
+# Repository-specific invariants for this private, synchronous HTTP recipe.
+let functions = Resources.*[ Type == 'AWS::Lambda::Function' ]
+let roles = Resources.*[ Type == 'AWS::IAM::Role' ]
+
+rule private_ingress {
+    Resources.*[ Type == 'AWS::Lambda::Url' ] empty
+    Resources.*[ Type == 'AWS::ApiGateway::RestApi' ] empty
+    Resources.*[ Type == 'AWS::ApiGatewayV2::Api' ] empty
+    Resources.*[ Type == 'AWS::Lambda::Permission' ] empty
+}
+
+rule streaming_runtime {
+    %functions !empty
+    %functions.Properties {
+        Handler == 'run.sh'
+        Timeout == 90
+        ReservedConcurrentExecutions exists
+        Environment.Variables {
+            AWS_LWA_INVOKE_MODE == 'response_stream'
+            AWS_LWA_READINESS_CHECK_HEALTHY_STATUS == '200'
+            AWS_LAMBDA_EXEC_WRAPPER == '/opt/bootstrap'
+            BFF_STREAM_MAX_SECONDS == '60'
+        }
+    }
+}
+
+rule log_only_role {
+    %roles !empty
+    %roles.Properties {
+        ManagedPolicyArns !exists
+        AssumeRolePolicyDocument.Statement.* {
+            Principal.Service == 'lambda.amazonaws.com'
+            Action == 'sts:AssumeRole'
+        }
+        Policies.*.PolicyDocument.Statement.* {
+            Effect == 'Allow'
+            Action.* IN ['logs:CreateLogStream', 'logs:PutLogEvents']
+            Resource.'Fn::GetAtt' == 'LogGroup.Arn'
+        }
+    }
+}
+
+rule retained_logs {
+    Resources.LogGroup {
+        DeletionPolicy == 'Retain'
+        UpdateReplacePolicy == 'Retain'
+        Properties.RetentionInDays == 7
+    }
+}

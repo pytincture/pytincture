@@ -6,7 +6,7 @@ import os
 
 import uvicorn
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from pytincture import PytinctureConfig, create_app
 from pytincture.api_clients import create_client
@@ -56,6 +56,19 @@ config = PytinctureConfig(
 )
 
 app = create_app(config)
+
+
+async def frame_policy_preview():
+    return HTMLResponse("<!doctype html><html><body>Frame policy fixture</body></html>")
+
+
+# Exercise the actual middleware policies in two isolated factory instances.
+app.add_api_route("/frame-policy/preview", frame_policy_preview, methods=["GET"])
+frame_app = create_app(PytinctureConfig(
+    modules_path=str(ROOT), browser_allow_blob_frames=True,
+))
+frame_app.add_api_route("/frame-policy/preview", frame_policy_preview, methods=["GET"])
+app.mount("/frame-policy-enabled", frame_app)
 
 
 @app.get("/external-api/signed-url-probe")

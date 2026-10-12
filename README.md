@@ -21,6 +21,10 @@ Backend ownership and dependency boundaries are described in the
 [backend architecture guide](docs/backend-architecture.md).
 Production topology, probes, monitoring, secret rotation, backup, and rollback
 are covered by the [production deployment runbook](docs/production-deployment.md).
+For AWS Lambda with live streaming, use the
+[Web Adapter deployment recipe](docs/aws-lambda.md), reusable infrastructure
+template, and Bedrock chat example. The
+[Mangum assessment](docs/mangum.md) covers the buffered alternative.
 
 Start with the [five-minute quickstart](docs/quickstart.md), then choose the
 [service](docs/service-mode.md) or [standalone](docs/standalone-mode.md) guide.
@@ -55,7 +59,7 @@ evidence for browser startup, package generation, health, and BFF calls.
 
 Install the latest published release candidate from PyPI:
 ~~~
-pip install 'pytincture==1.0.0rc12'
+pip install 'pytincture==1.0.0rc14'
 ~~~
 
 An unpinned `pip install pytincture` selects the latest stable release. This
@@ -67,12 +71,12 @@ without pulling optional identity-provider, Redis, or MCP stacks. Install only
 the features a deployment enables:
 
 ```bash
-pip install "pytincture[password]==1.0.0rc12"  # Argon2/bcrypt local login
-pip install "pytincture[oauth]==1.0.0rc12"     # Google/Microsoft OAuth
-pip install "pytincture[saml]==1.0.0rc12"      # SAML 2.0
-pip install "pytincture[redis]==1.0.0rc12"     # shared Upstash state
-pip install "pytincture[mcp]==1.0.0rc12"       # MCP endpoint
-pip install "pytincture[dev]==1.0.0rc12"       # all features and test/build tools
+pip install "pytincture[password]==1.0.0rc14"  # Argon2/bcrypt local login
+pip install "pytincture[oauth]==1.0.0rc14"     # Google/Microsoft OAuth
+pip install "pytincture[saml]==1.0.0rc14"      # SAML 2.0
+pip install "pytincture[redis]==1.0.0rc14"     # shared Upstash state
+pip install "pytincture[mcp]==1.0.0rc14"       # MCP endpoint
+pip install "pytincture[dev]==1.0.0rc14"       # all features and test/build tools
 ```
 
 From Source:
@@ -316,7 +320,7 @@ is published to npm and its SRI is copied from the trusted release integrity
 manifest. The URL below requires completed npm publication; use the Python-wheel
 asset export while publication is pending:
 ```
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.13/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.14/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
 ```
 
 ### Using pytincture.js standalone

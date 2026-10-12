@@ -1,0 +1,209 @@
+{
+  "measurement_date": "2026-10-11",
+  "scope": "One sequential local on/off comparison, not a CI qualification or a demonstrated speedup.",
+  "hardware": "Apple M1 Pro, 10 logical CPUs",
+  "python": "3.13.5",
+  "dependencies": {
+    "fastapi": "0.143.0",
+    "starlette": "1.7.0",
+    "pydantic": "2.14.0",
+    "uvicorn": "0.54.0",
+    "httpx": "0.28.1"
+  },
+  "candidate_base_commit": "04eee1c",
+  "candidate_source_sha256": {
+    "pytincture/backend/app.py": "6bae4f540a98693a3929714406d9443857aaab06137bda60c83a3a3058f658bc",
+    "pytincture/backend/bff.py": "1b85ddc9ec4f953c0e67d41b7049f71e8925e42e555d833981fdaae61b928a79",
+    "pytincture/configuration.py": "9a51faa93474371a13f824f9ed37db7b6a79b6aec01775cd24ba34f15d6d3295",
+    "pytincture/backend/results.py": "74a96aae6359dc86772f6f79120680b267b2e304bd02bc7da62ab1cd941a3a35",
+    "pytincture/backend/source_loading.py": "f85e0cac10978e9c0796765b2fdca9c815d379845bd1e98fc34b56df962d1927",
+    "pytincture/dataclass.py": "92a4ccad08a36ebcadc6d75b37f137bd318908f588019fc927b808e340c3c5f7"
+  },
+  "load_configuration": {
+    "example_commit": "d135b4facec4374bd3ff8386ff8677fd33ef924d",
+    "server": "One Uvicorn process on 127.0.0.1:19585, new temporary SQLite database for each run",
+    "client": "Same machine; tests/load_test.py exercise(base_url, [50, 100, 250], 4, 100, 8)",
+    "execution_concurrency": 32,
+    "p95_budget_ms": 1000,
+    "limits": {
+      "AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS": "60",
+      "AUTH_PASSWORD_HASH_MAX_CONCURRENCY": "8",
+      "AUTH_PASSWORD_HASH_QUEUE_TIMEOUT_SECONDS": "60",
+      "BFF_QUEUE_TIMEOUT_SECONDS": "30",
+      "BFF_REQUEST_INGRESS_QUEUE_TIMEOUT_SECONDS": "30",
+      "AUTH_LOGIN_RATE_LIMIT_ATTEMPTS": "500",
+      "BFF_MAX_QUEUE": "2000",
+      "BFF_REQUEST_INGRESS_MAX_CONCURRENCY": "500",
+      "BFF_REQUEST_INGRESS_MAX_CONCURRENCY_PER_PEER": "500",
+      "BFF_REQUEST_INGRESS_MAX_QUEUE": "2000"
+    }
+  },
+  "example_configuration_patch": "diff --git a/example/run.py b/example/run.py\nindex 9da37b8..7955180 100644\n--- a/example/run.py\n+++ b/example/run.py\n@@ -96,6 +96,9 @@ app = create_app(\n     PytinctureConfig(\n         modules_path=str(HERE),\n         default_application=\"py_ui\",\n+        bff_cache_revalidation={\"true\": True, \"false\": False}[\n+            os.getenv(\"BFF_CACHE_REVALIDATION\", \"true\").strip().lower()\n+        ],\n         enable_user_login=True,\n         # ALLOWED_EMAILS, AUTH_PASSWORD_HASHES and LOGIN_HELP_TEXT are not typed\n         # PytinctureConfig fields. create_app() gives the backend a module-local\n",
+  "caveats": "Same one-process server, dependencies, client workload and limits. New temporary database for each run; no competing local test suite. Timings vary. Both 100/250-caller stages still exceed the unchanged 1,000 ms p95 budget. This comparison does not show a consistent throughput gain from disabling warm cache revalidation.",
+  "load": {
+    "on": {
+      "BFF_CACHE_REVALIDATION": true,
+      "results": {
+        "unauthenticated_bff_status": 401,
+        "pagination_cap": {
+          "requested_records": 101,
+          "returned_records": 100,
+          "enforced": true
+        },
+        "session_login": {
+          "count": 250,
+          "min_ms": 158.262,
+          "median_ms": 442.695,
+          "p95_ms": 656.053,
+          "p99_ms": 746.69,
+          "max_ms": 829.556
+        },
+        "authenticated_app_html": {
+          "count": 250,
+          "min_ms": 62.484,
+          "median_ms": 334.123,
+          "p95_ms": 573.909,
+          "p99_ms": 605.594,
+          "max_ms": 640.334
+        },
+        "authenticated_paginated_bff_stages": [
+          {
+            "users": 50,
+            "request_count": 200,
+            "records_per_response": 100,
+            "count": 200,
+            "min_ms": 66.914,
+            "median_ms": 708.486,
+            "p95_ms": 840.394,
+            "p99_ms": 917.519,
+            "max_ms": 973.694,
+            "elapsed_seconds": 2.914,
+            "requests_per_second": 68.644,
+            "error_count": 0,
+            "error_rate": 0.0,
+            "errors": []
+          },
+          {
+            "users": 100,
+            "request_count": 400,
+            "records_per_response": 100,
+            "count": 400,
+            "min_ms": 185.379,
+            "median_ms": 1422.748,
+            "p95_ms": 1607.771,
+            "p99_ms": 1658.859,
+            "max_ms": 1755.518,
+            "elapsed_seconds": 5.85,
+            "requests_per_second": 68.372,
+            "error_count": 0,
+            "error_rate": 0.0,
+            "errors": []
+          },
+          {
+            "users": 250,
+            "request_count": 1000,
+            "records_per_response": 100,
+            "count": 1000,
+            "min_ms": 508.151,
+            "median_ms": 3713.748,
+            "p95_ms": 3985.987,
+            "p99_ms": 4043.553,
+            "max_ms": 4108.448,
+            "elapsed_seconds": 15.299,
+            "requests_per_second": 65.362,
+            "error_count": 0,
+            "error_rate": 0.0,
+            "errors": []
+          }
+        ],
+        "health": {
+          "status": "ok",
+          "version": "1.0.0rc13"
+        },
+        "label": "flag-on"
+      }
+    },
+    "off": {
+      "BFF_CACHE_REVALIDATION": false,
+      "results": {
+        "unauthenticated_bff_status": 401,
+        "pagination_cap": {
+          "requested_records": 101,
+          "returned_records": 100,
+          "enforced": true
+        },
+        "session_login": {
+          "count": 250,
+          "min_ms": 162.924,
+          "median_ms": 437.121,
+          "p95_ms": 672.683,
+          "p99_ms": 803.56,
+          "max_ms": 821.196
+        },
+        "authenticated_app_html": {
+          "count": 250,
+          "min_ms": 88.137,
+          "median_ms": 379.015,
+          "p95_ms": 569.819,
+          "p99_ms": 643.199,
+          "max_ms": 644.61
+        },
+        "authenticated_paginated_bff_stages": [
+          {
+            "users": 50,
+            "request_count": 200,
+            "records_per_response": 100,
+            "count": 200,
+            "min_ms": 22.248,
+            "median_ms": 587.138,
+            "p95_ms": 962.331,
+            "p99_ms": 983.783,
+            "max_ms": 996.208,
+            "elapsed_seconds": 2.881,
+            "requests_per_second": 69.409,
+            "error_count": 0,
+            "error_rate": 0.0,
+            "errors": []
+          },
+          {
+            "users": 100,
+            "request_count": 400,
+            "records_per_response": 100,
+            "count": 400,
+            "min_ms": 208.642,
+            "median_ms": 1366.802,
+            "p95_ms": 1473.119,
+            "p99_ms": 1510.125,
+            "max_ms": 1533.67,
+            "elapsed_seconds": 5.509,
+            "requests_per_second": 72.608,
+            "error_count": 0,
+            "error_rate": 0.0,
+            "errors": []
+          },
+          {
+            "users": 250,
+            "request_count": 1000,
+            "records_per_response": 100,
+            "count": 1000,
+            "min_ms": 558.419,
+            "median_ms": 3765.122,
+            "p95_ms": 4155.054,
+            "p99_ms": 4434.076,
+            "max_ms": 4658.57,
+            "elapsed_seconds": 15.334,
+            "requests_per_second": 65.214,
+            "error_count": 0,
+            "error_rate": 0.0,
+            "errors": []
+          }
+        ],
+        "health": {
+          "status": "ok",
+          "version": "1.0.0rc13"
+        },
+        "label": "flag-off"
+      }
+    }
+  }
+}
