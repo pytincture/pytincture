@@ -138,3 +138,7 @@ media_type=...)` only when the method yields correctly encoded bytes/text.
 
 The normative transport, error, authentication, and compatibility rules are
 in the [BFF v1 contract](contracts/bff-v1.md).
+
+On AWS Lambda, use the [Web Adapter + Uvicorn deployment recipe](aws-lambda.md)
+to preserve incremental `@bff_stream` delivery. A buffered adapter such as
+ordinary Mangum cannot deliver those chunks incrementally.

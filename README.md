@@ -21,6 +21,10 @@ Backend ownership and dependency boundaries are described in the
 [backend architecture guide](docs/backend-architecture.md).
 Production topology, probes, monitoring, secret rotation, backup, and rollback
 are covered by the [production deployment runbook](docs/production-deployment.md).
+For AWS Lambda with live streaming, use the
+[Web Adapter deployment recipe](docs/aws-lambda.md), reusable infrastructure
+template, and Bedrock chat example. The
+[Mangum assessment](docs/mangum.md) covers the buffered alternative.
 
 Start with the [five-minute quickstart](docs/quickstart.md), then choose the
 [service](docs/service-mode.md) or [standalone](docs/standalone-mode.md) guide.

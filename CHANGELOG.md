@@ -15,6 +15,12 @@ set when a release is published.
   benchmarking. Setting it to `false` skips warm registry/graph freshness checks;
   cold discovery, execution-source verification, authorization, and response
   limits still run. Restart workers after application-code changes in this mode.
+- Add a Lambda Web Adapter deployment recipe and private CloudFormation
+  template that preserve existing `@bff_stream` APIs under Uvicorn. Include a
+  bounded Nova Micro chat example, a reusable local streaming forwarder and
+  automated transport checks. Document the live AWS evidence and remaining
+  production qualification boundaries; no AWS SDK dependency is added to the
+  framework package.
 
 ## 1.0.0rc13 — 2026-10-07
 
