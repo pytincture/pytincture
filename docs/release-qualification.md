@@ -5,17 +5,36 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## RC14 preparation — unpublished
+## RC14 publication — 2026-10-12
 
-RC14 integrates the wapyt quickstarts (#384), BFF overhead improvements (#386,
+`1.0.0rc14` was published from `a0531182d3bdead6517ee8b790dabb5afd13506b`,
+merged into `main` by [PR #389](https://github.com/pytincture/pytincture/pull/389).
+It integrates the wapyt quickstarts (#384), BFF overhead improvements (#386,
 related to #385), Lambda streaming recipe (#387), and opt-in frame CSP controls
-(#388). The RC13 integrity manifest is retired unchanged; RC14 has a separate
-versioned manifest. Full combined CI, signed-tag qualification and release
-artifact attestation must pass before package publication.
+(#388). All 24 PR/main/signed-tag checks, the separate Lambda recipe checks,
+and all 25 release CI/attestation checks passed, followed by protected PyPI
+publication. The first release application run hit the test diagnostics rate
+limit; the unchanged signed tag passed on retry. The fixture configuration is
+corrected separately after publication; production limits remain unchanged.
 
-The final 1.0 target is October 17, 2026, tentatively. This announcement does not
-change observation evidence or final-release approvals. The concurrency target
-in #385 and actual application PDF/browser validation are not claimed resolved.
+Both public Python artifact hashes match the retained attested bytes. A fresh
+Python 3.13 installation from the public index verifies RC14 defaults and
+configuration round-trips, cold/warm BFF calls in both cache modes, oversized
+response rejection, and opt-in CSP isolation. The full local suites passed
+1,287 tests on each Python version, with two optional skips; 64 JavaScript tests
+also passed. This does not qualify an application's PDF viewer or resolve the
+remaining concurrency target in #385.
+
+- [Main validation](https://github.com/pytincture/pytincture/actions/runs/38309614304).
+- [Signed-tag qualification](https://github.com/pytincture/pytincture/actions/runs/38309645197).
+- [Release CI and attestations](https://github.com/pytincture/pytincture/actions/runs/38310555322).
+- [Protected PyPI publication](https://github.com/pytincture/pytincture/actions/runs/38311769180).
+- [Retained artifacts and checksums](https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc14).
+- [Published Python package](https://pypi.org/project/pytincture/1.0.0rc14/).
+- [npm publication awaiting independent approval](https://github.com/pytincture/pytincture/actions/runs/38311769175).
+
+The final 1.0 target is October 17, 2026, tentatively. Observation evidence and
+final-release approvals remain unchanged. See the [RC14 migration notes](migrations/0.10-to-1.0.md#rc13-to-rc14).
 
 ## RC13 publication — 2026-10-07
 

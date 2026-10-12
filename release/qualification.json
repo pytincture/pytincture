@@ -173,6 +173,19 @@
       },
       "status": "passed",
       "notes": "RC13 integration PR #382 merged all pending Microsoft organization SSO and dependency updates. All 24 main-branch and signed-tag checks (37621156553, 37626155492), all 25 release CI/attestation jobs (37627280842), and protected PyPI publication (37628369421) passed. The exact retained wheel, source distribution, npm tarball and SHA256SUMS.json are attached to the GitHub prerelease. Public PyPI wheel/sdist bytes match the attested hashes. A fresh isolated Python 3.13 public-index installation imports 1.0.0rc13, verifies existing defaults, Microsoft organization SSO configuration and cookie namespace round-trips, and creates an app exposing application, BFF and appcode routes. Full pinned application conformance passed across all three runtime/delivery profiles. Microsoft organization sign-in remains opt-in; live tenant registration and customer consent are deployment setup, not validated live-provider evidence. npm publication (37628369260) awaits independent environment approval; PyPI was the requested distribution. Known LiteLLM and older PyJWT findings in the separate application-conformance dependency lock remain follow-up work; that environment is not installed with the framework package, whose audited graph passed. Existing observation dates and final 1.0 approvals are unchanged."
+    },
+    {
+      "version": "1.0.0rc14",
+      "published_at": "2026-10-12T21:25:35Z",
+      "commit_sha": "a0531182d3bdead6517ee8b790dabb5afd13506b",
+      "ci_url": "https://github.com/pytincture/pytincture/actions/runs/38310555322",
+      "artifacts": {
+        "wheel": "86765e218ac3171dc236a3aa4a53ef346cdb8351eea4c9ccf612acbb81e6ee59",
+        "sdist": "f7944c86a652d3a3b241a4e5c4ae86a4b3c56b5ca98a61c15b2a6bd04c09ebdf",
+        "npm": "69a65907caddd3fafd996cfcbdb4e53ae98e9fd750d6b768ac171c7d2119eeec"
+      },
+      "status": "passed",
+      "notes": "Integration PR #389 merged #384, #386, #387 and #388 while preserving their commits. All 24 PR/main/tag checks (38308692064, 38309614304, 38309645197), the separate Lambda recipe checks, all 25 release CI/attestation checks (38310555322, attempt 2), and protected PyPI publication (38311769180) passed. The first release application run hit the fixture diagnostics rate limit; the unchanged tag passed on retry. The fixture environment override was not passed into explicit config objects and is corrected separately after publication, without changing production limits or the signed release. Public wheel/sdist bytes from the PyPI simple index match the retained attested hashes. A fresh Python 3.13 public-index installation verifies RC14, defaults, environment round-trips, cold/warm BFF calls in both cache modes, oversized-response rejection and opt-in CSP isolation. Artifacts and SHA256SUMS.json are attached to the GitHub prerelease. npm publication (38311769175) awaits independent environment approval. Issue #385 concurrency targets and application PDF/WebKit validation are not claimed resolved. Final 1.0 is tentatively targeted for October 17, 2026; existing observation evidence and final approvals are unchanged."
     }
   ],
   "representative_applications": {
