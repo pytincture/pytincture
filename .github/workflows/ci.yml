@@ -122,7 +122,9 @@ jobs:
           uv pip sync --python .venv/bin/python --require-hashes tests/conformance/requirements.txt
           uv pip install --python .venv/bin/python --no-deps .
           .venv/bin/python -m playwright install --with-deps chromium
-      - name: Prepare pinned applications, widgets and speech model
+      - name: Audit conformance dependencies
+        run: .venv/bin/python scripts/audit_python_dependencies.py
+      - name: Prepare pinned example and widget
         run: .venv/bin/python tests/prepare_application_conformance.py --destination "$RUNNER_TEMP/pytincture-apps"
       - name: Validate legacy Pyodide, portable Pyodide and MicroPython
         run: .venv/bin/python tests/run_application_conformance.py --prepared "$RUNNER_TEMP/pytincture-apps/prepared.json"

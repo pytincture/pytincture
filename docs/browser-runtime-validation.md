@@ -1,5 +1,9 @@
 # Full application runtime conformance — 2026-09-20
 
+The current framework suite retains the Book Library example. Full chat/provider/voice
+application fixtures were removed on 2026-10-13; that testing belongs in the
+wapyt/app repositories. The historical evidence below remains unchanged.
+
 This is the historical RC8 qualification report. Its commits, counts, and local
 coverage limits describe that run. For subsequent candidates, including RC10,
 use the [current release evidence](release-qualification.md) and the
