@@ -5,14 +5,36 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
-## RC15 integration — 2026-10-13
+## RC15 publication — 2026-10-13
 
-RC15 integrates all seven outstanding PRs (#391–#397), preserving their commit
-history. The combined candidate must pass the full CI matrix before tagging
-and publication. It includes browser tarfile regressions and audited Book
-Library conformance in all three runtime modes. Publication hashes and durable
-CI evidence will be recorded after the protected publishers complete.
-The final 1.0 target remains October 17, 2026, tentatively.
+`1.0.0rc15` was published from `661d1c812da3ef8a2d327e2a890bedf636fd4c7f`,
+merged into main by [PR #398](https://github.com/pytincture/pytincture/pull/398).
+It integrates every outstanding PR (#391–#397): the bundled tarfile backport,
+removal of the LiteLLM/chat test stack, remaining conformance dependency CVE
+fixes, and Dependabot updates. Public APIs and defaults remain compatible.
+
+PR, main, signed-tag and release CI all passed, including both Python versions,
+three browsers and the retained Book Library runtime matrix. The local suites
+passed 1,293 Python tests (two optional skips) and 64 JavaScript tests. GitHub's
+main-branch rescan reports zero open Dependabot alerts. Version-only scanners
+may still flag the unchanged bundled Python version; see the documented
+[backport provenance](pyodide-security.md).
+
+Both public PyPI artifact hashes match the retained attested bytes. A fresh
+Python 3.14 public-index installation passes defaults, configuration round-trip,
+BFF/cache-mode, oversized-response, CSP isolation, and installed tarfile link
+regressions. The browser patch does not upgrade the server Python interpreter.
+
+- [Main validation](https://github.com/pytincture/pytincture/actions/runs/38424164078).
+- [Signed-tag qualification](https://github.com/pytincture/pytincture/actions/runs/38424202286).
+- [Release CI and attestations](https://github.com/pytincture/pytincture/actions/runs/38425015755).
+- [Protected PyPI publication](https://github.com/pytincture/pytincture/actions/runs/38425590264).
+- [Retained artifacts and checksums](https://github.com/pytincture/pytincture/releases/tag/v1.0.0rc15).
+- [Published Python package](https://pypi.org/project/pytincture/1.0.0rc15/).
+- [npm publication awaiting independent approval](https://github.com/pytincture/pytincture/actions/runs/38425590451).
+
+The final 1.0 target remains October 17, 2026, tentatively. Final-release
+observation evidence and approvals are unchanged.
 
 ## RC14 publication — 2026-10-12
 
