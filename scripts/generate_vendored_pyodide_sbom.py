@@ -80,6 +80,7 @@ def build_sbom() -> dict:
             "filesAnalyzed": True,
             "licenseConcluded": "Python-2.0",
             "hasFiles": ["SPDXRef-File-python-stdlib"],
+            "comment": "CPython 3.13.2 with a Pytincture tarfile hard-link security backport; see security/pyodide-upstream.json and docs/pyodide-security.md. The interpreter version is unchanged.",
         },
         {
             "name": "micropip",
