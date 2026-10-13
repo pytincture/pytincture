@@ -362,8 +362,9 @@ network/cache conditions, runtime identity and the first useful app DOM.
 
 The CI conformance fixtures cover direct DOM, BFF sync/async/streaming, nested
 widgets, CodeMirror, modal persistence, fonts, CSP, runtime identity and screenshots.
-`tests/run_application_conformance.py` runs the complete example and Wawesome apps
-in all three supported combinations, including authentication and voice. See
+`tests/run_application_conformance.py` runs the Book Library example
+in all three supported combinations, including authentication and persistence.
+Full chat/provider/voice application testing belongs in the wapyt/app repositories. See
 [validation evidence and boundaries](browser-runtime-validation.md) for commands,
 versions and the exact features exercised. Legacy delivery has not been deprecated.
 
