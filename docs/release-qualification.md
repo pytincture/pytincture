@@ -5,6 +5,15 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
+## RC15 integration — 2026-10-13
+
+RC15 integrates all seven outstanding PRs (#391–#397), preserving their commit
+history. The combined candidate must pass the full CI matrix before tagging
+and publication. It includes browser tarfile regressions and audited Book
+Library conformance in all three runtime modes. Publication hashes and durable
+CI evidence will be recorded after the protected publishers complete.
+The final 1.0 target remains October 17, 2026, tentatively.
+
 ## RC14 publication — 2026-10-12
 
 `1.0.0rc14` was published from `a0531182d3bdead6517ee8b790dabb5afd13506b`,

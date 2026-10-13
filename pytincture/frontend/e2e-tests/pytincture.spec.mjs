@@ -6,6 +6,20 @@ const WIDGET_WHEEL = "dhxpyt-0.9.18+backend-py3-none-any.whl";
 const PERFORMANCE_BUDGETS = JSON.parse(readFileSync(
     new URL("../../../contracts/performance-budgets-v1.json", import.meta.url),
 ));
+const TARFILE_LINK_CHECKS = readFileSync(
+    new URL("../../../tests/fixtures/tarfile_links.py", import.meta.url), "utf8",
+);
+
+test("vendored Pyodide prevents tar hard-link relocation outside the extraction directory", async ({ page }) => {
+    await loginAndStartPackagedApp(page);
+    const result = await page.evaluate(async source => {
+        const runtime = globalThis.pytinctureBrowserRuntime.runtime;
+        return JSON.parse(await runtime.runPythonAsync(
+            source + "\nimport tarfile\njson.dumps(check_tarfile_links(tarfile))",
+        ));
+    }, TARFILE_LINK_CHECKS);
+    expect(result).toEqual({ link_cases: 8, streaming: true, native_hardlinks: false });
+});
 
 function percentile(values, percent) {
     const ordered = [...values].sort((left, right) => left - right);

@@ -45,18 +45,12 @@ def main():
     wheels = destination/'wheels'
     wheels.mkdir()
     env = {**os.environ, 'SOURCE_DATE_EPOCH':str(lock['source_date_epoch'])}
-    for name in ('dhxpyt','wapyt'):
+    for name in ('dhxpyt',):
         run(sys.executable,'-m','build','--wheel','--no-isolation','--outdir',wheels,cwd=destination/name,env=env)
     run('uv','pip','install','--python',sys.executable,'--no-deps','--reinstall',*sorted(wheels.glob('*.whl')))
     shutil.copy(next(wheels.glob('dhxpyt-*.whl')),destination/'example/example')
-    shutil.copy(next(wheels.glob('wapyt-*.whl')),destination/'chat/src/wawesomechat')
-    # Pin the speech model revision too. The test server still runs real Whisper.
-    from huggingface_hub import snapshot_download
-    model = snapshot_download(lock['voice_model']['repository'],revision=lock['voice_model']['revision'],
-                              cache_dir=str(Path.home()/'Library/Caches/pytincture-runtime-choice/whisper'),
-                              allow_patterns=['config.json','model.bin','tokenizer.json','vocabulary.*','preprocessor_config.json'])
-    setup = {'example':str(destination/'example'),'chat':str(destination/'chat'),
-             'python':sys.executable,'voice_model':model,'repositories':lock['repositories']}
+    setup = {'example':str(destination/'example'),
+             'python':sys.executable,'repositories':lock['repositories']}
     (destination/'prepared.json').write_text(json.dumps(setup,indent=2)+'\n')
     print('Prepared conformance inputs: '+str(destination/'prepared.json'))
 

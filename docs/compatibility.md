@@ -35,6 +35,12 @@ versions for each release candidate.
 
 ## Version compatibility rules
 
+RC15 preserves RC14's public APIs and defaults. The bundled Pyodide standard
+library includes a narrow tarfile security backport; its upstream runtime
+version remains unchanged. Removing the separate chat test application does
+not remove a framework feature or change widgetset support.
+See [RC15 migration notes](migrations/0.10-to-1.0.md#rc14-to-rc15).
+
 RC14 preserves the version-1 BFF contract and existing defaults. BFF result and
 source-analysis optimizations retain authorization, source checks and response
 limits. `BFF_CACHE_REVALIDATION` defaults to `true`; immutable-code deployments

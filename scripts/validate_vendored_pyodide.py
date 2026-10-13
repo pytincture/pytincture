@@ -28,6 +28,13 @@ def _sha256(content: bytes) -> str:
 
 
 def _validate_local() -> None:
+    manifest = json.loads((ROOT / "security/pyodide-upstream.json").read_text())
+    patch = manifest["stdlib_patch"]
+    if _sha256((ROOT / patch["patch"]).read_bytes()) != patch["patch_sha256"]:
+        raise SystemExit("stdlib patch checksum mismatch")
+    with zipfile.ZipFile(FULL / "python_stdlib.zip") as stdlib:
+        if _sha256(stdlib.read(patch["member"])) != patch["patched_sha256"]:
+            raise SystemExit("vendored stdlib security patch is missing or altered")
     sbom = json.loads((PYODIDE / "sbom.json").read_text(encoding="utf-8"))
     if sbom != build_sbom():
         raise SystemExit(
@@ -139,6 +146,10 @@ def _validate_upstream(path: Path | None = None) -> None:
             member = archive.extractfile(f"pyodide/{name}")
             if member is None or member.read() != (FULL / name).read_bytes():
                 raise SystemExit(f"vendored Pyodide file differs from official release: {name}")
+        stdlib = archive.extractfile("pyodide/python_stdlib.zip")
+        if stdlib is None:
+            raise SystemExit("official Pyodide archive is missing the stdlib")
+        _validate_stdlib(stdlib.read(), (FULL / "python_stdlib.zip").read_bytes(), manifest["stdlib_patch"])
         upstream_lock_member = archive.extractfile("pyodide/pyodide-lock.json")
         if upstream_lock_member is None:
             raise SystemExit("official Pyodide archive is missing pyodide-lock.json")
@@ -155,6 +166,19 @@ def _validate_upstream(path: Path | None = None) -> None:
     micropip = upstream_lock["packages"]["micropip"]
     if _sha256((FULL / micropip["file_name"]).read_bytes()) != micropip["sha256"]:
         raise SystemExit("vendored micropip wheel differs from official Pyodide lock")
+
+
+def _validate_stdlib(upstream: bytes, vendored: bytes, patch: dict) -> None:
+    from patch_vendored_pyodide import patched_module
+
+    with zipfile.ZipFile(io.BytesIO(upstream)) as source, zipfile.ZipFile(io.BytesIO(vendored)) as target:
+        if source.namelist() != target.namelist() or source.comment != target.comment:
+            raise SystemExit("vendored stdlib inventory differs from upstream")
+        replacement = patched_module(source.read(patch["member"]), patch)
+        for member in source.infolist():
+            expected = replacement if member.filename == patch["member"] else source.read(member)
+            if target.read(member.filename) != expected:
+                raise SystemExit(f"unexpected vendored stdlib change: {member.filename}")
 
 
 def main() -> None:

@@ -41,7 +41,8 @@
       "licenseConcluded": "Python-2.0",
       "hasFiles": [
         "SPDXRef-File-python-stdlib"
-      ]
+      ],
+      "comment": "CPython 3.13.2 with a Pytincture tarfile hard-link security backport; see security/pyodide-upstream.json and docs/pyodide-security.md. The interpreter version is unchanged."
     },
     {
       "name": "micropip",
@@ -5760,7 +5761,7 @@
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "4298b6ee445cb724c3973437da47789752b9e6ff4e26619026b283ec801fc46b"
+          "checksumValue": "f46ab6bb6f3959d1acae36e85b3540487c5fb47275cb43ac4d52e078f4ec2478"
         }
       ]
     }

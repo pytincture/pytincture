@@ -5,6 +5,17 @@ set when a release is published.
 
 ## Unreleased
 
+## 1.0.0rc15 — 2026-10-13
+
+- Backport the CVE-2026-82049 tarfile link fix into the bundled Pyodide
+  standard library, including the browser filesystem fallback. Preserve safe
+  archive extraction and record the reproducible patch and artifact hashes (#391).
+- Remove the chat, voice and wapyt application test stack, including LiteLLM.
+  Retain Book Library conformance across all three runtime modes, update its
+  PyJWT and python-dotenv locks, and audit that environment in CI (#397).
+- Update Playwright to 1.64.0 and the pinned setup-node, setup-uv,
+  download-artifact and upload-artifact actions (#392–#396).
+
 ## 1.0.0rc14 — 2026-10-12
 
 - Reduce BFF result processing and source-analysis overhead (#385). Plain JSON
