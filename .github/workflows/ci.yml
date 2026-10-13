@@ -93,7 +93,7 @@ jobs:
 
       - name: Upload portable conformance evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: portable-application-conformance
           path: |
@@ -128,7 +128,7 @@ jobs:
         run: .venv/bin/python tests/run_application_conformance.py --prepared "$RUNNER_TEMP/pytincture-apps/prepared.json"
       - name: Upload full application conformance evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: full-application-runtime-conformance
           path: validation-results/full-apps
@@ -236,14 +236,14 @@ jobs:
           /tmp/pytincture-sdist-smoke/bin/python scripts/smoke_optional_extra.py base
 
       - name: Upload validated release artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-artifacts
           path: dist/*
           if-no-files-found: error
 
       - name: Upload validated Python release artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-release-artifacts
           path: |
@@ -348,7 +348,7 @@ jobs:
 
       - name: Upload upgrade and rollback evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: upgrade-rollback-results
           path: |
@@ -494,7 +494,7 @@ jobs:
 
       - name: Upload browser failure artifacts
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: playwright-lifecycle-report
           path: |
@@ -578,7 +578,7 @@ jobs:
 
       - name: Upload E2E failure artifacts
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pytincture-e2e-${{ matrix.browser }}
           path: |
@@ -589,7 +589,7 @@ jobs:
 
       - name: Upload E2E performance evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pytincture-performance-${{ matrix.browser }}
           path: |
@@ -675,7 +675,7 @@ jobs:
 
       - name: Upload standalone qualification evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pytincture-standalone-wheel-acceptance
           path: |
@@ -750,7 +750,7 @@ jobs:
 
       - name: Upload quickstart failure artifacts
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pytincture-quickstarts-${{ matrix.browser }}
           path: |
@@ -869,7 +869,7 @@ jobs:
 
       - name: Upload SAML qualification evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pytincture-saml-federated-acceptance
           path: |
@@ -953,7 +953,7 @@ jobs:
 
       - name: Upload service performance evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pytincture-performance-service
           path: |
@@ -963,7 +963,7 @@ jobs:
 
       - name: Upload production smoke log
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: production-smoke-log
           path: production-smoke.log
