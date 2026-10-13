@@ -186,6 +186,19 @@
       },
       "status": "passed",
       "notes": "Integration PR #389 merged #384, #386, #387 and #388 while preserving their commits. All 24 PR/main/tag checks (38308692064, 38309614304, 38309645197), the separate Lambda recipe checks, all 25 release CI/attestation checks (38310555322, attempt 2), and protected PyPI publication (38311769180) passed. The first release application run hit the fixture diagnostics rate limit; the unchanged tag passed on retry. The fixture environment override was not passed into explicit config objects and is corrected separately after publication, without changing production limits or the signed release. Public wheel/sdist bytes from the PyPI simple index match the retained attested hashes. A fresh Python 3.13 public-index installation verifies RC14, defaults, environment round-trips, cold/warm BFF calls in both cache modes, oversized-response rejection and opt-in CSP isolation. Artifacts and SHA256SUMS.json are attached to the GitHub prerelease. npm publication (38311769175) awaits independent environment approval. Issue #385 concurrency targets and application PDF/WebKit validation are not claimed resolved. Final 1.0 is tentatively targeted for October 17, 2026; existing observation evidence and final approvals are unchanged."
+    },
+    {
+      "version": "1.0.0rc15",
+      "published_at": "2026-10-13T15:47:05Z",
+      "commit_sha": "661d1c812da3ef8a2d327e2a890bedf636fd4c7f",
+      "ci_url": "https://github.com/pytincture/pytincture/actions/runs/38425015755",
+      "artifacts": {
+        "wheel": "c45906f76ff66b6e8e4f2b8b8792e9878527ba5732ef6db1485e448154fa21a5",
+        "sdist": "94cff21c14b8bcea9eadc90103d5d455cebbc966349c5b12120d68d3dab7699a",
+        "npm": "effeb49c56f8d3b23674ab75c4037f20617cf8d960cc1d9ef219889c417287de"
+      },
+      "status": "passed",
+      "notes": "Integration PR #398 merged all seven outstanding PRs (#391–#397), preserving their history. PR CI (38423518609), main CI (38424164078), signed-tag CI (38424202286), all 25 release checks and attestations (38425015755), and protected PyPI publication (38425590264) passed. Both public PyPI artifact hashes match the retained attested bytes. A fresh Python 3.14 public-index installation verifies defaults, configuration round-trips, BFF calls in both cache modes, oversized response rejection, opt-in CSP isolation, and eight installed tarfile link regression cases plus streaming. The local suite passed 1,293 tests with two optional skips and all 64 JavaScript tests. GitHub reports zero open Dependabot alerts after rescanning main. Bundled Python version-only scanners may still flag the documented tarfile backport; the patch does not upgrade the server interpreter. npm publication (38425590451) awaits independent environment approval. Final 1.0 remains tentatively October 17, 2026; final-release evidence and approvals are unchanged."
     }
   ],
   "representative_applications": {
