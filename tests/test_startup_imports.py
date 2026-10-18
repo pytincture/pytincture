@@ -1,6 +1,7 @@
 """Fresh-process checks: test collection must not mask eager extra imports."""
 
 import os
+import secrets
 from pathlib import Path
 import subprocess
 import sys
@@ -62,7 +63,7 @@ def test_enabled_oauth_loads_its_dependencies(tmp_path, provider):
         microsoft_tenant_id='tenant-123',
         allowed_hosts=('app.example.test',),
         canonical_origin='https://app.example.test',
-        session_secret='0123456789abcdef' * 2,
+        session_secret=secrets.token_hex(32),
     ))
     backend = application.state.pytincture_backend
     from authlib.integrations.starlette_client import OAuth
@@ -83,7 +84,7 @@ def test_enabled_saml_loads_its_dependencies(tmp_path):
         modules_path=str(tmp_path), enable_saml_auth=True,
         allowed_hosts=('app.example.test',),
         canonical_origin='https://app.example.test',
-        session_secret='0123456789abcdef' * 2,
+        session_secret=secrets.token_hex(32),
         saml_idp_entity_id='https://idp.example.test/metadata',
         saml_idp_sso_url='https://idp.example.test/sso',
         saml_idp_x509_cert='test-certificate',
