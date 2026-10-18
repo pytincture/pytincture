@@ -5,6 +5,42 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
+## 1.0.0 release preparation — 2026-10-17
+
+The release branch targets Python and npm 1.0.0 and includes the Lambda
+manifest/checked-bytecode tools, conditional extras, startup improvements,
+separate login/BFF routing guidance, and CloudFront/CloudWatch documentation.
+Normal FastAPI/ASGI, desktop and browser defaults remain supported.
+
+The post-publication RC15 acceptance documents from successful
+[main CI run 38427355625](https://github.com/pytincture/pytincture/actions/runs/38427355625)
+are retained under `release/evidence/rc15` and referenced by the qualification
+record. This closes the stale application, upgrade/rollback and performance
+evidence gaps without inventing new test dates or resetting observation.
+
+Local release preparation passed 1,332 tests on each of Python 3.13 and 3.14
+(two optional skips per version), 64 JavaScript tests and 10 Chromium lifecycle
+tests. The initial lock-check test required adding the installed uv executable
+to PATH; the unchanged check then passed on both interpreters. The wheel,
+sdist and npm package pass exact-inventory/version inspection, including the
+new Lambda modules. These local results do not substitute for final remote CI.
+
+The owner explicitly waived the deployed HTTPS/HSTS/proxy review on October 17
+and reported personal application testing. This is recorded in
+`release_exceptions`; the individual edge checks are not reported as passed.
+
+The owner also explicitly waived the separate repository review policy gate for
+1.0.0. Live protection requires zero approvals and disables CODEOWNER/last-push
+approval; this is retained as a waived audit, not a passing policy review, in
+`release/evidence/1.0.0/repository-policy-review.json`. No protection settings
+were changed. Both exceptions are restricted to 1.0.0 and the latest RC;
+security, defect, application and required CI checks remain enforced.
+
+Current dependency, source/history secret, Dependabot and labeled-defect audits
+passed. The owner go decision is recorded; publication must still wait for the
+release commit's required CI, signed-tag CI, attestations and protected publisher
+verification. The standard policy remains documented for subsequent releases.
+
 ## RC15 publication — 2026-10-13
 
 `1.0.0rc15` was published from `661d1c812da3ef8a2d327e2a890bedf636fd4c7f`,

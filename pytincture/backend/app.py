@@ -414,39 +414,8 @@ OneLogin_Saml2_Auth = None
 OneLogin_Saml2_Settings = None
 OneLogin_Saml2_ValidationError = _OptionalSamlValidationError
 
-# Discover installed extras without making them mandatory for a base import.
-try:
-    from authlib.integrations.starlette_client import OAuth as _InstalledOAuth
-    from authlib.integrations.starlette_client import OAuthError as _InstalledOAuthError
-    from httpx import Timeout as _InstalledOAuthTimeout
-    from httpx import TimeoutException as _InstalledOAuthTransportError
-
-    OAuth = _InstalledOAuth
-    OAuthError = _InstalledOAuthError
-    OAuthTransportError = _InstalledOAuthTransportError
-    OAuthTimeout = _InstalledOAuthTimeout
-except ImportError:
-    pass
-
-try:
-    from fastmcp import FastMCP as _InstalledFastMCP
-
-    FastMCP = _InstalledFastMCP
-except ImportError:
-    pass
-
-try:
-    from onelogin.saml2.auth import OneLogin_Saml2_Auth as _InstalledSamlAuth
-    from onelogin.saml2.errors import (
-        OneLogin_Saml2_ValidationError as _InstalledSamlValidationError,
-    )
-    from onelogin.saml2.settings import OneLogin_Saml2_Settings as _InstalledSamlSettings
-
-    OneLogin_Saml2_Auth = _InstalledSamlAuth
-    OneLogin_Saml2_ValidationError = _InstalledSamlValidationError
-    OneLogin_Saml2_Settings = _InstalledSamlSettings
-except ImportError:
-    pass
+# Optional dependencies are loaded by their enabled-feature paths below.
+# Merely installing an extra must not add its imports to every cold start.
 
 
 def _optional_dependency_error(feature: str, extra: str, exc: ImportError) -> RuntimeError:
@@ -513,7 +482,8 @@ def reload_mcp_tools():
         "MCP_ALLOWED_ORIGINS", os.getenv("MCP_ALLOWED_ORIGINS", "[]")
     )
     auth = build_jwt_verifier(os.environ)
-    operations = reload_bff_registry(get_modules_path())
+    operations = _BFF_REGISTRY_STATE.refresh(get_modules_path())
+    _sync_bff_registry_snapshot()
     mcp = FastMCP(
         name="pytincture",
         auth=auth,
@@ -1260,6 +1230,7 @@ _BFF_REGISTRY_STATE = BFFRegistry(
     get_bff_manifest,
     autoload=False,
     revalidate=BFF_CACHE_REVALIDATION,
+    prebuilt_manifest=_PYTINCTURE_CONFIG.bff_prebuilt_manifest,
 )
 BFF_REGISTRY = _BFF_REGISTRY_STATE.operations
 BFF_REGISTRY_FAILURES: Dict[str, str] = {}
@@ -1414,7 +1385,8 @@ def _configured_bff_policy_hook() -> Optional[Callable[..., Any]]:
 
 
 def _validate_bff_policy_configuration() -> None:
-    operations = reload_bff_registry(get_modules_path())
+    operations = _BFF_REGISTRY_STATE.refresh(get_modules_path())
+    _sync_bff_registry_snapshot()
     if any(operation.get("policy") for operation in operations.values()):
         if _configured_bff_policy_hook() is None:
             raise RuntimeError(

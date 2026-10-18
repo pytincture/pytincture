@@ -198,7 +198,7 @@
         "npm": "effeb49c56f8d3b23674ab75c4037f20617cf8d960cc1d9ef219889c417287de"
       },
       "status": "passed",
-      "notes": "Integration PR #398 merged all seven outstanding PRs (#391–#397), preserving their history. PR CI (38423518609), main CI (38424164078), signed-tag CI (38424202286), all 25 release checks and attestations (38425015755), and protected PyPI publication (38425590264) passed. Both public PyPI artifact hashes match the retained attested bytes. A fresh Python 3.14 public-index installation verifies defaults, configuration round-trips, BFF calls in both cache modes, oversized response rejection, opt-in CSP isolation, and eight installed tarfile link regression cases plus streaming. The local suite passed 1,293 tests with two optional skips and all 64 JavaScript tests. GitHub reports zero open Dependabot alerts after rescanning main. Bundled Python version-only scanners may still flag the documented tarfile backport; the patch does not upgrade the server interpreter. npm publication (38425590451) awaits independent environment approval. Final 1.0 remains tentatively October 17, 2026; final-release evidence and approvals are unchanged."
+      "notes": "Integration PR #398 merged all seven outstanding PRs (#391\u2013#397), preserving their history. PR CI (38423518609), main CI (38424164078), signed-tag CI (38424202286), all 25 release checks and attestations (38425015755), and protected PyPI publication (38425590264) passed. Both public PyPI artifact hashes match the retained attested bytes. A fresh Python 3.14 public-index installation verifies defaults, configuration round-trips, BFF calls in both cache modes, oversized response rejection, opt-in CSP isolation, and eight installed tarfile link regression cases plus streaming. The local suite passed 1,293 tests with two optional skips and all 64 JavaScript tests. GitHub reports zero open Dependabot alerts after rescanning main. Bundled Python version-only scanners may still flag the documented tarfile backport; the patch does not upgrade the server interpreter. npm publication (38425590451) awaits independent environment approval. Final 1.0 remains tentatively October 17, 2026; final-release evidence and approvals are unchanged."
     }
   ],
   "representative_applications": {
@@ -267,6 +267,15 @@
         "console_errors": 0,
         "visible_url_clean": true,
         "findings": []
+      },
+      {
+        "version": "1.0.0rc15",
+        "tested_at": "2026-10-13T16:05:32Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/38427355625",
+        "commit_sha": "72aad0857936f872b256804dff9ffbd523624b68",
+        "retained_evidence": "release/evidence/rc15/qualification-evidence-standalone.json",
+        "application": "retained RC15 standalone qualification"
       }
     ],
     "authenticated_bff": [
@@ -287,7 +296,11 @@
         "status": "passed",
         "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33288079592",
         "commit_sha": "9757ce29fe13863118177a244efefc88aa5b194a",
-        "browsers": ["chromium", "firefox", "webkit"],
+        "browsers": [
+          "chromium",
+          "firefox",
+          "webkit"
+        ],
         "authenticated_bff_p95_ms": {
           "chromium": 13.2,
           "firefox": 16.0,
@@ -302,7 +315,11 @@
         "status": "passed",
         "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33463168037",
         "commit_sha": "6b49958c7e9cc11547db15d3d0c47feb4baad1a8",
-        "browsers": ["chromium", "firefox", "webkit"],
+        "browsers": [
+          "chromium",
+          "firefox",
+          "webkit"
+        ],
         "authenticated_bff_p95_ms": {
           "chromium": 15.5,
           "firefox": 14.0,
@@ -317,7 +334,11 @@
         "status": "passed",
         "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33555029444",
         "commit_sha": "ec1d7b8aa33b0a551f3e48311daebe91c8ca17c5",
-        "browsers": ["chromium", "firefox", "webkit"],
+        "browsers": [
+          "chromium",
+          "firefox",
+          "webkit"
+        ],
         "authenticated_bff_p95_ms": {
           "chromium": 9.7,
           "firefox": 13.0,
@@ -332,7 +353,11 @@
         "status": "passed",
         "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33758760808",
         "commit_sha": "9463366620afe275c6604dd000a76bf41afe7514",
-        "browsers": ["chromium", "firefox", "webkit"],
+        "browsers": [
+          "chromium",
+          "firefox",
+          "webkit"
+        ],
         "authenticated_bff_p95_ms": {
           "chromium": 14.9,
           "firefox": 16.0,
@@ -347,13 +372,44 @@
         "status": "passed",
         "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33775966072",
         "commit_sha": "8db4ad2c9380979519646bff171b53e579fa8371",
-        "browsers": ["chromium", "firefox", "webkit"],
+        "browsers": [
+          "chromium",
+          "firefox",
+          "webkit"
+        ],
         "authenticated_bff_p95_ms": {
           "chromium": 13.3,
           "firefox": 15.0,
           "webkit": 8.0
         },
         "findings": []
+      },
+      {
+        "version": "1.0.0rc15",
+        "tested_at": "2026-10-13T16:05:46Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/38427355625",
+        "commit_sha": "72aad0857936f872b256804dff9ffbd523624b68",
+        "retained_evidence": "release/evidence/rc15/qualification-evidence-authenticated-bff-chromium.json",
+        "application": "retained RC15 authenticated_bff qualification"
+      },
+      {
+        "version": "1.0.0rc15",
+        "tested_at": "2026-10-13T16:06:06Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/38427355625",
+        "commit_sha": "72aad0857936f872b256804dff9ffbd523624b68",
+        "retained_evidence": "release/evidence/rc15/qualification-evidence-authenticated-bff-firefox.json",
+        "application": "retained RC15 authenticated_bff qualification"
+      },
+      {
+        "version": "1.0.0rc15",
+        "tested_at": "2026-10-13T16:06:32Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/38427355625",
+        "commit_sha": "72aad0857936f872b256804dff9ffbd523624b68",
+        "retained_evidence": "release/evidence/rc15/qualification-evidence-authenticated-bff-webkit.json",
+        "application": "retained RC15 authenticated_bff qualification"
       }
     ],
     "federated_auth": [
@@ -435,6 +491,15 @@
         "saml_replay_mitigation": "passed",
         "redis_required": false,
         "findings": []
+      },
+      {
+        "version": "1.0.0rc15",
+        "tested_at": "2026-10-13T16:05:52Z",
+        "status": "passed",
+        "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/38427355625",
+        "commit_sha": "72aad0857936f872b256804dff9ffbd523624b68",
+        "retained_evidence": "release/evidence/rc15/qualification-evidence-federated-auth.json",
+        "application": "retained RC15 federated_auth qualification"
       }
     ]
   },
@@ -446,7 +511,13 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33288079592",
       "commit_sha": "9757ce29fe13863118177a244efefc88aa5b194a",
-      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "server-secret exclusion"]
+      "checks": [
+        "public imports",
+        "service page",
+        "appcode archive",
+        "widgetset metadata",
+        "server-secret exclusion"
+      ]
     },
     {
       "from_version": "0.10.7",
@@ -455,7 +526,13 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33463168037",
       "commit_sha": "6b49958c7e9cc11547db15d3d0c47feb4baad1a8",
-      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "server-secret exclusion"]
+      "checks": [
+        "public imports",
+        "service page",
+        "appcode archive",
+        "widgetset metadata",
+        "server-secret exclusion"
+      ]
     },
     {
       "from_version": "0.10.7",
@@ -464,7 +541,13 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33555029444",
       "commit_sha": "ec1d7b8aa33b0a551f3e48311daebe91c8ca17c5",
-      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "server-secret exclusion"]
+      "checks": [
+        "public imports",
+        "service page",
+        "appcode archive",
+        "widgetset metadata",
+        "server-secret exclusion"
+      ]
     },
     {
       "from_version": "0.10.7",
@@ -473,7 +556,13 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33758760808",
       "commit_sha": "9463366620afe275c6604dd000a76bf41afe7514",
-      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "server-secret exclusion"]
+      "checks": [
+        "public imports",
+        "service page",
+        "appcode archive",
+        "widgetset metadata",
+        "server-secret exclusion"
+      ]
     },
     {
       "from_version": "0.10.7",
@@ -482,7 +571,22 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33775966072",
       "commit_sha": "8db4ad2c9380979519646bff171b53e579fa8371",
-      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "server-secret exclusion"]
+      "checks": [
+        "public imports",
+        "service page",
+        "appcode archive",
+        "widgetset metadata",
+        "server-secret exclusion"
+      ]
+    },
+    {
+      "version": "1.0.0rc15",
+      "tested_at": "2026-10-13T16:05:20Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/38427355625",
+      "commit_sha": "72aad0857936f872b256804dff9ffbd523624b68",
+      "retained_evidence": "release/evidence/rc15/qualification-evidence-upgrade-rollback.json",
+      "from_version": "0.10.7"
     }
   ],
   "rollback_exercises": [
@@ -494,7 +598,13 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33288079592",
       "commit_sha": "9757ce29fe13863118177a244efefc88aa5b194a",
-      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "baseline equivalence"]
+      "checks": [
+        "public imports",
+        "service page",
+        "appcode archive",
+        "widgetset metadata",
+        "baseline equivalence"
+      ]
     },
     {
       "from_version": "1.0.0rc3",
@@ -504,7 +614,13 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33463168037",
       "commit_sha": "6b49958c7e9cc11547db15d3d0c47feb4baad1a8",
-      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "baseline equivalence"]
+      "checks": [
+        "public imports",
+        "service page",
+        "appcode archive",
+        "widgetset metadata",
+        "baseline equivalence"
+      ]
     },
     {
       "from_version": "1.0.0rc4",
@@ -514,7 +630,13 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33555029444",
       "commit_sha": "ec1d7b8aa33b0a551f3e48311daebe91c8ca17c5",
-      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "baseline equivalence"]
+      "checks": [
+        "public imports",
+        "service page",
+        "appcode archive",
+        "widgetset metadata",
+        "baseline equivalence"
+      ]
     },
     {
       "from_version": "1.0.0rc5",
@@ -524,7 +646,13 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33758760808",
       "commit_sha": "9463366620afe275c6604dd000a76bf41afe7514",
-      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "baseline equivalence"]
+      "checks": [
+        "public imports",
+        "service page",
+        "appcode archive",
+        "widgetset metadata",
+        "baseline equivalence"
+      ]
     },
     {
       "from_version": "1.0.0rc6",
@@ -534,7 +662,23 @@
       "status": "passed",
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/33775966072",
       "commit_sha": "8db4ad2c9380979519646bff171b53e579fa8371",
-      "checks": ["public imports", "service page", "appcode archive", "widgetset metadata", "baseline equivalence"]
+      "checks": [
+        "public imports",
+        "service page",
+        "appcode archive",
+        "widgetset metadata",
+        "baseline equivalence"
+      ]
+    },
+    {
+      "version": "1.0.0rc15",
+      "tested_at": "2026-10-13T16:05:20Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/38427355625",
+      "commit_sha": "72aad0857936f872b256804dff9ffbd523624b68",
+      "retained_evidence": "release/evidence/rc15/qualification-evidence-upgrade-rollback.json",
+      "from_version": "1.0.0rc15",
+      "to_version": "0.10.7"
     }
   ],
   "performance_reviews": [
@@ -657,6 +801,15 @@
         "firefox": 15.0,
         "webkit": 8.0
       }
+    },
+    {
+      "version": "1.0.0rc15",
+      "tested_at": "2026-10-13T16:04:53Z",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/38427355625",
+      "commit_sha": "72aad0857936f872b256804dff9ffbd523624b68",
+      "retained_evidence": "release/evidence/rc15/qualification-evidence-performance-service.json",
+      "application": "retained RC15 service performance qualification"
     }
   ],
   "repository_policy_reviews": [
@@ -762,6 +915,14 @@
       "open_critical": 0,
       "open_high": 0,
       "scope": "Material Design Icons self-hosting completion, dependency and history secret audits, SAML mitigation evidence, exact reproducible artifact attestations, and the complete release acceptance matrix"
+    },
+    {
+      "version": "1.0.0rc15",
+      "tested_at": "2026-10-18T02:36:23.872692+00:00",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/blob/release/1.0.0/release/evidence/1.0.0/security-review.json",
+      "open_critical": 0,
+      "open_high": 0
     }
   ],
   "defect_audits": [
@@ -809,12 +970,43 @@
       "open_p0": 0,
       "open_p1": 0,
       "open_release_blockers": 0
+    },
+    {
+      "version": "1.0.0rc15",
+      "tested_at": "2026-10-18T02:36:23.872692+00:00",
+      "status": "passed",
+      "evidence_url": "https://github.com/pytincture/pytincture/blob/release/1.0.0/release/evidence/1.0.0/defect-audit.json",
+      "open_p0": 0,
+      "open_p1": 0,
+      "open_release_blockers": 0
     }
   ],
   "final_decision": {
-    "status": "pending",
-    "decided_at": null,
-    "approvers": [],
-    "notes": "RC1 through RC13 release evidence is recorded, and rc4 through rc13 are published on PyPI. Rc13 passed complete framework release CI, pinned application conformance across all three runtime/delivery profiles, artifact attestation, public artifact hash verification and a clean public-index install. Legacy Pyodide remains the default. Portable profile fixes do not establish arbitrary CPython or unavailable private-application compatibility. The optional application-credential registry and portable runtime targets still need observation-scope review. Final 1.0 remains NO-GO pending the approved observation period, production-edge evidence, remaining registry distribution and final release-manager approval. Existing observation dates have not been changed."
-  }
+    "status": "go",
+    "decided_at": "2026-10-18T02:45:31.518416+00:00",
+    "approvers": [
+      "Stephen Chapman"
+    ],
+    "notes": "Owner requested the 1.0 release, reported personal application testing, and explicitly waived the production-edge and repository review policy gates for this release only. The approved 30-day observation interval has elapsed; retained RC15 acceptance evidence and current security/defect audits are recorded. Required CI, immutable artifacts, signed tag, attestations and protected publisher verification remain required before publication. No live branch protection was weakened."
+  },
+  "release_exceptions": [
+    {
+      "scope": "production_edge_reviews",
+      "release_version": "1.0.0",
+      "candidate_version": "1.0.0rc15",
+      "approved_by": "Stephen Chapman",
+      "approved_at": "2026-10-18T02:35:17.139001+00:00",
+      "reason": "Owner explicitly requested skipping the deployed HTTPS/HSTS/proxy qualification and reported testing the application personally. Individual edge checks have not been independently verified.",
+      "approval_source": "Owner messages in the release preparation chat: \u201cjust skip it\u201d; \u201ci've tested it myself\u201d."
+    },
+    {
+      "scope": "repository_policy_reviews",
+      "release_version": "1.0.0",
+      "candidate_version": "1.0.0rc15",
+      "approved_by": "Stephen Chapman",
+      "approved_at": "2026-10-18T02:45:31.518416+00:00",
+      "reason": "Owner explicitly waived the separate repository review policy gate for 1.0. Live protection has zero required approvals and disables CODEOWNER/last-push approval; required CI checks remain enforced. See release/evidence/1.0.0/repository-policy-review.json.",
+      "approval_source": "Owner response to the release policy question: Waive policy gate for 1.0."
+    }
+  ]
 }

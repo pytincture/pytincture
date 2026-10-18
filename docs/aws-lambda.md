@@ -73,6 +73,105 @@ is newline-delimited JSON; explicit raw text/SSE uses the existing
 `@bff_stream(raw=True, media_type=...)` contract. Use the normal trusted-thread
 execution mode for streaming; isolated-process mode does not support streams.
 
+## Separate login routes and BFF dispatch
+
+KingdomGive uses an outer FastAPI application for login and other application
+HTTP endpoints, then mounts the Pytincture application for browser assets and
+BFF dispatch. This composition works with ordinary Uvicorn locally and with
+Lambda Web Adapter. It is application routing, not a separate Lambda-specific
+BFF engine or an automatic split into multiple Lambda functions.
+
+Use this arrangement when a login request needs a large account/provider
+backend that ordinary BFF requests should not import. Keep those imports inside
+the login handler or the relevant BFF method. The outer app and Pytincture still
+initialize once per execution environment; deferred code initializes on its
+first use. This pattern complements the prebuilt manifest and bytecode steps.
+
+For example, `service.py`:
+
+```python
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
+
+from pytincture import PytinctureConfig, create_app
+from pytincture.configuration import configuration_context
+
+ROOT = Path(__file__).resolve().parent
+ui = create_app(PytinctureConfig.from_env(modules_path=str(ROOT / "apps")))
+
+# Application-owned integration, not a function supplied by Pytincture.
+# Keep this module lightweight: register existing policy/authentication hooks
+# and session-context middleware without importing the entire login backend.
+from application.security import install_security
+install_security(ui)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    # Calling a mounted app's router lifespan directly bypasses the child's
+    # configuration middleware. Supply its config for startup AND shutdown.
+    with configuration_context(ui.state.pytincture_config):
+        async with ui.router.lifespan_context(ui):
+            yield
+
+
+app = FastAPI(
+    lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None,
+)
+
+
+class LoginInput(BaseModel):
+    email: str = Field(max_length=320)
+    password: str = Field(max_length=1024)
+
+
+@app.post("/auth/login")
+async def login(request: Request, values: LoginInput):
+    # Application-owned synchronous handler: authenticate, apply login limits
+    # and CSRF/origin rules, create the session, and return a Response carrying
+    # its cookies. Import its database/password/provider code only on demand.
+    from application.auth import login_response
+    return await run_in_threadpool(
+        login_response, request, values.email, values.password,
+    )
+
+
+# Add logout, provider callbacks, and other application routes BEFORE this
+# catch-all mount. Pytincture handles /<application>/classcall/... beneath it.
+app.mount("/", ui)
+```
+
+`application.security.install_security` and `application.auth.login_response`
+are explicit integration points for **your existing application**, not framework
+APIs or a complete authentication implementation. If the login handler is async,
+await it directly rather than passing it to `run_in_threadpool`. Return its full
+Response so multiple `Set-Cookie` headers and redirects are preserved.
+
+The parent app's `/auth/login` wins because it is registered before the `/`
+mount; application BFF URLs continue through Pytincture's normal dispatch.
+Point `ASGIApplication` at `service:app`, or run `uvicorn service:app` locally.
+The same staging command and `BFFPrebuiltManifest` setting apply.
+
+**Mounting does not connect authentication automatically.** Wire the application's
+session into its BFF authentication/policy hooks or request-context middleware,
+as KingdomGive does. A successful custom login must not leave BFF operations
+anonymous. Middleware on `ui` only protects the mounted child; install the
+appropriate host, origin/CSRF, request-size and rate controls on the outer app
+and its login/provider routes too. Preserve the application's existing cookie
+scope, logout/revocation behavior, identity checks and backend permissions.
+Do not disable Pytincture startup validation to make the mount work.
+
+When adopting this pattern, check that startup uses the intended `apps` root,
+`/auth/login` reaches the parent route and preserves session cookies, protected
+BFF calls reject anonymous users, authenticated permissions still apply, and
+logout invalidates access. Keep application database migrations outside ordinary
+request handling. This example changes routing/import timing, not authorization
+requirements or browser bundle contents.
+
 ## Package an existing application
 
 The checked-in template targets Python 3.13, ARM64, and the published commercial
@@ -108,10 +207,16 @@ import pathlib, sys, zipfile
 root = pathlib.Path(sys.argv[1])
 with zipfile.ZipFile(sys.argv[2], "w", zipfile.ZIP_DEFLATED) as output:
     for path in sorted(root.rglob("*")):
-        if path.is_file() and "__pycache__" not in path.parts:
+        if path.is_file():
             output.write(path, path.relative_to(root))
 PY
 ```
+
+For optimized cold starts, run the [precompilation step](#precompile-the-complete-deployment)
+after copying the application and before the ZIP-writing command above. Keep the
+generated `__pycache__` directories in the ZIP. That step requires the target
+Python minor version and a compatible build environment for native dependencies.
+Then select the private manifest with the `BFFPrebuiltManifest` stack parameter.
 
 Only package reviewed application files; keep credentials, `.env`, local
 databases, deployment state and developer tools outside `apps/`. Include any
@@ -296,6 +401,155 @@ origin root; removing an ingress path prefix does not rewrite generated URLs.
 [Lambda response streaming](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html),
 [API Gateway REST streaming](https://docs.aws.amazon.com/apigateway/latest/developerguide/response-transfer-mode.html).
 
+## Cache app loads with CloudFront; measure them with CloudWatch
+
+**CloudFront caches HTTP content. CloudWatch records logs and metrics; it does
+not cache the app or freeze Python processes.** CloudFront hits can avoid both
+Lambda initialization and public-data queries. They do not speed up a cache
+miss, a private backend operation, or the browser's WASM initialization itself.
+
+KingdomGive used this pattern alongside the startup optimizations. Its public
+giving-page design and data were cacheable, while login, organizer operations,
+donor-specific information and checkout stayed live. This is an application and
+CDN configuration pattern; the Pytincture wheel and private deployment template
+do not automatically create a CloudFront distribution or publish public data.
+
+### Separate public content from private operations
+
+| Content | Routing/cache policy |
+| --- | --- |
+| Content-addressed browser bundles, WASM runtimes, scripts, styles and public images | Cache immutable release URLs for up to a year |
+| Anonymous page shell, published design and public organization settings | Separate public GET/HEAD routes; short shared TTL, such as 600 seconds |
+| Login/logout, account pages, donor details, organizer/admin models and personalized prefills | Caching disabled; preserve identity/cookies to origin |
+| BFF POST calls, payments, provider callbacks and streams | Live origin requests; no shared response cache |
+| Source code, private BFF manifests, build reports and secrets | Do not publish through the CDN |
+
+Cache the **public data as well as HTML**. Otherwise, cached HTML can immediately
+make a live BFF request that still waits for Lambda to start. CloudFront caches
+GET/HEAD responses (and optionally OPTIONS), not ordinary BFF POST responses;
+see [cache behavior settings](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesCacheBehavior.html).
+Do not change a state-changing operation to GET just to make it cacheable.
+
+A useful application URL layout is:
+
+```text
+/_public/html/giving                 anonymous, release-specific shell
+/_public/data/giving/<organization>  published public design/settings only
+/releases/<content-hash>/...         immutable public browser assets
+/auth/...                           live authentication
+/<application>/classcall/...        live Pytincture BFF dispatch
+```
+
+These are example application-owned routes, not built-in framework endpoints.
+Generate the public response using the same authorized service/read logic as
+normal publishing, but project **only published public fields**. Never put donor
+prefills, session/replay/CSRF tokens, signed private links, or payment sessions in
+it. A public projection must stay anonymous even when requested by a signed-in
+visitor. Personalized content uses a different uncached route. Do not populate
+a shared cache using the publisher's authenticated response.
+
+Only use a shared HTML shell when it contains no identity-specific data or
+session tokens and sets no cookies. If the normal shell personalizes content,
+use a dedicated public shell or keep it uncached. Do not remove protective
+headers from normal Pytincture responses globally to force cache hits.
+
+### Configure explicit CloudFront behaviors
+
+1. Keep the default behavior and all authentication, private BFF, checkout,
+   callback and streaming paths on a caching-disabled policy. Forward the
+   cookies, authentication headers, query values and bodies their origin needs.
+2. Add a narrowly scoped `/_public/*` GET/HEAD cache behavior. A custom policy
+   with minimum TTL **0**, default TTL **0**, maximum TTL **600** allows the
+   origin to opt eligible public responses in with this header:
+
+   ```http
+   Cache-Control: public, max-age=0, s-maxage=600, must-revalidate
+   ```
+
+3. Put immutable public assets on a separate behavior and use content-hashed
+   filenames/directories with `public, max-age=31536000, immutable`. Changing
+   content must produce a new URL; unversioned loader pointers need a short TTL
+   or revalidation. Do not use a process-random UUID as the release cache key.
+4. Include every value that changes the public representation in its path or
+   cache key: organization, selected purpose, locale, runtime and release as
+   applicable. Validate these inputs at origin. Exclude irrelevant tracking
+   parameters only when they cannot affect the response. For a shared shell,
+   ensure tenant details are resolved by the separate tenant-keyed data URL.
+5. Avoid forwarding identity to dedicated anonymous projections; forward it on
+   private behaviors. Dropping cookies/Authorization on an existing personalized
+   endpoint is not a replacement for creating a safe public projection.
+
+A positive minimum TTL can override origin `private`/`no-store` directives.
+Keep minimum TTL zero when relying on these headers, and use caching-disabled
+policies for private routes. See the [cache policy reference](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cache-key-understand-cache-policy.html).
+Configure behavior priority so a broad asset/public pattern cannot capture an
+authentication or backend path. Keep origin-access protection, request-body
+signing requirements and provider callback routing intact; CDN caching is not
+an authorization layer.
+
+### Refresh after publication and deployment
+
+After the business write commits, publish the new public representation and
+invalidate the affected organization HTML/data paths. Use a new versioned URL
+for changed images and bundles. First visits by new organizations populate their
+own cache entries; no separate distribution is required per organization. A
+short TTL is a fallback when refresh fails, not proof of immediate freshness.
+
+For example, after a successful publish, an authorized deployment/worker can run:
+
+```sh
+aws cloudfront create-invalidation --distribution-id YOUR_DISTRIBUTION_ID \
+  --paths '/_public/data/giving/example-org*' '/_public/html/giving*'
+```
+
+Invalidate the distribution's actual rewritten cache paths, including relevant
+query variants. A common shell invalidation may affect all organizations; skip
+it when only organization data changed. Invalidation is asynchronous: verify
+completion before claiming the new version is served. Grant refresh workers
+only the required distribution access, and retry/report refresh failures.
+See [invalidation](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Invalidation.html)
+and [versioned filenames](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/UpdatingExistingObjects.html).
+
+### Verify caching and correlate CloudWatch evidence
+
+Request a declared public URL twice and inspect its response headers:
+
+```sh
+curl -sS -D - -o /dev/null 'https://YOUR_DISTRIBUTION/_public/data/giving/example-org'
+```
+
+A later request can show `X-Cache: Hit from cloudfront` and an `Age` header.
+Check the public HTML, data and asset requests individually, and inspect the
+browser network waterfall to find live BFF calls still on the visible path.
+Different edge locations and expirations can produce new misses. Do not label a
+CloudFront hit a Lambda cold-start measurement.
+
+Use CloudWatch Lambda logs to distinguish initialization from request processing.
+For an application with KingdomGive-style duration logs, a Logs Insights starting
+query is:
+
+```text
+fields @timestamp, @logStream, @message
+| filter @message like /INIT_REPORT|REPORT RequestId|KG_STARTUP/
+| sort @timestamp desc
+| limit 100
+```
+
+`KG_STARTUP` is application instrumentation, not a built-in Pytincture event.
+Correlate log streams/request IDs and Lambda initialization records with the
+browser/edge timestamps; the absence of a new initialization record alone does
+not prove a cache hit. Check CloudFront cache-hit metrics/access logs alongside
+Lambda invocation counts. Background analytics, icons or private calls can
+still invoke Lambda even when the public page is cached.
+
+Before enabling caching broadly, test two different organizations, anonymous and
+signed-in visitors, a publish/edit refresh, a new organization, login/logout and
+checkout. Confirm public responses contain no private fields or Set-Cookie,
+private requests never produce shared-cache hits, and failed/unauthorized
+responses cannot become long-lived public entries. Capture both fresh-browser
+and repeat-browser timings, reporting edge hit/miss and backend warm/cold state
+separately.
+
 ## Compatibility and evidence
 
 | Area | Status and boundary |
@@ -328,3 +582,180 @@ actual Lambda invocations.
 The earlier [full-support design](lambda-full-support-design.md) remains a
 record of the wider qualification requirements; its custom Mangum runtime
 proposal is superseded by this Web Adapter path.
+
+## Measuring cold startup
+
+Use the deployment's Python interpreter, installed dependencies and environment
+with the startup profiler from a source checkout:
+
+```sh
+python scripts/profile_startup.py \
+  --modules-path /path/to/application/modules \
+  --runs 5 --top 50 --output /tmp/pytincture-startup.json
+```
+
+To include custom application construction, pass `--target service:create_app`
+where the target is an importable, no-argument factory returning the ASGI app.
+Use the same factory that installs the service's policy hooks and providers.
+The profiler executes startup hooks and lifespan code, including any configured
+external-service calls, but opens no HTTP listener. Do not run it against a
+production environment unless those startup actions are appropriate.
+
+Each sample uses a fresh Python subprocess. The JSON report separates target
+module imports, factory execution, lifespan startup, and individual Starlette
+startup hooks. It also ranks imports and functions by self and cumulative time.
+Cumulative entries overlap and must not be added together; self time excludes
+nested calls. Custom lifespan work is included in the lifespan total and function
+profile even when it does not use Starlette's startup-hook list.
+
+Profiling overhead increases these timings. Fresh processes can still benefit
+from OS filesystem caches and previously compiled bytecode. The measurements
+exclude Python startup before the worker's timer, Lambda/Web Adapter overhead,
+HTTP requests, and browser work; subprocess wall time includes worker startup
+and shutdown. Compare like-for-like runs and correlate with AWS initialization
+logs rather than treating these results as Lambda cold-start totals.
+
+Inspect optional dependency imports even when a feature is disabled, recursive
+BFF registry scans, source parsing, and repeated scans across factory and startup
+phases. Use the actual application module root: pointing at a whole checkout or
+an image root can make discovery scan unrelated Python files. Parallel execution
+is most promising for independent I/O; imports, model construction and registry
+mutation have dependencies that require care. Avoiding unused or repeated work
+should precede attempts to parallelize it.
+
+MCP, OAuth and SAML extras now load only when enabled. Startup policy validation
+and MCP registration reuse BFF manifests parsed during app construction when
+securely reread source bytes have the same digest. Discovery still checks for
+added, deleted and changed files, and explicit registry reloads still reparse.
+This cache belongs to one app in one process; it does not persist between fresh
+Lambda execution environments.
+
+### Prebuilding server BFF discovery
+
+The browser bundle contains client code and generated BFF proxies. The backend
+still needs its own export, argument, policy and definition metadata. To move
+that parsing to deployment build time, generate a separate private server file:
+
+```sh
+python -m pytincture.backend.bff_manifest \
+  --modules-path /build/application/modules \
+  --output /build/private/server-bff.json
+```
+
+Alternatively add `--server-bff-manifest /build/private/server-bff.json` to
+`pytincture-build-browser --config pyproject.toml` or the appcode builder:
+
+```sh
+pytincture-build-appcode demo --modules-path /build/application/modules \
+  --output-directory /build/appcode \
+  --server-bff-manifest /build/private/server-bff.json
+```
+
+Both builders require this file to be outside the browser output directory.
+For multi-app builds, invoke the option
+per application; artifacts with distinct module roots need distinct paths.
+
+Copy the application source and this private artifact into the Lambda image,
+then set `PYTINCTURE_BFF_PREBUILT_MANIFEST=/var/task/private/server-bff.json`.
+The typed factory equivalent is `PytinctureConfig(bff_prebuilt_manifest=...)`.
+Relative artifact paths resolve against `modules_path`. Without this setting,
+startup continues to discover everything from source.
+
+The artifact is deployment-trusted metadata, like backend code: keep it out of
+browser assets, uploads and client-controlled paths. Source hashes detect stale
+source; they do not authenticate a maliciously rewritten manifest. The file
+contains policies, definition identities, documentation and literal defaults,
+so do not publish it. No pickle, eval or application imports are used to build
+or load it.
+
+Startup securely reads and hashes every discovered Python file. Matching entries
+reuse the prebuilt metadata; new/changed files are parsed normally, deleted or
+unsafe files cannot retain cached exports, and startup policy validation still
+runs. Framework/parser or Python minor-version mismatches fall back to source
+discovery. Missing or malformed configured artifacts fail startup. Build with the
+same framework wheel and Python minor version used in Lambda; rebuild after
+upgrades. Files containing unusual non-JSON literal defaults fall back to source
+parsing. Explicit registry reload and request-time source/definition verification
+retain their existing behavior.
+
+Compare profiles with and without `PYTINCTURE_BFF_PREBUILT_MANIFEST` against the
+same application root. This optimization moves parsing out of initialization;
+it does not remove filesystem verification or optimize application data queries.
+
+### Precompile the complete deployment
+
+Do this **after** dependency installation, browser building and copying the
+service and application sources, and **before** creating the application ZIP:
+
+```sh
+PYTHONPATH="$package_dir" python3.13 -m pytincture.lambda_build \
+  --root "$package_dir" \
+  --modules-path "$package_dir/apps" \
+  --manifest "$package_dir/private/server-bff.json"
+```
+
+Use the target Python minor version and normal interpreter mode (no `-O` or
+`-OO`). Prefer running the whole build in the target Linux environment,
+particularly when dependencies contain native extensions. The staging command
+requires the matching framework version on its import path. It writes standard
+`__pycache__/*.pyc` files for the service, framework and installed dependencies,
+plus the private server manifest. Include both sources and `__pycache__` in the
+ZIP; don't run cleanup steps that delete bytecode afterward. Cross-platform
+`pip --target` alone does not guarantee that bytecode has been compiled.
+
+Compilation uses checked hashes, not unchecked bytecode. Python still validates
+source bytes before accepting cached code. Assertions and docstrings remain
+available. `PYTHONDONTWRITEBYTECODE=1` prevents runtime writes but does not prevent
+reading packaged bytecode. Do not set `PYTHONPYCACHEPREFIX` or change the Python
+minor version between build and deployment. The command records `/var/task`
+code locations; pass `--runtime-root` if deploying elsewhere. It skips symlinks
+and fails the build on invalid Python dependency files. It does not import the
+application or retain live application objects.
+
+Set the template parameter
+`BFFPrebuiltManifest=/var/task/private/server-bff.json` to activate the manifest.
+The launcher now chooses asyncio, h11 and no WebSocket protocol explicitly,
+avoiding optional transport discovery; ASGI lifespan validation remains enabled.
+
+Run the local comparison with the deployment's Python environment:
+
+```sh
+python scripts/benchmark_lambda_cold_start.py \
+  --modules-path /path/to/application/modules --runs 5 \
+  --output /tmp/pytincture-cold-start.json
+```
+
+It copies dependencies and current framework source into a disposable staging
+area, starts fresh processes with runtime bytecode writes disabled, then compares
+source-only, prebuilt BFF, checked bytecode, and explicit HTTP transport settings.
+Unlike the detailed profiler, this benchmark does not use cProfile/importtime.
+It includes Uvicorn configuration and application lifespan startup, but not a
+bound network listener, Lambda initialization, the Web Adapter or data requests.
+OS filesystem caches may remain warm. Whole-process timings include shutdown.
+
+### Keep an initialized environment ready
+
+For the shortest request startup path, the template supports optional
+[provisioned concurrency](https://docs.aws.amazon.com/lambda/latest/dg/provisioned-concurrency.html).
+Set `ProvisionedConcurrency=1` (or the required capacity), keeping it at or below
+`ReservedConcurrency`. It creates an immutable version and a `ready` alias;
+invoke the **ReadyFunctionArn** output, rather than the unqualified FunctionName.
+Wait for provisioned capacity to become ready before measuring. Capacity beyond
+the provisioned amount can still cold-start. This is a paid opt-in and defaults
+to zero; no infrastructure is changed by building the wheel or staging files.
+
+Use a new immutable CodeKey for each release, including configuration changes,
+so the version description changes and CloudFormation publishes a replacement.
+Retained old versions support rollback; manage their lifecycle in deployment
+operations. Requests using `$LATEST` do not use the alias's initialized capacity.
+This option avoids reinitialization on the request path; it does not make the
+initialization computation itself faster.
+
+[SnapStart](https://docs.aws.amazon.com/lambda/latest/dg/snapstart.html) is a
+different platform mechanism that restores initialized state. The
+[Web Adapter's newer releases](https://github.com/aws/aws-lambda-web-adapter/blob/main/CHANGELOG.md)
+document snapshot/restore HTTP hooks. This recipe pins an older layer and does
+not claim tested SnapStart compatibility. Do not simply enable snapshots on it:
+qualify the adapter upgrade, refresh restored identifiers/connections/temporary
+state, and test authentication, replay stores and streaming after restoration.
+The initialized `ready` alias is the implemented option for this recipe.

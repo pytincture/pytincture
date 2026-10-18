@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 5
 requires-python = ">=3.13, <3.15"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -1534,7 +1534,7 @@ wheels = [
 
 [[package]]
 name = "pytincture"
-version = "1.0.0rc15"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

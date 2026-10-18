@@ -61,6 +61,15 @@ artifact identity, hashes, and attestations have all been verified. It is not
 made available to build or test jobs and no packaging tool is installed while
 the token is present.
 
+## 1.0.0 owner exceptions
+
+For 1.0.0 only, the owner explicitly waived the deployed HTTPS/HSTS/proxy
+review and the independent CODEOWNER repository-policy gate after reporting
+personal application testing. The qualification record retains the approvals,
+scopes and actual policy audit. These are exceptions, not passing test results.
+Required CI and the signed-tag/attested publication procedure remain mandatory.
+No live branch protection settings were changed.
+
 ## Failed publication
 
 Do not overwrite an immutable PyPI/npm version. If one registry succeeds and

@@ -3,7 +3,21 @@
 This project follows semantic versioning from 1.0. Dates and final entries are
 set when a release is published.
 
-## Unreleased
+## 1.0.0 — 2026-10-17
+
+- Add a Lambda staging command that generates BFF metadata and precompiles
+  dependencies with checked-hash bytecode, preserving source checks and normal
+  assertions/docstrings. Defer desktop launcher imports and select HTTP-only
+  Uvicorn transports in the Lambda launcher. Add optional provisioned concurrency
+  through a published version/alias; defaults remain unprovisioned.
+- Add optional deployment-built server BFF manifests to move initial source
+  parsing out of startup. Browser/appcode builders can emit a separate private
+  artifact; source digests, policy checks and execution verification remain active.
+- Load MCP, OAuth and SAML dependencies only when their features are enabled, reducing
+  cold-start work when optional extras are installed but unused.
+- Reuse unchanged BFF manifests for startup policy validation and MCP tool
+  registration. Recheck source bytes and discover added/deleted files before
+  reuse; retain forced reparsing for explicit registry reloads.
 
 ## 1.0.0rc15 — 2026-10-13
 

@@ -359,3 +359,21 @@ def test_custom_runtime_bytes_must_match_the_profile_before_publication(tmp_path
     with pytest.raises(ValueError, match='pinned portable profile'):
         build_browser_bundle(config)
     assert manifest.read_bytes() == original
+
+
+def test_browser_bundle_emits_server_manifest_outside_public_assets(tmp_path):
+    from pytincture.backend.bff_manifest import load_bff_manifest
+    config = project(tmp_path, bff=BFF)
+    private = tmp_path / 'private' / 'server-bff.json'
+    result = build_browser_bundle(config, server_bff_manifest=private)
+    assert private.is_file()
+    assert 'api/catalog.py' in load_bff_manifest(private)
+    assert not private.is_relative_to(result.parent)
+    assert 'server-bff.json' not in result.read_text()
+
+
+def test_browser_bundle_rejects_server_manifest_in_public_output(tmp_path):
+    config = project(tmp_path)
+    result = build_browser_bundle(config, check=True)
+    with pytest.raises(ValueError, match='outside the browser output'):
+        build_browser_bundle(config, server_bff_manifest=result.parent / 'server-bff.json')

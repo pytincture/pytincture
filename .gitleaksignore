@@ -21,3 +21,8 @@ b697cdfa59ba60b3e5c5c3456bca1703bc3c8d7f:tests/test_configuration.py:generic-api
 # Historical, synthetic session key in the Microsoft configuration roundtrip
 # test. Replaced with a generated value; never used as a deployed credential.
 1c9ad72716c450c96221a7d2a53287653970c788:tests/test_configuration.py:generic-api-key:1010
+
+# Synthetic session keys in isolated OAuth/SAML construction tests; replaced
+# with freshly generated values. Exact historical findings only.
+540b29437e95e6601fb3d888ca000af80540ff31:tests/test_startup_imports.py:generic-api-key:65
+540b29437e95e6601fb3d888ca000af80540ff31:tests/test_startup_imports.py:generic-api-key:86

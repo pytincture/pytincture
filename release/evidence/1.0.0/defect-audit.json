@@ -1,0 +1,61 @@
+{
+  "reviewed_at": "2026-10-18T02:36:23.872692+00:00",
+  "blocking_labels": [
+    "priority:p0",
+    "priority:p1",
+    "security:critical",
+    "security:high",
+    "release-blocker"
+  ],
+  "open_issues": [
+    {
+      "labels": [
+        {
+          "id": "LA_kwDOLiOVec8AAAABj-xcdg",
+          "name": "enhancement",
+          "description": "New feature or request",
+          "color": "a2eeef"
+        }
+      ],
+      "number": 385,
+      "title": "[Performance] BFF calls cost ~3.5 ms each and do not scale with concurrency (example load gate fails)"
+    },
+    {
+      "labels": [
+        {
+          "id": "LA_kwDOLiOVec8AAAABj-xcdg",
+          "name": "enhancement",
+          "description": "New feature or request",
+          "color": "a2eeef"
+        },
+        {
+          "id": "LA_kwDOLiOVec8AAAACv-RatA",
+          "name": "roadmap",
+          "description": "Planned work on an approved project roadmap",
+          "color": "5319e7"
+        }
+      ],
+      "number": 144,
+      "title": "[Roadmap] Pytincture 1.0"
+    },
+    {
+      "labels": [
+        {
+          "id": "LA_kwDOLiOVec8AAAABj-xcdg",
+          "name": "enhancement",
+          "description": "New feature or request",
+          "color": "a2eeef"
+        },
+        {
+          "id": "LA_kwDOLiOVec8AAAACv-RatA",
+          "name": "roadmap",
+          "description": "Planned work on an approved project roadmap",
+          "color": "5319e7"
+        }
+      ],
+      "number": 143,
+      "title": "[1.0] Qualify release candidates and enforce the 1.0 release gates"
+    }
+  ],
+  "open_labeled_blockers": 0
+}

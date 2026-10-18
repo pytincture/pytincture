@@ -264,3 +264,45 @@ def test_rc2_release_requires_valid_rc1_evidence(monkeypatch):
     assert "1.0.0rc1 evidence is required before releasing 1.0.0rc2" in gates.validate_release_ref(
         record, "v1.0.0rc2"
     )
+
+
+def test_owner_edge_exception_is_limited_to_current_candidate():
+    record = complete_record()
+    record["production_edge_reviews"] = []
+    exception = {
+        "scope": "production_edge_reviews", "release_version": "1.0.0",
+        "candidate_version": "1.0.0rc2", "approved_by": "Release owner",
+        "approved_at": "2026-02-05T00:00:00Z",
+        "reason": "Owner explicitly waived this review",
+        "approval_source": "Owner release decision",
+    }
+    record["release_exceptions"] = [exception]
+    assert gates.validate_final(record) == []
+    exception["candidate_version"] = "1.0.0rc1"
+    assert any("release exception" in failure for failure in gates.validate_final(record))
+    exception["candidate_version"] = "1.0.0rc2"
+    exception["scope"] = "security_reviews"
+    assert "unsupported release exception scope" in gates.validate_final(record)
+    exception["scope"] = "production_edge_reviews"
+    del exception["approval_source"]
+    assert any("release exception" in failure for failure in gates.validate_final(record))
+
+
+def test_owner_policy_exception_does_not_waive_other_gates():
+    record = complete_record()
+    record["repository_policy_reviews"] = []
+    exception = {
+        "scope": "repository_policy_reviews", "release_version": "1.0.0",
+        "candidate_version": "1.0.0rc2", "approved_by": "Release owner",
+        "approved_at": "2026-02-05T00:00:00Z",
+        "reason": "Owner explicitly waived this review",
+        "approval_source": "Owner release decision",
+    }
+    record["release_exceptions"] = [exception]
+    assert gates.validate_final(record) == []
+    record["security_reviews"] = []
+    assert any("security_reviews" in failure for failure in gates.validate_final(record))
+    record["production_edge_reviews"] = []
+    assert any("production_edge_reviews" in failure for failure in gates.validate_final(record))
+    exception["release_version"] = "1.0.1"
+    assert any("release exception" in failure for failure in gates.validate_final(record))

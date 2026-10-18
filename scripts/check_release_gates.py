@@ -227,41 +227,68 @@ def validate_final(record: dict) -> list[str]:
             latest_published_at,
         )
     )
-    failures.extend(
-        passed_evidence(
-            record.get("repository_policy_reviews", []),
-            "repository_policy_reviews",
-            latest_version,
-            latest_published_at,
-        )
-    )
-    edge_reviews = record.get("production_edge_reviews", [])
-    failures.extend(
-        passed_evidence(
-            edge_reviews,
-            "production_edge_reviews",
-            latest_version,
-            latest_published_at,
-        )
-    )
-    required_edge_checks = {
-        "https_redirect",
-        "hsts",
-        "canonical_origin",
-        "trusted_proxy_headers",
-    }
-    for index, review in enumerate(edge_reviews):
-        if review.get("version") != latest_version:
+    # Owner exceptions are limited to the named review, this release and latest RC.
+    # Security, defect, application and CI requirements cannot be waived here.
+    waived_reviews = set()
+    for exception in record.get("release_exceptions", []):
+        scope = exception.get("scope")
+        if scope not in {"production_edge_reviews", "repository_policy_reviews"}:
+            failures.append("unsupported release exception scope")
             continue
-        checks = review.get("checks", {})
-        missing_checks = sorted(
-            check for check in required_edge_checks if checks.get(check) is not True
+        valid = (
+            exception.get("release_version") == "1.0.0"
+            and exception.get("candidate_version") == latest_version
+            and all(exception.get(field) for field in (
+                "approved_by", "reason", "approval_source"
+            ))
         )
-        if missing_checks:
-            failures.append(
-                f"production_edge_reviews[{index}].checks must pass: "
-                f"{', '.join(missing_checks)}"
+        try:
+            approved_at = parse_time(exception.get("approved_at"), "release exception approved_at")
+            valid = valid and latest_published_at is not None and approved_at >= latest_published_at
+        except ValueError as exc:
+            failures.append(str(exc))
+            valid = False
+        if not valid:
+            failures.append("release exception requires current release, candidate and owner approval evidence")
+        else:
+            waived_reviews.add(scope)
+    if "repository_policy_reviews" not in waived_reviews:
+        failures.extend(
+            passed_evidence(
+                record.get("repository_policy_reviews", []),
+                "repository_policy_reviews",
+                latest_version,
+                latest_published_at,
             )
+        )
+    if "production_edge_reviews" not in waived_reviews:
+        edge_reviews = record.get("production_edge_reviews", [])
+        failures.extend(
+            passed_evidence(
+                edge_reviews,
+                "production_edge_reviews",
+                latest_version,
+                latest_published_at,
+            )
+        )
+        required_edge_checks = {
+            "https_redirect",
+            "hsts",
+            "canonical_origin",
+            "trusted_proxy_headers",
+        }
+        for index, review in enumerate(edge_reviews):
+            if review.get("version") != latest_version:
+                continue
+            checks = review.get("checks", {})
+            missing_checks = sorted(
+                check for check in required_edge_checks if checks.get(check) is not True
+            )
+            if missing_checks:
+                failures.append(
+                    f"production_edge_reviews[{index}].checks must pass: "
+                    f"{', '.join(missing_checks)}"
+                )
 
     reviews = record.get("security_reviews", [])
     failures.extend(

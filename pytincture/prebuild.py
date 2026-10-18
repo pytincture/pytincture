@@ -23,11 +23,16 @@ def build_prebuilt_appcode(
     max_files: int = 512,
     max_file_bytes: int = 4 * 1024 * 1024,
     max_total_bytes: int = 32 * 1024 * 1024,
+    server_bff_manifest: str | os.PathLike[str] | None = None,
 ) -> Path:
     """Build ``<application>.pyt`` atomically without importing app modules."""
     application = validate_application_name(application)
     modules_root = canonical_root(os.fspath(modules_path))
     destination_root = Path(output_directory).expanduser().resolve()
+    if server_bff_manifest is not None:
+        server_bff_manifest = Path(server_bff_manifest).expanduser().resolve()
+        if server_bff_manifest.is_relative_to(destination_root):
+            raise ValueError("Server BFF manifest must be outside the browser output directory")
     destination_root.mkdir(parents=True, exist_ok=True)
     manifest: dict[str, object] = {}
     archive = create_appcode_archive(
@@ -66,6 +71,9 @@ def build_prebuilt_appcode(
         return staged
 
     try:
+        if server_bff_manifest is not None:
+            from pytincture.backend.bff_manifest import build_bff_manifest
+            build_bff_manifest(modules_root, server_bff_manifest)
         archive_stage = stage(archive.getvalue(), ".pyt.tmp")
         manifest_stage = stage(manifest_bytes, ".pyt.json.tmp")
         os.replace(archive_stage, target)
@@ -99,12 +107,17 @@ def main() -> None:
         default="",
         help="Optional browser file declaration, matching PYTINCTURE_BROWSER_FILES",
     )
+    parser.add_argument(
+        "--server-bff-manifest",
+        help="Also write a private server BFF manifest to this path (not inside the browser archive)",
+    )
     arguments = parser.parse_args()
     built = build_prebuilt_appcode(
         arguments.application,
         arguments.output_directory,
         modules_path=arguments.modules_path,
         browser_files=arguments.browser_files,
+        server_bff_manifest=arguments.server_bff_manifest,
     )
     print(built)
 

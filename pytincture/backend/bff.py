@@ -25,6 +25,9 @@ _EXCLUDED_DIRECTORIES = {
 BFFKey = tuple[str, str, str]
 BFFOperation = dict[str, Any]
 BFFRegistryFailures = dict[str, str]
+BFFManifestCache = dict[
+    str, tuple[str, Mapping[tuple[str, str], BFFOperation]]
+]
 
 
 def _manifest_failure_reason(exc: Exception) -> str:
@@ -45,12 +48,17 @@ def _scan_bff_registry(
     manifest_loader: Callable[
         [str], Mapping[tuple[str, str], BFFOperation]
     ],
+    *,
+    manifest_cache: BFFManifestCache | None = None,
 ) -> tuple[dict[BFFKey, BFFOperation], BFFRegistryFailures]:
     """Build a fail-closed registry while isolating failures to their files."""
     root_path = canonical_root(modules_root)
     registry: dict[BFFKey, BFFOperation] = {}
     failures: BFFRegistryFailures = {}
+    seen = set()
     if not os.path.isdir(root_path):
+        if manifest_cache is not None:
+            manifest_cache.clear()
         return registry, failures
 
     for root, dirs, files in os.walk(root_path):
@@ -69,15 +77,23 @@ def _scan_bff_registry(
             relative_path = os.path.relpath(file_path, root_path).replace(os.sep, "/")
             try:
                 secure_file = read_contained_file(root_path, relative_path)
-                if manifest_loader is get_bff_manifest:
+                seen.add(relative_path)
+                cached = manifest_cache.get(relative_path) if manifest_cache is not None else None
+                if cached is not None and cached[0] == secure_file.digest:
+                    file_manifest = cached[1]
+                elif manifest_loader is get_bff_manifest:
                     source = decode_python_source(secure_file.content)
                     file_manifest = manifest_loader(file_path, source=source)
                 else:
                     file_manifest = manifest_loader(file_path)
+                if manifest_cache is not None:
+                    manifest_cache[relative_path] = (secure_file.digest, file_manifest)
             except (OSError, SyntaxError, UnicodeDecodeError, UnsafePath, ValueError) as exc:
                 # No operation from a rejected file enters the authorization
                 # registry. Valid files remain available to unrelated apps.
                 failures[relative_path] = _manifest_failure_reason(exc)
+                if manifest_cache is not None:
+                    manifest_cache.pop(relative_path, None)
                 continue
             for (class_name, function_name), operation in file_manifest.items():
                 registry[(relative_path, class_name, function_name)] = {
@@ -85,6 +101,9 @@ def _scan_bff_registry(
                     "_source_path": secure_file.path,
                     "_source_digest": secure_file.digest,
                 }
+    if manifest_cache is not None:
+        for deleted in manifest_cache.keys() - seen:
+            del manifest_cache[deleted]
     return registry, failures
 
 
@@ -111,13 +130,16 @@ class BFFRegistry:
         *,
         autoload: bool = True,
         revalidate: bool = True,
+        prebuilt_manifest: str | None = None,
     ):
         self._manifest_loader = manifest_loader
         self.revalidate = revalidate
+        self.prebuilt_manifest = prebuilt_manifest
         self.root = canonical_root(modules_root)
         self.operations: dict[BFFKey, BFFOperation] = {}
         self.failures: BFFRegistryFailures = {}
         self.loaded = False
+        self._manifest_cache: BFFManifestCache = {}
         self._lock = threading.RLock()
         if autoload:
             self.reload()
@@ -126,10 +148,36 @@ class BFFRegistry:
         with self._lock:
             if modules_root is not None:
                 self.root = canonical_root(modules_root)
+            cache: BFFManifestCache = {}
+            if not self.loaded and self.prebuilt_manifest and self._manifest_loader is get_bff_manifest:
+                from pytincture.backend.bff_manifest import load_bff_manifest
+                manifest_path = self.prebuilt_manifest
+                if not os.path.isabs(manifest_path):
+                    manifest_path = os.path.join(self.root, manifest_path)
+                cache = load_bff_manifest(manifest_path)
             self.operations, self.failures = _scan_bff_registry(
-                self.root, self._manifest_loader
+                self.root, self._manifest_loader, manifest_cache=cache
             )
+            self._manifest_cache = cache
             self.loaded = True
+            return self.operations
+
+    def refresh(self, modules_root: str) -> dict[BFFKey, BFFOperation]:
+        """Recheck source bytes, reusing manifests only for unchanged files.
+
+        Discover additions/deletions too, so startup policy validation cannot
+        overlook edits made after construction. Explicit reload still reparses.
+        Custom loaders retain their existing full-reload behavior.
+        """
+        with self._lock:
+            root = canonical_root(modules_root)
+            if root != self.root or not self.loaded or self._manifest_loader is not get_bff_manifest:
+                return self.reload(root)
+            cache = self._manifest_cache.copy()
+            self.operations, self.failures = _scan_bff_registry(
+                root, self._manifest_loader, manifest_cache=cache
+            )
+            self._manifest_cache = cache
             return self.operations
 
     def operation(

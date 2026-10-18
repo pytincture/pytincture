@@ -1,0 +1,7 @@
+{
+  "reviewed_at": "2026-10-18T02:36:23.872692+00:00",
+  "open_dependabot_alerts": [],
+  "dependency_audit_output": "No known vulnerabilities found\nName       Skip Reason\n---------- -------------------------------------------------------------------------\npytincture Dependency not found on PyPI and could not be audited: pytincture (1.0.0)\n",
+  "secret_scan": "Passed; 332 tracked source files scanned before release staging",
+  "notes": "The unpublished root package is not available in the PyPI vulnerability database; resolved dependencies were audited."
+}

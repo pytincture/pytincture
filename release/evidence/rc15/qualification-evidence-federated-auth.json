@@ -1,0 +1,1615 @@
+{
+  "$schema": "https://github.com/pytincture/pytincture/contracts/qualification-evidence-v1.schema.json",
+  "artifact_files": {
+    "npm": "pytincture-runtime-1.0.0-rc.15.tgz",
+    "sdist": "pytincture-1.0.0rc15.tar.gz",
+    "wheel": "pytincture-1.0.0rc15-py3-none-any.whl"
+  },
+  "artifact_sha256": {
+    "npm": "effeb49c56f8d3b23674ab75c4037f20617cf8d960cc1d9ef219889c417287de",
+    "sdist": "37cbf624ae9d1c922396df5bb754f8560db9d31e2c1c490637d54ab1260a7972",
+    "wheel": "f1ae8964a21ad746aade0f8dcffd352d23f9563762c08d7d0f4bfdfef7c76fa2"
+  },
+  "commit_sha": "72aad0857936f872b256804dff9ffbd523624b68",
+  "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/38427355625",
+  "exercise": "federated_auth",
+  "npm_version": "1.0.0-rc.15",
+  "result_sha256": {
+    "saml": "8872a2da94ac54ce2dd746ec92b6663792d79fcbfaca667ad7f2baf641b80ffa",
+    "saml_replay_mitigation": "b28f8f1b7a2328567986c3215d3ec987bd610398fedb5cb714e208bca7e225d2",
+    "saml_transform_mitigation": "2cd4484ae22967723a32e39e93a0d693f6f356811b91e78586fe987fe3004043",
+    "security_review_dispositions": "153f02036d983d223b93827b244926317c0f5e44185058fea2ead4be9653e9da"
+  },
+  "results": {
+    "saml": {
+      "acs_url": "http://127.0.0.1:8084/e2e_app/auth/saml/acs",
+      "anonymous_bff_status_after_logout": 401,
+      "authenticated_email": "saml@example.com",
+      "bff_status": 200,
+      "browser": "chromium",
+      "browser_bound_handshake_cookie": true,
+      "completed_widget_probe_abort_count": 3,
+      "console_error_count": 0,
+      "duration_ms": 8380,
+      "handshake_cookie_cleared_after_use": true,
+      "idp_image": "quay.io/keycloak/keycloak:26.7.2@sha256:9d1f1b2b7261ff53c66cb1092dfcdc34a5fb77e81f9e6a6e75b8b6a795de8067",
+      "pytincture_version": "1.0.0rc15",
+      "requested_authn_context": false,
+      "sp_entity_id": "http://127.0.0.1:8084/e2e_app/auth/saml/metadata",
+      "status": "passed",
+      "unexpected_request_failure_count": 0
+    },
+    "saml_replay_mitigation": {
+      "architecture": {
+        "browser_session_storage": "signed HttpOnly cookies",
+        "process_memory_required": false,
+        "redis_required": false,
+        "server_side_transaction_state": false
+      },
+      "finding": "SAML RelayState and signed responses were reusable and not bound to the initiating browser",
+      "mitigations": {
+        "assertion_only_idp_requires_signed_subject_confirmation": true,
+        "browser_session_capped_to_saml_expiry": true,
+        "copied_relay_state_rejected_cross_browser": true,
+        "cross_worker_callback_portable": true,
+        "dedicated_httponly_handshake_cookie": true,
+        "exact_in_response_to_required": true,
+        "handshake_cookie_cleared_after_success": true,
+        "in_response_to_must_be_covered_by_validated_signature": true,
+        "response_and_assertion_ids_required": true,
+        "sequential_browser_replay_rejected": true,
+        "sha256_or_stronger_signature_and_digest_required": true,
+        "signed_browser_session_replay_proof": true,
+        "signed_expiring_browser_transaction": true
+      },
+      "regression_tests": [
+        "tests/test_app.py::test_saml_acs_rejects_relay_state_copied_to_another_browser",
+        "tests/test_app.py::test_saml_acs_requires_exact_in_response_to",
+        "tests/test_app.py::test_saml_acs_creates_compact_session_that_authorizes_bff_calls",
+        "tests/test_backend_modules.py::test_assertion_only_saml_correlation_rejects_unsigned_response_rewrapping",
+        "tests/test_backend_modules.py::test_saml_response_rejects_deprecated_or_unknown_signature_algorithms",
+        "tests/test_production.py::test_saml_handshake_is_portable_between_workers_without_redis",
+        "pytincture/frontend/e2e-tests/saml-federated.spec.mjs"
+      ],
+      "schema_version": 1,
+      "stateless_boundary": "Without shared mutable state, no server can guarantee that exactly one of two simultaneous raw HTTP requests carrying identical pre-response cookies wins. Pytincture rejects cross-browser login CSRF and normal sequential browser replay; exact request correlation and short expiry bound the remaining duplicate-delivery case.",
+      "status": "passed",
+      "verified_at": "2026-08-29T21:57:45Z"
+    },
+    "saml_transform_mitigation": {
+      "dependency": "python3-saml==1.16.0",
+      "encrypted_assertion_fixture": "tests/fixtures/saml/encrypted-assertion.xml",
+      "finding": "python3-saml signature verification accepts attacker-selected XSLT transforms",
+      "fixed_release_available": false,
+      "mitigations": {
+        "acs_rate_limit_enabled": true,
+        "decoded_response_size_limited": true,
+        "dtd_and_entity_declarations_rejected": true,
+        "encrypted_assertions_rejected_before_toolkit": true,
+        "encrypted_assertions_supported": false,
+        "guard_runs_before_toolkit_signature_processing": true,
+        "process_isolation_required": false,
+        "strict_transform_allowlist": true,
+        "xml_network_and_entity_resolution_disabled": true
+      },
+      "process_isolation_rationale": "Unapproved visible transforms and every encrypted assertion are rejected before xmlsec processing; input allocation and XML parsing are bounded.",
+      "regression_tests": [
+        "tests/test_backend_modules.py::test_saml_response_transform_guard_accepts_only_bounded_safe_algorithms",
+        "tests/test_backend_modules.py::test_saml_response_transform_guard_rejects_unsafe_or_oversized_xml",
+        "tests/test_app.py::test_saml_acs_rejects_disallowed_transforms_before_toolkit_and_rate_limits",
+        "tests/test_app.py::test_saml_acs_rejects_encrypted_assertions_before_toolkit"
+      ],
+      "safe_fixture": "tests/fixtures/saml/disallowed-xslt-transform.xml",
+      "schema_version": 1,
+      "status": "passed",
+      "upstream_issue": "https://github.com/SAML-Toolkits/python3-saml/issues/447",
+      "upstream_status": "open",
+      "upstream_status_checked_at": "2026-08-29T21:34:12Z"
+    },
+    "security_review_dispositions": {
+      "accepted_architecture_document": "security/accepted-architecture.md",
+      "active_review_status": "remediated",
+      "active_review_tracking_document": "security/review-2026-09-01.json",
+      "dispositions": [
+        {
+          "controls": {
+            "class_level_export_preserved": true,
+            "exact_pytincture_import_provenance_required": true,
+            "local_same_named_decorators_rejected": true,
+            "method_level_export_required": false,
+            "rebound_or_shadowed_aliases_rejected": true,
+            "unrelated_imports_rejected": true
+          },
+          "id": "F-01",
+          "implementation": [
+            "pytincture/dataclass.py",
+            "docs/contracts/bff-v1.md"
+          ],
+          "intentional_contract": "A Pytincture backend_for_frontend class decorator exports its public methods and public read-only attributes. Method-level export declarations are not required.",
+          "regression_tests": [
+            "tests/test_dataclass.py::test_static_manifest_rejects_spoofed_or_rebound_export_decorators",
+            "tests/test_dataclass.py::test_static_manifest_rejects_spoofed_or_rebound_security_metadata",
+            "tests/test_dataclass.py::test_static_manifest_accepts_proven_direct_and_module_aliases",
+            "tests/test_dataclass.py::test_static_manifest_tracks_rebinding_in_source_order",
+            "tests/test_dataclass.py::test_static_manifest_rejects_less_common_rebindings",
+            "tests/test_dataclass.py::test_static_manifest_rejects_class_scope_security_decorator_rebinding"
+          ],
+          "security_boundary": "Static discovery accepts security decorators only when their exact binding is proven to come directly from pytincture or pytincture.dataclass at that point in source order.",
+          "status": "remediated",
+          "title": "Decorator provenance with class-level BFF exports"
+        },
+        {
+          "controls": {
+            "application_scoped_asset_declarations_supported": true,
+            "explicit_asset_ownership_required": true,
+            "python_assets_never_public": true,
+            "real_application_entrypoint_required": true,
+            "same_origin_browser_execution_intentional": true,
+            "svg_response_sandboxed_without_script": true
+          },
+          "id": "F-02",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "docs/browser-packaging.md",
+            "docs/contracts/appcode-v1.md"
+          ],
+          "intentional_contract": "Application-selected browser Python and manifest-approved widget JavaScript execute as trusted same-origin application code. That same-origin execution model is intentional and is not a sandbox boundary.",
+          "regression_tests": [
+            "tests/test_app.py::test_public_assets_require_a_real_app_and_explicit_app_ownership",
+            "tests/test_app.py::test_public_asset_globs_can_be_scoped_per_application",
+            "tests/test_app.py::test_public_svg_assets_are_sandboxed",
+            "pytincture/frontend/e2e-tests/pytincture.spec.mjs::direct SVG navigation cannot execute application-origin script"
+          ],
+          "security_boundary": "Direct assets are deliberately unauthenticated, but must belong to a real application and an explicit application browser/public/favicon/widget declaration. Python is never public, and SVG responses cannot create a same-origin script context.",
+          "status": "remediated_boundary_with_accepted_architecture",
+          "title": "Same-origin browser trust with application-owned assets"
+        },
+        {
+          "controls": {
+            "cross_browser_login_csrf_rejected": true,
+            "cross_worker_portable": true,
+            "exact_in_response_to_required": true,
+            "process_memory_required": false,
+            "redis_required": false,
+            "response_and_assertion_ids_required": true,
+            "sequential_replay_rejected": true,
+            "signed_browser_transaction": true,
+            "strict_simultaneous_single_consumption_built_in": false
+          },
+          "id": "SAML-STATELESS-REPLAY-BOUNDARY",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "security/saml-replay-mitigation.json",
+            "docs/authentication.md"
+          ],
+          "intentional_contract": "SAML browser transactions use signed HttpOnly cookies and remain portable across workers without Redis, process memory, or sticky routing.",
+          "optional_control": "A deployment that requires strict simultaneous single-consumption must add a shared atomic transaction-consumption control. That policy does not make Redis a Pytincture requirement.",
+          "regression_tests": [
+            "tests/test_app.py::test_saml_acs_rejects_relay_state_copied_to_another_browser",
+            "tests/test_app.py::test_saml_acs_requires_exact_in_response_to",
+            "tests/test_production.py::test_saml_handshake_is_portable_between_workers_without_redis"
+          ],
+          "security_boundary": "Pytincture rejects cross-browser login CSRF and normal sequential replay. Without shared mutable state, exactly one of two simultaneous raw requests carrying the same valid pre-response cookie and assertion cannot be guaranteed to win.",
+          "status": "accepted_architecture",
+          "title": "Stateless SAML browser binding and duplicate-delivery boundary"
+        },
+        {
+          "controls": {
+            "explicit_mcp_targets_remain_fail_closed": true,
+            "invalid_file_operations_denied": true,
+            "policy_bearing_exports_remain_fail_closed": true,
+            "recovery_requires_complete_rescan": true,
+            "redis_required": false,
+            "shared_state_required": false,
+            "unrelated_valid_operations_preserved": true
+          },
+          "id": "OBS-BFF-REGISTRY-BLAST-RADIUS",
+          "implementation": [
+            "pytincture/backend/bff.py",
+            "pytincture/backend/app.py",
+            "docs/contracts/bff-v1.md",
+            "docs/production-deployment.md"
+          ],
+          "intentional_contract": "The class decorator remains the complete developer opt-in, while static registry failures are isolated to the exact canonical source file that failed validation.",
+          "regression_tests": [
+            "tests/test_backend_modules.py::test_bff_registry_isolates_invalid_source_files_and_recovers",
+            "tests/test_configuration.py::test_invalid_python_file_cannot_disable_unrelated_bff_application"
+          ],
+          "security_boundary": "An unreadable, unsafe, malformed, or invalidly encoded file contributes zero callable operations. Other files retain only their own proven exports, and a repaired file must pass a complete rescan before access is restored.",
+          "status": "remediated",
+          "title": "Fail-closed per-file BFF registry discovery"
+        },
+        {
+          "controls": {
+            "artifact_attestation_required": true,
+            "exact_package_identity_version_and_hash_required": true,
+            "exact_successful_release_run_required": true,
+            "long_lived_pypi_credential_used": true,
+            "owner_approval_required": true,
+            "project_scoped_api_token_required": true,
+            "protected_default_branch_ancestry_required": true,
+            "protected_environment_required": true,
+            "published_release_required": true,
+            "trusted_publishing_oidc_required": false
+          },
+          "external_activation": "The repository owner must configure and rotate the project-scoped PYPI_PASSWORD Actions secret. This deliberately accepts the persistence risk of a long-lived registry token while retaining release provenance and protected-environment controls.",
+          "id": "FOLLOWUP-F-01",
+          "implementation": [
+            ".github/workflows/pypi-publish.yml",
+            ".github/workflows/ci.yml",
+            ".github/workflows/npm-publish.yml",
+            "scripts/verify_python_release.py",
+            "docs/releasing.md"
+          ],
+          "regression_tests": [
+            "tests/test_python_release_provenance.py::test_python_artifacts_require_exact_identity_version_and_hashes",
+            "tests/test_release_gates.py::test_python_publish_requires_token_protected_attested_release_provenance",
+            "tests/test_release_gates.py::test_release_publishers_require_tags_reachable_from_default_branch"
+          ],
+          "security_boundary": "At the repository owner's direction, Python publication uses a project-scoped PyPI API token rather than OIDC. The token is available only inside the protected pypi environment after the workflow accepts exact attested wheel and sdist bytes from successful release CI for a published tag whose commit is reachable from the protected default branch.",
+          "status": "accepted_risk_with_repository_controls",
+          "title": "PyPI token publication provenance"
+        },
+        {
+          "controls": {
+            "compatibility_wildcard_cors_rejected": true,
+            "credentialed_explicit_origins_preserved": true,
+            "typed_wildcard_cors_rejected": true
+          },
+          "id": "FOLLOWUP-F-02",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "docs/production-deployment.md"
+          ],
+          "regression_tests": [
+            "tests/test_configuration.py::test_legacy_app_rejects_credentialed_wildcard_cors",
+            "tests/test_configuration.py::test_invalid_configuration_fails_with_actionable_message"
+          ],
+          "security_boundary": "Both typed configuration and the supported compatibility application reject CORS_ALLOWED_ORIGINS=* before serving requests because credentialed CORS requires explicit origins.",
+          "status": "remediated",
+          "title": "Compatibility application rejects credentialed wildcard CORS"
+        },
+        {
+          "controls": {
+            "forwarded_headers_ignored": true,
+            "literal_loopback_browser_origin_required_when_present": true,
+            "literal_loopback_direct_host_required": true,
+            "literal_loopback_peer_required": true,
+            "proxy_configuration_rejected": true,
+            "public_configuration_rejected": true,
+            "redis_required": false
+          },
+          "id": "FOLLOWUP-F-03",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "docs/authentication.md"
+          ],
+          "regression_tests": [
+            "tests/test_app.py::test_development_email_login_rejects_public_host_through_loopback_proxy",
+            "tests/test_app.py::test_development_email_login_accepts_literal_loopback_peer_and_host",
+            "tests/test_configuration.py::test_development_email_login_rejects_proxy_and_public_auth_configuration",
+            "tests/test_configuration.py::test_legacy_app_rejects_unsafe_development_email_configuration"
+          ],
+          "scope_note": "This strict passwordless-login boundary is separate from the peer-loopback-only dynamic-origin switch used for local OAuth/SAML acceptance, because standards-based cross-origin POST callbacks may legitimately carry an opaque Origin.",
+          "security_boundary": "Passwordless development login requires a literal-loopback network peer and direct Host, plus a literal-loopback Origin or Referer when present. Proxy trust, public host/origin controls, and production providers are incompatible with the mode.",
+          "status": "remediated",
+          "title": "Development email login rejects loopback proxy laundering"
+        },
+        {
+          "controls": {
+            "forwarding_can_be_disabled": true,
+            "maximum_entries_per_container": 20,
+            "maximum_message_characters": 800,
+            "maximum_object_depth": 3,
+            "pre_transmission_redaction": true
+          },
+          "id": "FOLLOWUP-F-04",
+          "implementation": [
+            "pytincture/frontend/pytincture.js",
+            "docs/public-api.md"
+          ],
+          "regression_tests": [
+            "pytincture/frontend/tests/lifecycle.test.mjs::browser console forwarding redacts secrets and bounds complex messages"
+          ],
+          "security_boundary": "Console forwarding redacts sensitive keys and token-shaped values, bounds object depth and entries, handles cycles and unreadable values, and caps the serialized message at 800 characters before fetch constructs the request body.",
+          "status": "remediated",
+          "title": "Browser console diagnostics are sanitized before transmission"
+        },
+        {
+          "controls": {
+            "dependabot_github_actions": true,
+            "dependabot_npm": true,
+            "dependabot_pip": true,
+            "npm_audit_minimum_severity": "low",
+            "vendored_pyodide_component_inventory_verified": true
+          },
+          "id": "FOLLOWUP-F-05",
+          "implementation": [
+            ".github/dependabot.yml",
+            ".github/workflows/ci.yml",
+            "pytincture/frontend/pyodide/0.29.3/sbom.json",
+            "scripts/validate_vendored_pyodide.py"
+          ],
+          "regression_tests": [
+            "tests/test_contracts.py::test_vendored_pyodide_sbom_and_checksums_validate",
+            "tests/test_release_gates.py::test_python_publish_requires_token_protected_attested_release_provenance"
+          ],
+          "security_boundary": "Dependabot covers pip, npm, and GitHub Actions; CI fails npm audit at low severity; and the checksum-validated vendored SBOM explicitly inventories Pyodide, CPython, micropip, and the Emscripten build tool against runtime metadata.",
+          "status": "remediated",
+          "title": "Dependency monitoring and vendored runtime inventory coverage"
+        },
+        {
+          "controls": {
+            "bff_only_server_package_initializers_excluded": true,
+            "bff_server_import_traversal_stops": true,
+            "conditional_browser_imports_conservatively_included": true,
+            "hidden_and_sensitive_explicit_files_rejected": true,
+            "independent_browser_imports_preserved": true,
+            "ordinary_browser_package_initializers_traversed": true,
+            "redis_required": false
+          },
+          "id": "REVIEW-2026-08-31-H-01",
+          "implementation": [
+            "pytincture/backend/browser_packages.py",
+            "pytincture/backend/app.py",
+            "pytincture/dataclass.py",
+            "docs/browser-packaging.md",
+            "docs/contracts/appcode-v1.md"
+          ],
+          "intentional_contract": "A proven BFF module is delivered as a generated browser proxy, while its server implementation and imports remain server-only. An independently imported browser module remains part of the browser graph.",
+          "regression_tests": [
+            "tests/test_backend_modules.py::test_browser_package_stops_at_bff_server_import_boundary",
+            "tests/test_backend_modules.py::test_browser_package_keeps_independently_selected_browser_imports",
+            "tests/test_backend_modules.py::test_bff_only_package_uses_namespace_without_server_initializer",
+            "tests/test_backend_modules.py::test_browser_package_initializer_remains_for_browser_module",
+            "tests/test_backend_modules.py::test_browser_package_conservatively_includes_conditional_browser_imports",
+            "tests/test_backend_modules.py::test_configured_browser_files_fail_closed_on_sensitive_match",
+            "tests/test_app.py::test_public_assets_require_a_real_app_and_explicit_app_ownership"
+          ],
+          "security_boundary": "Static browser dependency traversal stops before following imports from a proven Pytincture BFF module. Packages containing only BFF proxies use namespace-package behavior so a server package initializer is not copied into appcode.pyt.",
+          "status": "remediated",
+          "title": "Server-only imports remain outside browser archives"
+        },
+        {
+          "controls": {
+            "class_level_export_preserved": true,
+            "comprehension_named_expression_rebinding_tracked": true,
+            "duplicate_class_definitions_rejected": true,
+            "method_level_export_required": false,
+            "post_definition_class_rebinding_rejected": true,
+            "post_definition_member_rebinding_rejected": true,
+            "redis_required": false,
+            "runtime_wrapper_and_member_verified_before_construction": true,
+            "single_outermost_export_decorator_required": true,
+            "source_definition_fingerprints_recorded": true
+          },
+          "id": "REVIEW-2026-08-31-H-02",
+          "implementation": [
+            "pytincture/dataclass.py",
+            "pytincture/backend/app.py",
+            "docs/contracts/bff-v1.md"
+          ],
+          "intentional_contract": "The class-level backend_for_frontend decorator remains the complete developer export decision; method-level export declarations are not required.",
+          "regression_tests": [
+            "tests/test_dataclass.py::test_static_manifest_tracks_named_expression_rebinding_in_comprehensions",
+            "tests/test_dataclass.py::test_static_manifest_does_not_treat_comprehension_targets_as_module_rebinding",
+            "tests/test_dataclass.py::test_static_manifest_rejects_exported_class_or_member_replacement",
+            "tests/test_dataclass.py::test_static_manifest_requires_bff_export_decorator_to_be_outermost",
+            "tests/test_app.py::test_bff_rebinding_is_rejected_before_module_import",
+            "tests/test_app.py::test_bff_dispatch_rejects_runtime_class_or_method_replacement_before_construction",
+            "tests/test_app.py::test_bff_dispatch_preserves_inner_class_decorators"
+          ],
+          "security_boundary": "The Pytincture export decorator must be the single outermost export decorator. Static discovery rejects duplicate definitions and later class/member bindings before import, records canonical AST definition fingerprints, and dispatch verifies the final Pytincture wrapper, original class, source, and current method before construction.",
+          "status": "remediated",
+          "title": "Static BFF authorization is bound to the exact runtime class and member"
+        },
+        {
+          "controls": {
+            "authenticated_calls_scoped": true,
+            "class_level_noauth_export_preserved": true,
+            "exact_application_graph_membership_required": true,
+            "mcp_calls_scoped": true,
+            "noauth_calls_scoped": true,
+            "real_application_required": true,
+            "redis_required": false,
+            "redundant_method_allowlist_required": false,
+            "unscoped_bff_routes_available": false
+          },
+          "id": "REVIEW-2026-08-31-H-03",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "pytincture/dataclass.py",
+            "contracts/public-api-v1.json",
+            "docs/contracts/bff-v1.md",
+            "docs/migrations/0.10-to-1.0.md"
+          ],
+          "intentional_contract": "When authentication is disabled, a Pytincture backend_for_frontend class decorator remains the complete public export decision; no redundant per-method no-auth allowlist is required.",
+          "regression_tests": [
+            "tests/test_app.py::test_unscoped_bff_routes_are_removed",
+            "tests/test_app.py::test_noauth_bff_requires_a_real_application_graph_without_method_allowlist",
+            "tests/test_app.py::test_noauth_bff_grant_does_not_authorize_same_basename",
+            "tests/test_app.py::test_authenticated_session_cannot_cross_application_audience",
+            "tests/test_dataclass.py::test_generate_stub_classes_requires_application_for_bff_clients",
+            "tests/test_contracts.py::test_bff_route_methods_and_generated_stub_match_contract"
+          ],
+          "security_boundary": "The unscoped classcall routes are removed. HTTP, generated-proxy, OpenAPI, and MCP BFF calls name an exact validated application, and the requested canonical module must belong to that application's static browser/BFF dependency graph before dispatch.",
+          "status": "remediated",
+          "title": "Every BFF call is scoped to a real application graph"
+        },
+        {
+          "controls": {
+            "checked_before_session_issuance": true,
+            "checked_during_application_audience_enforcement": true,
+            "configured_applications_fail_closed": true,
+            "in_process_state_required": false,
+            "provider_issuer_tenant_subject_email_domain_role_constraints": true,
+            "redis_required": false,
+            "separate_origins_recommended_for_different_trust_domains": true,
+            "single_trust_compatibility_preserved": true,
+            "sticky_sessions_required": false,
+            "unlisted_applications_denied_when_configured": true
+          },
+          "id": "REVIEW-2026-08-31-H-05",
+          "implementation": [
+            "pytincture/backend/application_admission.py",
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "docs/authentication.md",
+            "docs/configuration.md",
+            "security/accepted-architecture.md"
+          ],
+          "intentional_contract": "An explicitly single-trust service may retain one global identity policy. A configured per-application policy is required when one service admits different identities to different applications; materially different trust domains should use separate origins and processes.",
+          "regression_tests": [
+            "tests/test_application_admission.py::test_application_admission_is_stateless_and_fails_closed",
+            "tests/test_application_admission.py::test_application_admission_across_identity_providers",
+            "tests/test_application_admission.py::test_application_admission_rejects_invalid_configuration",
+            "tests/test_application_admission.py::test_config_normalizes_application_admission_and_round_trips_to_environment",
+            "tests/test_application_admission.py::test_local_login_enforces_application_admission_before_session_issuance",
+            "tests/test_app.py::test_authenticated_session_cannot_cross_application_audience"
+          ],
+          "security_boundary": "Every authentication flow builds a compact verified identity and evaluates the exact application's configured provider, issuer, tenant, subject, email/domain, and role constraints before issuing a session. The application remains the signed audience, and admission is rechecked whenever that audience is enforced.",
+          "status": "remediated",
+          "title": "Shared multi-app services can enforce stateless application identity admission"
+        },
+        {
+          "controls": {
+            "direct_local_registry_publish_available": false,
+            "local_build_and_pack_inspection_preserved": true,
+            "locally_rebuilt_worktree_publishable": false,
+            "mutable_local_tool_install_before_publish": false,
+            "protected_oidc_workflow_is_sole_publish_path": true,
+            "retained_attested_artifact_required": true
+          },
+          "id": "REVIEW-2026-08-31-H-09",
+          "implementation": [
+            ".github/workflows/npm-publish.yml",
+            "docs/releasing.md",
+            "pytincture/frontend/README.md"
+          ],
+          "regression_tests": [
+            "tests/test_release_gates.py::test_npm_publish_requires_attested_release_provenance",
+            "tests/test_release_gates.py::test_protected_workflow_is_the_only_npm_publish_path"
+          ],
+          "security_boundary": "Repository scripts cannot publish to npm. The sole registry command is inside the protected npm environment workflow after exact release-run resolution, default-branch ancestry verification, retained-artifact identity validation, and GitHub attestation verification, using trusted-publisher OIDC.",
+          "status": "remediated",
+          "title": "npm publication has one protected retained-artifact path"
+        },
+        {
+          "controls": {
+            "cdn_mode_explicit_convenience_only": true,
+            "export_verifies_bytes_before_copy": true,
+            "external_asset_anonymous_cors_required": true,
+            "external_icon_stylesheet_sri_required": true,
+            "external_pyodide_script_sri_required": true,
+            "material_icons_feature_preserved": true,
+            "redis_required": false,
+            "same_origin_browser_trust_model_preserved": true,
+            "self_hosted_service_assets_default": true,
+            "self_hosted_standalone_production_path": true,
+            "service_cdn_dependency_removed": true,
+            "versioned_runtime_pyodide_wasm_stdlib_manifest": true
+          },
+          "id": "REVIEW-2026-08-31-H-08-M-25",
+          "implementation": [
+            "pytincture/assets.py",
+            "pytincture/frontend/pytincture.js",
+            "pytincture/frontend/generate-integrity-manifest.mjs",
+            "pytincture/frontend/vendor/materialdesignicons/materialdesignicons.css",
+            "pytincture/frontend/vendor/materialdesignicons/materialdesignicons.css.map",
+            "docs/standalone-mode.md",
+            "examples/quickstart/standalone/index.html"
+          ],
+          "intentional_contract": "Browser Python and manifest-approved widget JavaScript remain trusted application-origin code. CDN loading remains available only as an explicit convenience mode using immutable versions and trusted SRI values.",
+          "regression_tests": [
+            "tests/test_assets.py::test_browser_asset_export_is_verified_and_self_contained",
+            "tests/test_assets.py::test_browser_asset_export_rejects_tampered_installed_bytes",
+            "tests/test_contracts.py::test_browser_asset_integrity_manifest_covers_runtime_dependencies",
+            "tests/test_app.py::test_security_headers_and_static_manifest",
+            "pytincture/frontend/tests/lifecycle.test.mjs::external browser assets fail closed without explicit SRI",
+            "pytincture/frontend/tests/lifecycle.test.mjs::external script and stylesheet loaders apply SRI with anonymous CORS",
+            "pytincture/frontend/browser-tests/lifecycle.spec.mjs::browser rejects an asset whose SRI does not match",
+            "pytincture/frontend/example-tests/quickstarts.spec.mjs::standalone quickstart runs with its bundled runtime"
+          ],
+          "security_boundary": "Service mode serves a vendored Material Design stylesheet/font and no longer permits cdnjs in its CSP. The Python wheel exports a complete self-hosted runtime, Pyodide, WASM, standard library, and icon tree only after verifying a versioned SHA-256/SRI manifest. Cross-origin Pyodide scripts and icon CSS fail preflight without explicit SRI and anonymous CORS. A manifest fetched from the same untrusted CDN is documented as insufficient.",
+          "status": "remediated_with_explicit_trust_boundary",
+          "title": "Standalone and shared browser assets are self-hosted or independently integrity-locked"
+        },
+        {
+          "controls": {
+            "assertion_only_idps_supported_with_signed_correlation": true,
+            "redis_required": false,
+            "response_signed_idps_supported": true,
+            "session_capped_to_earliest_saml_expiry": true,
+            "sha1_signature_and_digest_rejected": true,
+            "stateless_handshake_preserved": true,
+            "sticky_sessions_required": false,
+            "unknown_signature_and_digest_rejected": true,
+            "unsigned_outer_response_rewrapping_rejected": true
+          },
+          "id": "REVIEW-2026-08-31-M-02-M-03",
+          "implementation": [
+            "pytincture/backend/saml.py",
+            "pytincture/backend/app.py",
+            "pytincture/backend/middleware.py",
+            "docs/authentication.md",
+            "security/saml-replay-mitigation.json"
+          ],
+          "intentional_contract": "Response-signed and assertion-only SAML identity providers remain supported. Assertion-only providers must place the exact AuthnRequest correlation inside the signed assertion.",
+          "regression_tests": [
+            "tests/test_backend_modules.py::test_saml_correlation_accepts_response_or_assertion_signed_evidence",
+            "tests/test_backend_modules.py::test_assertion_only_saml_correlation_rejects_unsigned_response_rewrapping",
+            "tests/test_backend_modules.py::test_saml_response_rejects_deprecated_or_unknown_signature_algorithms",
+            "tests/test_backend_modules.py::test_saml_assertion_expirations_include_conditions_confirmation_and_session",
+            "tests/test_app.py::test_saml_acs_creates_compact_session_that_authorizes_bff_calls",
+            "tests/test_production.py::test_saml_handshake_is_portable_between_workers_without_redis"
+          ],
+          "security_boundary": "After python3-saml validates the certificate and signature, Pytincture requires Response.InResponseTo to match the signed browser transaction and proves that value is covered either by the direct Response signature or by exact SubjectConfirmationData.InResponseTo in the direct signed assertion. XML signature and digest methods must be SHA-256 or stronger, and the signed-cookie session expires at the earliest validated SAML assertion/session bound.",
+          "status": "remediated",
+          "title": "SAML request correlation and algorithms are cryptographically bounded"
+        },
+        {
+          "controls": {
+            "body_depth_and_item_limits": true,
+            "class_level_export_preserved": true,
+            "common_annotations_checked_before_import": true,
+            "double_encoded_json_accepted": false,
+            "duplicate_keys_rejected": true,
+            "generated_clients_encode_once": true,
+            "get_browser_metadata_validated": true,
+            "get_parameterless_read_only_contract": true,
+            "legacy_bare_kwargs_accepted": false,
+            "non_finite_numbers_rejected": true,
+            "redis_required": false,
+            "single_canonical_json_representation": true,
+            "static_signature_bound_before_import": true
+          },
+          "id": "REVIEW-2026-08-31-M-06-GET",
+          "implementation": [
+            "pytincture/backend/bff_requests.py",
+            "pytincture/backend/app.py",
+            "pytincture/dataclass.py",
+            "docs/contracts/bff-v1.md",
+            "contracts/public-api-v1.json"
+          ],
+          "intentional_contract": "The class-level BFF decorator remains the complete export opt-in. Body-bearing calls use exactly one JSON object with args and kwargs; GET is an explicit parameterless, read-only, repeatable developer contract.",
+          "regression_tests": [
+            "tests/test_bff_requests.py::test_canonical_bff_body_has_one_json_representation",
+            "tests/test_bff_requests.py::test_canonical_bff_body_rejects_duplicate_keys_and_non_finite_numbers",
+            "tests/test_bff_requests.py::test_canonical_bff_body_enforces_byte_depth_and_item_limits",
+            "tests/test_bff_requests.py::test_static_signature_binding_validates_shape_and_common_annotations",
+            "tests/test_app.py::test_bff_request_validation_finishes_before_application_import",
+            "tests/test_app.py::test_get_bff_rejects_cross_site_browser_metadata",
+            "tests/test_dataclass.py::test_static_manifest_defines_get_as_parameterless_read_only_contract",
+            "tests/test_dataclass.py::test_generate_stub_classes_returns_stub"
+          ],
+          "security_boundary": "Pytincture reads and validates the bounded raw body against duplicate-key, finite-number, depth/item, canonical-shape, static signature, and common annotation rules before importing the target module, constructing its class, running application code, or consuming an optional replay proof. Generated browser and MCP clients encode the canonical object once. Browser Origin and Fetch Metadata checks cover GET as well as mutations.",
+          "status": "remediated",
+          "subsequent_contract_note": "The controls below record the reviewed 2026-08-31 implementation. The current contract also accepts named JSON argument objects, normalized before the same limits, static signature/type validation, authorization, CSRF and replay checks. See docs/contracts/bff-v1.md and tests/test_bff_docs.py; this extension is not an additional external-review attestation.",
+          "title": "BFF requests are canonical and validated before application execution"
+        },
+        {
+          "controls": {
+            "all_proxy_styles_require_2xx": true,
+            "class_level_export_preserved": true,
+            "error_response_body_exposed": false,
+            "invalid_policy_return_fails_closed": true,
+            "login_redirect_401_preserved": true,
+            "policy_false_denies": true,
+            "policy_true_and_none_allow": true,
+            "redis_required": false,
+            "safe_correlation_exposed": true,
+            "typed_non_2xx_error": true
+          },
+          "id": "REVIEW-2026-08-31-M-07-POLICY",
+          "implementation": [
+            "pytincture/dataclass.py",
+            "pytincture/backend/app.py",
+            "docs/contracts/bff-v1.md",
+            "contracts/public-api-v1.json"
+          ],
+          "intentional_contract": "The class-level BFF export and simple policy-hook API remain unchanged. Generated sync, async, and streaming proxies decode only successful responses; the existing 401 application-login redirect remains supported.",
+          "regression_tests": [
+            "tests/test_dataclass.py::test_generated_bff_proxies_raise_safe_typed_errors_for_non_2xx",
+            "tests/test_dataclass.py::test_generated_bff_proxies_preserve_401_login_redirect",
+            "tests/test_app.py::test_policy_hook_true_none_false_and_invalid_results",
+            "tests/test_app.py::test_async_policy_runs_before_constructor",
+            "pytincture/frontend/e2e-tests/pytincture.spec.mjs::authenticated packaged and inline apps run through real Pyodide"
+          ],
+          "security_boundary": "Every generated proxy raises a typed PytinctureBFFError for a non-2xx response after the optional one-time replay retry. The error contains only status, operation, and the sanitized X-Request-ID correlation value and never reads or exposes the response body. Policy hooks allow only with True or the backward-compatible None result, deny on False, preserve raised HTTPException statuses, and reject all other return types.",
+          "status": "remediated",
+          "title": "Generated BFF clients and policy decisions fail closed"
+        },
+        {
+          "controls": {
+            "expiration_indexed_cleanup": true,
+            "feature_enabled_by_default": false,
+            "full_batch_rejected_atomically": true,
+            "local_session_capacity_bounded": true,
+            "local_worker_capacity_bounded": true,
+            "peer_refill_quota": true,
+            "pluggable_atomic_store_contract": true,
+            "redis_is_optional_adapter": true,
+            "redis_required": false,
+            "session_refill_quota": true,
+            "strict_shared_mode_fails_closed": true,
+            "worker_refill_quota": true
+          },
+          "id": "REVIEW-2026-08-31-M-08-REPLAY-ISSUANCE",
+          "implementation": [
+            "pytincture/backend/replay.py",
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "docs/contracts/bff-v1.md",
+            "security/accepted-architecture.md"
+          ],
+          "intentional_contract": "BFF replay proofs remain disabled by default. Normal signed-cookie sessions, SAML handshakes, BFF calls, and load balancing remain stateless and require neither Redis, process-memory session storage, nor sticky routing.",
+          "regression_tests": [
+            "tests/test_backend_modules.py::test_local_replay_store_is_bounded_expiration_indexed_and_single_use",
+            "tests/test_backend_modules.py::test_local_replay_store_rejects_worker_capacity_without_partial_batch",
+            "tests/test_backend_modules.py::test_shared_replay_adapter_exposes_vendor_neutral_atomic_contract",
+            "tests/test_app.py::test_bff_replay_refills_have_session_peer_and_worker_quotas",
+            "tests/test_app.py::test_bff_replay_refill_rejects_full_local_store_without_partial_issue",
+            "tests/test_configuration.py::test_strict_replay_fails_startup_with_only_a_local_store",
+            "tests/test_configuration.py::test_strict_replay_accepts_a_custom_shared_atomic_store_without_redis"
+          ],
+          "security_boundary": "When replay proofs are enabled, refill requests are limited per signed session, direct peer, and worker. The local store has fixed per-session and worker capacities, expiration-indexed cleanup, and atomic single-worker consumption. Strict fleet-wide single consumption is accepted only through a provider implementing the vendor-neutral AtomicReplayStore contract and declaring shared cross-worker atomicity; strict mode fails startup with a local-only provider.",
+          "status": "remediated",
+          "title": "Optional BFF replay-proof issuance is bounded and topology-explicit"
+        },
+        {
+          "controls": {
+            "isolated_streaming_supported": false,
+            "optional_process_cpu_limit": true,
+            "optional_process_memory_limit_linux": true,
+            "optional_process_output_limit": true,
+            "optional_process_per_user_limit": true,
+            "optional_process_stable_identity_key": true,
+            "optional_process_wall_timeout_killable": true,
+            "ordinary_result_byte_limit": true,
+            "ordinary_result_depth_limit": true,
+            "ordinary_result_item_limit": true,
+            "process_isolation_mandatory": false,
+            "redis_required": false,
+            "stream_item_encoded_before_retention": true,
+            "timed_out_thread_slot_retained": true,
+            "trusted_execution_default": true
+          },
+          "id": "REVIEW-2026-08-31-M-09-BFF-EXECUTION",
+          "implementation": [
+            "pytincture/backend/results.py",
+            "pytincture/backend/execution.py",
+            "pytincture/backend/streaming.py",
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "docs/contracts/bff-v1.md",
+            "security/accepted-architecture.md"
+          ],
+          "intentional_contract": "BFF modules remain deployment-trusted server application code. Trusted thread/async execution stays the simple default so normal object, async, and streaming behavior is preserved; process isolation is an explicit opt-in and is not required for ordinary BFFs.",
+          "regression_tests": [
+            "tests/test_backend_modules.py::test_bff_result_encoder_stops_at_byte_depth_and_item_limits",
+            "tests/test_backend_modules.py::test_stream_rejects_one_oversized_item_before_retaining_serialized_bytes",
+            "tests/test_backend_modules.py::test_optional_process_executor_kills_cpu_work_and_recovers",
+            "tests/test_backend_modules.py::test_optional_process_executor_enforces_per_user_and_output_limits",
+            "tests/test_app.py::test_ordinary_bff_results_are_serialized_under_a_hard_byte_limit",
+            "tests/test_app.py::test_class_call_timeout_returns_gateway_timeout",
+            "tests/test_app.py::test_timed_out_sync_bff_holds_capacity_until_worker_recovers",
+            "tests/test_app.py::test_class_call_uses_optional_process_isolation_when_configured",
+            "tests/test_app.py::test_isolated_process_fairness_uses_stable_hmac_identity",
+            "tests/test_app.py::test_multiple_sessions_share_one_isolated_process_fairness_quota",
+            "tests/test_configuration.py::test_trusted_bff_execution_remains_the_simple_default"
+          ],
+          "security_boundary": "Ordinary JSON results are encoded under configurable byte, depth, and item limits before a response is retained. Stream items are encoded under the remaining byte budget before retention. Timed-out trusted threads retain their admission slot until exit. The optional non-streaming process executor has per-worker and per-identity admission keyed by a domain-separated HMAC over stable signed identity, killable wall time, CPU limits on POSIX, address-space limits on Linux, and the same output limits; it releases capacity after timeout so later work can recover.",
+          "status": "remediated",
+          "title": "BFF result serialization is bounded and harder isolation is optional"
+        },
+        {
+          "controls": {
+            "cache_aggregate_byte_limit": true,
+            "cache_entry_limit": true,
+            "changed_source_forces_digest_rebuild": true,
+            "head_reads_asset_body": false,
+            "public_asset_buffered_in_memory": false,
+            "public_asset_nofollow_descriptor": true,
+            "public_asset_reads_off_event_loop": true,
+            "redis_required": false,
+            "sticky_routing_required": false,
+            "warm_archive_source_rehash": false,
+            "warm_archive_source_reread": false,
+            "widget_get_digest_incremental": true
+          },
+          "id": "REVIEW-2026-08-31-M-10-PUBLIC-FILE-APPCODE-CACHE",
+          "implementation": [
+            "pytincture/backend/safe_paths.py",
+            "pytincture/backend/browser_packages.py",
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "pytincture/frontend/pytincture.js",
+            "docs/contracts/appcode-v1.md"
+          ],
+          "intentional_contract": "Public application assets remain application-owned, unauthenticated deployment files, and appcode archives remain disposable per-worker optimizations. Neither mechanism stores login or session state, requires Redis, or requires sticky routing.",
+          "regression_tests": [
+            "tests/test_backend_modules.py::test_secure_stat_reads_metadata_without_reading_file_contents",
+            "tests/test_backend_modules.py::test_appcode_warm_cache_uses_metadata_without_rereading_sources",
+            "tests/test_backend_modules.py::test_appcode_cache_enforces_aggregate_byte_budget",
+            "tests/test_app.py::test_large_public_asset_head_is_metadata_only_and_get_streams_off_loop",
+            "tests/test_app.py::test_detected_widget_wheel_is_public_but_unrelated_wheels_are_not",
+            "tests/test_performance_contract.py::test_performance_budget_contract_covers_roadmap_targets",
+            "tests/test_performance_contract.py::test_ci_runs_and_retains_every_performance_profile",
+            "pytincture/frontend/e2e-tests/pytincture.spec.mjs::authenticated packaged and inline apps run through real Pyodide"
+          ],
+          "security_boundary": "Direct assets are authorized using the existing application ownership boundary, opened through no-follow descriptors, and streamed in bounded chunks with blocking filesystem work off the event loop. HEAD reads metadata only. Warm appcode cache hits validate the digest-bearing source fingerprint using device, inode, size, mtime, ctime, and relevant directory metadata before returning immutable bytes; changed metadata forces a full secure reread and SHA-256 rebuild. The LRU enforces both entry-count and aggregate-byte limits.",
+          "status": "remediated",
+          "title": "Public file streaming and byte-bounded appcode caching"
+        },
+        {
+          "controls": {
+            "negative_misses_cached": false,
+            "normal_sessions_server_side": false,
+            "opt_in_cache_entry_bound": true,
+            "opt_in_cache_ttl_bound": true,
+            "readiness_cache_ttl_bound": true,
+            "readiness_refresh_coalesced": true,
+            "redis_read_cache_default": false,
+            "redis_required": false,
+            "remote_failure_circuit": true,
+            "remote_operation_admission_bound": true,
+            "remote_readiness_off_event_loop": true,
+            "remote_replay_issuance_off_event_loop": true,
+            "remote_revocation_lookup_admission_bound": true,
+            "remote_revocation_lookup_off_event_loop": true,
+            "remote_transport_deadline": true,
+            "saml_dedicated_concurrency_gate": true,
+            "saml_queue_bound": true,
+            "saml_runtime_deadline": true,
+            "saml_signature_off_event_loop": true,
+            "saml_xml_off_event_loop": true,
+            "stateless_session_uses_remote_gate": false,
+            "sticky_routing_required": false,
+            "timed_out_saml_slot_retained": true
+          },
+          "id": "REVIEW-2026-08-31-M-11-M-12-BLOCKING-SHARED-STORE",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "pytincture/backend/storage.py",
+            "pytincture/backend/limits.py",
+            "pytincture/configuration.py",
+            "docs/production-deployment.md",
+            "security/accepted-architecture.md"
+          ],
+          "intentional_contract": "Normal sessions, SAML browser handshakes, and load balancing remain stateless and browser-carried. Redis is an optional adapter only for deployments that explicitly select shared revocation or strict fleet-wide replay consumption.",
+          "regression_tests": [
+            "tests/test_backend_modules.py::test_redis_read_cache_is_opt_in_positive_ttl_bounded_and_invalidated",
+            "tests/test_backend_modules.py::test_remote_store_circuit_opens_and_recovers",
+            "tests/test_backend_modules.py::test_bounded_thread_stage_keeps_event_loop_responsive_and_holds_timed_out_slot",
+            "tests/test_app.py::test_readiness_checks_are_offloaded_coalesced_and_briefly_cached",
+            "tests/test_app.py::test_readiness_fails_when_shared_state_is_unavailable",
+            "tests/test_app.py::test_main_page_revocation_lookup_runs_off_the_event_loop",
+            "tests/test_app.py::test_bff_replay_refill_store_work_runs_off_the_event_loop",
+            "tests/test_app.py::test_saml_acs_creates_compact_session_that_authorizes_bff_calls",
+            "tests/test_configuration.py::test_replay_proofs_remain_optional_and_do_not_require_redis",
+            "tests/test_production.py::test_saml_handshake_is_portable_between_workers_without_redis"
+          ],
+          "security_boundary": "SAML XML prevalidation and toolkit signature/correlation processing execute in worker threads behind a dedicated concurrency and queue gate with a runtime deadline; a timed-out thread retains its slot until exit. Async readiness, every enabled shared session-revocation read, and replay issuance offload optional store work behind a separate bounded gate and network deadline. Signed-cookie validation without a shared provider remains local and stateless. Readiness refreshes are coalesced for a short TTL. RedisDict disables read caching by default; explicit caching stores only positive values, expires them by TTL, enforces LRU entry capacity, and invalidates local mutations. Remote calls retain transport deadlines and a failure circuit breaker.",
+          "status": "remediated",
+          "title": "Blocking SAML and optional shared-store work is bounded and off-loop"
+        },
+        {
+          "controls": {
+            "api_docs_authenticated_mode": true,
+            "api_docs_disabled_mode": true,
+            "api_docs_public_mode": true,
+            "browser_log_body_bound": true,
+            "browser_log_exact_schema": true,
+            "browser_log_message_bound": true,
+            "browser_log_noauth_default": false,
+            "browser_log_noauth_explicit_opt_in": true,
+            "browser_log_rate_limit": true,
+            "dynamic_private_no_store": true,
+            "dynamic_vary_cookie_authorization": true,
+            "hsts_edge_owned": true,
+            "opt_in_access_log_query_string_recorded": false,
+            "process_memory_required": false,
+            "production_edge_evidence_required_for_final": true,
+            "redis_required": false,
+            "sticky_routing_required": false,
+            "structured_request_log_path_only": true,
+            "uvicorn_access_log_default": false
+          },
+          "id": "REVIEW-2026-08-31-M-13-M-14-LOGS-DOCS-HSTS",
+          "implementation": [
+            "pytincture/__init__.py",
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "pytincture/dataclass.py",
+            "pytincture/frontend/pytincture.js",
+            "scripts/check_release_gates.py",
+            "contracts/release-qualification-v1.schema.json",
+            "release/qualification.json",
+            "docs/production-deployment.md",
+            "security/accepted-architecture.md"
+          ],
+          "intentional_contract": "Browser-carried signed sessions and load balancing remain stateless. Browser diagnostics and API documentation remain optional service features. HSTS remains a TLS-edge responsibility because only the edge knows the public domain's subdomain and preload policy. None of these controls requires Redis, process memory, or sticky routing.",
+          "regression_tests": [
+            "tests/test_launcher.py::test_optional_uvicorn_access_log_strips_query_strings",
+            "tests/test_production.py::test_request_completion_log_is_structured",
+            "tests/test_app.py::test_logs_endpoint",
+            "tests/test_app.py::test_logs_endpoint_rejects_noncanonical_payloads",
+            "tests/test_app.py::test_logs_endpoint_has_dedicated_size_and_rate_limits",
+            "tests/test_app.py::test_noauth_browser_logging_requires_explicit_opt_in",
+            "tests/test_app.py::test_main_app_frontend_files_share_one_instance_uuid",
+            "tests/test_configuration.py::test_bff_documentation_can_require_authentication_or_be_disabled",
+            "tests/test_configuration.py::test_browser_diagnostic_and_documentation_controls_fail_closed",
+            "tests/test_release_gates.py::test_final_gate_requires_production_edge_hsts_and_proxy_evidence",
+            "pytincture/frontend/tests/lifecycle.test.mjs::browser console forwarding redacts secrets and bounds complex messages"
+          ],
+          "security_boundary": "The launcher disables raw Uvicorn access logging by default and strips complete query strings when an operator opts in. Structured request events record the normalized path only. Authentication, session, BFF, private appcode, MCP, browser-log, and documentation responses are private, non-cacheable, and vary on Cookie and Authorization. Browser diagnostics use a strict bounded schema, client-side secret redaction, server-side message/body limits, dedicated rate limiting, browser-origin/CSRF enforcement, and no-auth opt-in. API docs can be public, authenticated, or absent. Final 1.0 qualification fails until durable production-edge evidence passes HTTPS redirect, HSTS, canonical-origin, and trusted-proxy checks.",
+          "status": "remediated",
+          "title": "Dynamic responses, diagnostics, access logs, documentation, and edge HSTS are fail-closed"
+        },
+        {
+          "controls": {
+            "complete_pyodide_catalog_sbom": true,
+            "exact_npm_inventory": true,
+            "exact_sdist_inventory": true,
+            "exact_wheel_inventory": true,
+            "history_secret_scan": true,
+            "micropip_embedded_libraries_inventoried": true,
+            "official_pyodide_archive_verified": true,
+            "redis_required": false,
+            "registry_distribution_hashes_required": true,
+            "release_build_isolation_unpinned": false,
+            "repository_secret_scan": true,
+            "runtime_state_added": false,
+            "sensitive_release_entries_rejected": true,
+            "unexpected_release_entries_rejected": true,
+            "uv_lock_frozen": true
+          },
+          "id": "REVIEW-2026-08-31-M-19-M-21-M-23-SECRET-SCAN",
+          "implementation": [
+            "uv.lock",
+            "pyproject.toml",
+            ".github/workflows/ci.yml",
+            ".gitleaksignore",
+            "contracts/release-artifacts-v1.json",
+            "scripts/install_locked_artifact.py",
+            "scripts/inspect_release_artifacts.py",
+            "scripts/generate_vendored_pyodide_sbom.py",
+            "scripts/validate_vendored_pyodide.py",
+            "scripts/scan_repository_secrets.py",
+            "security/pyodide-upstream.json",
+            "pytincture/frontend/pyodide/0.29.3/sbom.json"
+          ],
+          "intentional_contract": "User dependency ranges remain compatible while Pytincture development, qualification, and publication use a frozen hash-bearing dependency graph. These controls affect build and publication only; they add no service state, Redis, or sticky-routing requirement.",
+          "regression_tests": [
+            "tests/test_release_security.py::test_release_contract_is_an_exact_inventory_and_rejects_extra_files",
+            "tests/test_release_security.py::test_release_inventory_rejects_sensitive_files_even_if_declared",
+            "tests/test_release_security.py::test_vendored_sbom_is_generated_and_covers_complete_pyodide_catalog",
+            "tests/test_release_security.py::test_upstream_pyodide_manifest_pins_official_release_archive",
+            "tests/test_release_security.py::test_secret_scanner_detects_seeded_credentials_without_returning_values",
+            "tests/test_release_security.py::test_uv_lock_covers_registry_inputs_with_sha256_hashes",
+            "tests/test_release_security.py::test_ci_uses_frozen_python_inputs_and_release_security_gates",
+            "tests/test_release_security.py::test_frozen_lock_has_no_drift"
+          ],
+          "security_boundary": "CI verifies lock freshness, installs release dependencies from uv.lock with hashes, and builds without an unpinned isolated backend. Wheel, sdist, and npm archives must match exact normalized inventories and reject duplicate, unexpected, and sensitive entries. The generated SPDX inventory covers all embedded runtime files, micropip-vendored libraries, and every package in the Pyodide catalog. CI downloads the official Pyodide release archive, verifies its recorded digest and size, compares exact core bytes, and permits only one documented upstream metadata correction. Deterministic tracked-source and Gitleaks history scans block credential material before attestation.",
+          "status": "remediated",
+          "title": "Release inputs, artifact inventories, vendored runtime provenance, and secret scans are fail-closed"
+        },
+        {
+          "controls": {
+            "administrator_allowlist_optional": true,
+            "administrator_asset_hashes_override_package_manifest": true,
+            "browser_package_imported_for_discovery": false,
+            "configured_allowlist_fails_closed": true,
+            "exact_pins_preserved": true,
+            "html_script_metadata_context_safe": true,
+            "installed_distribution_metadata_static": true,
+            "package_manifest_is_independent_authorization_root": false,
+            "pluggable_widgetsets_preserved": true,
+            "redis_required": false,
+            "runtime_state_added": false
+          },
+          "id": "REVIEW-2026-08-31-M-17-WIDGET-TRUST",
+          "implementation": [
+            "pytincture/backend/browser_packages.py",
+            "pytincture/backend/widget_trust.py",
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "pytincture/frontend/index.html",
+            "docs/browser-packaging.md",
+            "docs/widgetset-packaging.md"
+          ],
+          "intentional_contract": "Widgetsets remain pluggable exact-pinned browser wheels. A wheel-owned asset manifest is integrity metadata for that selected wheel, not an independent authorization root. High-trust deployments may add an exact administrator-owned distribution/version/asset-hash allowlist without changing ordinary developer usage.",
+          "regression_tests": [
+            "tests/test_backend_modules.py::test_widgetset_discovery_reads_installed_distribution_without_importing",
+            "tests/test_backend_modules.py::test_widgetset_discovery_skips_distribution_scan_for_stdlib_imports",
+            "tests/test_backend_modules.py::test_widget_trust_policy_is_an_exact_administrator_allowlist",
+            "tests/test_configuration.py::test_deployment_widget_trust_policy_overrides_manifest_and_escapes_html",
+            "tests/test_configuration.py::test_deployment_widget_trust_policy_fails_closed_for_unlisted_version",
+            "tests/test_configuration.py::test_widget_trust_policy_rejects_ambiguous_or_unhashed_entries"
+          ],
+          "security_boundary": "The service discovers widget metadata only through AST parsing and installed distribution metadata/owned source; it never imports browser packages. When a deployment trust policy is configured, an unlisted distribution or version is rejected, the administrator manifest overrides wheel self-attestation, the development fallback is not exposed, and every selected browser asset is still ownership- and SHA-256-verified before evaluation. All selected metadata is JSON-serialized with HTML-script escaping.",
+          "status": "remediated_with_optional_high_trust_policy",
+          "title": "Widget discovery is non-executing and administrator trust can fail closed"
+        },
+        {
+          "controls": {
+            "allowlist_checked_after_rate_admission": true,
+            "csrf_transaction_application_bound": true,
+            "disallowed_account_dummy_hash_work": true,
+            "mcp_json_login_one_time_csrf": true,
+            "oversized_identity_session_issued": false,
+            "password_login_one_time_csrf": true,
+            "per_claim_value_limit": true,
+            "positive_claim_allowlist": true,
+            "process_memory_required": false,
+            "production_secure_cookie_forced": true,
+            "redis_required": false,
+            "signed_browser_session_preserved": true,
+            "signed_cookie_byte_limit": true,
+            "sticky_routing_required": false,
+            "total_claim_count_limit": true,
+            "total_identity_byte_limit": true,
+            "unknown_account_dummy_hash_work": true
+          },
+          "id": "REVIEW-2026-08-31-M-15-M-16-M-18-PREAUTH-CSRF",
+          "implementation": [
+            "pytincture/configuration.py",
+            "pytincture/backend/auth.py",
+            "pytincture/backend/app.py",
+            "pytincture/backend/middleware.py",
+            "docs/authentication.md",
+            "docs/configuration.md"
+          ],
+          "intentional_contract": "Authenticated sessions remain signed browser-carried data that any replica sharing the signing key can validate. Redis, process-memory session tables, and sticky routing are not required.",
+          "regression_tests": [
+            "tests/test_configuration.py::test_production_authentication_requires_exact_https_origin_controls",
+            "tests/test_app.py::test_unknown_and_disallowed_logins_share_admission_and_dummy_hash_work",
+            "tests/test_app.py::test_browser_login_and_logout_have_csrf_and_origin_protection",
+            "tests/test_app.py::test_mcp_password_login_requires_one_time_application_transaction",
+            "tests/test_app.py::test_authenticated_identity_enforces_claim_count_and_total_size",
+            "tests/test_app.py::test_authenticated_session_enforces_signed_cookie_envelope",
+            "tests/test_app.py::test_oversized_authenticator_claims_fail_login_without_session",
+            "tests/test_production.py::test_signed_session_cookie_is_portable_between_workers"
+          ],
+          "security_boundary": "Every non-development authentication profile requires an HTTPS canonical origin and Secure cookies. Password admission occurs before allowlist outcome, and unknown or disallowed identities perform bounded dummy password-hash work. Browser-form and JSON password login each require a short-lived, application-bound, one-time CSRF transaction. Retained identity claims use a positive allowlist plus per-value, count, canonical-identity-byte, and final signed-cookie limits; oversized provider identities fail without issuing an authenticated session.",
+          "status": "remediated",
+          "title": "Secure production cookies, uniform local-login work, one-time preauthentication, and bounded stateless sessions"
+        },
+        {
+          "controls": {
+            "future_digest_reference_required": true,
+            "future_protected_release_required": true,
+            "future_sbom_required": true,
+            "future_signature_or_attestation_required": true,
+            "mutable_container_tag_recommended": false,
+            "official_container_currently_published": false,
+            "redis_required": false,
+            "runtime_state_added": false,
+            "unsupported_dockerhub_image_recommended": false
+          },
+          "id": "REVIEW-2026-08-31-M-24-CONTAINER-GUIDANCE",
+          "implementation": [
+            "README.md",
+            "docs/releasing.md"
+          ],
+          "intentional_contract": "Pytincture currently publishes verified Python and npm artifacts, not an official container image. Applications may build deployment-owned images from exact verified releases.",
+          "regression_tests": [
+            "tests/test_release_security.py::test_docs_do_not_recommend_an_unsupported_mutable_container_image"
+          ],
+          "security_boundary": "Documentation does not recommend a mutable or unsupported Pytincture image. Official container guidance remains blocked until a protected tagged-release workflow publishes immutable version and digest references, generates an SBOM, and signs or attests the image.",
+          "status": "remediated_by_removing_unsupported_guidance",
+          "title": "Unsupported mutable container recommendation removed"
+        },
+        {
+          "controls": {
+            "concurrent_factories_isolated": true,
+            "factory_environment_process_global_mutation": false,
+            "multiple_factories_preserved": true,
+            "non_finite_limits_rejected": true,
+            "process_memory_session_requirement_added": false,
+            "raw_asgi_import_deprecated": true,
+            "raw_asgi_import_fail_closed": true,
+            "redis_required": false,
+            "typed_validation_all_startup_paths": true
+          },
+          "id": "REVIEW-2026-08-31-CONFIG-FACTORY-ISOLATION",
+          "implementation": [
+            "pytincture/configuration.py",
+            "pytincture/factory.py",
+            "pytincture/backend/app.py",
+            "pytincture/backend/browser_packages.py",
+            "pytincture/dataclass.py",
+            "scripts/smoke_optional_extra.py",
+            "docs/backend-architecture.md"
+          ],
+          "intentional_contract": "Multiple Pytincture application factories may coexist in one process without Redis, sticky routing, or process-global configuration handoff. The raw ASGI module remains a deprecated compatibility entrypoint.",
+          "regression_tests": [
+            "tests/test_configuration.py::test_every_floating_point_environment_setting_rejects_non_finite_values",
+            "tests/test_configuration.py::test_legacy_raw_asgi_import_uses_typed_non_finite_validation",
+            "tests/test_configuration.py::test_concurrent_create_app_never_exposes_instance_environment",
+            "tests/test_configuration.py::test_create_app_isolates_routes_registries_and_session_stores"
+          ],
+          "security_boundary": "Every supported startup path validates through PytinctureConfig before route assembly. Every floating-point timeout and resource limit must be finite. Factory-specific settings are injected into an isolated backend module and are never copied into the real process environment, including during concurrent factory creation.",
+          "status": "remediated",
+          "title": "Typed startup parity, finite limits, and instance-local factory configuration"
+        },
+        {
+          "controls": {
+            "cold_graph_bytes_bounded": true,
+            "cold_graph_directories_bounded": true,
+            "cold_graph_files_bounded": true,
+            "cold_graph_scanned_files_bounded": true,
+            "directory_identity_revalidated_on_hit": true,
+            "impossible_operation_rejected_before_graph_scan": true,
+            "new_glob_matches_invalidate": true,
+            "process_local_lru_entries_bounded": true,
+            "redis_required": false,
+            "same_name_source_edits_invalidate": true,
+            "source_identity_revalidated_on_hit": true,
+            "sticky_routing_required": false
+          },
+          "id": "REVIEW-2026-09-01-PT-09",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "pytincture/backend/browser_packages.py",
+            "pytincture/configuration.py",
+            "docs/configuration.md",
+            "docs/contracts/bff-v1.md",
+            "docs/production-deployment.md"
+          ],
+          "intentional_contract": "Application graphs may change during local development, while production replicas remain stateless and independently disposable.",
+          "regression_tests": [
+            "tests/test_app.py::test_impossible_bff_operation_is_rejected_before_application_graph_scan",
+            "tests/test_app.py::test_application_graph_cache_reuses_and_invalidates_same_name_sources",
+            "tests/test_app.py::test_application_graph_cache_detects_new_globbed_file",
+            "tests/test_app.py::test_application_graph_cache_detects_new_import_in_existing_namespace",
+            "tests/test_app.py::test_application_graph_applies_aggregate_source_limit",
+            "tests/test_backend_modules.py::test_configured_browser_file_scan_has_explicit_directory_and_file_limits"
+          ],
+          "security_boundary": "An impossible registry operation is rejected before application graph work. Valid operations use a bounded per-worker graph snapshot only while secure source identities and relevant directory identities remain unchanged. Cold discovery enforces file-count, per-file, aggregate-byte, directory, and scanned-file limits.",
+          "status": "remediated",
+          "title": "Application BFF graph discovery is cached, bounded, and self-invalidating"
+        },
+        {
+          "controls": {
+            "application_object_ids_supported": true,
+            "domain_admission_removed": false,
+            "email_admission_removed": false,
+            "microsoft_oid_retained_in_signed_session": true,
+            "mutable_email_admission_warning": true,
+            "redis_required": false,
+            "sticky_routing_required": false,
+            "warning_is_non_blocking": true
+          },
+          "id": "REVIEW-2026-09-01-PT-13",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "pytincture/backend/application_admission.py",
+            "docs/authentication.md",
+            "docs/configuration.md",
+            "docs/production-deployment.md",
+            "docs/migrations/0.10-to-1.0.md"
+          ],
+          "intentional_contract": "Applications may continue using email and domain admission for simple workflows; Pytincture does not silently change their authorization policy.",
+          "regression_tests": [
+            "tests/test_app.py::test_microsoft_login_stores_only_compact_stateless_claims",
+            "tests/test_app.py::test_microsoft_mutable_email_admission_warns_without_breaking_configuration",
+            "tests/test_app.py::test_microsoft_stable_identity_admission_emits_no_mutable_email_warning",
+            "tests/test_application_admission.py::test_application_admission_is_stateless_and_fails_closed",
+            "tests/test_application_admission.py::test_application_admission_across_identity_providers"
+          ],
+          "security_boundary": "Microsoft sessions retain the immutable tenant-scoped oid claim. Stateless per-application admission can match object_ids, and production startup emits a structured advisory warning when Microsoft admission relies only on mutable email or domain. Sensitive applications should use tenant/object id, issuer/subject, or provider roles.",
+          "status": "remediated_additive_hardening",
+          "title": "Microsoft immutable object identity is available for authorization"
+        },
+        {
+          "controls": {
+            "argon2id_replacement_available_after_bcrypt_success": true,
+            "generic_login_failure_preserved": true,
+            "oversized_bcrypt_and_unknown_verifier_sequence_equal": true,
+            "oversized_bcrypt_fast_error_reachable": false,
+            "password_api_changed": false,
+            "process_memory_credential_state_added": false,
+            "redis_required": false,
+            "static_environment_mutated": false
+          },
+          "id": "REVIEW-2026-09-01-PT-14",
+          "implementation": [
+            "pytincture/backend/auth.py",
+            "docs/authentication.md",
+            "docs/migrations/0.10-to-1.0.md"
+          ],
+          "intentional_contract": "Local password values and login APIs remain compatible. Static environment configuration is never mutated into hidden process-local credential state.",
+          "regression_tests": [
+            "tests/test_backend_modules.py::test_password_verifier_uses_equal_work_for_unknown_and_oversized_bcrypt",
+            "tests/test_backend_modules.py::test_password_verifier_selects_the_configured_hash_scheme",
+            "tests/test_backend_modules.py::test_successful_bcrypt_verification_returns_argon2id_upgrade"
+          ],
+          "security_boundary": "A bcrypt password exceeding 72 UTF-8 bytes performs the same Argon2id dummy verification as an unknown account before denial. Mutable application-owned credential stores may persist a helper-provided Argon2id replacement after successful bcrypt authentication.",
+          "status": "remediated",
+          "title": "Oversized bcrypt failures do not reveal configured accounts"
+        },
+        {
+          "controls": {
+            "boolean_integer_alias_accepted": false,
+            "integer_float_alias_accepted": false,
+            "literal_exact_runtime_type_required": true,
+            "literal_exact_value_required": true,
+            "none_matched_explicitly": true,
+            "redis_required": false,
+            "runtime_state_added": false,
+            "valid_literal_api_preserved": true
+          },
+          "id": "REVIEW-2026-09-01-PT-15",
+          "implementation": [
+            "pytincture/backend/bff_requests.py",
+            "docs/contracts/bff-v1.md"
+          ],
+          "intentional_contract": "Literal annotations remain convenient request declarations and support mixed bool, integer, float, string, and None options.",
+          "regression_tests": [
+            "tests/test_bff_requests.py::test_literal_validation_requires_exact_runtime_type",
+            "tests/test_bff_requests.py::test_literal_validation_accepts_each_exact_option_in_a_mixed_literal"
+          ],
+          "security_boundary": "A JSON value satisfies a Literal only when both its exact Python runtime type and value match one declared option. None is matched by identity, preventing bool/int/float equality aliases from bypassing a type-sensitive selector.",
+          "status": "remediated",
+          "title": "BFF Literal values require their declared JSON type"
+        },
+        {
+          "controls": {
+            "api_docs_authenticated_or_disabled_available": true,
+            "development_default_changed": false,
+            "named_readiness_checks_can_be_hidden": true,
+            "operator_bearer_details_available": true,
+            "operator_token_strong_and_redacted": true,
+            "public_health_status_preserved": true,
+            "public_readiness_status_preserved": true,
+            "redis_required": false,
+            "sticky_routing_required": false,
+            "version_can_be_hidden": true
+          },
+          "id": "REVIEW-2026-09-01-PT-16",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "docs/configuration.md",
+            "docs/production-deployment.md",
+            "docs/migrations/0.10-to-1.0.md"
+          ],
+          "intentional_contract": "Load balancers can always read liveness/readiness status and HTTP codes, while development retains the existing detailed response by default.",
+          "regression_tests": [
+            "tests/test_app.py::test_health_and_readiness_endpoints",
+            "tests/test_app.py::test_diagnostic_details_can_be_minimal_or_operator_only",
+            "tests/test_configuration.py::test_bff_documentation_can_require_authentication_or_be_disabled",
+            "tests/test_configuration.py::test_browser_diagnostic_and_documentation_controls_fail_closed"
+          ],
+          "security_boundary": "API documentation already supports public, authenticated, and disabled modes. Health and readiness details now support public, minimal, and operator modes. Operator detail requires a strong stateless Bearer token compared in constant time; responses are private and not stored by caches.",
+          "status": "remediated_additive_hardening",
+          "title": "Public probe status is separate from optional diagnostic details"
+        },
+        {
+          "controls": {
+            "authenticated_responses_private_no_store": true,
+            "exact_cache_directive_parsing": true,
+            "protected_public_cache_override_allowed": false,
+            "public_framework_assets_cacheable": true,
+            "public_responses_set_cookie_allowed": false,
+            "redis_required": false,
+            "server_session_state_added": false,
+            "session_bearing_responses_private_no_store": true
+          },
+          "id": "REVIEW-2026-09-02-SR-01",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "pytincture/backend/middleware.py",
+            "SECURITY.md"
+          ],
+          "intentional_contract": "Versioned framework assets remain public and immutable; application, authentication, session, and BFF data remain private.",
+          "regression_tests": [
+            "tests/test_app.py::test_bff_cannot_override_private_cache_policy",
+            "tests/test_backend_modules.py::test_session_middleware_protects_cookie_responses_and_strips_public_state",
+            "tests/test_app.py::test_authenticated_frontend_assets_are_public_and_do_not_rotate_session"
+          ],
+          "security_boundary": "Protected-route classification is authoritative over application Cache-Control headers. Every protected or session-bearing response is private/no-store with Cookie and Authorization variance, while an intentionally public response has all Set-Cookie headers removed.",
+          "status": "remediated",
+          "title": "Protected responses cannot opt into public caching"
+        },
+        {
+          "controls": {
+            "application_checked_before_body": true,
+            "authentication_runtime_shortened": false,
+            "idle_receive_deadline": true,
+            "password_form_ingress_bounded": true,
+            "password_json_ingress_bounded": true,
+            "per_peer_concurrency_bounded": true,
+            "per_worker_concurrency_and_queue_bounded": true,
+            "redis_required": false,
+            "saml_acs_ingress_bounded": true,
+            "server_session_state_added": false,
+            "total_receive_deadline": true
+          },
+          "id": "REVIEW-2026-09-02-SR-02",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "docs/configuration.md",
+            "docs/production-deployment.md",
+            "docs/migrations/0.10-to-1.0.md"
+          ],
+          "intentional_contract": "Password and SAML authentication remain stateless and load-balancer friendly. Upload deadlines are separate from authentication, assertion-validation, session, and BFF execution time.",
+          "regression_tests": [
+            "tests/test_app.py::test_auth_ingress_idle_timeout_releases_worker_and_peer_slots",
+            "tests/test_app.py::test_auth_ingress_total_timeout_applies_while_chunks_keep_moving",
+            "tests/test_app.py::test_auth_ingress_rejects_unknown_application_before_receiving_body",
+            "tests/test_app.py::test_mcp_password_login_requires_one_time_application_transaction"
+          ],
+          "security_boundary": "Password-form, password-JSON, and SAML ACS routes perform cheap feature, content-type, application, and provider checks before parsing. Request bodies use bounded per-peer and per-worker admission and independent idle and total receive deadlines.",
+          "status": "remediated",
+          "title": "Authentication request uploads are bounded before parsing"
+        },
+        {
+          "controls": {
+            "admission_before_first_receive": true,
+            "execution_capacity_reduced": false,
+            "per_peer_upload_concurrency_bounded": true,
+            "per_worker_upload_concurrency_bounded": true,
+            "queued_bodies_buffered": false,
+            "redis_required": false,
+            "sticky_routing_required": false,
+            "upload_queue_bounded": true,
+            "upload_slot_released_before_execution_admission": true
+          },
+          "id": "REVIEW-2026-09-02-SR-03",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "docs/configuration.md",
+            "docs/production-deployment.md",
+            "docs/migrations/0.10-to-1.0.md"
+          ],
+          "intentional_contract": "BFF upload admission is independent of sync, async, isolated-process, and streaming execution capacity and timeouts.",
+          "regression_tests": [
+            "tests/test_app.py::test_slow_bff_body_times_out_before_execution_admission",
+            "tests/test_app.py::test_bff_ingress_queue_overflow_rejects_before_receiving_body",
+            "tests/test_app.py::test_bff_ingress_per_peer_limit_rejects_before_worker_admission",
+            "tests/test_app.py::test_bff_ingress_is_cached_and_does_not_spend_execution_time"
+          ],
+          "security_boundary": "Every uncached BFF body must acquire bounded process-local per-peer and per-worker upload admission before the first ASGI receive. Queue overflow and peer saturation occur before buffering, and admission is released on success, timeout, disconnect, cancellation, or size rejection.",
+          "status": "remediated",
+          "title": "BFF bodies are admitted before buffering"
+        },
+        {
+          "controls": {
+            "absolute_response_deadline": true,
+            "atomic_prebuilt_archive_command": true,
+            "backend_entrypoint_still_required": true,
+            "blocked_write_deadline": true,
+            "dynamic_development_packaging_preserved": true,
+            "per_peer_download_concurrency_bounded": true,
+            "per_worker_download_concurrency_bounded": true,
+            "prebuilt_archive_digest_verified": true,
+            "prebuilt_source_manifest_digest_verified": true,
+            "redis_required": false,
+            "response_lifetime_admission_bounded": true,
+            "stale_prebuilt_source_rejected": true,
+            "sticky_routing_required": false
+          },
+          "id": "REVIEW-2026-09-02-SR-04",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "pytincture/prebuild.py",
+            "docs/contracts/appcode-v1.md"
+          ],
+          "intentional_contract": "Dynamic browser packaging remains the development default, and production may opt into deployment-built immutable archives without replacing installed backend source.",
+          "regression_tests": [
+            "tests/test_app.py::test_appcode_download_slot_is_held_until_blocked_write_times_out",
+            "tests/test_app.py::test_download_appcode_uses_prebuilt_archive_and_keeps_backend_required",
+            "tests/test_app.py::test_required_prebuilt_appcode_does_not_fall_back_to_dynamic",
+            "tests/test_app.py::test_required_prebuilt_appcode_rejects_stale_source",
+            "tests/test_backend_modules.py::test_build_prebuilt_appcode_writes_browser_archive_atomically"
+          ],
+          "security_boundary": "Every appcode response holds bounded process-local per-peer and per-worker admission until completion, disconnect, timeout, or cleanup. Total and blocked-write deadlines bound slow clients; required prebuilt archives fail closed when absent.",
+          "status": "remediated",
+          "title": "Appcode downloads retain bounded admission for the response lifetime"
+        },
+        {
+          "controls": {
+            "appcode_route_covered": true,
+            "auth_and_logout_routes_covered": true,
+            "bff_routes_covered": true,
+            "documentation_and_log_routes_covered": true,
+            "redis_required": false,
+            "remote_provider_failure_circuit": true,
+            "remote_revocation_lookup_admission_bound": true,
+            "remote_revocation_lookup_off_event_loop": true,
+            "remote_revocation_operation_deadline": true,
+            "remote_revocation_queue_bound": true,
+            "signed_cookie_validation_local": true,
+            "state_route_covered": true,
+            "stateless_session_uses_remote_gate": false,
+            "sticky_routing_required": false,
+            "timed_out_remote_slot_retained": true
+          },
+          "id": "REVIEW-2026-09-02-SR-05",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "docs/configuration.md",
+            "docs/production-deployment.md"
+          ],
+          "intentional_contract": "Browser-carried signed sessions remain the default stateless, load-balancer-friendly path. A shared revocation provider is optional, and Redis is never required.",
+          "regression_tests": [
+            "tests/test_app.py::test_stateless_session_validation_does_not_use_remote_gate",
+            "tests/test_app.py::test_remote_revocation_reads_have_bounded_async_admission",
+            "tests/test_app.py::test_main_page_revocation_lookup_runs_off_the_event_loop"
+          ],
+          "security_boundary": "Local signed-cookie structure, identity, audience, and lifetime checks run without shared state, admission, or thread-pool work. When shared revocation is explicitly enabled, every HTTP authentication path performs the lookup off the event loop behind one bounded per-worker gate with queue and operation deadlines. Saturation and provider failures fail closed; timed-out work retains its gate slot until its worker thread actually exits.",
+          "status": "remediated",
+          "title": "Optional shared session-revocation reads have bounded async admission"
+        },
+        {
+          "controls": {
+            "application_validated_before_provider_work": true,
+            "browser_handshake_stateless": true,
+            "login_toolkit_off_event_loop": true,
+            "metadata_cache_entry_bound": true,
+            "metadata_configuration_change_invalidates": true,
+            "metadata_settings_fingerprinted": true,
+            "metadata_toolkit_off_event_loop": true,
+            "per_peer_public_saml_rate_limit": true,
+            "public_saml_concurrency_bound": true,
+            "public_saml_queue_bound": true,
+            "public_saml_runtime_deadline": true,
+            "redis_required": false,
+            "sticky_routing_required": false
+          },
+          "id": "REVIEW-2026-09-02-SR-06",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "docs/configuration.md",
+            "docs/production-deployment.md"
+          ],
+          "intentional_contract": "SAML login URLs, metadata endpoints, provider compatibility, browser-carried handshakes, and load-balanced stateless operation remain unchanged. Redis and sticky routing are not required.",
+          "regression_tests": [
+            "tests/test_app.py::test_saml_public_routes_reject_missing_application_before_provider_work",
+            "tests/test_app.py::test_saml_metadata_is_offloaded_bounded_and_releases_capacity",
+            "tests/test_app.py::test_saml_public_routes_share_a_per_peer_rate_limit",
+            "tests/test_app.py::test_saml_login_toolkit_work_runs_off_the_event_loop",
+            "tests/test_app.py::test_saml_metadata_cache_is_bounded_and_settings_fingerprinted"
+          ],
+          "security_boundary": "Public SAML login and metadata requests consume a bounded per-peer rate budget and prove the application entrypoint exists before provider lookup or toolkit work. Login request generation, signing, metadata generation, and metadata validation execute off the event loop behind a dedicated bounded concurrency and queue gate with a runtime deadline. Metadata cache entries contain public XML only, use a complete effective-settings SHA-256 fingerprint for invalidation, and are capped by an LRU entry limit.",
+          "status": "remediated",
+          "title": "Public SAML setup work is validated, rate-limited, bounded, and cached"
+        },
+        {
+          "controls": {
+            "browser_logging_covered": true,
+            "exact_cookie_name_comparison": true,
+            "generated_bff_clients_covered": true,
+            "local_http_development_preserved": true,
+            "prebuilt_appcode_portable": true,
+            "production_development_alias_accepted": false,
+            "redis_required": false,
+            "server_selected_cookie_mode": true,
+            "server_session_state_added": false
+          },
+          "id": "REVIEW-2026-09-02-SR-07",
+          "implementation": [
+            "pytincture/backend/app.py",
+            "pytincture/frontend/index.html",
+            "pytincture/frontend/pytincture.js",
+            "pytincture/dataclass.py",
+            "docs/authentication.md"
+          ],
+          "intentional_contract": "Secure production cookies, local HTTP development cookies, generated sync/async/streaming BFF APIs, and deployment-portable prebuilt appcode remain supported.",
+          "regression_tests": [
+            "pytincture/frontend/tests/lifecycle.test.mjs::CSRF cookie selection uses one explicit runtime mode",
+            "tests/test_dataclass.py::test_generated_stub_uses_only_the_runtime_selected_csrf_cookie",
+            "tests/test_app.py::test_main_app_frontend_files_share_one_instance_uuid"
+          ],
+          "security_boundary": "The hosted page supplies the backend-selected cookie name as JSON-safe runtime metadata. The runtime validates it against the two framework-owned names and both browser logging and generated Python clients read only that exact cookie, independent of browser cookie ordering.",
+          "status": "remediated",
+          "title": "Browser clients use one exact deployment-selected CSRF cookie"
+        },
+        {
+          "controls": {
+            "async_fetch_uses_abort_controller": true,
+            "asynchronous_api_preserved": true,
+            "moving_stream_chunks_preserved": true,
+            "redis_required": false,
+            "replay_state_fetch_covered": true,
+            "server_session_state_added": false,
+            "stream_reader_cancelled_in_finally": true,
+            "stream_reader_cleanup_bounded": true,
+            "streaming_yield_preserved": true,
+            "synchronous_api_preserved": true,
+            "task_cancellation_aborts_browser_request": true,
+            "timeout_aborts_browser_request": true
+          },
+          "id": "REVIEW-2026-09-02-SR-08",
+          "implementation": [
+            "pytincture/dataclass.py",
+            "docs/public-api.md",
+            "docs/migrations/0.10-to-1.0.md",
+            "contracts/public-api-v1.json"
+          ],
+          "intentional_contract": "Generated synchronous and asynchronous methods, streaming chunk delivery, explicit yield, and async multitasking remain supported without Redis or server session state.",
+          "regression_tests": [
+            "tests/test_dataclass.py::test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_flight",
+            "tests/test_dataclass.py::test_generated_stream_keeps_moving_and_cleans_up_on_completion_and_early_exit",
+            "tests/test_backend_modules.py::test_async_stream_disconnect_closes_source"
+          ],
+          "security_boundary": "Generated async BFF and replay-state fetches attach one AbortController signal and abort the browser request in a finally path after success, error, timeout, or task cancellation. Generated streaming transport additionally cancels its reader with a bounded cleanup wait whenever the stream completes or closes, allowing the server's existing disconnect cleanup to release admission.",
+          "status": "remediated",
+          "title": "Cancelled browser BFF work aborts its network request"
+        },
+        {
+          "controls": {
+            "cache_key_query_allowlist_exact": true,
+            "clean_navigation_url_preserved": true,
+            "entries_bounded_by_manifest": true,
+            "foreign_caches_deleted": false,
+            "instance_uuid_preserved": true,
+            "other_application_caches_deleted": false,
+            "polluted_current_entries_pruned": true,
+            "redis_required": false,
+            "server_session_state_added": false,
+            "stale_application_caches_pruned": true,
+            "unrelated_query_parameters_preserved": false
+          },
+          "id": "REVIEW-2026-09-02-SR-09",
+          "implementation": [
+            "pytincture/frontend/sw.js",
+            "docs/service-mode.md",
+            "SECURITY.md"
+          ],
+          "intentional_contract": "Every backend frontend asset keeps its instance UUID, cache namespaces remain isolated by application/release/instance, page navigation URLs remain clean, and non-Pytincture caches are never deleted.",
+          "regression_tests": [
+            "pytincture/frontend/tests/service-worker.test.mjs::service worker canonicalizes asset keys and prunes only its application namespace",
+            "pytincture/frontend/tests/lifecycle.test.mjs::framework caches are namespaced by application, release, and instance uuid",
+            "tests/test_app.py::test_service_worker_only_caches_manifested_framework_assets"
+          ],
+          "security_boundary": "The worker accepts only exact manifest paths and the active instance UUID, then reconstructs the cache key from origin, pathname, and that UUID alone. This creates at most one key per manifest asset. Activation removes noncanonical entries in the current cache and stale cache names only when they begin with the exact encoded application-owned prefix.",
+          "status": "remediated",
+          "title": "Service-worker cache keys are canonical and application-bounded"
+        },
+        {
+          "controls": {
+            "cold_directory_limit": true,
+            "cold_scanned_file_limit": true,
+            "new_glob_matches_invalidate": true,
+            "prebuilt_production_supported": true,
+            "redis_required": false,
+            "relevant_directory_fingerprint_bounded": true,
+            "relevant_source_fingerprint_bounded": true,
+            "same_name_edits_invalidate": true,
+            "sticky_routing_required": false,
+            "validation_deadline": true,
+            "warm_modules_root_walk": false
+          },
+          "id": "REVIEW-2026-09-02-SR-10",
+          "implementation": [
+            "pytincture/backend/browser_packages.py",
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "docs/production-deployment.md"
+          ],
+          "intentional_contract": "Dynamic development packaging continues to detect same-name source edits and newly matching declared browser files. Immutable production appcode can be prebuilt, and caches remain disposable per-worker state requiring neither Redis nor sticky routing.",
+          "regression_tests": [
+            "tests/test_backend_modules.py::test_appcode_warm_cache_uses_metadata_without_rereading_sources",
+            "tests/test_backend_modules.py::test_appcode_cache_tracks_new_files_in_declared_browser_directories",
+            "tests/test_backend_modules.py::test_appcode_archive_applies_directory_and_scan_limits",
+            "tests/test_backend_modules.py::test_appcode_cache_validation_deadline_fails_closed"
+          ],
+          "security_boundary": "Cold archive discovery applies file-count, per-file byte, aggregate-byte, directory, and scanned-file limits while recording only source files and directories relevant to imports and declared browser globs. Warm hits stat that bounded snapshot under a configurable deadline and never walk the complete modules root. A changed snapshot rebuilds; a limit or deadline failure fails closed.",
+          "status": "remediated",
+          "title": "Warm appcode validation is bounded to relevant fingerprints"
+        },
+        {
+          "controls": {
+            "empty_refill_index_error": false,
+            "failed_refill_retryable": true,
+            "multiple_batches_supported": true,
+            "new_caller_quota_added": false,
+            "pool_rechecked_after_refill": true,
+            "redis_required": false,
+            "server_refill_quotas_preserved": true,
+            "server_session_state_added": false,
+            "single_flight_preserved": true,
+            "waiter_cancellation_cancels_shared_refill": false
+          },
+          "id": "REVIEW-2026-09-02-SR-11",
+          "implementation": [
+            "pytincture/dataclass.py",
+            "docs/contracts/bff-v1.md",
+            "SECURITY.md"
+          ],
+          "intentional_contract": "Optional browser replay proofs retain single-flight refill and support high asynchronous concurrency without introducing a caller quota, Redis requirement, server-side browser session, or sticky routing.",
+          "regression_tests": [
+            "tests/test_dataclass.py::test_generated_async_bff_transport_is_bounded_and_replay_refill_is_single_flight"
+          ],
+          "security_boundary": "Each generated BFF class keeps one shared refill task. Waiters shield that task from individual cancellation, recheck the shared pool after every completed batch, and join or initiate another refill whenever other callers consumed the batch. Empty responses and failed refills raise controlled errors instead of indexing an empty pool.",
+          "status": "remediated",
+          "title": "Replay-token waiters safely span refill batches"
+        },
+        {
+          "controls": {
+            "admission_release_exactly_once": true,
+            "default_stable_identity_capacity": 4,
+            "default_worker_capacity": 8,
+            "hostile_code_sandbox_claimed": false,
+            "isolated_mode_required": false,
+            "partial_children_terminated_and_reaped": true,
+            "partial_connections_closed": true,
+            "partial_start_failure_releases_admission": true,
+            "pipe_failure_releases_admission": true,
+            "prior_limits_explicitly_configurable": true,
+            "process_construction_failure_releases_admission": true,
+            "redis_required": false,
+            "server_session_state_added": false,
+            "trusted_execution_changed": false
+          },
+          "id": "REVIEW-2026-09-02-SR-12",
+          "implementation": [
+            "pytincture/backend/execution.py",
+            "pytincture/backend/app.py",
+            "pytincture/configuration.py",
+            "docs/production-deployment.md"
+          ],
+          "intentional_contract": "Isolated-process execution remains optional, non-streaming, and a killable boundary for deployment-trusted BFF code rather than a hostile-code sandbox. Trusted thread/async execution, stateless signed sessions, load balancing, and Redis-free operation are unchanged.",
+          "regression_tests": [
+            "tests/test_backend_modules.py::test_optional_process_executor_releases_setup_failures",
+            "tests/test_backend_modules.py::test_optional_process_executor_kills_cpu_work_and_recovers",
+            "tests/test_configuration.py::test_trusted_bff_execution_remains_the_simple_default"
+          ],
+          "security_boundary": "After isolated-process admission succeeds, pipe creation, process construction, process start, execution, and response handling all remain inside one exactly-once cleanup boundary. Partial connections close and a partially started child terminates and is reaped before worker and stable-identity admission are released. Defaults are eight children per worker and four per stable identity.",
+          "status": "remediated",
+          "title": "Isolated-process setup releases admission exactly once"
+        }
+      ],
+      "external_controls_document": "security/external-controls.json",
+      "followup_reviewed_report": "Daybreak follow-up findings received 2026-08-31",
+      "latest_capacity_review": "security/review-2026-09-02-capacity.json",
+      "latest_followup_review": "security/review-2026-09-01-followup.json",
+      "recorded_on": "2026-08-31",
+      "review_response": "accepted",
+      "review_response_date": "2026-08-30",
+      "reviewed_report": "SECURITY_REVIEW_2026-08-30.txt",
+      "schema_version": 1,
+      "status": "passed"
+    }
+  },
+  "run": {
+    "attempt": 1,
+    "event": "push",
+    "id": "38427355625",
+    "job": "saml-federated-e2e",
+    "ref": "refs/heads/main"
+  },
+  "schema_version": 1,
+  "status": "passed",
+  "tested_at": "2026-10-13T16:05:52Z",
+  "version": "1.0.0rc15"
+}
