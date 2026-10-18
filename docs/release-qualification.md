@@ -29,13 +29,17 @@ The owner explicitly waived the deployed HTTPS/HSTS/proxy review on October 17
 and reported personal application testing. This is recorded in
 `release_exceptions`; the individual edge checks are not reported as passed.
 
-Final publication is still gated on the
-documented release-profile repository protection audit and the final release
-decision. Current dependency, secret, Dependabot and labeled-defect audits
-passed; their results are retained under `release/evidence/1.0.0`. Live repository protection currently has zero
-required approvals and disables CODEOWNER/last-push approval; that does not
-satisfy the documented final-release contract. The production-edge exception
-does not waive the repository protection requirements.
+The owner also explicitly waived the separate repository review policy gate for
+1.0.0. Live protection requires zero approvals and disables CODEOWNER/last-push
+approval; this is retained as a waived audit, not a passing policy review, in
+`release/evidence/1.0.0/repository-policy-review.json`. No protection settings
+were changed. Both exceptions are restricted to 1.0.0 and the latest RC;
+security, defect, application and required CI checks remain enforced.
+
+Current dependency, source/history secret, Dependabot and labeled-defect audits
+passed. The owner go decision is recorded; publication must still wait for the
+release commit's required CI, signed-tag CI, attestations and protected publisher
+verification. The standard policy remains documented for subsequent releases.
 
 ## RC15 publication — 2026-10-13
 

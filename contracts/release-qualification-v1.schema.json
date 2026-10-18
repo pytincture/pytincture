@@ -100,7 +100,10 @@
         ],
         "properties": {
           "scope": {
-            "const": "production_edge_reviews"
+            "enum": [
+              "production_edge_reviews",
+              "repository_policy_reviews"
+            ]
           },
           "release_version": {
             "const": "1.0.0"

@@ -982,10 +982,12 @@
     }
   ],
   "final_decision": {
-    "status": "pending",
-    "decided_at": null,
-    "approvers": [],
-    "notes": "Preparing 1.0.0 on October 17, 2026 at the owner request, including the opt-in Lambda tools and deployment guides. RC15 standalone, authenticated BFF, federated authentication, upgrade/rollback and performance evidence has been recovered from successful post-publication CI run 38427355625 and retained in release/evidence/rc15. The approved 30-day observation interval has elapsed. Final publication remains pending a current passing release-profile repository-policy audit, final evidence review and the final go decision. The owner explicitly waived the deployed production-edge review and reported personal application testing; see release_exceptions. Other release gates remain pending."
+    "status": "go",
+    "decided_at": "2026-10-18T02:45:31.518416+00:00",
+    "approvers": [
+      "Stephen Chapman"
+    ],
+    "notes": "Owner requested the 1.0 release, reported personal application testing, and explicitly waived the production-edge and repository review policy gates for this release only. The approved 30-day observation interval has elapsed; retained RC15 acceptance evidence and current security/defect audits are recorded. Required CI, immutable artifacts, signed tag, attestations and protected publisher verification remain required before publication. No live branch protection was weakened."
   },
   "release_exceptions": [
     {
@@ -996,6 +998,15 @@
       "approved_at": "2026-10-18T02:35:17.139001+00:00",
       "reason": "Owner explicitly requested skipping the deployed HTTPS/HSTS/proxy qualification and reported testing the application personally. Individual edge checks have not been independently verified.",
       "approval_source": "Owner messages in the release preparation chat: \u201cjust skip it\u201d; \u201ci've tested it myself\u201d."
+    },
+    {
+      "scope": "repository_policy_reviews",
+      "release_version": "1.0.0",
+      "candidate_version": "1.0.0rc15",
+      "approved_by": "Stephen Chapman",
+      "approved_at": "2026-10-18T02:45:31.518416+00:00",
+      "reason": "Owner explicitly waived the separate repository review policy gate for 1.0. Live protection has zero required approvals and disables CODEOWNER/last-push approval; required CI checks remain enforced. See release/evidence/1.0.0/repository-policy-review.json.",
+      "approval_source": "Owner response to the release policy question: Waive policy gate for 1.0."
     }
   ]
 }

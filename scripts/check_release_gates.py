@@ -227,19 +227,12 @@ def validate_final(record: dict) -> list[str]:
             latest_published_at,
         )
     )
-    failures.extend(
-        passed_evidence(
-            record.get("repository_policy_reviews", []),
-            "repository_policy_reviews",
-            latest_version,
-            latest_published_at,
-        )
-    )
-    # An explicit owner waiver is limited to this release and the latest RC.
-    # Keep unverified edge checks out of the passed-evidence history.
-    edge_waived = False
+    # Owner exceptions are limited to the named review, this release and latest RC.
+    # Security, defect, application and CI requirements cannot be waived here.
+    waived_reviews = set()
     for exception in record.get("release_exceptions", []):
-        if exception.get("scope") != "production_edge_reviews":
+        scope = exception.get("scope")
+        if scope not in {"production_edge_reviews", "repository_policy_reviews"}:
             failures.append("unsupported release exception scope")
             continue
         valid = (
@@ -256,9 +249,19 @@ def validate_final(record: dict) -> list[str]:
             failures.append(str(exc))
             valid = False
         if not valid:
-            failures.append("production-edge exception requires current release, candidate and owner approval evidence")
-        edge_waived = edge_waived or valid
-    if not edge_waived:
+            failures.append("release exception requires current release, candidate and owner approval evidence")
+        else:
+            waived_reviews.add(scope)
+    if "repository_policy_reviews" not in waived_reviews:
+        failures.extend(
+            passed_evidence(
+                record.get("repository_policy_reviews", []),
+                "repository_policy_reviews",
+                latest_version,
+                latest_published_at,
+            )
+        )
+    if "production_edge_reviews" not in waived_reviews:
         edge_reviews = record.get("production_edge_reviews", [])
         failures.extend(
             passed_evidence(
