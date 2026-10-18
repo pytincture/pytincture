@@ -1,7 +1,6 @@
 # Compatibility and support policy
 
-This matrix records what is supported today and what must be qualified before
-1.0. "CI" means the repository exercises the combination on every pull
+This matrix records the 1.0 support scope and its qualification coverage. "CI" means the repository exercises the combination on every pull
 request. "Planned gate" means the combination is in the 1.0 support target but
 does not yet have automated qualification.
 
@@ -31,9 +30,17 @@ versions for each release candidate.
 | Service | FastAPI delivery, packaged browser app, BFF, auth, public assets, optional MCP | Python and cross-browser CI. |
 | Standalone | `pytincture.js`, inline Python, Pyodide, micropip, configurable widgetset | Cross-browser CI. |
 | Multiple workers | Shared signing key; no shared store for normal sessions. Optional atomic provider only for immediate revocation or strict replay-proof single use. | Simulated stateless and shared-state multi-worker CI. |
+| Lambda Web Adapter | Normal ASGI lifespan and streaming; optional prebuilt BFF manifest, checked bytecode and initialized alias | Framework CI plus KingdomGive AWS application evidence; qualify application integrations separately. |
 | Reverse proxy | Forwarded HTTPS scheme and stable host configuration | Header/topology integration CI and deployment runbook. |
 
 ## Version compatibility rules
+
+1.0.0 preserves RC15 public APIs, regular FastAPI/ASGI and desktop launch paths,
+and existing authentication defaults. The Lambda manifest/bytecode build steps
+and provisioned concurrency are opt-in. Unchanged BFF manifests are reused only
+after source verification; optional MCP/OAuth/SAML imports load when enabled.
+See the [Lambda guide](aws-lambda.md) for deployment, login/BFF composition and
+public CDN caching. MicroPython remains an opt-in portable profile.
 
 RC15 preserves RC14's public APIs and defaults. The bundled Pyodide standard
 library includes a narrow tarfile security backport; its upstream runtime

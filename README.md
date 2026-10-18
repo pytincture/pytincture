@@ -23,7 +23,9 @@ Production topology, probes, monitoring, secret rotation, backup, and rollback
 are covered by the [production deployment runbook](docs/production-deployment.md).
 For AWS Lambda with live streaming, use the
 [Web Adapter deployment recipe](docs/aws-lambda.md), reusable infrastructure
-template, and Bedrock chat example. The
+template, and Bedrock chat example. Optional build-time BFF manifests and
+checked bytecode reduce Lambda startup work; the guide also covers separate
+login/BFF routing and CloudFront caching for public app loads. The
 [Mangum assessment](docs/mangum.md) covers the buffered alternative.
 
 Start with the [five-minute quickstart](docs/quickstart.md), then choose the
@@ -57,26 +59,25 @@ evidence for browser startup, package generation, health, and BFF calls.
 
 ## Installation
 
-Install the latest published release candidate from PyPI:
+Install Pytincture 1.0:
 ~~~
-pip install 'pytincture==1.0.0rc14'
+pip install 'pytincture==1.0.0'
 ~~~
 
-An unpinned `pip install pytincture` selects the latest stable release. This
-checkout is developing RC13; use the source installation below for unreleased
-changes and see the [migration notes](docs/migrations/0.10-to-1.0.md).
+Use Python 3.13 or 3.14. For a source checkout, use the installation below;
+see the [migration notes](docs/migrations/0.10-to-1.0.md) when upgrading.
 
 The base install serves unauthenticated applications and local development
 without pulling optional identity-provider, Redis, or MCP stacks. Install only
 the features a deployment enables:
 
 ```bash
-pip install "pytincture[password]==1.0.0rc14"  # Argon2/bcrypt local login
-pip install "pytincture[oauth]==1.0.0rc14"     # Google/Microsoft OAuth
-pip install "pytincture[saml]==1.0.0rc14"      # SAML 2.0
-pip install "pytincture[redis]==1.0.0rc14"     # shared Upstash state
-pip install "pytincture[mcp]==1.0.0rc14"       # MCP endpoint
-pip install "pytincture[dev]==1.0.0rc14"       # all features and test/build tools
+pip install "pytincture[password]==1.0.0"  # Argon2/bcrypt local login
+pip install "pytincture[oauth]==1.0.0"     # Google/Microsoft OAuth
+pip install "pytincture[saml]==1.0.0"      # SAML 2.0
+pip install "pytincture[redis]==1.0.0"     # shared Upstash state
+pip install "pytincture[mcp]==1.0.0"       # MCP endpoint
+pip install "pytincture[dev]==1.0.0"       # all features and test/build tools
 ```
 
 From Source:
@@ -320,7 +321,7 @@ is published to npm and its SRI is copied from the trusted release integrity
 manifest. The URL below requires completed npm publication; use the Python-wheel
 asset export while publication is pending:
 ```
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0-rc.15/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
 ```
 
 ### Using pytincture.js standalone

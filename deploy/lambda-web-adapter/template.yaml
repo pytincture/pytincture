@@ -27,6 +27,10 @@ Parameters:
     Default: service:app
     Description: Import target for the application's configured ASGI app
     AllowedPattern: '[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_.]*'
+  BFFPrebuiltManifest:
+    Type: String
+    Default: ''
+    Description: Optional private server manifest path in the package, e.g. /var/task/private/server-bff.json
   AllowedHosts:
     Type: String
     Default: 127.0.0.1,localhost
@@ -42,6 +46,15 @@ Parameters:
     Default: 3
     MinValue: 1
     MaxValue: 100
+  ProvisionedConcurrency:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 100
+    Description: Optional paid initialized environments on the ready alias; 0 disables. Must not exceed ReservedConcurrency.
+Conditions:
+  KeepInitialized: !Not [!Equals [!Ref ProvisionedConcurrency, 0]]
+  HasBFFManifest: !Not [!Equals [!Ref BFFPrebuiltManifest, '']]
 Resources:
   LogGroup:
     Type: AWS::Logs::LogGroup
@@ -116,6 +129,7 @@ Resources:
           AWS_LWA_ENABLE_COMPRESSION: 'false'
           PYTHONDONTWRITEBYTECODE: '1'
           PYTINCTURE_ASGI_APP: !Ref ASGIApplication
+          PYTINCTURE_BFF_PREBUILT_MANIFEST: !If [HasBFFManifest, !Ref BFFPrebuiltManifest, !Ref 'AWS::NoValue']
           PYTINCTURE_DEFAULT_APPLICATION: !Ref DefaultApplication
           PYTINCTURE_ALLOWED_HOSTS: !Ref AllowedHosts
           BFF_STREAM_MAX_SECONDS: '60'
@@ -123,6 +137,23 @@ Resources:
           BFF_STREAM_WRITE_TIMEOUT_SECONDS: '15'
           # Ingress requests are buffered and base64 may add overhead.
           MAX_REQUEST_BODY_BYTES: '1048576'
+  ReadyVersion:
+    Type: AWS::Lambda::Version
+    Condition: KeepInitialized
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Ref Function
+      Description: !Sub 'Initialized release ${CodeKey}'
+  ReadyAlias:
+    Type: AWS::Lambda::Alias
+    Condition: KeepInitialized
+    Properties:
+      Name: ready
+      FunctionName: !Ref Function
+      FunctionVersion: !GetAtt ReadyVersion.Version
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: !Ref ProvisionedConcurrency
 Outputs:
   FunctionName:
     Description: Pass this name to scripts/lambda_forward.py --function
@@ -130,6 +161,10 @@ Outputs:
   FunctionArn:
     Description: Scope the local caller's lambda:InvokeFunction permission to this ARN
     Value: !GetAtt Function.Arn
+  ReadyFunctionArn:
+    Condition: KeepInitialized
+    Description: Invoke this qualified alias ARN to use initialized environments
+    Value: !Ref ReadyAlias
   LogGroupName:
     Description: Retained execution logs; use aws logs tail to verify actual invocations
     Value: !Ref LogGroup

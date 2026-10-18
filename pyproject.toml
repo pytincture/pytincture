@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pytincture"
 
-version = "1.0.0rc15"
+version = "1.0.0"
 
 description = "UI Builder"
 readme = "README.md"
@@ -77,6 +77,8 @@ Source = "https://github.com/pytincture/pytincture"
 [project.scripts]
 pytincture-build-appcode = "pytincture.prebuild:main"
 pytincture-build-browser = "pytincture.browser_build:main"
+pytincture-build-bff-manifest = "pytincture.backend.bff_manifest:main"
+pytincture-prepare-lambda = "pytincture.lambda_build:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

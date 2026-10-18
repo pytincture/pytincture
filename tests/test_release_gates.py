@@ -264,3 +264,25 @@ def test_rc2_release_requires_valid_rc1_evidence(monkeypatch):
     assert "1.0.0rc1 evidence is required before releasing 1.0.0rc2" in gates.validate_release_ref(
         record, "v1.0.0rc2"
     )
+
+
+def test_owner_edge_exception_is_limited_to_current_candidate():
+    record = complete_record()
+    record["production_edge_reviews"] = []
+    exception = {
+        "scope": "production_edge_reviews", "release_version": "1.0.0",
+        "candidate_version": "1.0.0rc2", "approved_by": "Release owner",
+        "approved_at": "2026-02-05T00:00:00Z",
+        "reason": "Owner explicitly waived this review",
+        "approval_source": "Owner release decision",
+    }
+    record["release_exceptions"] = [exception]
+    assert gates.validate_final(record) == []
+    exception["candidate_version"] = "1.0.0rc1"
+    assert any("production-edge exception" in failure for failure in gates.validate_final(record))
+    exception["candidate_version"] = "1.0.0rc2"
+    exception["scope"] = "security_reviews"
+    assert "unsupported release exception scope" in gates.validate_final(record)
+    exception["scope"] = "production_edge_reviews"
+    del exception["approval_source"]
+    assert any("production-edge exception" in failure for failure in gates.validate_final(record))

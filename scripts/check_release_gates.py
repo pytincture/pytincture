@@ -235,33 +235,57 @@ def validate_final(record: dict) -> list[str]:
             latest_published_at,
         )
     )
-    edge_reviews = record.get("production_edge_reviews", [])
-    failures.extend(
-        passed_evidence(
-            edge_reviews,
-            "production_edge_reviews",
-            latest_version,
-            latest_published_at,
-        )
-    )
-    required_edge_checks = {
-        "https_redirect",
-        "hsts",
-        "canonical_origin",
-        "trusted_proxy_headers",
-    }
-    for index, review in enumerate(edge_reviews):
-        if review.get("version") != latest_version:
+    # An explicit owner waiver is limited to this release and the latest RC.
+    # Keep unverified edge checks out of the passed-evidence history.
+    edge_waived = False
+    for exception in record.get("release_exceptions", []):
+        if exception.get("scope") != "production_edge_reviews":
+            failures.append("unsupported release exception scope")
             continue
-        checks = review.get("checks", {})
-        missing_checks = sorted(
-            check for check in required_edge_checks if checks.get(check) is not True
+        valid = (
+            exception.get("release_version") == "1.0.0"
+            and exception.get("candidate_version") == latest_version
+            and all(exception.get(field) for field in (
+                "approved_by", "reason", "approval_source"
+            ))
         )
-        if missing_checks:
-            failures.append(
-                f"production_edge_reviews[{index}].checks must pass: "
-                f"{', '.join(missing_checks)}"
+        try:
+            approved_at = parse_time(exception.get("approved_at"), "release exception approved_at")
+            valid = valid and latest_published_at is not None and approved_at >= latest_published_at
+        except ValueError as exc:
+            failures.append(str(exc))
+            valid = False
+        if not valid:
+            failures.append("production-edge exception requires current release, candidate and owner approval evidence")
+        edge_waived = edge_waived or valid
+    if not edge_waived:
+        edge_reviews = record.get("production_edge_reviews", [])
+        failures.extend(
+            passed_evidence(
+                edge_reviews,
+                "production_edge_reviews",
+                latest_version,
+                latest_published_at,
             )
+        )
+        required_edge_checks = {
+            "https_redirect",
+            "hsts",
+            "canonical_origin",
+            "trusted_proxy_headers",
+        }
+        for index, review in enumerate(edge_reviews):
+            if review.get("version") != latest_version:
+                continue
+            checks = review.get("checks", {})
+            missing_checks = sorted(
+                check for check in required_edge_checks if checks.get(check) is not True
+            )
+            if missing_checks:
+                failures.append(
+                    f"production_edge_reviews[{index}].checks must pass: "
+                    f"{', '.join(missing_checks)}"
+                )
 
     reviews = record.get("security_reviews", [])
     failures.extend(

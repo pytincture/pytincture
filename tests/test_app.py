@@ -5868,9 +5868,11 @@ def test_oauth_exchange_timeout_releases_admission(
     assert gate.released == 1
 
 
-def test_oauth_http_client_has_explicit_phase_deadlines():
+def test_oauth_http_client_has_explicit_phase_deadlines(monkeypatch):
     import pytincture.backend.app as backend_app
 
+    # This fixture has OAuth disabled; supply the transport as enabled OAuth does.
+    monkeypatch.setattr(backend_app, "OAuthTimeout", httpx.Timeout)
     kwargs = backend_app._oauth_client_kwargs("openid")
     timeout = kwargs["timeout"]
     assert kwargs["scope"] == "openid"
@@ -6286,6 +6288,9 @@ def test_saml_metadata_route_returns_metadata(fresh_client, monkeypatch, tmp_pat
     Verify that the SAML metadata endpoint returns valid XML when configured.
     """
     import pytincture.backend.app as backend_app
+    from onelogin.saml2.settings import OneLogin_Saml2_Settings
+
+    monkeypatch.setattr(backend_app, "OneLogin_Saml2_Settings", OneLogin_Saml2_Settings)
 
     dummy_frontend = tmp_path / "frontend"
     dummy_frontend.mkdir()
@@ -6359,6 +6364,9 @@ def test_saml_provider_metadata_route_uses_provider_config(fresh_client, monkeyp
     Provider metadata should use the selected provider's IdP config with shared SP URLs by default.
     """
     import pytincture.backend.app as backend_app
+    from onelogin.saml2.settings import OneLogin_Saml2_Settings
+
+    monkeypatch.setattr(backend_app, "OneLogin_Saml2_Settings", OneLogin_Saml2_Settings)
 
     dummy_frontend = tmp_path / "frontend"
     dummy_frontend.mkdir()

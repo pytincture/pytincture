@@ -9,9 +9,10 @@ import threading
 import uuid
 from importlib.machinery import SourceFileLoader
 from types import ModuleType
-from typing import Mapping, Optional
+from typing import TYPE_CHECKING, Mapping, Optional
 
-from fastapi import FastAPI
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 from .configuration import PytinctureConfig, configuration_context
 

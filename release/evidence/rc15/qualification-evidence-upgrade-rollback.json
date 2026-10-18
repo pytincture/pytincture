@@ -1,0 +1,77 @@
+{
+  "$schema": "https://github.com/pytincture/pytincture/contracts/qualification-evidence-v1.schema.json",
+  "artifact_files": {
+    "npm": "pytincture-runtime-1.0.0-rc.15.tgz",
+    "sdist": "pytincture-1.0.0rc15.tar.gz",
+    "wheel": "pytincture-1.0.0rc15-py3-none-any.whl"
+  },
+  "artifact_sha256": {
+    "npm": "effeb49c56f8d3b23674ab75c4037f20617cf8d960cc1d9ef219889c417287de",
+    "sdist": "37cbf624ae9d1c922396df5bb754f8560db9d31e2c1c490637d54ab1260a7972",
+    "wheel": "f1ae8964a21ad746aade0f8dcffd352d23f9563762c08d7d0f4bfdfef7c76fa2"
+  },
+  "commit_sha": "72aad0857936f872b256804dff9ffbd523624b68",
+  "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/38427355625",
+  "exercise": "upgrade_rollback",
+  "npm_version": "1.0.0-rc.15",
+  "result_sha256": {
+    "before": "ec7741c597c26283568b9cd8d1e77347eabb843756560b04285fad05c8539ff6",
+    "candidate": "bc1e2e1ffaf15fffa4f36896c2c2982946ffb82b72071187d2f6e8a3026e16f3",
+    "rollback": "ec7741c597c26283568b9cd8d1e77347eabb843756560b04285fad05c8539ff6"
+  },
+  "results": {
+    "before": {
+      "archive_names": [
+        "data.py",
+        "demo.py",
+        "widget.py"
+      ],
+      "archive_status": 200,
+      "modules_path": true,
+      "page_status": 200,
+      "public_imports": true,
+      "server_secret_absent": true,
+      "version": "0.10.7",
+      "widgetset": "dhxpyt==0.9.18"
+    },
+    "candidate": {
+      "archive_names": [
+        "data.py",
+        "demo.py",
+        "widget.py"
+      ],
+      "archive_status": 200,
+      "modules_path": true,
+      "page_status": 200,
+      "public_imports": true,
+      "server_secret_absent": true,
+      "version": "1.0.0rc15",
+      "widgetset": "dhxpyt==0.9.18"
+    },
+    "rollback": {
+      "archive_names": [
+        "data.py",
+        "demo.py",
+        "widget.py"
+      ],
+      "archive_status": 200,
+      "modules_path": true,
+      "page_status": 200,
+      "public_imports": true,
+      "server_secret_absent": true,
+      "version": "0.10.7",
+      "widgetset": "dhxpyt==0.9.18"
+    }
+  },
+  "run": {
+    "attempt": 1,
+    "event": "push",
+    "id": "38427355625",
+    "job": "upgrade-rollback",
+    "ref": "refs/heads/main"
+  },
+  "schema_version": 1,
+  "status": "passed",
+  "tested_at": "2026-10-13T16:05:20Z",
+  "version": "1.0.0rc15"
+}

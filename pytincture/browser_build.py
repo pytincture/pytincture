@@ -576,7 +576,8 @@ def _prepare_browser_bundle(config_file, *, application=None, engine="micropytho
     return output, manifest, artifacts
 
 
-def build_browser_bundle(config_file, *, application=None, check=False, report_path=None):
+def build_browser_bundle(config_file, *, application=None, check=False, report_path=None,
+                         server_bff_manifest=None):
     config_file = Path(config_file).resolve()
     settings = tomllib.loads(config_file.read_text())['tool']['pytincture']['browser']
     applications = settings.get('apps', {})
@@ -617,6 +618,14 @@ def build_browser_bundle(config_file, *, application=None, check=False, report_p
     manifest = seal_manifest(manifest, artifacts)
     if check:
         return output / 'manifest.json'
+    if server_bff_manifest is not None:
+        from pytincture.backend.bff_manifest import build_bff_manifest
+        private_target = Path(server_bff_manifest).expanduser().resolve()
+        if private_target.is_relative_to(output.resolve()):
+            raise ValueError('Server BFF manifest must be outside the browser output directory')
+        effective_settings = {**settings, **app_settings}
+        modules_root = config_file.parent / effective_settings.get('modules-path', '.')
+        build_bff_manifest(modules_root, private_target)
     # Immutable content-addressed revisions. Publish the pointer only after all bytes exist.
     output.mkdir(parents=True, exist_ok=True)
     release = output / manifest['assetBase']
@@ -654,7 +663,10 @@ def main() -> None:
     parser.add_argument('--all', action='store_true', help='Build every configured application')
     parser.add_argument('--check', action='store_true', help='Validate inputs without writing output')
     parser.add_argument('--config', default='pyproject.toml', help='TOML file containing [tool.pytincture.browser]')
+    parser.add_argument('--server-bff-manifest', help='Also write a private server BFF manifest outside browser output')
     args = parser.parse_args()
+    if args.all and args.server_bff_manifest:
+        parser.error('Build each application separately when writing a server BFF manifest')
     try:
         if args.inspect:
             print(canonical_json(inspect_bundle(args.inspect)).decode(), end='')
@@ -665,7 +677,9 @@ def main() -> None:
         else:
             names = [args.application]
         for name in names:
-            result = build_browser_bundle(args.config, application=name, check=args.check, report_path=args.compatibility_report)
+            result = build_browser_bundle(args.config, application=name, check=args.check,
+                                          report_path=args.compatibility_report,
+                                          server_bff_manifest=args.server_bff_manifest)
             if args.compatibility_report != '-':
                 print(('Validated: ' if args.check else '') + str(result))
                 print('Use --compatibility-report PATH for per-runtime details.' if args.check else 'Compatibility transformations and exclusions: ' + str(result.parent/'compatibility.json'))

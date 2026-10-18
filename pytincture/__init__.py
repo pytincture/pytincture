@@ -2,24 +2,28 @@
 pyTincture uvicorn launcher
 """
 
-__version__ = "1.0.0rc15"
+__version__ = "1.0.0"
 
-from multiprocessing import Process, freeze_support
-from copy import deepcopy
 import ipaddress
 import logging
 import os
 import signal
-import shutil
-import zipfile
-import asyncio
 
-try:
-    import uvloop  # type: ignore
-except ImportError:  # pragma: no cover - depends on installation
-    uvloop = None
 
-import uvicorn
+def __getattr__(name):
+    """Keep desktop launcher dependencies out of ASGI and build-tool imports."""
+    if name in globals():
+        return globals()[name]
+    import importlib
+
+    modules = {"uvicorn": "uvicorn", "Process": "multiprocessing",
+               "freeze_support": "multiprocessing"}
+    if name not in modules:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = importlib.import_module(modules[name])
+    value = module if name == "uvicorn" else getattr(module, name)
+    globals()[name] = value
+    return value
 
 MODULES_PATH = os.environ.get("MODULES_PATH")
 
@@ -125,6 +129,8 @@ class _PathOnlyAccessFilter(logging.Filter):
 
 
 def _sanitized_uvicorn_log_config():
+    from copy import deepcopy
+    uvicorn = __getattr__("uvicorn")
     config = deepcopy(uvicorn.config.LOGGING_CONFIG)
     config.setdefault("filters", {})["pytincture_path_only"] = {
         "()": _PathOnlyAccessFilter,
@@ -135,6 +141,12 @@ def _sanitized_uvicorn_log_config():
 
 
 def main(port, ssl_keyfile=None, ssl_certfile=None, modules_folder=None, host=None):
+    import asyncio
+    uvicorn = __getattr__("uvicorn")
+    try:
+        import uvloop
+    except ImportError:
+        uvloop = None
     if modules_folder is not None:
         set_modules_path(os.fspath(modules_folder))
 
@@ -202,7 +214,7 @@ def launch_service(
     PytinctureConfig.from_env()
 
     bind_host = _loopback_bind_host(host)
-    main_application = Process(
+    main_application = __getattr__("Process")(
         target=main,
         args=(port, ssl_keyfile, ssl_certfile, modules_folder, bind_host),
     )

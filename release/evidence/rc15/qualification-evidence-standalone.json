@@ -1,0 +1,70 @@
+{
+  "$schema": "https://github.com/pytincture/pytincture/contracts/qualification-evidence-v1.schema.json",
+  "artifact_files": {
+    "npm": "pytincture-runtime-1.0.0-rc.15.tgz",
+    "sdist": "pytincture-1.0.0rc15.tar.gz",
+    "wheel": "pytincture-1.0.0rc15-py3-none-any.whl"
+  },
+  "artifact_sha256": {
+    "npm": "effeb49c56f8d3b23674ab75c4037f20617cf8d960cc1d9ef219889c417287de",
+    "sdist": "37cbf624ae9d1c922396df5bb754f8560db9d31e2c1c490637d54ab1260a7972",
+    "wheel": "f1ae8964a21ad746aade0f8dcffd352d23f9563762c08d7d0f4bfdfef7c76fa2"
+  },
+  "commit_sha": "72aad0857936f872b256804dff9ffbd523624b68",
+  "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/38427355625",
+  "exercise": "standalone",
+  "npm_version": "1.0.0-rc.15",
+  "result_sha256": {
+    "browser": "ab3535c680cccc2c6f71af4077eaad422db34a700354be40be44d04fe61ed918"
+  },
+  "results": {
+    "browser": {
+      "backend_widget_requests": 2,
+      "backend_widget_wheel": "dhxpyt-0.9.18+backend-py3-none-any.whl",
+      "browser": "chromium",
+      "compatibility": {
+        "assetManifest": "Pytincture compatibility lock dhxpyt@0.9.18",
+        "cssAssets": 4,
+        "dhxAvailable": true,
+        "installedSource": "http://127.0.0.1:8082/standalone_fixture/appcode/dhxpyt-0.9.18+backend-py3-none-any.whl",
+        "javascriptAssets": 9,
+        "pyodideBaseUrl": "http://127.0.0.1:8082/runtime/pyodide/0.29.3/full/",
+        "pyodideVersion": "0.29.3",
+        "pythonVersion": "3.13.2",
+        "runtime": "pytincture",
+        "runtimeVersion": "1.0.0rc15",
+        "widgetPackage": "dhxpyt",
+        "widgetVersion": "0.9.18",
+        "widgetset": "dhxpyt==0.9.18+backend"
+      },
+      "completed_widget_probe_abort_count": 1,
+      "console_error_count": 0,
+      "duration_ms": 5041,
+      "external_widget_requests": 0,
+      "health": {
+        "distribution_version": "1.0.0rc15",
+        "instance_uuid": "7516e991-c4f8-48d3-9b15-77ca6bf69e54",
+        "runtime_sha256": "41be0243a3bb87b21f5e53e4da9c5e2a17b7863c221cf71253b8c5a444d56e9a",
+        "runtime_source": "installed-python-wheel",
+        "status": "ok",
+        "version": "1.0.0rc15"
+      },
+      "local_asset_requests": 9,
+      "request_uuid": "7516e991-c4f8-48d3-9b15-77ca6bf69e54",
+      "status": "passed",
+      "unexpected_request_failure_count": 0,
+      "visible_url": "http://127.0.0.1:8082/standalone"
+    }
+  },
+  "run": {
+    "attempt": 1,
+    "event": "push",
+    "id": "38427355625",
+    "job": "standalone-wheel-e2e",
+    "ref": "refs/heads/main"
+  },
+  "schema_version": 1,
+  "status": "passed",
+  "tested_at": "2026-10-13T16:05:32Z",
+  "version": "1.0.0rc15"
+}

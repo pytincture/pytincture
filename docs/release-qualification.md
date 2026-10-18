@@ -5,6 +5,38 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
+## 1.0.0 release preparation — 2026-10-17
+
+The release branch targets Python and npm 1.0.0 and includes the Lambda
+manifest/checked-bytecode tools, conditional extras, startup improvements,
+separate login/BFF routing guidance, and CloudFront/CloudWatch documentation.
+Normal FastAPI/ASGI, desktop and browser defaults remain supported.
+
+The post-publication RC15 acceptance documents from successful
+[main CI run 38427355625](https://github.com/pytincture/pytincture/actions/runs/38427355625)
+are retained under `release/evidence/rc15` and referenced by the qualification
+record. This closes the stale application, upgrade/rollback and performance
+evidence gaps without inventing new test dates or resetting observation.
+
+Local release preparation passed 1,332 tests on each of Python 3.13 and 3.14
+(two optional skips per version), 64 JavaScript tests and 10 Chromium lifecycle
+tests. The initial lock-check test required adding the installed uv executable
+to PATH; the unchanged check then passed on both interpreters. The wheel,
+sdist and npm package pass exact-inventory/version inspection, including the
+new Lambda modules. These local results do not substitute for final remote CI.
+
+The owner explicitly waived the deployed HTTPS/HSTS/proxy review on October 17
+and reported personal application testing. This is recorded in
+`release_exceptions`; the individual edge checks are not reported as passed.
+
+Final publication is still gated on the
+documented release-profile repository protection audit and the final release
+decision. Current dependency, secret, Dependabot and labeled-defect audits
+passed; their results are retained under `release/evidence/1.0.0`. Live repository protection currently has zero
+required approvals and disables CODEOWNER/last-push approval; that does not
+satisfy the documented final-release contract. The production-edge exception
+does not waive the repository protection requirements.
+
 ## RC15 publication — 2026-10-13
 
 `1.0.0rc15` was published from `661d1c812da3ef8a2d327e2a890bedf636fd4c7f`,

@@ -705,6 +705,12 @@ class PytinctureConfig:
         "Revalidate cached BFF registry and application-graph freshness before reuse (default true). Disable only for immutable code; restart after changes. Execution source verification and request/result protections remain enabled.",
         kw_only=True,
     )
+    bff_prebuilt_manifest: Optional[str] = _setting(
+        None,
+        "PYTINCTURE_BFF_PREBUILT_MANIFEST",
+        "Private deployment-owned BFF parse manifest. Source digests are verified before reuse; never accept a client-supplied artifact.",
+        kw_only=True,
+    )
     bff_async_execution_mode: str = _setting(
         "event-loop",
         "BFF_ASYNC_EXECUTION_MODE",
