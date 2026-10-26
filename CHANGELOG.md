@@ -3,6 +3,19 @@
 This project follows semantic versioning from 1.0. Dates and final entries are
 set when a release is published.
 
+## 1.0.1 — 2026-10-26
+
+- Consolidate dependency updates into one tested maintenance release: FastMCP
+  and fastmcp-slim 4.1.2, filelock 4.2.1, certifi 2026.10.19,
+  opentelemetry-api 1.45.1, and setuptools 84.2.1.
+- Update Playwright to 1.64.1 and Swagger UI to 5.34.0; regenerate the bundled
+  Swagger assets and their integrity metadata.
+- Update pinned setup-python, setup-uv and PyPI publishing actions.
+- Group scheduled Python, npm and GitHub Actions version updates into one weekly
+  Dependabot PR so the combined dependency graph is reviewed and tested together.
+- Preserve public APIs, configuration defaults, normal FastAPI/ASGI deployment,
+  and the opt-in Lambda startup path.
+
 ## 1.0.0 — 2026-10-17
 
 - Add a Lambda staging command that generates BFF metadata and precompiles

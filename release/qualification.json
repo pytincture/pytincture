@@ -1008,5 +1008,26 @@
       "reason": "Owner explicitly waived the separate repository review policy gate for 1.0. Live protection has zero required approvals and disables CODEOWNER/last-push approval; required CI checks remain enforced. See release/evidence/1.0.0/repository-policy-review.json.",
       "approval_source": "Owner response to the release policy question: Waive policy gate for 1.0."
     }
+  ],
+  "maintenance_releases": [
+    {
+      "version": "1.0.1",
+      "prepared_on": "2026-10-26",
+      "source_pull_requests": [
+        402,
+        403,
+        404,
+        405,
+        406,
+        407,
+        408,
+        409,
+        410,
+        411,
+        412,
+        413
+      ],
+      "notes": "Dependency-only maintenance batch. PR403 is superseded by PR409; PR406 and PR408 request the same paired FastMCP update. Required combined CI and normal signed-tag/attested publication remain enforced. The 1.0.0 owner exceptions are historical and have not been extended."
+    }
   ]
 }

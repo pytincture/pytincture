@@ -100,7 +100,7 @@ def test_python_publish_requires_token_protected_attested_release_provenance():
     assert "--source-ref" in release_workflow
     assert "verify_python_release.py" in release_workflow
     assert (
-        "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33"
+        "pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086"
         in release_workflow
     )
     assert "password: ${{ secrets.PYPI_PASSWORD }}" in release_workflow

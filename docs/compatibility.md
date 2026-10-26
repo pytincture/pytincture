@@ -35,6 +35,10 @@ versions for each release candidate.
 
 ## Version compatibility rules
 
+1.0.1 is a dependency and bundled Swagger UI maintenance update. Public APIs,
+configuration defaults and FastAPI/ASGI, browser, desktop and Lambda deployment
+paths are unchanged from 1.0.0.
+
 1.0.0 preserves RC15 public APIs, regular FastAPI/ASGI and desktop launch paths,
 and existing authentication defaults. The Lambda manifest/bytecode build steps
 and provisioned concurrency are opt-in. Unchanged BFF manifests are reused only
