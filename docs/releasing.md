@@ -103,3 +103,23 @@ npm ci --ignore-scripts
 npm run build
 npm pack --dry-run
 ```
+
+## Combined dependency maintenance
+
+Scheduled uv, npm and GitHub Actions version updates share the weekly
+`dependency-refresh` multi-ecosystem group in `.github/dependabot.yml`. The uv
+entry maintains `uv.lock` alongside `pyproject.toml`; do not add a duplicate pip
+entry for the same project. Security updates can still arrive outside that
+scheduled batch. See GitHub's [multi-ecosystem update guide](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/configuring-multi-ecosystem-updates).
+
+For existing individual bump PRs, consolidate the requested versions into one
+release branch, choose the newer version where PRs overlap, regenerate locks
+and vendored assets, and run the full integration matrix on that combined PR.
+Keep the original PRs open until the batch merges, then close any that Dependabot
+has not already retired as superseded. A passing test on an individual bump
+does not establish that the combined dependency graph works. No separate manual
+application test is required for each bump when the combined acceptance suite
+passes; targeted investigation is needed if the combined tests fail.
+
+The ordinary signed-tag and attested publication checks still run for the
+release. Grouping does not remove required CI or protected registry approvals.

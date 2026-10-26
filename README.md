@@ -61,7 +61,7 @@ evidence for browser startup, package generation, health, and BFF calls.
 
 Install Pytincture 1.0:
 ~~~
-pip install 'pytincture==1.0.0'
+pip install 'pytincture==1.0.1'
 ~~~
 
 Use Python 3.13 or 3.14. For a source checkout, use the installation below;
@@ -72,12 +72,12 @@ without pulling optional identity-provider, Redis, or MCP stacks. Install only
 the features a deployment enables:
 
 ```bash
-pip install "pytincture[password]==1.0.0"  # Argon2/bcrypt local login
-pip install "pytincture[oauth]==1.0.0"     # Google/Microsoft OAuth
-pip install "pytincture[saml]==1.0.0"      # SAML 2.0
-pip install "pytincture[redis]==1.0.0"     # shared Upstash state
-pip install "pytincture[mcp]==1.0.0"       # MCP endpoint
-pip install "pytincture[dev]==1.0.0"       # all features and test/build tools
+pip install "pytincture[password]==1.0.1"  # Argon2/bcrypt local login
+pip install "pytincture[oauth]==1.0.1"     # Google/Microsoft OAuth
+pip install "pytincture[saml]==1.0.1"      # SAML 2.0
+pip install "pytincture[redis]==1.0.1"     # shared Upstash state
+pip install "pytincture[mcp]==1.0.1"       # MCP endpoint
+pip install "pytincture[dev]==1.0.1"       # all features and test/build tools
 ```
 
 From Source:
@@ -321,7 +321,7 @@ is published to npm and its SRI is copied from the trusted release integrity
 manifest. The URL below requires completed npm publication; use the Python-wheel
 asset export while publication is pending:
 ```
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.1/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
 ```
 
 ### Using pytincture.js standalone

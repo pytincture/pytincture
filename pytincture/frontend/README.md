@@ -157,7 +157,7 @@ available; use the Python-wheel asset export while npm publication is pending:
 
 ```html
 <script
-  src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.0/dist/pytincture.min.js"
+  src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.1/dist/pytincture.min.js"
   integrity="sha384-<trusted-manifest-value>"
   crossorigin="anonymous"></script>
 ```

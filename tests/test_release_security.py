@@ -237,3 +237,26 @@ def test_frozen_lock_has_no_drift():
         ["uv", "lock", "--check"], cwd=ROOT, check=False, capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("extra,name,version,allowed", [
+    (None, "python-multipart", "0.0.20", False),
+    (None, "python-multipart", "0.0.31", True),
+    ("oauth", "authlib", "1.6.8", False),
+    ("oauth", "authlib", "1.6.12", True),
+    ("mcp", "fastmcp", "3.4.7", False),
+    ("mcp", "fastmcp", "3.4.10", True),
+    ("mcp", "fastmcp", "4.0.5", False),
+    ("mcp", "fastmcp", "4.1.1", False),
+    ("mcp", "fastmcp", "4.1.2", True),
+    ("dev", "pytest", "9.0.2", False),
+    ("dev", "pytest", "9.0.3", True),
+])
+def test_release_dependency_ranges_exclude_known_vulnerable_versions(extra, name, version, allowed):
+    from packaging.requirements import Requirement
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    dependencies = (project["dependencies"] if extra is None
+                    else project["optional-dependencies"][extra])
+    requirement = next(Requirement(value) for value in dependencies
+                       if Requirement(value).name == name)
+    assert requirement.specifier.contains(version) is allowed
