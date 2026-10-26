@@ -25,14 +25,14 @@ dependencies = [
     "markupsafe>=3,<4",
     "packaging>=24,<27",
     "pydantic>=2.10,<3",
-    "python-multipart>=0.0.20,<1",
+    "python-multipart>=0.0.31,<1",
     "starlette>=1.6,<2",
     "uvicorn>=0.34,<1",
 ]
 
 [project.optional-dependencies]
 oauth = [
-    "authlib>=1.4,<2",
+    "authlib>=1.6.12,<2",
     "httpx>=0.27,<1",
 ]
 password = [
@@ -47,18 +47,18 @@ saml = [
     "xmlsec>=1.3.17,<2",
 ]
 mcp = [
-    "fastmcp>=3.4.7,<5",
+    "fastmcp>=3.4.10,<5,!=4.0.*,!=4.1.0,!=4.1.1",
 ]
 dev = [
     "argon2-cffi>=23.1,<26",
-    "authlib>=1.4,<2",
+    "authlib>=1.6.12,<2",
     "bcrypt>=4.2,<6",
     "build>=1.2,<2",
-    "fastmcp>=3.4.7,<5",
+    "fastmcp>=3.4.10,<5,!=4.0.*,!=4.1.0,!=4.1.1",
     "httpx>=0.27,<1",
     "httpx2>=2,<3",
     "pip-audit>=2.9,<3",
-    "pytest>=8.3,<10",
+    "pytest>=9.0.3,<10",
     "python3-saml>=1.16,<2",
     "setuptools==84.2.1",
     "twine>=6,<8",
