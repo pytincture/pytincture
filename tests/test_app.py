@@ -5617,6 +5617,8 @@ def test_authenticated_session_has_absolute_lifetime(
     expired_absolute_cookie = TimestampSigner(
         backend_app.SAML_SECRET_KEY
     ).sign(encoded).decode("utf-8")
+    # Replace the domain-scoped login cookie rather than adding a second one.
+    fresh_client.cookies.delete(_SESSION_COOKIE)
     fresh_client.cookies.set(_SESSION_COOKIE, expired_absolute_cookie)
     response = fresh_client.post(
         "/demoapp/classcall/example.py/ExampleClass/testfunc",

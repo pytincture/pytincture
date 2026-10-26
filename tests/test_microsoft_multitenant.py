@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 import pytest
+from authlib.integrations.httpx_client import oauth2_client
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from fastapi.testclient import TestClient
@@ -16,6 +17,11 @@ from pytincture.backend.microsoft import (
     MICROSOFT_CONSUMER_TENANT,
     MICROSOFT_ISSUER_TEMPLATE,
 )
+
+
+# Authlib 1.9 uses httpx2; older supported versions use httpx.
+# Mock the provider’s transport with the same HTTP implementation it uses.
+oauth_httpx = getattr(oauth2_client, "httpx2", httpx)
 
 
 TENANT_A = "11111111-2222-3333-4444-555555555555"
@@ -73,7 +79,7 @@ def _login(app, key, *, tenant=TENANT_A, changes=None,
         assert request.url.host == "login.microsoftonline.com"
         path = request.url.path
         if path.endswith("/.well-known/openid-configuration"):
-            return httpx.Response(200, json={
+            return oauth_httpx.Response(200, json={
                 "issuer": MICROSOFT_ISSUER_TEMPLATE if provider._server_metadata_url.find("/organizations/") >= 0
                 else MICROSOFT_ISSUER_TEMPLATE.format(tenantid=tenant),
                 "authorization_endpoint": "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize",
@@ -84,7 +90,7 @@ def _login(app, key, *, tenant=TENANT_A, changes=None,
             })
         if path.endswith("/keys"):
             key_fetches.append(True)
-            return httpx.Response(200, json={"keys": [_jwk(key, key_issuer)]})
+            return oauth_httpx.Response(200, json={"keys": [_jwk(key, key_issuer)]})
         assert path.endswith("/token")
         assert request.method == "POST"
         claims = {
@@ -100,9 +106,9 @@ def _login(app, key, *, tenant=TENANT_A, changes=None,
         payload = {"access_token": "test-access-token", "token_type": "Bearer"}
         if not missing_id_token:
             payload["id_token"] = _signed_token(token_key or key, claims)
-        return httpx.Response(200, json=payload)
+        return oauth_httpx.Response(200, json=payload)
 
-    provider.client_kwargs["transport"] = httpx.MockTransport(provider_response)
+    provider.client_kwargs["transport"] = oauth_httpx.MockTransport(provider_response)
     if rotate:
         provider.server_metadata["jwks"] = {"keys": [_jwk(key, key_issuer, "old-key")]}
     with TestClient(app, base_url="https://service.example") as client:
