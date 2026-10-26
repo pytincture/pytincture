@@ -11,6 +11,8 @@ set when a release is published.
 - Update Playwright to 1.64.1 and Swagger UI to 5.34.0; regenerate the bundled
   Swagger assets and their integrity metadata.
 - Update pinned setup-python, setup-uv and PyPI publishing actions.
+- Refresh the separate hash-locked Book Library conformance environment to the
+  same patched dependency versions.
 - Group scheduled Python, npm and GitHub Actions version updates into one weekly
   Dependabot PR so the combined dependency graph is reviewed and tested together.
 - Preserve public APIs, configuration defaults, normal FastAPI/ASGI deployment,
