@@ -50,6 +50,6 @@
     "@playwright/test": "1.64.0",
     "codemirror": "6.0.2",
     "esbuild": "^0.28.1",
-    "swagger-ui-dist": "5.33.1"
+    "swagger-ui-dist": "5.34.0"
   }
 }
