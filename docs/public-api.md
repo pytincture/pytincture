@@ -383,3 +383,17 @@ not compatibility promises:
 - generated bundle internals and helper functions other than
   `runTinctureApp()`; and
 - exact log text, HTML markup, CSS class names, or archive compression details.
+
+## Optional installed application packages (experimental)
+
+`pytincture.packaged_apps.build_app_manifest(modules_path, application, *,
+requires_pytincture=">=1.0.1,<2", bff_manifest=None)` writes the build-time inventory.
+`load_packaged_app(distribution, *, expected_version=None)` verifies an explicitly
+selected installed wheel and returns immutable package metadata without importing
+its application. `create_packaged_app(distribution, config=None, *,
+expected_version=None)` uses that verified root with the existing FastAPI factory.
+`config` is a `PytinctureConfig` or `None` (environment configuration).
+
+These APIs do not install or download packages, automatically enable apps, or
+provide live upgrades. See [Packaged microapps and AWS delivery](packaged-microapps.md).
+The existing `create_app()` API and folder-based deployments are unchanged.

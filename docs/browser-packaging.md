@@ -1,5 +1,9 @@
 # Browser packaging and dynamic imports
 
+For optional versioned app wheels and the proposed S3/CloudFront environment
+pattern, see [Packaged microapps](packaged-microapps.md). Existing folder loading
+remains the default.
+
 This guide covers the default legacy Pyodide delivery. Opt-in portable bundles
 have a separate [builder and import configuration](browser-runtimes.md), including
 `dynamic-imports`, `browser-substitutes`, and `server-only-imports`.
