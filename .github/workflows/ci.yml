@@ -262,6 +262,7 @@ jobs:
       matrix:
         extra:
           - microapps
+          - microapps-s3
           - oauth
           - password
           - redis
@@ -1045,3 +1046,6 @@ jobs:
       - name: Install app into an open platform using real Pyodide and BFF workers
         working-directory: pytincture/frontend
         run: npx playwright test --config playwright.microapps.config.mjs
+      - name: Reconcile environment bundles and live additions in real Pyodide
+        working-directory: pytincture/frontend
+        run: npx playwright test --config playwright.environment.config.mjs

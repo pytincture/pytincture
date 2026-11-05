@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import inspect
 import json
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from starlette.responses import FileResponse, JSONResponse, Response
 
@@ -11,13 +11,14 @@ _HOP = {b"connection", b"keep-alive", b"proxy-authenticate", b"proxy-authorizati
         b"te", b"trailer", b"transfer-encoding", b"upgrade"}
 
 
-def create_microapp_host(base_app, manager, *, authorize):
+def create_microapp_host(base_app, manager, *, authorize, authorize_install=None):
     """Wrap an existing ASGI app with explicitly authorized live microapp routes.
 
     authorize(scope, app_id) must return True (or await True). app_id is None
     for catalog access and the selected id for each app. It must validate the
     platform session/environment itself; base-app middleware has not run here.
-    There is deliberately no public installation endpoint.
+    An installation endpoint exists only with EnvironmentMicroappManager and an
+    explicit authorize_install callback returning a trusted approved app record.
     """
     if not callable(authorize):
         raise TypeError("An explicit platform authorization callback is required")
@@ -27,6 +28,10 @@ def create_microapp_host(base_app, manager, *, authorize):
         if inspect.isawaitable(result):
             result = await result
         return result is True
+
+    if hasattr(manager, 'read_manifest') and hasattr(base_app, 'state'):
+        base_app.state.pytincture_environment_catalog_url = manager.prefix + '/catalog'
+        base_app.state.pytincture_environment_asset_origins = list(manager.asset_origins)
 
     async def host(scope, receive, send):
         if scope["type"] == "lifespan":
@@ -56,6 +61,87 @@ def create_microapp_host(base_app, manager, *, authorize):
         if path != prefix and not path.startswith(prefix + "/"):
             await base_app(scope, receive, send)
             return
+        if path == prefix + '/installations' and hasattr(manager, 'request_install'):
+            if authorize_install is None:
+                await Response(status_code=404)(scope, receive, send); return
+            if scope['method'] != 'POST':
+                await Response(status_code=405)(scope, receive, send); return
+            headers = dict(scope['headers'])
+            origin = headers.get(b'origin', b'').decode()
+            expected_origin = manager.config.canonical_origin or (scope['scheme'] + '://' + headers.get(b'host', b'').decode())
+            if (origin and origin != expected_origin) or (b'cookie' in headers and not origin):
+                await Response(status_code=403)(scope, receive, send); return
+            if headers.get(b'x-pytincture-install') != b'1' or headers.get(b'content-type', b'').split(b';')[0] != b'application/json':
+                await Response(status_code=415)(scope, receive, send); return
+            if not await allowed(scope, None):
+                await Response(status_code=403)(scope, receive, send); return
+            data = bytearray()
+            while True:
+                message = await receive()
+                if message['type'] == 'http.disconnect': return
+                data.extend(message.get('body', b''))
+                if len(data) > 1024 * 1024:
+                    await Response(status_code=413)(scope, receive, send); return
+                if not message.get('more_body'): break
+            from .object_store import ObjectConflict
+            try:
+                command = json.loads(data)
+                if not isinstance(command, dict) or set(command) - {'app_id', 'version', 'installed', 'expected_revision'}:
+                    raise ValueError('Invalid install command')
+                if type(command.get('installed')) is not bool or not isinstance(command.get('app_id'), str):
+                    raise ValueError('Invalid install selection')
+                approved = authorize_install(scope, command)
+                if inspect.isawaitable(approved): approved = await approved
+                if not isinstance(approved, dict):
+                    await Response(status_code=403)(scope, receive, send); return
+                if approved.get('installed') != command['installed']:
+                    raise ValueError('Approved state differs from requested state')
+                if command['installed']:
+                    from packaging.version import Version
+                    if Version(approved['version']) != Version(command['version']):
+                        raise ValueError('Approved version differs from requested version')
+                result = await manager.request_install(command['app_id'], approved,
+                                                       expected_revision=command.get('expected_revision'))
+            except ObjectConflict:
+                await JSONResponse({'error': 'Environment revision changed'}, status_code=409)(scope, receive, send); return
+            except (ValueError, KeyError, TypeError):
+                await JSONResponse({'error': 'Invalid approved installation'}, status_code=400)(scope, receive, send); return
+            await JSONResponse(result, status_code=202, headers={'Cache-Control': 'no-store'})(scope, receive, send)
+            return
+        if path == prefix + '/environment' and hasattr(manager, 'read_manifest'):
+            if scope['method'] != 'GET':
+                await Response(status_code=405)(scope, receive, send); return
+            if not await allowed(scope, None):
+                await Response(status_code=403)(scope, receive, send); return
+            from .environment_manifest import selection_id
+            document, _ = await manager.read_manifest()
+            await JSONResponse({'revision': document['revision'], 'desired': selection_id(document),
+                'active': document['active'] and document['active']['selection'],
+                'building': document['build'] is not None, 'error': document['error']},
+                headers={'Cache-Control': 'private, no-store'})(scope, receive, send)
+            return
+        if path.startswith(prefix + '/bundles/') and hasattr(manager, 'browser_bundle'):
+            import re
+            matched = re.fullmatch(re.escape(prefix) + r'/bundles/([a-f0-9]{64})/environment\.zip', path)
+            if not matched or scope['method'] not in {'GET', 'HEAD'}:
+                await Response(status_code=404)(scope, receive, send); return
+            if not await allowed(scope, None):
+                await Response(status_code=403)(scope, receive, send); return
+            candidates = ([manager._bundle] if manager._bundle else [])
+            if manager._document: candidates += manager._document['history']
+            bundle = next((item for item in candidates if item['selection'] == matched[1]), None)
+            if bundle is None:
+                await Response(status_code=404)(scope, receive, send); return
+            if not all([await allowed(scope, app_id) for app_id in bundle['inventory']['releases']]):
+                await Response(status_code=403)(scope, receive, send); return
+            resolved = await manager.browser_bundle(matched[1])
+            if resolved is None:
+                await Response(status_code=404)(scope, receive, send); return
+            bundle, bundle_file = resolved
+            await FileResponse(bundle_file, media_type='application/zip',
+                headers={'Cache-Control': 'private, no-cache', 'ETag': '"' + bundle['sha256'] + '"',
+                         'X-Content-Type-Options': 'nosniff', 'Vary': 'Cookie, Authorization'})(scope, receive, send)
+            return
         if path == prefix + "/catalog":
             if scope["method"] != "GET":
                 await Response(status_code=405)(scope, receive, send)
@@ -64,11 +150,17 @@ def create_microapp_host(base_app, manager, *, authorize):
                 await Response(status_code=403)(scope, receive, send)
                 return
             document = manager.catalog()
-            document["apps"] = [app for app in document["apps"] if await allowed(scope, app["id"])]
+            all_apps = document['apps']
+            document["apps"] = [app for app in all_apps if await allowed(scope, app["id"])]
+            if len(document['apps']) != len(all_apps):
+                document.pop('snapshot', None)  # Never leak other apps through an aggregate archive.
             if root:
                 for app in document["apps"]:
                     app["bff_base"] = root + app["bff_base"]
-                    app["browser"]["url"] = root + app["browser"]["url"]
+                    if app['browser']['url'].startswith('/'):
+                        app["browser"]["url"] = root + app["browser"]["url"]
+                if document.get('snapshot') and document['snapshot']['url'].startswith('/'):
+                    document['snapshot']['url'] = root + document['snapshot']['url']
             await JSONResponse(document, headers={"Cache-Control": "private, no-store",
                                                    "Vary": "Cookie, Authorization"})(scope, receive, send)
             return
@@ -80,7 +172,11 @@ def create_microapp_host(base_app, manager, *, authorize):
         app_id, release_id, kind = parts[:3]
         key = f"{app_id}/{release_id}"
         release = manager._releases.get(key)
-        if release is None or kind not in {"browser", "backend"}:
+        if release is None and kind == 'backend' and app_id in manager._active and hasattr(manager, 'ensure_release'):
+            if await allowed(scope, app_id):
+                await manager.ensure_release(app_id, release_id)
+                release = manager._releases.get(key)
+        if release is None or app_id not in manager._active or kind not in {"browser", "backend"}:
             await Response(status_code=404)(scope, receive, send)
             return
         if not await allowed(scope, app_id):
@@ -147,4 +243,15 @@ def create_microapp_host(base_app, manager, *, authorize):
             finally:
                 await response.aclose()
 
-    return host
+    async def environment_host(scope, receive, send):
+        async def with_revision(message):
+            bundle = getattr(manager, '_bundle', None)
+            if scope['type'] == 'http' and message['type'] == 'http.response.start' and bundle:
+                message = dict(message)
+                message['headers'] = [(key, value) for key, value in message.get('headers', [])
+                    if key.lower() not in {b'x-pytincture-bundle', b'x-pytincture-revision'}]
+                message['headers'].extend([(b'x-pytincture-bundle', bundle['selection'].encode()),
+                                          (b'x-pytincture-revision', str(bundle['revision']).encode())])
+            await send(message)
+        await host(scope, receive, with_revision)
+    return environment_host

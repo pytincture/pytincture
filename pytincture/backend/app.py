@@ -7688,6 +7688,13 @@ async def main_app_route(response: Response, application: str, request: Request)
     index_html = index_html.replace("***DELIVERY_MODE_JSON***", _html_script_json(delivery_mode))
     index_html = index_html.replace("***BROWSER_RUNTIME_JSON***", _html_script_json(browser_runtime))
     index_html = index_html.replace("***RUNTIME_MANIFEST_JSON***", _html_script_json(runtime_manifest_url))
+    environment_catalog = getattr(request.app.state, 'pytincture_environment_catalog_url', None)
+    if environment_catalog:
+        if browser_runtime != 'pyodide':
+            raise HTTPException(status_code=422, detail='Environment bundles require Pyodide')
+        environment_catalog = request.scope.get('root_path', '') + environment_catalog
+    index_html = index_html.replace('***ENVIRONMENT_CATALOG_JSON***', _html_script_json(environment_catalog))
+    index_html = index_html.replace('***ENVIRONMENT_ASSET_ORIGINS_JSON***', _html_script_json(getattr(request.app.state, 'pytincture_environment_asset_origins', [])))
     index_html = index_html.replace(
         "***APPLICATION_JSON***", _html_script_json(application)
     )

@@ -1,5 +1,9 @@
 # Live microapp installation (experimental, added in 1.0.2)
 
+For automatic S3 selection, consolidated startup bundles, and multiple ECS replicas,
+see [environment bundles](environment-microapps.md), an unreleased opt-in addition.
+The APIs below remain available with their existing behavior.
+
 This opt-in path adds an approved app to a running environment without rebuilding
 its image, restarting its Pytincture service, reloading an open browser, or
 fetching a second WASM engine. The normal `create_app()` and app-folder path do
