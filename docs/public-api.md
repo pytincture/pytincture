@@ -407,7 +407,45 @@ stages approved artifacts and activates after health readiness. `activate(app_id
 release_id)` selects an installed version. `WheelArtifact(path, sha256)` and
 `BrowserArtifact(wheel, entrypoint, runtime_version="0.29.3")` describe its inputs.
 `create_microapp_host(base_app, manager, authorize=...)` wraps an existing ASGI app
-with authorized catalog, browser-wheel and BFF proxy routes. It has no install
-HTTP endpoint. The browser client is `window.createPytinctureMicroappClient(options)` or the
+with authorized catalog, browser-wheel and BFF proxy routes. With this manager it
+has no install HTTP endpoint. The browser client is `window.createPytinctureMicroappClient(options)` or the
 `MicroappClient` source export. See [Live microapps](live-microapps.md) for the
 pure-Python/Pyodide scope, ECS topology, authentication and shared-runtime limits.
+
+
+## Environment bundles (experimental, unreleased)
+
+`EnvironmentMicroappManager(store, config, *, objects, environment,
+manifest_key="environment.json", poll_seconds=5, lease_seconds=60,
+startup_timeout=300, browser_delivery="host", asset_origins=(), **kwargs)` extends
+the live manager with a shared desired-state manifest. `objects` is an
+`S3ObjectStore(bucket, prefix="", client=None)` or `DirectoryObjectStore(root)`.
+S3 credentials come from the SDK chain; constructing the adapter requires the
+optional `microapps-s3` extra. Importing the normal framework does not load boto3.
+Each replica needs a separate private local store and one ASGI worker.
+
+`empty_manifest(environment)` creates the initial document. `initialize(document)`
+is create-only. `start()` reconciles installed wheel selections before readiness;
+`reconcile()` performs an explicit check. `read_manifest()` returns document and
+ETag. `request_install(app_id, approved_record, artifacts=None,
+expected_revision=None)` durably updates the desired selection, optionally
+uploading trusted local artifacts, and returns accepted revision/selection.
+`close()` stops reconciliation and workers. Low-level inherited `install()` and
+`activate()` are for the manual manager; use desired-state requests with the
+environment manager so S3 remains authoritative.
+
+`create_microapp_host(..., authorize_install=callback)` enables the opt-in
+installation endpoint only for this manager. The callback verifies platform
+permissions and returns the reviewed artifact record. Environment status,
+consolidated bundle delivery, BFF revision headers, and automatic standard-page
+browser configuration are enabled by the wrapper. Existing `authorize` checks
+remain required. `browser_delivery="s3"` signs only browser artifacts for exact
+approved HTTPS `asset_origins`; configure CSP and bucket CORS separately.
+
+Browser `bootstrapEnvironment(runtime, options)` initializes a verified aggregate
+and automatically records bundled release IDs. Options include `catalogUrl`,
+`assetOrigins`, `onCatalog`, and `onUpdateRequired`. Standard Pyodide startup calls
+it when `environmentCatalogUrl` is set. `MicroappClient.initializeSnapshot()` and
+`syncAvailable()` support custom hosts; `autoSync` observes BFF response revisions.
+Updates of already loaded apps request a safe reload. See the complete
+[manifest, ECS/S3 and live-install guide](environment-microapps.md).

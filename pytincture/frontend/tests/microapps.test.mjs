@@ -99,3 +99,61 @@ test('legacy runtime source remains a classic script; live loading is opt-in', a
     assert.doesNotThrow(() => new Script(source));
     assert.match(source, /createPytinctureMicroappClient/);
 });
+
+test('snapshot inventory automatically skips individual wheel installation', async () => {
+    const f = fixture(), item = app();
+    f.client.adapter.installSnapshot = async () => ({schema: 1, apps: {orders: {release: item.release}}});
+    f.client.fetch = async url => url.endsWith('/catalog')
+        ? new Response(JSON.stringify({schema: 1, revision: 1, apps: [item], snapshot: {
+            selection: 'c'.repeat(64), sha256, bytes: wheel.length,
+            url: '/environment.zip', runtime: {engine: 'pyodide', version: '0.29.3'}}}))
+        : (assert.ok(url.endsWith('/environment.zip')), new Response(wheel));
+    await f.client.initializeSnapshot();
+    await f.client.install('orders');
+    assert.deepEqual(f.client.bundledApps, {orders: item.release});
+    assert.equal(f.installed.length, 0);
+});
+
+test('S3 wheel URLs retain signatures and omit platform credentials', async () => {
+    const f = fixture(), item = app();
+    const signed = 'https://bucket.s3.us-east-1.amazonaws.com/ui.whl?X-Amz-Signature=abc';
+    item.browser.url = signed;
+    f.client.assetOrigins = ['https://bucket.s3.us-east-1.amazonaws.com'];
+    f.client.fetch = async (url, options) => {
+        if (url.endsWith('/catalog')) return new Response(JSON.stringify({schema: 1, revision: 1, apps: [item]}));
+        assert.equal(url, signed); assert.equal(options.credentials, 'omit');
+        return new Response(wheel);
+    };
+    await f.client.refresh(); await f.client.install('orders');
+    assert.equal(f.installed.length, 1);
+});
+
+test('BFF revision loads missing app but preserves an already loaded upgrade', async () => {
+    const f = fixture(); f.setCatalog({schema: 1, revision: 1, apps: [app()]});
+    await f.client.refresh(); await f.client.install('orders');
+    const reports = {...app(), id: 'reports'};
+    const upgrades = []; f.client.autoSync = true;
+    f.client.onUpdateRequired = (next, previous) => upgrades.push([next.release, previous.release]);
+    f.setCatalog({schema: 1, revision: 2, apps: [app('b'.repeat(64)), reports]});
+    const response = {url: 'https://platform.test/shell/classcall/ping.py/Ping/read', headers: new Headers({
+        'x-pytincture-bundle': 'c'.repeat(64), 'x-pytincture-revision': '2'})};
+    f.client.noticeBffResponse(response);
+    await f.client.refreshing;
+    assert.equal(f.client.installed.get('orders').release, 'a'.repeat(64));
+    assert.equal(f.client.installed.get('reports').release, reports.release);
+    assert.deepEqual(upgrades, [['b'.repeat(64), 'a'.repeat(64)]]);
+    assert.equal(f.installed.length, 2);
+});
+
+test('off-origin BFF response cannot prompt catalog refresh', () => {
+    const f = fixture(); f.client.autoSync = true;
+    f.client.noticeBffResponse({url: 'https://other.test/classcall/a', headers: new Headers({
+        'x-pytincture-bundle': 'c'.repeat(64), 'x-pytincture-revision': '99'})});
+    assert.equal(f.client.refreshing, null);
+});
+
+test('an app named constructor is not mistaken for a bundled prototype property', async () => {
+    const f = fixture(); f.setCatalog({schema: 1, revision: 1, apps: [{...app(), id: 'constructor'}]});
+    await f.client.refresh(); await f.client.install('constructor');
+    assert.equal(f.installed.length, 1);
+});

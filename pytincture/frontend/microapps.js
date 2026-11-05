@@ -8,6 +8,53 @@ function sameOrigin(value, base) {
     return url.href;
 }
 
+function assetUrl(value, base, origins = []) {
+    const url = new URL(value, base);
+    if (url.origin === new URL(base).origin) return sameOrigin(value, base);
+    if (url.protocol !== 'https:' || url.username || url.password || url.hash || !origins.includes(url.origin)) {
+        throw new Error('Unapproved microapp asset origin');
+    }
+    return url.href;
+}
+
+const bffObservers = new Set();
+let restoreBffObserver = null;
+export function observeBffResponses(listener) {
+    bffObservers.add(listener);
+    if (!restoreBffObserver) {
+        const originalFetch = globalThis.fetch;
+        const notify = response => {
+            if (!response?.url || !response.url.includes('/classcall/')) return;
+            for (const callback of bffObservers) callback(response);
+        };
+        const wrappedFetch = async (...args) => {
+            const response = await originalFetch.apply(globalThis, args);
+            notify(response);
+            return response;
+        };
+        globalThis.fetch = wrappedFetch;
+        const xhr = globalThis.XMLHttpRequest?.prototype;
+        const open = xhr?.open;
+        let xhrListener;
+        if (xhr) {
+            xhrListener = function (...args) {
+                if (this.__pytinctureBffListener) this.removeEventListener('loadend', this.__pytinctureBffListener);
+                this.__pytinctureBffListener = () => notify({url: this.responseURL,
+                    headers: {get: name => this.getResponseHeader(name)}});
+                this.addEventListener('loadend', this.__pytinctureBffListener);
+                return open.apply(this, args);
+            };
+            xhr.open = xhrListener;
+        }
+        restoreBffObserver = () => {
+            if (globalThis.fetch === wrappedFetch) globalThis.fetch = originalFetch;
+            if (xhr && xhr.open === xhrListener) xhr.open = open;
+            restoreBffObserver = null;
+        };
+    }
+    return () => { bffObservers.delete(listener); if (!bffObservers.size) restoreBffObserver?.(); };
+}
+
 async function bytes(response, limit) {
     if (!response.ok) throw new Error(`Microapp request failed (${response.status})`);
     if (Number(response.headers.get('content-length') || 0) > limit) throw new Error('Microapp response exceeds byte limit');
@@ -30,11 +77,20 @@ async function bytes(response, limit) {
     return output;
 }
 
-export function validateMicroappCatalog(document, base) {
+export function validateMicroappCatalog(document, base, origins = []) {
     if (document?.schema !== 1 || !Number.isSafeInteger(document.revision) || document.revision < 0
         || !Array.isArray(document.apps) || document.apps.length > 256) throw new Error('Invalid microapp catalog');
     const ids = new Set();
-    return {schema: 1, revision: document.revision, apps: document.apps.map(app => {
+    let snapshot = null;
+    if (document.snapshot) {
+        const item = document.snapshot;
+        if (!/^[a-f0-9]{64}$/.test(item.selection) || !/^[a-f0-9]{64}$/.test(item.sha256)
+            || !Number.isSafeInteger(item.bytes) || item.bytes < 1 || item.bytes > 268435456
+            || item.runtime?.engine !== 'pyodide' || item.runtime?.version !== '0.29.3') throw new Error('Invalid environment snapshot');
+        snapshot = {...item, url: assetUrl(item.url, base, origins)};
+    }
+    return {schema: 1, revision: document.revision, snapshot, environment: document.environment,
+        desired_revision: document.desired_revision, apps: document.apps.map(app => {
         const browser = app.browser;
         if (!/^[a-z][a-z0-9-]{0,63}$/.test(app.id) || ids.has(app.id)
             || !/^[a-f0-9]{64}$/.test(app.release) || typeof app.version !== 'string'
@@ -47,7 +103,7 @@ export function validateMicroappCatalog(document, base) {
             || browser.top_modules.some(name => !/^[A-Za-z_]\w*$/.test(name))) throw new Error('Invalid microapp release');
         ids.add(app.id);
         return {...app, bff_base: sameOrigin(app.bff_base, base),
-            browser: {...browser, url: sameOrigin(browser.url, base)}};
+            browser: {...browser, url: assetUrl(browser.url, base, origins)}};
     })};
 }
 
@@ -67,6 +123,24 @@ export class PyodideMicroappAdapter {
         runtime.FS.mkdirTree(directory);
         runtime.unpackArchive(wheelBytes, 'zip', {extractDir: directory});
         await runtime.runPythonAsync(`__import__('sys').path.insert(0, ${JSON.stringify(directory)})\n__import__('importlib').invalidate_caches()\n__import__('importlib').import_module(${JSON.stringify(app.browser.entrypoint.split(':')[0])})`);
+    }
+    async installSnapshot(catalog, data) {
+        const snapshot = catalog.snapshot;
+        if (this.runtime.version !== snapshot.runtime.version) throw new Error('Snapshot runtime mismatch');
+        const directory = `/pytincture_environment/${snapshot.selection}`;
+        this.runtime.FS.mkdirTree(directory);
+        this.runtime.unpackArchive(data, 'zip', {extractDir: directory});
+        const inventory = JSON.parse(this.runtime.FS.readFile(directory + '/pytincture-environment.json', {encoding: 'utf8'}));
+        if (inventory.schema !== 1 || inventory.selection !== snapshot.selection
+            || Object.keys(inventory.apps).length !== catalog.apps.length) throw new Error('Invalid embedded bundle inventory');
+        for (const app of catalog.apps) {
+            const bundled = inventory.apps[app.id];
+            if (bundled?.release !== app.release || bundled.version !== app.version || bundled.sha256 !== app.browser.sha256) {
+                throw new Error('Bundled app version does not match catalog');
+            }
+        }
+        await this.runtime.runPythonAsync(`__import__('sys').path.insert(0, ${JSON.stringify(directory)})\n__import__('importlib').invalidate_caches()`);
+        return inventory;
     }
     async invoke(app, hook, context, optional = false) {
         if (this.runtime.version !== app.browser.runtime_version) throw new Error('Microapp requires a different runtime');
@@ -105,9 +179,16 @@ export class MicroappClient {
     constructor({runtime, adapter, catalogUrl = '/_microapps/catalog', baseUrl = globalThis.location?.href,
                  fetch: fetcher = globalThis.fetch.bind(globalThis), pollMs = 15000,
                  onCatalog = () => {}, onError = console.error, csrfToken = defaultCsrfToken,
-                 bundledApps = {}} = {}) {
+                 bundledApps = {}, assetOrigins = [], autoSync = false,
+                 onUpdateRequired = () => {}} = {}) {
         this.baseUrl = baseUrl;
         this.catalogUrl = sameOrigin(catalogUrl, baseUrl);
+        for (const origin of assetOrigins) {
+            if (new URL(origin).origin !== origin || !origin.startsWith('https://')) throw new Error('Asset origins must be exact HTTPS origins');
+        }
+        this.assetOrigins = [...assetOrigins]; this.autoSync = autoSync;
+        this.onUpdateRequired = onUpdateRequired;
+        this.observedSelection = null; this.observedRevision = -1;
         this.fetch = fetcher;
         this.adapter = adapter || new PyodideMicroappAdapter(runtime);
         if (!Number.isFinite(pollMs) || pollMs < 1000) throw new Error('pollMs must be at least 1000');
@@ -124,11 +205,11 @@ export class MicroappClient {
         this.queue = result;
         return result;
     }
-    async _fetch(url, limit) {
+    async _fetch(url, limit, cache = 'no-store') {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 35000);
         try {
-            return await bytes(await this.fetch(url, {credentials: 'same-origin', cache: 'no-store',
+            return await bytes(await this.fetch(url, {credentials: new URL(url).origin === new URL(this.baseUrl).origin ? 'same-origin' : 'omit', cache,
                 redirect: 'error', signal: controller.signal}), limit);
         } finally { clearTimeout(timer); }
     }
@@ -136,38 +217,80 @@ export class MicroappClient {
         if (this.refreshing) return this.refreshing;
         this.refreshing = (async () => {
             const raw = await this._fetch(this.catalogUrl, 1048576);
-            const catalog = validateMicroappCatalog(JSON.parse(new TextDecoder().decode(raw)), this.baseUrl);
+            const catalog = validateMicroappCatalog(JSON.parse(new TextDecoder().decode(raw)), this.baseUrl, this.assetOrigins);
             this.available = new Map(catalog.apps.map(app => [app.id, app]));
             this.revision = catalog.revision;
+            this.catalog = catalog;
+            this.observedRevision = Math.max(this.observedRevision, catalog.revision);
+            this.observedSelection = catalog.snapshot?.selection || this.observedSelection;
+            if (this.autoSync) await this.syncAvailable();
             this.onCatalog(catalog);
             return catalog;
         })().finally(() => { this.refreshing = null; });
         return this.refreshing;
     }
-    async start() {
+    async start({refresh = true} = {}) {
         if (this.running) return;
         this.running = true;
+        if (this.autoSync) this._unobserve = observeBffResponses(response => this.noticeBffResponse(response));
         globalThis.addEventListener?.('focus', this.focus);
         const poll = async () => {
             if (!this.running) return;
             try { await this.refresh(); } catch (error) { this.onError(error); }
             if (this.running) this.timer = setTimeout(poll, this.pollMs);
         };
-        await poll();
+        if (refresh) await poll();
+        else this.timer = setTimeout(poll, this.pollMs);
     }
     stop() {
         this.running = false;
+        this._unobserve?.(); this._unobserve = null;
         clearTimeout(this.timer);
         globalThis.removeEventListener?.('focus', this.focus);
+    }
+    noticeBffResponse(response) {
+        if (response.url && new URL(response.url, this.baseUrl).origin !== new URL(this.baseUrl).origin) return;
+        const selected = response.headers?.get('x-pytincture-bundle');
+        const revision = Number(response.headers?.get('x-pytincture-revision'));
+        if (!this.autoSync || !selected || selected === this.observedSelection || revision < this.observedRevision) return;
+        this.refresh().catch(this.onError);
+    }
+    async syncAvailable() {
+        for (const app of this.available.values()) {
+            const installed = this.installed.get(app.id);
+            if (installed && installed.release !== app.release) {
+                this.onUpdateRequired(app, installed);
+                continue;
+            }
+            if (!installed) await this.install(app.id);
+        }
+    }
+    async initializeSnapshot() {
+        const catalog = await this.refresh();
+        if (catalog.snapshot) {
+            const snapshot = catalog.snapshot;
+            const data = await this._fetch(snapshot.url, snapshot.bytes, 'no-cache');
+            const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', data)), b => b.toString(16).padStart(2, '0')).join('');
+            if (data.byteLength !== snapshot.bytes || hash !== snapshot.sha256) throw new Error('Environment bundle integrity check failed');
+            const inventory = await this.adapter.installSnapshot(catalog, data);
+            this.bundledApps = Object.fromEntries(Object.entries(inventory.apps).map(([id, app]) => [id, app.release]));
+            for (const app of catalog.apps) this.installed.set(app.id, app);
+            this.bundleInventory = inventory;
+        } else {
+            await this.syncAvailable();
+        }
+        this.autoSync = true;
+        return catalog;
     }
     install(id) {
         return this._serial(async () => {
             const app = this.available.get(id);
             if (!app) throw new Error('Microapp is not enabled in this environment');
             const current = this.installed.get(id);
+            const bundled = Object.hasOwn(this.bundledApps, id) ? this.bundledApps[id] : null;
             if (current?.release === app.release) return current;
-            if (current || (this.bundledApps[id] && this.bundledApps[id] !== app.release)) throw new Error('Updating a loaded app requires a reload in this first version');
-            if (this.bundledApps[id] !== app.release) {
+            if (current || (bundled && bundled !== app.release)) throw new Error('Updating a loaded app requires a reload in this first version');
+            if (bundled !== app.release) {
                 const wheel = await this._fetch(app.browser.url, app.browser.bytes);
                 if (wheel.byteLength !== app.browser.bytes) throw new Error('Microapp wheel size mismatch');
                 const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', wheel)), b => b.toString(16).padStart(2, '0')).join('');
@@ -197,6 +320,7 @@ export class MicroappClient {
                     const url = `${app.bff_base}/classcall/${module.split('/').map(encodeURIComponent).join('/')}/${encodeURIComponent(className)}/${encodeURIComponent(method)}`;
                     const response = await this.fetch(url, {method: 'POST', credentials: 'same-origin', redirect: 'error',
                         headers, body: JSON.stringify({args: plain(args), kwargs: plain(kwargs)})});
+                    this.noticeBffResponse(response);
                     if (!response.ok) throw new Error(`Microapp BFF call failed (${response.status})`);
                     return response.json();
                 }};
@@ -225,4 +349,17 @@ export class MicroappClient {
             }
         });
     }
+}
+
+
+export async function bootstrapEnvironment(runtime, options) {
+    if (runtime.__pytinctureEnvironmentClient) return runtime.__pytinctureEnvironmentClient;
+    const client = new MicroappClient({...options, runtime,
+        onCatalog: options.onCatalog || (catalog => globalThis.dispatchEvent?.(new CustomEvent('pytincture:microapps', {detail: catalog}))),
+        onUpdateRequired: options.onUpdateRequired || (app => globalThis.dispatchEvent?.(new CustomEvent('pytincture:microapp-update', {detail: app})))});
+    await client.initializeSnapshot();
+    runtime.__pytinctureEnvironmentClient = client;
+    globalThis.pytinctureMicroapps = client;
+    await client.start({refresh: false});
+    return client;
 }

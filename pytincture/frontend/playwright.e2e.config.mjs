@@ -10,7 +10,7 @@ const e2ePython = process.env.PYTINCTURE_E2E_PYTHON
 
 export default defineConfig({
     testDir: "./e2e-tests",
-    testIgnore: ["live-microapps.spec.mjs", "standalone-wheel.spec.mjs", "saml-federated.spec.mjs"],
+    testIgnore: ["environment-microapps.spec.mjs", "live-microapps.spec.mjs", "standalone-wheel.spec.mjs", "saml-federated.spec.mjs"],
     timeout: 180_000,
     expect: { timeout: 120_000 },
     fullyParallel: false,

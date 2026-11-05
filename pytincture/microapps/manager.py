@@ -342,7 +342,7 @@ class LiveMicroappManager:
             raise
 
     async def install(self, app_id, backend: WheelArtifact, browser: BrowserArtifact, *, approval_id,
-                      dependencies=()):
+                      dependencies=(), activate=True):
         """Install an approved release; call only after your platform authorizes it.
 
         Sources must already have been downloaded by trusted provisioning (e.g.
@@ -378,7 +378,8 @@ class LiveMicroappManager:
                     if not worker or worker["process"].returncode is not None:
                         await self._stop_worker(key)
                         await self._start_worker(key, self._releases[key])
-                    self._activate(key)
+                    if activate:
+                        self._activate(key)
                     return self._public_release(self._releases[key])
                 if len(self._releases) >= self.max_releases:
                     raise ValueError("Microapp release capacity reached; retained versions count toward the limit")
@@ -390,12 +391,14 @@ class LiveMicroappManager:
                 await self._start_worker(key, release)
                 self._releases[key] = release
                 old = self._active.get(app_id)
-                self._active[app_id] = key
-                self._revision += 1
+                if activate:
+                    self._active[app_id] = key
+                    self._revision += 1
                 try:
                     self._save()
                 except BaseException:
-                    self._revision -= 1
+                    if activate:
+                        self._revision -= 1
                     self._releases.pop(key)
                     if old is None:
                         self._active.pop(app_id)
@@ -432,6 +435,25 @@ class LiveMicroappManager:
                 raise ValueError("Release is not installed and ready")
             self._activate(key)
             return self._public_release(self._releases[key])
+
+    async def activate_set(self, releases, *, revision, _commit=None):
+        """Atomically select an environment snapshot after every worker is ready."""
+        async with self._lock:
+            active = {}
+            for app_id, release_id in releases.items():
+                key = f"{app_id}/{release_id}"
+                if key not in self._releases or self._public_release(self._releases[key]) is None:
+                    raise ValueError("Environment release is not ready")
+                active[app_id] = key
+            previous, previous_revision = self._active, self._revision
+            self._active, self._revision = active, revision
+            try:
+                self._save()
+            except BaseException:
+                self._active, self._revision = previous, previous_revision
+                raise
+            if _commit is not None:
+                _commit()
 
     def _public_release(self, release):
         key = f'{release["id"]}/{release["release"]}'

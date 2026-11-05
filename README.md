@@ -1,3 +1,7 @@
+> **Development branch:** [manifest-driven environment bundles](docs/environment-microapps.md)
+> add startup reconciliation and live S3 installation. This opt-in feature is
+> unreleased and is not included in the published 1.0.2 wheel.
+
 > **1.0.2:** optional packaged microapps and experimental live installation.
 > Existing app-folder loading remains the default. See
 > [packaging and ECS/S3](docs/packaged-microapps.md) and
