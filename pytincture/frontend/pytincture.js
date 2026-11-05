@@ -1,5 +1,5 @@
 const FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
-const PYTINCTURE_RUNTIME_VERSION = "1.0.1";
+const PYTINCTURE_RUNTIME_VERSION = "1.0.2";
 
 // Complete-wheel locks for compatibility releases maintained by Pytincture.
 // These remain PyPI installs (and therefore never receive the backend instance
@@ -994,6 +994,7 @@ function frameworkAssetUrls(config) {
         : new URL(config.serviceWorkerScope, window.location.href);
     const relativePaths = [
         "pytincture.js",
+        "microapps.js",
         "vendor/materialdesignicons/materialdesignicons.css",
         "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
         "pyodide/0.29.3/full/pyodide.js",
@@ -1818,6 +1819,10 @@ async function runTinctureApp(arg1, widgetlib, entrypoint) {
 
 if (typeof window !== "undefined") {
     window.runTinctureApp = runTinctureApp;
+    window.createPytinctureMicroappClient = async options => {
+        const { MicroappClient } = await import("./microapps.js");
+        return new MicroappClient(options);
+    };
     window.PytinctureLifecycleError = PytinctureLifecycleError;
 }
 

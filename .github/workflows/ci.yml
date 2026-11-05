@@ -1011,3 +1011,36 @@ jobs:
             dist/*.tar.gz
             dist/*.tgz
             dist/SHA256SUMS.json
+
+  live-microapps:
+    name: Live microapp browser and BFF acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Set up locked dependency installer
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.8.0"
+      - name: Install frozen Python dependencies
+        run: uv sync --frozen --extra dev
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: pytincture/frontend/package-lock.json
+      - name: Install browser dependencies
+        working-directory: pytincture/frontend
+        run: npm ci --ignore-scripts
+      - name: Install Chromium
+        working-directory: pytincture/frontend
+        run: npx playwright install --with-deps chromium
+      - name: Install app into an open platform using real Pyodide and BFF workers
+        working-directory: pytincture/frontend
+        run: npx playwright test --config playwright.microapps.config.mjs

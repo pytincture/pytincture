@@ -1115,6 +1115,7 @@ _PUBLIC_FRAMEWORK_FILES = frozenset({
     "dist/pytincture.min.js.map",
     "bff-docs.js",
     "browser-runtimes.js",
+    "microapps.js",
     "widget-assets.js",
     "vendor/swagger-ui/swagger-ui-bundle.js",
     "vendor/swagger-ui/swagger-ui.css",
