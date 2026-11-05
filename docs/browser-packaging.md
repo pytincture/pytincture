@@ -1,6 +1,6 @@
 # Browser packaging and dynamic imports
 
-For optional versioned app wheels and the proposed S3/CloudFront environment
+For optional versioned app wheels and the proposed ECS/S3 (optional CloudFront) environment
 pattern, see [Packaged microapps](packaged-microapps.md). Existing folder loading
 remains the default.
 

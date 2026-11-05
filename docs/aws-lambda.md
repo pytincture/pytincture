@@ -765,5 +765,5 @@ The initialized `ready` alias is the implemented option for this recipe.
 [Packaged microapps](packaged-microapps.md) describes installing a versioned app
 wheel into a Lambda image during build, then creating its normal FastAPI app.
 Do not download/install wheels during cold starts. The guide also separates private
-backend artifacts from browser-only S3/CloudFront assets and marks live upgrades
+backend artifacts from browser-only ECS/S3 (optional CloudFront) assets and marks live upgrades
 as future work. Existing Lambda recipes remain unchanged.

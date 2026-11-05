@@ -387,7 +387,7 @@ not compatibility promises:
 ## Optional installed application packages (experimental)
 
 `pytincture.packaged_apps.build_app_manifest(modules_path, application, *,
-requires_pytincture=">=1.0.1,<2", bff_manifest=None)` writes the build-time inventory.
+requires_pytincture=">=1.0.2,<2", bff_manifest=None)` writes the build-time inventory.
 `load_packaged_app(distribution, *, expected_version=None)` verifies an explicitly
 selected installed wheel and returns immutable package metadata without importing
 its application. `create_packaged_app(distribution, config=None, *,

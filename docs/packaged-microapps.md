@@ -70,7 +70,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "customer-orders"
 version = "0.3.0"
-dependencies = ["pytincture>=1.0.1,<2"]
+dependencies = ["pytincture>=1.0.2,<2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -148,7 +148,7 @@ check consistency, not publisher identity. Your platform must authenticate the
 wheel and approve its exact digest before installation. Installing backend Python
 executes customer code later; isolate customer environments accordingly.
 
-## AWS S3 and CloudFront integration
+## AWS ECS and S3 integration (CloudFront optional)
 
 The platform, not Pytincture startup, downloads and installs approved packages.
 A possible layout is:
@@ -163,7 +163,7 @@ s3://PRIVATE-BROWSER-BUCKET/
   environments/dev-123/apps/customer-orders/0.3.0/<bundle-id>/...
 ```
 
-Use separate buckets, or rigorously separate prefixes and CloudFront access, for
+Use separate buckets, or rigorously separate prefixes and access policies, for
 backend wheels and public/browser artifacts. A wheel includes backend code:
 **never publish the whole wheel through your browser asset behavior**. Extract
 only the builder's explicit browser artifact inventory. Do not copy the entire
@@ -182,7 +182,7 @@ An environment manifest is a platform-owned proposal, not a Pytincture API yet:
     "version": "0.3.0",
     "wheel_key": "approved/customer-orders/0.3.0/<wheel-sha256>/customer_orders-0.3.0-py3-none-any.whl",
     "wheel_sha256": "<64 hexadecimal characters>",
-    "browser_base_url": "https://assets.example.com/environments/dev-123/apps/customer-orders/0.3.0/<bundle-id>/",
+    "browser_base_url": "https://orders.example.com/microapp-assets/customer-orders/0.3.0/<bundle-id>/",
     "approval_id": "review-456"
   }]
 }
@@ -196,19 +196,59 @@ independently trusted approved record, resolve dependencies from a locked source
 and install before starting the service. Do not install packages on each Lambda
 cold start or allow browser requests to select arbitrary wheel URLs.
 
-For browser delivery, use a private regular S3 bucket, Block Public Access, and
-CloudFront Origin Access Control (OAC). Restrict the bucket policy to the specific
-CloudFront distribution and browser prefix. OAC protects the S3 origin; it does
-not authorize viewers. For private apps, the portal must separately authorize
-users and issue appropriately scoped CloudFront signed URLs/cookies. Custom-policy
-signed cookies can cover the multiple files in one app/environment prefix.
+### ECS delivery without CloudFront
 
-Prefer a same-origin CloudFront route for assets to simplify cookies and browser
-policy. Cross-origin delivery additionally needs matching CORS, credential mode,
-CSP allowances and, where the chosen runtime needs it, cross-origin isolation
-headers. The current Pytincture browser loader is not extended here for arbitrary
-remote manifests; a CDN base URL and its trust/credential policy need a later
-loader integration. Uploading bundles to S3 alone does not activate that feature.
+CloudFront is **not required**. The simplest initial deployment is:
+
+```mermaid
+flowchart LR
+    S[Private S3 artifact bucket] --> D[Image build or deployment provisioning]
+    D --> E[ECS task running Pytincture]
+    B[Browser] --> L[Your existing HTTPS ingress / ALB]
+    L --> E
+```
+
+Build an ECS container image with the approved wheel and locked dependencies
+already installed. Give build/provisioning its own least-privilege IAM role to
+read the selected S3 artifacts; no S3 download is needed during app startup.
+Run `uvicorn service:app` in the task using the packaged-app factory above.
+The existing Pytincture asset routes can serve the packaged browser files through
+your existing ingress. Apply the existing public-asset allowlist: these routes
+are not automatically a private-content authorization layer. Use your platform's
+authenticated asset delivery if the browser code itself must be access-restricted.
+No CDN, CloudFront configuration or new AWS SDK dependency is needed for this path.
+The task still uses its existing configuration and authentication for BFF calls.
+
+If artifacts need to be staged from S3 when an ECS task starts, use a provisioning
+step before service readiness, verify hashes, and avoid doing installation inside
+an HTTP request. Prefer a prebuilt image for predictable startup and rollback.
+Keep artifacts immutable and coordinate the selected version across all ECS tasks;
+use a rolling deployment and retain compatible old backend routes as required.
+
+A second option is an authenticated ECS asset endpoint reading allowed browser
+objects from S3 with its task role and streaming them to the browser. That adapter
+belongs to the platform and is not included in this change. Validate environment
+membership and object keys; never expose an arbitrary S3 proxy. Keep it same-origin
+to avoid unnecessary browser cross-origin configuration.
+
+A third option is direct browser-to-S3 downloads using short-lived presigned GET
+URLs issued by an authorized ECS API. Each object needs its own valid URL; signing
+a directory URL does not authorize relative files beneath it. The signing role
+needs `s3:GetObject` for the selected objects, and URLs cannot outlive the temporary
+credentials used to sign them. Account for refresh, relative imports, S3 CORS,
+CSP and runtime-specific cross-origin requirements. The existing browser loader
+is not extended here with per-object URL signing or arbitrary remote manifests;
+this option needs a later loader integration. Never expose AWS credentials to the
+browser or make the bucket public just to deliver an app.
+
+### Optional CloudFront delivery
+
+If a CDN is useful later, CloudFront can sit in front of the browser-only S3
+bucket. OAC can protect that origin, while signed URLs/cookies separately control
+viewer access. Neither feature is needed for the ECS-served path above. Keep
+backend wheels outside the browser distribution. The same future remote-loader
+and credential-policy requirements apply; uploading bundles alone does not
+activate remote loading.
 
 Cache content-addressed release assets with long immutable caching. Keep the
 mutable environment selection private and uncached or revalidated. Upload all
@@ -245,5 +285,6 @@ been deployed as part of these changes.
 
 AWS references:
 
-- [Restrict S3 origin access with OAC](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html)
-- [CloudFront signed cookies](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-signed-cookies.html)
+- [S3 presigned URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html)
+- [Optional: restrict S3 origin access with OAC](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html)
+- [Optional: CloudFront signed cookies](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-signed-cookies.html)

@@ -1,3 +1,8 @@
+> **1.0.2 validation candidate:** packaged-microapp support is under manual
+> validation on `feat/packaged-microapps`. It is not published on PyPI/npm yet.
+> The installation examples below retain the published 1.0.1 version.
+> See [packaged microapps and ECS/S3](docs/packaged-microapps.md).
+
 # pyTincture
 
 ## Overview

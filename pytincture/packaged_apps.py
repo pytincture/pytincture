@@ -43,7 +43,7 @@ def _digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def build_app_manifest(modules_path, application, *, requires_pytincture=">=1.0.1,<2",
+def build_app_manifest(modules_path, application, *, requires_pytincture=">=1.0.2,<2",
                        bff_manifest=None):
     """Inventory a dedicated app resource directory before building its wheel."""
     validate_application_name(application)
@@ -163,7 +163,7 @@ def main():
     parser = argparse.ArgumentParser(description="Inventory an app resource directory before wheel build")
     parser.add_argument("--modules-path", required=True)
     parser.add_argument("--application", required=True)
-    parser.add_argument("--requires-pytincture", default=">=1.0.1,<2")
+    parser.add_argument("--requires-pytincture", default=">=1.0.2,<2")
     parser.add_argument("--bff-manifest")
     args = parser.parse_args()
     print(build_app_manifest(args.modules_path, args.application,
