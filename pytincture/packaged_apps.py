@@ -86,9 +86,13 @@ def load_packaged_app(distribution, *, expected_version=None):
     The deployment must authenticate/approve the wheel itself. Inventory hashes
     detect incomplete or changed files; they are not publisher signatures.
     """
+    return _load_distribution(metadata.distribution(distribution), expected_version=expected_version)
+
+
+def _load_distribution(dist, *, expected_version=None):
+    """Verify an explicitly located distribution (including a staged wheel)."""
     from . import __version__
 
-    dist = metadata.distribution(distribution)
     if expected_version is not None and dist.version != expected_version:
         raise ValueError("Installed microapp version does not match environment selection")
     inventory = list(dist.files or ())

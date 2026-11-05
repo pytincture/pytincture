@@ -1,3 +1,5 @@
+import { MicroappClient } from "./microapps.js";
+
 const FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
 const PYTINCTURE_RUNTIME_VERSION = "1.0.2";
 
@@ -994,6 +996,7 @@ function frameworkAssetUrls(config) {
         : new URL(config.serviceWorkerScope, window.location.href);
     const relativePaths = [
         "pytincture.js",
+        "microapps.js",
         "vendor/materialdesignicons/materialdesignicons.css",
         "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
         "pyodide/0.29.3/full/pyodide.js",
@@ -1818,6 +1821,7 @@ async function runTinctureApp(arg1, widgetlib, entrypoint) {
 
 if (typeof window !== "undefined") {
     window.runTinctureApp = runTinctureApp;
+    window.PytinctureMicroappClient = MicroappClient;
     window.PytinctureLifecycleError = PytinctureLifecycleError;
 }
 

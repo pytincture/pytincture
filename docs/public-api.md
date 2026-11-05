@@ -397,3 +397,17 @@ expected_version=None)` uses that verified root with the existing FastAPI factor
 These APIs do not install or download packages, automatically enable apps, or
 provide live upgrades. See [Packaged microapps and AWS delivery](packaged-microapps.md).
 The existing `create_app()` API and folder-based deployments are unchanged.
+
+## Live microapp hosting (experimental)
+
+`pytincture.microapps.LiveMicroappManager(store, config)` owns a persistent local
+environment catalog and versioned BFF processes. `start()`/`close()` manage its
+lifetime; `install(app_id, backend, browser, approval_id=..., dependencies=())`
+stages approved artifacts and activates after health readiness. `activate(app_id,
+release_id)` selects an installed version. `WheelArtifact(path, sha256)` and
+`BrowserArtifact(wheel, entrypoint, runtime_version="0.29.3")` describe its inputs.
+`create_microapp_host(base_app, manager, authorize=...)` wraps an existing ASGI app
+with authorized catalog, browser-wheel and BFF proxy routes. It has no install
+HTTP endpoint. The browser client is `window.PytinctureMicroappClient` or the
+`MicroappClient` source export. See [Live microapps](live-microapps.md) for the
+pure-Python/Pyodide scope, ECS topology, authentication and shared-runtime limits.

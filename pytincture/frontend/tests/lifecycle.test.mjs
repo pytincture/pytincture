@@ -733,7 +733,8 @@ test("only same-origin framework URLs receive the instance uuid", () => {
             application: "sample",
             requestUuid: "instance-a",
         }));
-        assert.equal(assets.length, 10);
+        assert.equal(assets.length, 11);
+        assert.ok(assets.some(url => new URL(url).pathname.endsWith("/microapps.js")));
         assert.equal(assets.every(url => (
             new URL(url).pathname.startsWith("/sample/frontend/")
             && new URL(url).searchParams.get("uuid") === "instance-a"

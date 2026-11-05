@@ -15,11 +15,13 @@ Implemented here:
 - create the existing FastAPI service with that package's app root and optional
   prebuilt BFF manifest. Deployment authentication and policy stay in configuration.
 
-Not implemented here: an app marketplace, approval API, S3 downloader, environment
-catalog endpoint, browser hot installation/replacement, versioned BFF routing,
-or simultaneous incompatible backend versions. This guide describes those as
-platform integration and future work, not current Pytincture functionality.
-The package loader is experimental and has not been released on PyPI yet.
+An additional experimental [live microapp host](live-microapps.md) now stages
+approved wheels, starts separate versioned BFF workers, and lets an open browser
+load compatible uniquely namespaced pure-Python apps into its existing Pyodide
+runtime without rebuilding/redeploying the environment. This package loader alone
+is still a startup API. Review/marketplace APIs, distributed orchestration,
+MicroPython live loading, and seamless replacement of imported packages remain
+outside this first implementation. Neither API is released on PyPI yet.
 
 ## Current and additional paths
 
@@ -268,10 +270,11 @@ and browser assets for rollback and open browser sessions.
 6. Switch the environment only after backend readiness. Browser live discovery,
    installation and state-preserving replacement require the later lifecycle API.
 
-For the first implementation, upgrading means replacing/restarting the backend
-and reloading its browser application. Seamless live upgrades require explicit
-versioned BFF routing and old/new backend overlap; they are not provided by simply
-refreshing an S3 manifest. A worker has no direct DOM access, so a future isolated
+For this startup-only factory, upgrading means replacing/restarting the backend
+and reloading its browser application. Use the separate [live host](live-microapps.md)
+for compatible additions without redeployment and versioned BFF overlap. It does
+not automatically replace an already imported browser package. Simply refreshing
+an S3 manifest is not a live installer. A worker has no direct DOM access, so a future isolated
 UI needs either a rendering bridge or an iframe-based contract.
 
 ## Validation and rollout

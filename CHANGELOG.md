@@ -5,6 +5,13 @@ set when a release is published.
 
 ## 1.0.2 — Unreleased (manual validation pending)
 
+- Add an opt-in live microapp host: staged approved pure-Python wheels, separate
+  versioned BFF workers, persistent catalog, environment authorization and rollback.
+- Add browser discovery and verified live loading into the existing Pyodide
+  interpreter, with mount/unmount hooks and explicit runtime/module-conflict errors.
+- Exercise live installation in real Chromium/Pyodide without a page reload or
+  another WASM download. Image rebuilding and CloudFront are not required.
+
 - Add experimental, opt-in app-wheel inventories and installed-package loading
   through the existing FastAPI factory, with version and integrity checks.
 - Document package publication, human approval, environment selection, and ECS/S3
