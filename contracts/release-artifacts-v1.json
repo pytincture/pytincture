@@ -250,6 +250,7 @@
     "extras": [
       "dev",
       "mcp",
+      "microapps",
       "oauth",
       "password",
       "redis",

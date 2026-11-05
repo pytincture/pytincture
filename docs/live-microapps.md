@@ -1,4 +1,4 @@
-# Live microapp installation (experimental, 1.0.2 candidate)
+# Live microapp installation (experimental, added in 1.0.2)
 
 This opt-in path adds an approved app to a running environment without rebuilding
 its image, restarting its Pytincture service, reloading an open browser, or
@@ -7,8 +7,8 @@ not change. Initial bundled apps still use their existing fast startup path.
 Nothing is automatically installed merely because a wheel is present.
 
 The current implementation supports **new, uniquely namespaced pure-Python
-microapps using the existing Pyodide 0.29.3 browser runtime**. It is a development
-candidate, not a production marketplace or a security sandbox. It does not add
+microapps using the existing Pyodide 0.29.3 browser runtime**. It is an experimental
+API, not a production marketplace or a security sandbox. It does not add
 live loading to MicroPython, support arbitrary native wheels, or silently replace
 already imported Python packages. Upgrading a browser app already loaded into
 the shared interpreter explicitly requires a page reload in this first version.
@@ -69,6 +69,13 @@ shares its service account, filesystem permissions and inherited environment.
 Only install backend code trusted within that environment's security boundary.
 
 ## Host integration
+
+Install the explicit server extra first; the base install does not acquire the
+HTTP client used by the opt-in live host:
+
+```sh
+pip install "pytincture[microapps]==1.0.2"
+```
 
 Keep your existing base app, then explicitly wrap it:
 

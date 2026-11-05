@@ -1028,6 +1028,16 @@
         413
       ],
       "notes": "Dependency-only maintenance batch. PR403 is superseded by PR409; PR406 and PR408 request the same paired FastMCP update. Required combined CI and normal signed-tag/attested publication remain enforced. The 1.0.0 owner exceptions are historical and have not been extended."
+    },
+    {
+      "version": "1.0.2",
+      "prepared_on": "2026-11-05",
+      "source_pull_requests": [
+        415,
+        419
+      ],
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/42054675460",
+      "notes": "Opt-in packaged apps and experimental live microapps; normal loading remains the default. Merged source passed full CI, Lambda, both dependency audits and artifact inventory checks; zero open Dependabot alerts or labeled release blockers at readiness review. Signed-tag CI, release-run attestations and protected PyPI publication remain required. Historical 1.0.0 exceptions are not extended. GitHub and PyPI publication authorized by the owner; npm publication is not included in this request."
     }
   ]
 }

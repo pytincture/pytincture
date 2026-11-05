@@ -71,7 +71,7 @@ def main() -> None:
     parser.add_argument("--python", type=Path, required=True)
     parser.add_argument("--artifact", type=Path, required=True)
     parser.add_argument(
-        "--extra", choices=("oauth", "password", "redis", "saml", "mcp", "dev")
+        "--extra", choices=("oauth", "password", "redis", "saml", "mcp", "microapps", "dev")
     )
     args = parser.parse_args()
     # Preserve a virtual environment's interpreter path instead of resolving
