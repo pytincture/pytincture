@@ -70,6 +70,13 @@ Only install backend code trusted within that environment's security boundary.
 
 ## Host integration
 
+Install the explicit server extra first; the base install does not acquire the
+HTTP client used by the opt-in live host:
+
+```sh
+pip install "pytincture[microapps]==1.0.2"
+```
+
 Keep your existing base app, then explicitly wrap it:
 
 ```python

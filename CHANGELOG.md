@@ -5,7 +5,7 @@ set when a release is published.
 
 ## 1.0.2 — 2026-11-05
 
-- Add an opt-in live microapp host: staged approved pure-Python wheels, separate
+- Add the explicit `microapps` server extra and an opt-in live microapp host: staged approved pure-Python wheels, separate
   versioned BFF workers, persistent catalog, environment authorization and rollback.
 - Add browser discovery and verified live loading into the existing Pyodide
   interpreter, with mount/unmount hooks and explicit runtime/module-conflict errors.

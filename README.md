@@ -81,6 +81,7 @@ pip install "pytincture[password]==1.0.2"  # Argon2/bcrypt local login
 pip install "pytincture[oauth]==1.0.2"     # Google/Microsoft OAuth
 pip install "pytincture[saml]==1.0.2"      # SAML 2.0
 pip install "pytincture[redis]==1.0.2"     # shared Upstash state
+pip install "pytincture[microapps]==1.0.2" # optional live microapp host
 pip install "pytincture[mcp]==1.0.2"       # MCP endpoint
 pip install "pytincture[dev]==1.0.2"       # all features and test/build tools
 ```
