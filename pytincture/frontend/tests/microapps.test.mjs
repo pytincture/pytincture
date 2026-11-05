@@ -90,3 +90,12 @@ test('cleanup errors still clear UI and release the mounted slot', async () => {
     assert.deepEqual(ran, ['last']); assert.equal(root.textContent, '');
     assert.equal(f.client.mounted.size, 0);
 });
+
+
+test('legacy runtime source remains a classic script; live loading is opt-in', async () => {
+    const {readFile} = await import('node:fs/promises');
+    const {Script} = await import('node:vm');
+    const source = await readFile(new URL('../pytincture.js', import.meta.url), 'utf8');
+    assert.doesNotThrow(() => new Script(source));
+    assert.match(source, /createPytinctureMicroappClient/);
+});

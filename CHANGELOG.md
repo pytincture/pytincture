@@ -3,7 +3,7 @@
 This project follows semantic versioning from 1.0. Dates and final entries are
 set when a release is published.
 
-## 1.0.2 — Unreleased (manual validation pending)
+## 1.0.2 — Unreleased
 
 - Add an opt-in live microapp host: staged approved pure-Python wheels, separate
   versioned BFF workers, persistent catalog, environment authorization and rollback.
@@ -18,7 +18,9 @@ set when a release is published.
   delivery. CloudFront is optional; existing app-folder loading remains unchanged.
 - Include the grouped dependency refresh merged in #415 and HTTP-client-compatible
   OAuth/session test fixtures.
-- GitHub validation candidate only: no release, tag, PyPI or npm publication yet.
+- Preserve classic-script startup with opt-in asynchronous live-loader creation;
+  update release artifact inventories and patch both dependency lockfiles.
+- Source version only: no release, tag, PyPI or npm publication yet.
 
 ## 1.0.1 — 2026-10-26
 

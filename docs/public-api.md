@@ -408,6 +408,6 @@ release_id)` selects an installed version. `WheelArtifact(path, sha256)` and
 `BrowserArtifact(wheel, entrypoint, runtime_version="0.29.3")` describe its inputs.
 `create_microapp_host(base_app, manager, authorize=...)` wraps an existing ASGI app
 with authorized catalog, browser-wheel and BFF proxy routes. It has no install
-HTTP endpoint. The browser client is `window.PytinctureMicroappClient` or the
+HTTP endpoint. The browser client is `window.createPytinctureMicroappClient(options)` or the
 `MicroappClient` source export. See [Live microapps](live-microapps.md) for the
 pure-Python/Pyodide scope, ECS topology, authentication and shared-runtime limits.

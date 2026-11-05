@@ -156,12 +156,12 @@ review pipeline. Activation is not a substitute for testing the app's operations
 ## Browser integration with the existing fast bundle
 
 `runTinctureApp()` still returns its existing Pyodide runtime. Pass it to the
-opt-in browser client after the base application starts. The built runtime exposes
-`window.PytinctureMicroappClient`; the source module also exports `MicroappClient`.
+opt-in browser client after the base application starts. The built runtime exposes the asynchronous factory
+`window.createPytinctureMicroappClient(options)`; the source module also exports `MicroappClient`.
 
 ```javascript
 const runtime = await runTinctureApp(yourExistingStartupConfig);
-const microapps = new window.PytinctureMicroappClient({
+const microapps = await window.createPytinctureMicroappClient({
     runtime,
     catalogUrl: '/_microapps/catalog',
     pollMs: 15000,

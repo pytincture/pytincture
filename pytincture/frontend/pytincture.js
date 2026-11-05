@@ -1,5 +1,3 @@
-import { MicroappClient } from "./microapps.js";
-
 const FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
 const PYTINCTURE_RUNTIME_VERSION = "1.0.2";
 
@@ -1821,7 +1819,10 @@ async function runTinctureApp(arg1, widgetlib, entrypoint) {
 
 if (typeof window !== "undefined") {
     window.runTinctureApp = runTinctureApp;
-    window.PytinctureMicroappClient = MicroappClient;
+    window.createPytinctureMicroappClient = async options => {
+        const { MicroappClient } = await import("./microapps.js");
+        return new MicroappClient(options);
+    };
     window.PytinctureLifecycleError = PytinctureLifecycleError;
 }
 
