@@ -3,7 +3,7 @@
 This project follows semantic versioning from 1.0. Dates and final entries are
 set when a release is published.
 
-## 1.0.2 — Unreleased
+## 1.0.2 — 2026-11-05
 
 - Add an opt-in live microapp host: staged approved pure-Python wheels, separate
   versioned BFF workers, persistent catalog, environment authorization and rollback.
@@ -11,7 +11,6 @@ set when a release is published.
   interpreter, with mount/unmount hooks and explicit runtime/module-conflict errors.
 - Exercise live installation in real Chromium/Pyodide without a page reload or
   another WASM download. Image rebuilding and CloudFront are not required.
-
 - Add experimental, opt-in app-wheel inventories and installed-package loading
   through the existing FastAPI factory, with version and integrity checks.
 - Document package publication, human approval, environment selection, and ECS/S3
@@ -20,7 +19,6 @@ set when a release is published.
   OAuth/session test fixtures.
 - Preserve classic-script startup with opt-in asynchronous live-loader creation;
   update release artifact inventories and patch both dependency lockfiles.
-- Source version only: no release, tag, PyPI or npm publication yet.
 
 ## 1.0.1 — 2026-10-26
 

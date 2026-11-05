@@ -21,7 +21,7 @@ load compatible uniquely namespaced pure-Python apps into its existing Pyodide
 runtime without rebuilding/redeploying the environment. This package loader alone
 is still a startup API. Review/marketplace APIs, distributed orchestration,
 MicroPython live loading, and seamless replacement of imported packages remain
-outside this first implementation. Neither API is released on PyPI yet.
+outside this first implementation. Both opt-in APIs were introduced in 1.0.2.
 
 ## Current and additional paths
 
@@ -81,9 +81,8 @@ where = ["src"]
 customer_orders = ["apps/*", "apps/**/*"]
 ```
 
-Use a development checkout containing this feature until a supporting framework
-release is published; the example dependency range alone does not add these APIs
-to older releases. Declare actual app dependencies normally, and lock the entire
+These APIs require Pytincture 1.0.2 or later. Declare actual app dependencies
+normally, and lock the entire
 deployment's resolved versions and artifact hashes. Do not nest dependency wheels
 inside another wheel and expect pip to install them automatically.
 
