@@ -40,7 +40,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Set up locked dependency installer
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.8.0"
 
@@ -66,7 +66,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Set up locked dependency installer
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.8.0"
       - name: Install framework and browser test dependencies
@@ -113,7 +113,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Set up locked dependency installer
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.8.0"
       - name: Install hash-locked conformance environment
@@ -150,7 +150,7 @@ jobs:
           python-version: "3.13"
 
       - name: Set up locked dependency installer
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.8.0"
 
@@ -278,7 +278,7 @@ jobs:
           python-version: "3.13"
 
       - name: Set up locked dependency installer
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.8.0"
 
@@ -402,7 +402,7 @@ jobs:
           python-version: "3.13"
 
       - name: Set up locked dependency installer
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.8.0"
 
@@ -527,7 +527,7 @@ jobs:
           python-version: "3.13"
 
       - name: Set up locked dependency installer
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.8.0"
 
@@ -616,7 +616,7 @@ jobs:
           python-version: "3.13"
 
       - name: Set up locked dependency installer
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.8.0"
 
@@ -711,7 +711,7 @@ jobs:
           python-version: "3.13"
 
       - name: Set up locked dependency installer
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.8.0"
 
@@ -778,7 +778,7 @@ jobs:
           python-version: "3.13"
 
       - name: Set up locked dependency installer
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.8.0"
 
@@ -902,7 +902,7 @@ jobs:
           python-version: "3.13"
 
       - name: Set up locked dependency installer
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.8.0"
 
