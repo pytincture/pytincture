@@ -5,6 +5,9 @@ set when a release is published.
 
 ## Unreleased
 
+- Add a separate environment bundle build command so S3 artifacts can be ready
+  before web backends start. Add an optional backend mode that only consumes
+  published bundles, with BFF readiness still checked on each replica.
 - Add opt-in environment manifests and S3/local object stores. Reuse matching
   bundles at startup or reconcile installed wheel versions before readiness.
 - Coordinate ECS builders with conditional writes and renewable fenced leases;

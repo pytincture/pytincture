@@ -78,6 +78,7 @@ Issues = "https://github.com/pytincture/pytincture/issues"
 Source = "https://github.com/pytincture/pytincture"
 
 [project.scripts]
+pytincture-build-environment = "pytincture.microapps.builder:main"
 pytincture-build-app-manifest = "pytincture.packaged_apps:main"
 pytincture-build-appcode = "pytincture.prebuild:main"
 pytincture-build-browser = "pytincture.browser_build:main"

@@ -25,7 +25,7 @@ test('startup uses automatic bundled inventory, BFF calls pull additions, and ne
     expect(response.status()).toBe(202);
     await expect.poll(async()=>{
         const status=await request.get('/_microapps/environment');
-        const data=await status.json();return data.active===data.desired;
+        const data=await status.json();return data.serving===data.desired;
     }).toBe(true);
     expect(await page.evaluate(()=>client.installed.has('reports'))).toBe(false);
     // A normal platform BFF call, not catalog polling, drives the background pull.

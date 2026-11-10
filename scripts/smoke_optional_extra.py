@@ -77,6 +77,9 @@ def main() -> None:
             stub.assert_no_pending_responses()
         assert empty_manifest("dev-smoke")["active"] is None
         assert EnvironmentMicroappManager is not None
+        entry = next(item for item in importlib.metadata.distribution("pytincture").entry_points
+                     if item.group == "console_scripts" and item.name == "pytincture-build-environment")
+        assert callable(entry.load())
     elif feature == "oauth":
         os.environ["ENABLE_GOOGLE_AUTH"] = "true"
         os.environ["GOOGLE_CLIENT_ID"] = "clean-install-client"

@@ -117,6 +117,8 @@ def create_microapp_host(base_app, manager, *, authorize, authorize_install=None
             document, _ = await manager.read_manifest()
             await JSONResponse({'revision': document['revision'], 'desired': selection_id(document),
                 'active': document['active'] and document['active']['selection'],
+                'serving': manager._bundle and manager._bundle['selection'],
+                'serving_error': manager._last_error,
                 'building': document['build'] is not None, 'error': document['error']},
                 headers={'Cache-Control': 'private, no-store'})(scope, receive, send)
             return

@@ -18,6 +18,74 @@ same ZIP. Without a base wheel, the existing platform archive still loads normal
 and the aggregate supplies its microapps. Existing `create_app()`, FastAPI,
 app-folder, and opt-in Lambda deployment paths keep their defaults.
 
+## Build before starting web backends
+
+The browser bundle can be built once by a separate job and stored in S3 before
+web backends start. S3 stores the output; the build itself runs in CI or an ECS
+task. The job does not start a web server or BFF workers, and does not import
+application code.
+
+Run this command using the same framework, Python and dependency environment
+as the web deployment, after approved wheels and the environment manifest exist:
+
+```sh
+pytincture-build-environment \
+  --bucket company-apps \
+  --prefix environments/dev-42 \
+  --environment dev-42
+```
+
+It verifies the selected wheels, builds the aggregate browser ZIP, uploads it
+under an immutable key and updates the manifest's active bundle pointer. It
+prints a JSON result with `state: "ready"`, selection, revision, key, SHA-256 and
+size. A matching bundle is verified and reused without another build. The same
+S3 lease and conditional writes coordinate competing build jobs and web replicas.
+Wheel inspection and dependency checks do not prove business behavior or BFF
+health; every web replica still checks its workers before serving the selection.
+
+For backends that should never build browser bundles, configure:
+
+```python
+manager = EnvironmentMicroappManager(
+    "/var/lib/tenzyn/microapps", config,
+    objects=objects, environment="dev-42",
+    build_bundles=False,
+)
+```
+
+These replicas read the manifest, verify/download the prebuilt bundle and start
+their local BFF workers. They write no build lease or browser bundle. If the
+desired selection has no matching artifact, startup waits for an external build
+and fails readiness at `startup_timeout` rather than compiling in the web task.
+A running replica keeps serving its previous local selection until it can adopt
+the newly published bundle and its BFF workers are ready.
+
+When a live installation changes the manifest in this mode, the portal/control
+plane must reliably queue another build job, or run an external builder that
+periodically checks desired state. Pytincture does not provision or trigger AWS
+build tasks automatically. The durable manifest lets a retried job finish after
+a crash. The default `build_bundles=True` retains automatic startup/background
+builds for deployments that want the web manager to perform them.
+
+The Python API for a one-shot build is:
+
+```python
+from pytincture.microapps.builder import build_environment_bundle
+
+result = await build_environment_bundle(objects, environment="dev-42")
+```
+
+Use `cache_directory="/private/build-cache"` for a retained, private build cache;
+otherwise the job uses a temporary directory. A local development equivalent is
+`pytincture-build-environment --objects-directory ./objects --environment dev-42`.
+No container image rebuild or CloudFront deployment is needed when installing a
+microapp. The precompiled WASM engine remains unchanged; the job builds the
+application archive that runs in it.
+
+## Automatic builds in the web manager
+
+With the default `build_bundles=True`, the existing flow is:
+
 ```mermaid
 sequenceDiagram
     participant P as Portal / approval API
@@ -203,8 +271,10 @@ await fetch('/_microapps/installations', {
 The endpoint checks same-origin browser requests and the explicit header, then
 persists desired state before returning **202 accepted**. A stale
 `expected_revision` returns 409. Read `GET /_microapps/environment` to compare
-`desired` with `active` and inspect `building`/`error`. Accepted means persisted;
-activation happens only after verification and worker readiness. A process crash
+`desired` with `active` (the published S3 bundle) and `serving` (the responding
+replica's locally ready selection). Inspect `building`/`error` for build status
+and `serving_error` for replica adoption failures. Accepted means persisted;
+a replica serves the selection only after verification and worker readiness. A process crash
 after acceptance does not lose the request: another replica or a restart resumes
 from S3. Polling also detects approved manifest changes from another service.
 
@@ -312,13 +382,16 @@ from [live microapps](live-microapps.md) still apply.
 Run the deterministic checks and real-browser acceptance:
 
 ```sh
-uv run --frozen --extra dev pytest -q tests/test_environment_microapps.py tests/test_microapp_s3_store.py
+uv run --frozen --extra dev pytest -q tests/test_environment_microapps.py tests/test_environment_build.py tests/test_microapp_s3_store.py
 cd pytincture/frontend
 npx playwright test --config playwright.environment.config.mjs
 ```
 
 The browser fixture verifies consolidated startup, automatic bundled-app detection,
 BFF-triggered loading of one missing wheel, unchanged interpreter state, and a
-new client receiving the rebuilt aggregate. S3 SDK tests stub conditional AWS
+new client receiving the rebuilt aggregate. It starts from a bundle published
+before the web service starts. Separate build tests cover worker-free builds,
+clean-cache backend startup, external build adoption and concurrent builders.
+S3 SDK tests stub conditional AWS
 requests; acceptance uses the local object store. A deployment against a real AWS
 bucket and your own authorization/approval service still needs environment validation.

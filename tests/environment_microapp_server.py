@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 from pytincture import PytinctureConfig
 from pytincture.microapps import EnvironmentMicroappManager, DirectoryObjectStore, empty_manifest, create_microapp_host
+from pytincture.microapps.builder import build_environment_bundle
 from test_environment_microapps import app_package
 from test_live_microapps import wheel
 
@@ -33,6 +34,8 @@ async def provision():
     await objects.put(key, Path(base.path).read_bytes(), expected=None)
     doc['base'] = {'artifact': {'key': key, 'sha256': base.sha256}, 'application': 'shell', 'entrypoint': 'main'}
     await manager.initialize(doc)
+    # Publish the initial browser artifact before the ASGI/BFF service starts.
+    await build_environment_bundle(objects, environment='dev-browser')
 asyncio.run(provision())
 
 base = FastAPI()

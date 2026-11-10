@@ -417,12 +417,27 @@ pure-Python/Pyodide scope, ECS topology, authentication and shared-runtime limit
 
 `EnvironmentMicroappManager(store, config, *, objects, environment,
 manifest_key="environment.json", poll_seconds=5, lease_seconds=60,
-startup_timeout=300, browser_delivery="host", asset_origins=(), **kwargs)` extends
+startup_timeout=300, browser_delivery="host", asset_origins=(),
+build_bundles=True, **kwargs)` extends
 the live manager with a shared desired-state manifest. `objects` is an
 `S3ObjectStore(bucket, prefix="", client=None)` or `DirectoryObjectStore(root)`.
 S3 credentials come from the SDK chain; constructing the adapter requires the
 optional `microapps-s3` extra. Importing the normal framework does not load boto3.
 Each replica needs a separate private local store and one ASGI worker.
+Set `build_bundles=False` for replicas that consume external builds: they wait
+for a matching published bundle before readiness and never acquire a build lease.
+Live changes then require a separate build job; ready replicas keep their previous
+local selection until the new bundle and its BFF workers can be adopted.
+
+`pytincture.microapps.builder.build_environment_bundle(objects, *, environment,
+manifest_key="environment.json", cache_directory=None, timeout=300,
+poll_seconds=1, lease_seconds=60)` builds or verifies/reuses the browser artifact
+without starting BFF workers or a web server. It returns the ready artifact's
+selection, revision, key, SHA-256 and size. Static wheel/dependency validation uses
+the builder's framework/Python environment; backend readiness is checked later by
+each web replica. The command `pytincture-build-environment --bucket BUCKET
+--prefix PREFIX --environment ENVIRONMENT` invokes this API. Use
+`--objects-directory PATH` instead of `--bucket` for the local adapter.
 
 `empty_manifest(environment)` creates the initial document. `initialize(document)`
 is create-only. `start()` reconciles installed wheel selections before readiness;
