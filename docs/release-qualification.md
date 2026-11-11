@@ -21,7 +21,10 @@ metadata changes must pass current required CI again before merge and tag.
 Signed-tag qualification, release attestations and protected publication remain
 required. The owner explicitly requested merge and 1.0.3 publication on November 11. Browser qualification
 jobs are pinned to Ubuntu 24.04 after the floating Ubuntu 26.04 runners stalled
-on font-package mirror downloads. They use the runner system libraries with Playwright host-requirement validation enabled, avoiding the failing APT refresh. The full browser matrix remains required.
+on font-package mirror downloads. Chromium-only jobs use the runner libraries; the cross-browser jobs use the
+matching digest-pinned Playwright image to provide WebKit's additional system
+libraries. Host-requirement validation and the full browser matrix remain enabled,
+without the failing APT refresh.
 
 ## 1.0.0 release preparation — 2026-10-17
 

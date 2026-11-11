@@ -19,9 +19,9 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Browser jobs use the pinned runner's system libraries. Playwright still
-# validates host requirements and launches the real browsers; avoid an APT
-# refresh that can stall on unrelated Ubuntu mirror DNS failures.
+# Chromium jobs use the pinned runner's system libraries; cross-browser jobs
+# use the matching digest-pinned Playwright image, including WebKit libraries.
+# Host validation and all real-browser tests remain enabled without an APT refresh.
 jobs:
   python-tests:
     name: Python ${{ matrix.python-version }} tests
@@ -513,6 +513,9 @@ jobs:
     name: Pyodide E2E (${{ matrix.browser }})
     needs: python-package
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --ipc=host
     strategy:
       fail-fast: false
       matrix:
@@ -697,6 +700,9 @@ jobs:
     name: Quickstart examples (${{ matrix.browser }})
     needs: python-package
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --ipc=host
     strategy:
       fail-fast: false
       matrix:
