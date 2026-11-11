@@ -1,8 +1,14 @@
-# Manifest-driven environment bundles (experimental, unreleased)
+# Manifest-driven environment bundles (experimental, added in 1.0.3)
 
-This feature is on the development branch after 1.0.2. It is not in the published
-1.0.2 wheel. Install a wheel built from this branch with the `microapps-s3` extra
-(or `microapps` for the local object-store adapter).
+Install Pytincture 1.0.3 with the `microapps-s3` extra for S3, or the
+`microapps` extra for the local object-store adapter:
+
+```sh
+pip install "pytincture[microapps-s3]==1.0.3"
+```
+
+This is an opt-in experimental API. Validate your AWS bucket, platform
+approval callbacks and application integration before production use.
 
 An environment's S3 manifest selects installed apps from ordinary, versioned
 Python wheels copied to S3. On startup Pytincture compares that selection with the

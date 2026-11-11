@@ -35,6 +35,17 @@ versions for each release candidate.
 
 ## Version compatibility rules
 
+1.0.3 preserves existing FastAPI, app-folder, browser and Lambda defaults.
+The experimental environment manager adds manifest-driven bundle reuse, S3
+coordination across replicas, approved live updates and optional direct S3 browser
+delivery. `pytincture-build-environment` can publish the browser bundle before
+web backends start; `build_bundles=False` makes replicas consume external builds.
+The older manual live manager keeps its single-controller topology. New browser
+apps can load live on Pyodide 0.29.3, while replacing an already imported app
+requires a safe reload. Browser wheels remain self-contained pure Python.
+CloudFront is optional. AWS and platform-specific integration validation remains
+an application deployment responsibility. See [environment bundles](environment-microapps.md).
+
 1.0.2 preserves the existing app-folder factory, launch commands, configuration
 defaults, BFF routes and normal FastAPI/Lambda paths. Packaged apps and live
 microapp hosting are explicit opt-ins. The live path is experimental: uniquely

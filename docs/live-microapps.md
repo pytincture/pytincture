@@ -1,7 +1,7 @@
 # Live microapp installation (experimental, added in 1.0.2)
 
 For automatic S3 selection, consolidated startup bundles, and multiple ECS replicas,
-see [environment bundles](environment-microapps.md), an unreleased opt-in addition.
+see [environment bundles](environment-microapps.md), an experimental opt-in addition available in 1.0.3.
 The APIs below remain available with their existing behavior.
 
 This opt-in path adds an approved app to a running environment without rebuilding
@@ -78,7 +78,7 @@ Install the explicit server extra first; the base install does not acquire the
 HTTP client used by the opt-in live host:
 
 ```sh
-pip install "pytincture[microapps]==1.0.2"
+pip install "pytincture[microapps]==1.0.3"
 ```
 
 Keep your existing base app, then explicitly wrap it:

@@ -3,7 +3,7 @@
 This project follows semantic versioning from 1.0. Dates and final entries are
 set when a release is published.
 
-## Unreleased
+## 1.0.3 — 2026-11-11
 
 - Add a separate environment bundle build command so S3 artifacts can be ready
   before web backends start. Add an optional backend mode that only consumes

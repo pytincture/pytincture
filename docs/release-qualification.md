@@ -5,6 +5,22 @@ The machine-readable evidence record is
 with `scripts/check_release_gates.py`; a final `v1.0.0` tag cannot publish until
 every gate below has durable evidence.
 
+## 1.0.3 release preparation — 2026-11-11
+
+The release adds experimental, opt-in S3 environment bundles and a separate
+prebuild command. Existing FastAPI, folder, browser and Lambda defaults remain
+unchanged. Real AWS and private Tenzyn integration are not claimed qualified.
+
+The feature head passed all 28 checks in
+[CI run 42834325323](https://github.com/pytincture/pytincture/actions/runs/42834325323),
+including Python 3.13/3.14, three browser engines, live microapp acceptance,
+clean extras, artifacts, dependency audit and Lambda contract coverage. Local
+feature validation passed 1,410 Python tests (one optional skip), 79 JavaScript
+tests and both Chromium/Pyodide live-install flows. The release version and
+metadata changes must pass current required CI again before merge and tag.
+Signed-tag qualification, release attestations and protected publication remain
+required. The owner explicitly requested merge and 1.0.3 publication on November 11.
+
 ## 1.0.0 release preparation — 2026-10-17
 
 The release branch targets Python and npm 1.0.0 and includes the Lambda

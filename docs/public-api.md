@@ -413,7 +413,7 @@ has no install HTTP endpoint. The browser client is `window.createPytinctureMicr
 pure-Python/Pyodide scope, ECS topology, authentication and shared-runtime limits.
 
 
-## Environment bundles (experimental, unreleased)
+## Environment bundles (experimental, added in 1.0.3)
 
 `EnvironmentMicroappManager(store, config, *, objects, environment,
 manifest_key="environment.json", poll_seconds=5, lease_seconds=60,

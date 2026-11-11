@@ -1038,6 +1038,15 @@
       ],
       "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/42054675460",
       "notes": "Opt-in packaged apps and experimental live microapps; normal loading remains the default. Merged source passed full CI, Lambda, both dependency audits and artifact inventory checks; zero open Dependabot alerts or labeled release blockers at readiness review. Signed-tag CI, release-run attestations and protected PyPI publication remain required. Historical 1.0.0 exceptions are not extended. GitHub and PyPI publication authorized by the owner; npm publication is not included in this request."
+    },
+    {
+      "version": "1.0.3",
+      "prepared_on": "2026-11-11",
+      "source_pull_requests": [
+        421
+      ],
+      "evidence_url": "https://github.com/pytincture/pytincture/actions/runs/42834325323",
+      "notes": "Opt-in experimental S3 environment bundles, manifest reconciliation, standalone prebuild jobs and live browser additions. Existing FastAPI, app-folder, browser and Lambda defaults remain unchanged. Feature head passed all 28 checks; current version metadata, merge, signed tag and attested publication still require their normal CI. Real AWS/private Tenzyn integration is not claimed qualified. Owner explicitly requested merge and publication of 1.0.3 on November 11. No protection settings were changed and no independent CODEOWNER approval is claimed."
     }
   ]
 }

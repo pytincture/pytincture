@@ -1,7 +1,7 @@
 # Packaged microapps and environment delivery
 
 For automatic S3 selection, consolidated startup bundles, and multiple ECS replicas,
-see [environment bundles](environment-microapps.md), an unreleased opt-in addition.
+see [environment bundles](environment-microapps.md), an experimental opt-in addition available in 1.0.3.
 The APIs below remain available with their existing behavior.
 
 ## Status and compatibility
