@@ -24,7 +24,8 @@ jobs are pinned to Ubuntu 24.04 after the floating Ubuntu 26.04 runners stalled
 on font-package mirror downloads. Chromium-only jobs use the runner libraries; the cross-browser jobs use the
 matching digest-pinned Playwright image to provide WebKit's additional system
 libraries. Host-requirement validation and the full browser matrix remain enabled,
-without the failing APT refresh.
+without the failing APT refresh. The container home directory is owned by its
+process user so Firefox can launch with its normal checks.
 
 ## 1.0.0 release preparation — 2026-10-17
 
