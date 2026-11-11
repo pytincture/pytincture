@@ -19,6 +19,9 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Browser jobs use the pinned runner's system libraries. Playwright still
+# validates host requirements and launches the real browsers; avoid an APT
+# refresh that can stall on unrelated Ubuntu mirror DNS failures.
 jobs:
   python-tests:
     name: Python ${{ matrix.python-version }} tests
@@ -73,7 +76,7 @@ jobs:
         run: |
           uv sync --frozen --extra dev
           uv pip install --python .venv/bin/python playwright==1.63.0 "dhxpyt @ git+https://github.com/pytincture/dhx_pytincture_widgetset.git@349d6dc3d2da28ec6a1ac8aa623072cd4fbc9822"
-          .venv/bin/python -m playwright install --with-deps chromium
+          .venv/bin/python -m playwright install chromium
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -121,7 +124,7 @@ jobs:
           uv venv .venv
           uv pip sync --python .venv/bin/python --require-hashes tests/conformance/requirements.txt
           uv pip install --python .venv/bin/python --no-deps .
-          .venv/bin/python -m playwright install --with-deps chromium
+          .venv/bin/python -m playwright install chromium
       - name: Audit conformance dependencies
         run: .venv/bin/python scripts/audit_python_dependencies.py
       - name: Prepare pinned example and widget
@@ -483,7 +486,7 @@ jobs:
 
       - name: Install Chromium
         working-directory: pytincture/frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Run lifecycle browser tests
         working-directory: pytincture/frontend
@@ -561,7 +564,7 @@ jobs:
 
       - name: Install ${{ matrix.browser }}
         working-directory: pytincture/frontend
-        run: npx playwright install --with-deps ${{ matrix.browser }}
+        run: npx playwright install ${{ matrix.browser }}
 
       - name: Run real Pyodide tests in ${{ matrix.browser }}
         working-directory: pytincture/frontend
@@ -657,7 +660,7 @@ jobs:
 
       - name: Install Chromium
         working-directory: pytincture/frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Qualify the runtime bundled in the Python wheel
         working-directory: pytincture/frontend
@@ -744,7 +747,7 @@ jobs:
 
       - name: Install ${{ matrix.browser }}
         working-directory: pytincture/frontend
-        run: npx playwright install --with-deps ${{ matrix.browser }}
+        run: npx playwright install ${{ matrix.browser }}
 
       - name: Run repository quickstarts in ${{ matrix.browser }}
         working-directory: pytincture/frontend
@@ -841,7 +844,7 @@ jobs:
 
       - name: Install Chromium
         working-directory: pytincture/frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Run production-style SAML acceptance
         working-directory: pytincture/frontend
@@ -1042,7 +1045,7 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Install Chromium
         working-directory: pytincture/frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
       - name: Install app into an open platform using real Pyodide and BFF workers
         working-directory: pytincture/frontend
         run: npx playwright test --config playwright.microapps.config.mjs
