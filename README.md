@@ -1,16 +1,17 @@
-> **1.0.2:** optional packaged microapps and experimental live installation.
-> Existing app-folder loading remains the default. See
-> [packaging and ECS/S3](docs/packaged-microapps.md) and
-> [live installation](docs/live-microapps.md).
+> **1.0.3:** opt-in environment bundles with S3 startup reconciliation,
+> live microapp updates, and a separate build job that publishes bundles before
+> web backends start. Existing app-folder loading remains the default. See
+> [environment bundles and ECS/S3](docs/environment-microapps.md),
+> [packaged apps](docs/packaged-microapps.md), and [live installation](docs/live-microapps.md).
 
 # pyTincture
 
 ## Overview
 `pyTincture` is a Python framework for browser interfaces with Python backends. Pyodide with legacy package delivery is the default. Portable bundles for Pyodide and MicroPython are opt-in. Engine and delivery mode are independent; see [configuration and migration](docs/browser-runtimes.md) and the [portable Python profile](docs/portable-python-profile.md).
 
-Development toward a stable 1.0 release is tracked in the [Pytincture 1.0 roadmap](ROADMAP.md) and the [Pytincture 1.0 GitHub milestone](https://github.com/pytincture/pytincture/milestone/1).
+The 1.0 release history is tracked in the [Pytincture 1.0 roadmap](ROADMAP.md) and the [Pytincture 1.0 GitHub milestone](https://github.com/pytincture/pytincture/milestone/1).
 
-The proposed 1.0 stability contract is documented in the
+The 1.0 stability contract is documented in the
 [public API reference](docs/public-api.md), [compatibility matrix](docs/compatibility.md),
 [BFF v1 contract](docs/contracts/bff-v1.md), and
 [`appcode.pyt` v1 contract](docs/contracts/appcode-v1.md). CI checks the
@@ -44,8 +45,7 @@ Task guides cover [BFFs](docs/bff-guide.md),
 are in the [changelog](CHANGELOG.md), [security policy](SECURITY.md),
 [contribution guide](CONTRIBUTING.md), and
 [release procedure](docs/releasing.md).
-The [RC qualification record](docs/release-qualification.md) shows the current
-1.0 go/no-go state and the evidence still required before publication.
+The [RC qualification record](docs/release-qualification.md) records release preparation and the retained qualification evidence.
 The [performance budgets](docs/performance.md) define and retain regression
 evidence for browser startup, package generation, health, and BFF calls.
 
@@ -66,7 +66,7 @@ evidence for browser startup, package generation, health, and BFF calls.
 
 Install Pytincture 1.0:
 ~~~
-pip install 'pytincture==1.0.2'
+pip install 'pytincture==1.0.3'
 ~~~
 
 Use Python 3.13 or 3.14. For a source checkout, use the installation below;
@@ -77,13 +77,14 @@ without pulling optional identity-provider, Redis, or MCP stacks. Install only
 the features a deployment enables:
 
 ```bash
-pip install "pytincture[password]==1.0.2"  # Argon2/bcrypt local login
-pip install "pytincture[oauth]==1.0.2"     # Google/Microsoft OAuth
-pip install "pytincture[saml]==1.0.2"      # SAML 2.0
-pip install "pytincture[redis]==1.0.2"     # shared Upstash state
-pip install "pytincture[microapps]==1.0.2" # optional live microapp host
-pip install "pytincture[mcp]==1.0.2"       # MCP endpoint
-pip install "pytincture[dev]==1.0.2"       # all features and test/build tools
+pip install "pytincture[password]==1.0.3"  # Argon2/bcrypt local login
+pip install "pytincture[oauth]==1.0.3"     # Google/Microsoft OAuth
+pip install "pytincture[saml]==1.0.3"      # SAML 2.0
+pip install "pytincture[redis]==1.0.3"     # shared Upstash state
+pip install "pytincture[microapps]==1.0.3" # optional live microapp host
+pip install "pytincture[microapps-s3]==1.0.3" # optional S3 environment bundles
+pip install "pytincture[mcp]==1.0.3"       # MCP endpoint
+pip install "pytincture[dev]==1.0.3"       # all features and test/build tools
 ```
 
 From Source:
@@ -327,7 +328,7 @@ is published to npm and its SRI is copied from the trusted release integrity
 manifest. The URL below requires completed npm publication; use the Python-wheel
 asset export while publication is pending:
 ```
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.2/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.3/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
 ```
 
 ### Using pytincture.js standalone

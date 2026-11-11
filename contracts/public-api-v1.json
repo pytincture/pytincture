@@ -54,6 +54,8 @@
       "enableBackendLogging",
       "enableServiceWorker",
       "entrypoint",
+      "environmentAssetOrigins",
+      "environmentCatalogUrl",
       "inlineSelector",
       "libsSelector",
       "loadMaterialIcons",

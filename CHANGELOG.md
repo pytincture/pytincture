@@ -3,6 +3,23 @@
 This project follows semantic versioning from 1.0. Dates and final entries are
 set when a release is published.
 
+## 1.0.3 — 2026-11-11
+
+- Add a separate environment bundle build command so S3 artifacts can be ready
+  before web backends start. Add an optional backend mode that only consumes
+  published bundles, with BFF readiness still checked on each replica.
+- Add opt-in environment manifests and S3/local object stores. Reuse matching
+  bundles at startup or reconcile installed wheel versions before readiness.
+- Coordinate ECS builders with conditional writes and renewable fenced leases;
+  publish immutable aggregate browser archives with an atomic active pointer.
+- Persist approved live install requests before acknowledgment, build in the
+  background, and automatically detect bundled apps in browser startup.
+- Refresh open clients on BFF revision headers and load missing browser wheels
+  into the existing interpreter. Preserve loaded app versions until safe reload.
+- Add optional direct S3 browser delivery, environment status and install routes,
+  replica BFF restoration, authorization checks, and an ECS/S3 setup guide.
+- Preserve existing FastAPI, folder-based, Lambda and manual live-host defaults.
+
 ## 1.0.2 — 2026-11-05
 
 - Add the explicit `microapps` server extra and an opt-in live microapp host: staged approved pure-Python wheels, separate

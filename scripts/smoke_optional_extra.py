@@ -13,6 +13,7 @@ from pathlib import Path
 
 OPTIONAL_DISTRIBUTIONS = {
     "httpx",
+    "boto3",
     "authlib",
     "fastmcp",
     "python3-saml",
@@ -61,6 +62,24 @@ def main() -> None:
                 finally:
                     await manager.close()
         asyncio.run(exercise())
+    elif feature == "microapps-s3":
+        import asyncio
+        import boto3
+        from botocore.stub import Stubber
+        from pytincture.microapps import S3ObjectStore, EnvironmentMicroappManager, empty_manifest
+        client = boto3.client("s3", region_name="us-east-1",
+                              aws_access_key_id="testing", aws_secret_access_key="testing")
+        with Stubber(client) as stub:
+            stub.add_response("put_object", {"ETag": '"created"'}, {
+                "Bucket": "smoke-test", "Key": "dev/environment.json", "Body": b"{}", "IfNoneMatch": "*"})
+            result = asyncio.run(S3ObjectStore("smoke-test", "dev", client=client).put("environment.json", b"{}"))
+            assert result == '"created"'
+            stub.assert_no_pending_responses()
+        assert empty_manifest("dev-smoke")["active"] is None
+        assert EnvironmentMicroappManager is not None
+        entry = next(item for item in importlib.metadata.distribution("pytincture").entry_points
+                     if item.group == "console_scripts" and item.name == "pytincture-build-environment")
+        assert callable(entry.load())
     elif feature == "oauth":
         os.environ["ENABLE_GOOGLE_AUTH"] = "true"
         os.environ["GOOGLE_CLIENT_ID"] = "clean-install-client"
