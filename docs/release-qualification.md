@@ -19,7 +19,9 @@ feature validation passed 1,410 Python tests (one optional skip), 79 JavaScript
 tests and both Chromium/Pyodide live-install flows. The release version and
 metadata changes must pass current required CI again before merge and tag.
 Signed-tag qualification, release attestations and protected publication remain
-required. The owner explicitly requested merge and 1.0.3 publication on November 11.
+required. The owner explicitly requested merge and 1.0.3 publication on November 11. Browser qualification
+jobs are pinned to Ubuntu 24.04 after the floating Ubuntu 26.04 runners stalled
+on font-package mirror downloads. The full browser matrix remains required.
 
 ## 1.0.0 release preparation — 2026-10-17
 

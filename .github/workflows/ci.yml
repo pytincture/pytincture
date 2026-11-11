@@ -57,7 +57,7 @@ jobs:
 
   micropython-browser:
     name: MicroPython and Pyodide application compatibility
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -103,7 +103,7 @@ jobs:
 
   real-application-conformance:
     name: Full application delivery and runtime parity
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - name: Check out repository
@@ -460,7 +460,7 @@ jobs:
 
   javascript-runtime:
     name: Validate JavaScript runtime
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Check out repository
@@ -509,7 +509,7 @@ jobs:
   browser-e2e:
     name: Pyodide E2E (${{ matrix.browser }})
     needs: python-package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -605,7 +605,7 @@ jobs:
   standalone-wheel-e2e:
     name: Standalone Python-wheel acceptance
     needs: python-package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Check out repository
@@ -693,7 +693,7 @@ jobs:
   quickstart-examples-e2e:
     name: Quickstart examples (${{ matrix.browser }})
     needs: python-package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -767,7 +767,7 @@ jobs:
   saml-federated-e2e:
     name: Keycloak SAML acceptance
     needs: python-package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Check out repository
@@ -1016,7 +1016,7 @@ jobs:
 
   live-microapps:
     name: Live microapp browser and BFF acceptance
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out repository
