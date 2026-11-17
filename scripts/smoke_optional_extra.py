@@ -12,6 +12,8 @@ from pathlib import Path
 
 
 OPTIONAL_DISTRIBUTIONS = {
+    "httpx",
+    "boto3",
     "authlib",
     "fastmcp",
     "python3-saml",
@@ -38,6 +40,46 @@ def main() -> None:
         import pytincture.backend.app as backend
 
         assert backend.mcp_http_app is None
+    elif feature == "microapps":
+        import asyncio
+        import httpx
+        from pytincture import PytinctureConfig, create_app
+        from pytincture.microapps import LiveMicroappManager, create_microapp_host
+
+        async def exercise():
+            with tempfile.TemporaryDirectory() as store:
+                config = PytinctureConfig()
+                manager = LiveMicroappManager(store, config)
+                app = create_microapp_host(create_app(config), manager,
+                                           authorize=lambda scope, app_id: True)
+                await manager.start()
+                try:
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                                 base_url="http://127.0.0.1") as client:
+                        response = await client.get("/_microapps/catalog")
+                        assert response.status_code == 200
+                        assert response.json() == {"schema": 1, "revision": 0, "apps": []}
+                finally:
+                    await manager.close()
+        asyncio.run(exercise())
+    elif feature == "microapps-s3":
+        import asyncio
+        import boto3
+        from botocore.stub import Stubber
+        from pytincture.microapps import S3ObjectStore, EnvironmentMicroappManager, empty_manifest
+        client = boto3.client("s3", region_name="us-east-1",
+                              aws_access_key_id="testing", aws_secret_access_key="testing")
+        with Stubber(client) as stub:
+            stub.add_response("put_object", {"ETag": '"created"'}, {
+                "Bucket": "smoke-test", "Key": "dev/environment.json", "Body": b"{}", "IfNoneMatch": "*"})
+            result = asyncio.run(S3ObjectStore("smoke-test", "dev", client=client).put("environment.json", b"{}"))
+            assert result == '"created"'
+            stub.assert_no_pending_responses()
+        assert empty_manifest("dev-smoke")["active"] is None
+        assert EnvironmentMicroappManager is not None
+        entry = next(item for item in importlib.metadata.distribution("pytincture").entry_points
+                     if item.group == "console_scripts" and item.name == "pytincture-build-environment")
+        assert callable(entry.load())
     elif feature == "oauth":
         os.environ["ENABLE_GOOGLE_AUTH"] = "true"
         os.environ["GOOGLE_CLIENT_ID"] = "clean-install-client"

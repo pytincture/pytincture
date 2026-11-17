@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pytincture"
 
-version = "1.0.1"
+version = "1.0.3"
 
 description = "UI Builder"
 readme = "README.md"
@@ -31,8 +31,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+microapps = ["httpx>=0.27,<1"]
+microapps-s3 = ["httpx>=0.27,<1", "boto3>=1.40,<2"]
 oauth = [
-    "authlib>=1.6.12,<2",
+    "authlib>=1.9.1,<2",
     "httpx>=0.27,<1",
 ]
 password = [
@@ -50,8 +52,9 @@ mcp = [
     "fastmcp>=3.4.10,<5,!=4.0.*,!=4.1.0,!=4.1.1",
 ]
 dev = [
+    "boto3>=1.40,<2",
     "argon2-cffi>=23.1,<26",
-    "authlib>=1.6.12,<2",
+    "authlib>=1.9.1,<2",
     "bcrypt>=4.2,<6",
     "build>=1.2,<2",
     "fastmcp>=3.4.10,<5,!=4.0.*,!=4.1.0,!=4.1.1",
@@ -75,6 +78,8 @@ Issues = "https://github.com/pytincture/pytincture/issues"
 Source = "https://github.com/pytincture/pytincture"
 
 [project.scripts]
+pytincture-build-environment = "pytincture.microapps.builder:main"
+pytincture-build-app-manifest = "pytincture.packaged_apps:main"
 pytincture-build-appcode = "pytincture.prebuild:main"
 pytincture-build-browser = "pytincture.browser_build:main"
 pytincture-build-bff-manifest = "pytincture.backend.bff_manifest:main"
@@ -97,6 +102,7 @@ pytincture = [
     "frontend/index.html",
     "frontend/pytincture.js",
     "frontend/browser-runtimes.js",
+    "frontend/microapps.js",
     "frontend/widget-assets.js",
     "frontend/sw.js",
     "frontend/bff-docs.js",
