@@ -400,6 +400,14 @@ The existing `create_app()` API and folder-based deployments are unchanged.
 
 ## Live microapp hosting (experimental)
 
+The upcoming 1.0.4 API `pytincture.microapps.browser_wheel.build_browser_wheel(backend,
+output_directory, *, namespace, entrypoint, files=(), resources=())` builds a
+browser-only `BrowserArtifact` from an approved private `WheelArtifact` without
+importing app code. It uses the normal BFF proxy generator and binds the result
+to the microapp context transport. The matching CLI is
+`pytincture-build-microapp-browser`; see the
+[build contract and limits](live-microapps.md#generate-the-browser-wheel).
+
 `pytincture.microapps.LiveMicroappManager(store, config)` owns a persistent local
 environment catalog and versioned BFF processes. `start()`/`close()` manage its
 lifetime; `install(app_id, backend, browser, approval_id=..., dependencies=())`

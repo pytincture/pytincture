@@ -35,7 +35,7 @@ def test_build_job_publishes_before_web_start_and_reuses_matching_bundle(tmp_pat
             assert not any('services.py' in name for name in archive.namelist())
 
         async def no_rebuild(*args): raise AssertionError('Matching selections must be reused')
-        monkeypatch.setattr(EnvironmentMicroappManager, '_prepare_build', no_rebuild)
+        monkeypatch.setattr('pytincture.microapps.environment.build_snapshot', no_rebuild)
         second = await build_environment_bundle(objects, environment='dev-123')
         assert first == second
         assert (await controller.read_manifest())[1] == etag

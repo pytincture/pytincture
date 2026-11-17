@@ -51,7 +51,7 @@ def _widget_wheel(config, directory, package="dhxpyt"):
                 archive.writestr(zipfile.ZipInfo(relative), Path(distribution.locate_file(name)).read_bytes())
     return result.getvalue()
 
-def _bff_stub(name: str, source: str) -> str:
+def _bff_stub(name: str, source: str, *, bridge_module: str | None = None) -> str:
     """Generate async session stubs from public signatures, never method bodies."""
     operations = get_bff_manifest(name, source=source)
     async_methods = {(cls.name, method.name) for cls in ast.parse(source).body
@@ -124,7 +124,9 @@ def _bff_stub(name: str, source: str) -> str:
                 classes[class_name].append(f'    def {method}({declaration}):\n' + '\n'.join(sync_body))
     if not classes:
         raise ValueError(f'No supported session methods found in {name}')
-    return f'from _pytincture_bff import Stream as {stream_name}\nimport json as {json_name}\nimport js as {js_name}\n{sentinel} = object()\n\n' + '\n\n'.join(
+    bridge_imports = (f'from {bridge_module} import Stream as {stream_name}\nimport json as {json_name}\nimport {bridge_module} as {js_name}\n'
+                      if bridge_module else f'from _pytincture_bff import Stream as {stream_name}\nimport json as {json_name}\nimport js as {js_name}\n')
+    return bridge_imports + f'{sentinel} = object()\n\n' + '\n\n'.join(
         f'class {name}:\n' + ('\n\n'.join(methods) or '    pass') for name, methods in classes.items()) + '\n'
 
 
