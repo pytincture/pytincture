@@ -411,10 +411,10 @@ and attests their exact bytes after all qualification gates pass. Protected
 PyPI and npm workflows independently publish those retained artifacts. Both
 support retries by published release tag; neither accepts arbitrary build files.
 
-PyPI uses the protected `PYPI_PASSWORD` project token. npm uses trusted-publisher
-OIDC, with no `NPM_TOKEN`. Registry publication and approvals are independent;
-a GitHub or PyPI release does not establish npm/CDN availability. See the
-[release procedure](docs/releasing.md) for configuration and retry instructions.
+PyPI and npm use Trusted Publishing (OIDC) with separate registry approvals.
+PyPI shows the publishing attestations for the wheel and source distribution
+on the release's Security tab. See the [release procedure](docs/releasing.md)
+for configuration and retry instructions.
 
 The artifact contract and local verification command are documented in the
 [release artifact guide](docs/release-artifacts.md).
