@@ -26,12 +26,14 @@ Only a maintained release commit with green required CI is publishable.
    `pypi-publish.yml` and `npm-publish.yml` independently verify the published
    tag, exact commit, protected-default-branch ancestry, CI workflow identity,
    attestation, package identity, filename, and version. They publish only the
-   exact retained wheel/sdist and npm tarball. Python publication uses the
-   protected `PYPI_PASSWORD` API token; npm uses trusted-publisher OIDC. Both
+   exact retained wheel/sdist and npm tarball. Both use Trusted Publishing
+   (OIDC). PyPI also receives a publishing attestation for each file. Both
    workflows support idempotent retries by published release tag and resolve
    the trusted release run themselves.
 7. Verify PyPI/npm metadata and install each artifact from the public index in
-   a new environment. Attach the generated `SHA256SUMS.json` to the release.
+   a new environment. Confirm that the PyPI release's Security tab shows a
+   publishing attestation for the wheel and source distribution. Attach the
+   generated `SHA256SUMS.json` to the release.
 
 Prerelease npm artifacts are published under the `next` dist-tag; only stable
 releases update `latest`.
@@ -45,21 +47,33 @@ publishes immutable version and digest references, generates an SBOM, and
 signs or attests the image. Mutable tags are not production pins.
 
 The publishers use protected `pypi` and `npm` GitHub environments. The PyPI
-environment is owner-approved; keep its API token scoped to the `pytincture`
-project and rotate it after suspected exposure. Restrict deployments to the
-protected default branch. Protect creation, update, and deletion of `v*`
-release tags.
+environment requires owner approval. Restrict deployments to the protected
+default branch and protect creation, update, and deletion of `v*` release tags.
+GitHub sends deployment review requests to the environment's reviewers. Open
+the workflow run from the notification, select **Review deployments**, choose
+the environment, then select **Approve and deploy**. The same run resumes
+automatically. See [GitHub's deployment review guide](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments).
 Publication actions are pinned to full commit SHAs, and values derived from
 release or artifact metadata are passed to shell steps through environment
 variables. Run manual tag-based retries from the protected default branch; the
 tag is an input, not the workflow execution ref.
 
-Configure the project-scoped PyPI API token as the protected `PYPI_PASSWORD`
-Actions secret. The token is passed only to the pinned publishing action after
-the published tag, protected-default-branch ancestry, successful release run,
-artifact identity, hashes, and attestations have all been verified. It is not
-made available to build or test jobs and no packaging tool is installed while
-the token is present.
+In [Pytincture's PyPI Publishing settings](https://pypi.org/manage/project/pytincture/settings/publishing/),
+add a GitHub Actions Trusted Publisher with these values.
+
+| Field | Value |
+| --- | --- |
+| Owner | `pytincture` |
+| Repository | `pytincture` |
+| Workflow name | `pypi-publish.yml` |
+| Environment | `pypi` |
+
+The protected publish job requests a short-lived credential through OIDC. It
+uploads the wheel and source distribution after verifying their GitHub build
+attestations. The pinned publish action attaches PyPI publishing attestations
+to both files. After the first successful Trusted Publishing release, revoke
+the old project token on PyPI and delete the `PYPI_PASSWORD` environment secret
+in GitHub.
 
 ## 1.0.0 owner exceptions
 

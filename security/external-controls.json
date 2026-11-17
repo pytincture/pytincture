@@ -20,7 +20,7 @@
       "framework_cannot_self_attest": true
     },
     {
-      "control": "Protect immutable release tags and the PyPI/npm deployment environments. Keep PyPI's project-scoped API token restricted to its owner-approved environment; keep npm trusted publishing configured.",
+      "control": "Protect immutable release tags and the PyPI and npm deployment environments. Register the exact GitHub workflow and protected environment as a trusted publisher in each registry.",
       "owner": "repository and registry administrators",
       "required_before_release": true,
       "framework_cannot_self_attest": true
