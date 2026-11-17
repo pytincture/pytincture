@@ -476,6 +476,12 @@ export async function runBrowserApplication(config, status = () => {}) {
         installResources(runtime, resourceBundle);
     });
     status("Importing application…");
+    if (config.environmentCatalogUrl) {
+        if (engine !== 'pyodide') throw new Error('Environment bundles require Pyodide');
+        const {bootstrapEnvironment} = await import('./microapps.js');
+        await bootstrapEnvironment(runtime, {catalogUrl: config.environmentCatalogUrl,
+                                             assetOrigins: config.environmentAssetOrigins});
+    }
     await phase("module-import", manifest.entrypoint, () => runtime.runPythonAsync(`import sys\nsys.path.insert(0, '/')\nimport ${manifest.entrypoint} as _pytincture_client`));
     invoke = async (name, payload) => {
         if (payload !== undefined && typeof payload !== "string") throw new Error("Interpreter callback payload must be a JSON string");

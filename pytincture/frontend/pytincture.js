@@ -1,5 +1,5 @@
 const FALLBACK_DEV_WIDGET_HOST = "http://127.0.0.1:8070";
-const PYTINCTURE_RUNTIME_VERSION = "1.0.1";
+const PYTINCTURE_RUNTIME_VERSION = "1.0.3";
 
 // Complete-wheel locks for compatibility releases maintained by Pytincture.
 // These remain PyPI installs (and therefore never receive the backend instance
@@ -52,6 +52,8 @@ const DEFAULT_CONFIG = {
     runtime: "pyodide",
     deliveryMode: "legacy-package",
     runtimeManifestUrl: null,
+    environmentCatalogUrl: null,
+    environmentAssetOrigins: [],
     application: null,
     entrypoint: null,
     widgetlib: "dhxpyt==0.9.18",
@@ -994,6 +996,7 @@ function frameworkAssetUrls(config) {
         : new URL(config.serviceWorkerScope, window.location.href);
     const relativePaths = [
         "pytincture.js",
+        "microapps.js",
         "vendor/materialdesignicons/materialdesignicons.css",
         "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",
         "pyodide/0.29.3/full/pyodide.js",
@@ -1693,6 +1696,18 @@ async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_O
         compatibility: { ...configReport, ...runtimeResult.report, ...widgetReport },
     });
 
+    let environmentClient = null;
+    if (config.environmentCatalogUrl) {
+        updateLoadingStatus(loadingOverlay, 'Loading environment bundle…');
+        const { bootstrapEnvironment } = await import('./microapps.js');
+        environmentClient = await bootstrapEnvironment(pyodide, {
+            catalogUrl: config.environmentCatalogUrl,
+            assetOrigins: config.environmentAssetOrigins,
+        });
+        const base = environmentClient.catalog.snapshot?.base;
+        if (base?.application === config.application) config.entrypoint = base.entrypoint;
+    }
+
     updateLoadingStatus(loadingOverlay, "Starting app…");
     if (config.mode === "inline") {
         await runLifecycleStage(
@@ -1711,6 +1726,8 @@ async function runStartup(config, loadingOverlay, operations = DEFAULT_RUNTIME_O
                 }
             },
         );
+    } else if (environmentClient?.catalog.snapshot?.base?.application === config.application) {
+        await operations.executePackagedApp(pyodide, config);
     } else if (config.mode === "package" || config.application) {
         let downloaded;
         try {
@@ -1818,6 +1835,10 @@ async function runTinctureApp(arg1, widgetlib, entrypoint) {
 
 if (typeof window !== "undefined") {
     window.runTinctureApp = runTinctureApp;
+    window.createPytinctureMicroappClient = async options => {
+        const { MicroappClient } = await import("./microapps.js");
+        return new MicroappClient(options);
+    };
     window.PytinctureLifecycleError = PytinctureLifecycleError;
 }
 

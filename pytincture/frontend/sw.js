@@ -12,6 +12,7 @@ const OWNED_CACHE_PREFIX = `pytincture:${encodeURIComponent(APPLICATION)}:`;
 const CACHE_NAME = `${OWNED_CACHE_PREFIX}${RELEASE}:${REQUEST_UUID}`;
 const FRAMEWORK_ASSET_PATHS = new Set([
     "pytincture.js",
+    "microapps.js",
     "vendor/materialdesignicons/materialdesignicons.css",
     "vendor/materialdesignicons/materialdesignicons.css.map",
     "vendor/materialdesignicons/fonts/materialdesignicons-webfont.woff2",

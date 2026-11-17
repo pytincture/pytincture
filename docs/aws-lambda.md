@@ -759,3 +759,11 @@ not claim tested SnapStart compatibility. Do not simply enable snapshots on it:
 qualify the adapter upgrade, refresh restored identifiers/connections/temporary
 state, and test authentication, replay stores and streaming after restoration.
 The initialized `ready` alias is the implemented option for this recipe.
+
+## Optional packaged microapps
+
+[Packaged microapps](packaged-microapps.md) describes installing a versioned app
+wheel into a Lambda image during build, then creating its normal FastAPI app.
+Do not download/install wheels during cold starts. The guide also separates private
+backend artifacts from browser-only ECS/S3 (optional CloudFront) assets and marks live upgrades
+as future work. Existing Lambda recipes remain unchanged.

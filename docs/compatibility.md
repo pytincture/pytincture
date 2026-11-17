@@ -35,6 +35,27 @@ versions for each release candidate.
 
 ## Version compatibility rules
 
+1.0.3 preserves existing FastAPI, app-folder, browser and Lambda defaults.
+The experimental environment manager adds manifest-driven bundle reuse, S3
+coordination across replicas, approved live updates and optional direct S3 browser
+delivery. `pytincture-build-environment` can publish the browser bundle before
+web backends start; `build_bundles=False` makes replicas consume external builds.
+The older manual live manager keeps its single-controller topology. New browser
+apps can load live on Pyodide 0.29.3, while replacing an already imported app
+requires a safe reload. Browser wheels remain self-contained pure Python.
+CloudFront is optional. AWS and platform-specific integration validation remains
+an application deployment responsibility. See [environment bundles](environment-microapps.md).
+
+1.0.2 preserves the existing app-folder factory, launch commands, configuration
+defaults, BFF routes and normal FastAPI/Lambda paths. Packaged apps and live
+microapp hosting are explicit opt-ins. The live path is experimental: uniquely
+namespaced pure-Python apps on Pyodide 0.29.3, one controller per environment,
+and reloads for upgrades of already imported browser packages. CloudFront is
+optional. Security minimums include Authlib 1.9.1; deployments with older pins
+must update those pins. Regenerate prebuilt BFF caches with the target framework
+and Python to retain startup benefits. Deploy matching browser assets alongside
+the backend. See [live microapps](live-microapps.md) for the scope and limitations.
+
 1.0.1 is a dependency and bundled Swagger UI maintenance update. Public APIs,
 configuration defaults and FastAPI/ASGI, browser, desktop and Lambda deployment
 paths are unchanged from 1.0.0. Dependency minimums now exclude known vulnerable
