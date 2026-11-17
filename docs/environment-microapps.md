@@ -136,6 +136,20 @@ browser-safe code/resources and a uniquely named Python entrypoint such as
 must match the selected app version. The filename, `METADATA` version, Python tags,
 `Requires-Python`, and complete SHA-256 are checked before use.
 
+Only the approved **browser** wheels enter the aggregate; backend wheels remain
+private. Generate that browser wheel in the trusted publishing job with
+[`pytincture-build-microapp-browser`](live-microapps.md#generate-the-browser-wheel),
+then approve its exact digest. The generator and added code checks are planned
+for 1.0.4. To try them before publication, install this checkout with
+`python -m pip install '.[microapps-s3]'`. The checks apply to microapps and the
+optional base UI wheel, including on cache reuse. A prebuilt aggregate must match those
+browser wheels file for file. A BFF implementation accidentally included in a
+browser artifact is rejected, not published. Browser downloads do not strip or
+rewrite Python code; filtering happens in the build job before browser wheels
+are reviewed and approved. See the
+[browser code boundary](live-microapps.md#artifact-contract) for the checks
+and their limits. `context.callBff(...)` continues calling the versioned backend.
+
 Current scope is pure Python on Pyodide 0.29.3. Browser wheels must be
 self-contained: vendor dependencies into unique namespaces during their build.
 Backend dependency wheels are explicitly listed and hashed in `dependencies`.

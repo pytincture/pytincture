@@ -328,7 +328,7 @@ is published to npm and its SRI is copied from the trusted release integrity
 manifest. The URL below requires completed npm publication; use the Python-wheel
 asset export while publication is pending:
 ```
-<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.3/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pytincture/runtime@1.0.4/dist/pytincture.min.js" integrity="sha384-<trusted-manifest-value>" crossorigin="anonymous"></script>
 ```
 
 ### Using pytincture.js standalone

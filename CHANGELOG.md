@@ -3,6 +3,18 @@
 This project follows semantic versioning from 1.0. Dates and final entries are
 set when a release is published.
 
+## 1.0.4 (unreleased)
+
+- Add a trusted microapp browser-wheel build step using the existing static BFF
+  proxy generator. Keep BFF code, imports and defaults private while binding
+  generated calls to each microapp release for aggregate and live delivery.
+- Exclude BFF package initializers and dependencies reached only through them
+  from generated browser wheels.
+- Reject BFF implementations and private/opaque code files in microapp browser
+  wheels and base UI wheels before publication. Recheck restored artifacts and
+  require prebuilt aggregate contents to match the approved browser wheel lock.
+  Preserve versioned backend calls through the existing microapp context API.
+
 ## 1.0.3 — 2026-11-11
 
 - Add a separate environment bundle build command so S3 artifacts can be ready

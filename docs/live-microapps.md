@@ -64,6 +64,29 @@ checks runtime compatibility, total file hash/size, and existing module names
 before extracting or importing code. Hashes prove consistency with the supplied
 approved digest; they are not an approval signature.
 
+Every byte in a browser wheel or aggregate is visible to the browser user,
+including when it is loaded alongside WASM. Keep BFF implementations in the
+private backend wheel. Browser calls use `context.callBff(...)`; the downloaded
+wheel is verified and served unchanged. Generate proxies before approving it,
+using the build step below.
+
+The controller rejects recognized BFF implementations, server-side Pytincture
+imports, copies of known private BFF definitions, sensitive file paths, bytecode
+and nested code archives before publishing a browser wheel. Restored wheels and
+prebuilt aggregates are checked too; aggregates must contain exactly the files
+from the selected browser wheels. Invalid artifacts fail installation/startup
+and are not advertised or signed for S3 delivery. Approved artifacts are never
+silently modified. These static checks cannot identify every business function
+or an embedded secret: review the explicit browser build output before approval,
+and never place backend helpers or credentials in it.
+If an older artifact is rejected on upgrade, build a browser-only replacement
+with a new version and digest, approve it, and update the environment selection.
+Validation cannot revoke files already downloaded or signed URLs already issued.
+
+Source filtering does not hide data returned by a BFF endpoint. Class-level BFF
+exports include public members under the existing BFF contract; keep credentials
+in private attributes or server configuration and enforce server authorization.
+
 Optional backend dependency wheels must also be explicitly supplied with hashes.
 No network dependency resolution runs during installation. Missing dependencies,
 native platform wheels and unsupported install schemes are rejected. Each worker
@@ -71,6 +94,53 @@ has release-specific package paths plus the host's installed framework environme
 it is a separate process, not a separately secured tenant or container. The process
 shares its service account, filesystem permissions and inherited environment.
 Only install backend code trusted within that environment's security boundary.
+
+### Generate the browser wheel
+
+The generator and browser-code checks are planned for **1.0.4**. To try them
+before publication, install this checkout with
+`python -m pip install '.[microapps]'`.
+
+In the trusted publishing/build job, fetch the approved private backend wheel
+with the job's credentials, then run:
+
+```sh
+pytincture-build-microapp-browser \
+  --backend-wheel ./private/customer_orders-0.3.0-py3-none-any.whl \
+  --backend-sha256 "$APPROVED_BACKEND_SHA256" \
+  --namespace customer_orders_ui \
+  --entrypoint client:mount \
+  --output-directory ./browser \
+  --resource styles/orders.css
+```
+
+`client:mount` is a UI function `mount(context)` in the backend wheel's inventoried
+app resource directory. It can import BFF classes normally and await their
+generated methods, for example `await Data().read_async()`. The builder parses
+the UI import graph without executing app code, replaces entire decorated BFF
+modules with proxies, and leaves their imports, helpers, constructors, constants,
+docstrings and default values on the server. Proxies omit unspecified arguments
+so the backend applies its real defaults. BFF package initializers are replaced
+with empty browser parents; put UI initialization in separate UI modules.
+
+The resulting wheel contains one unique namespace, a mount/unmount wrapper and
+release-bound transport through `context.callBff`. Its version comes from the
+verified backend wheel. The JSON result supplies `wheel`, `sha256`, `entrypoint`
+and `runtime_version`. Review and approve these exact bytes, upload only this
+wheel to the browser artifact location, and put its digest/entrypoint in the
+environment manifest. Initial aggregates and later live downloads both use this
+same artifact. Do not expose the input private wheel or a whole backend package.
+
+The Python API is
+`pytincture.microapps.browser_wheel.build_browser_wheel(backend, output_directory,
+namespace=..., entrypoint=..., files=(), resources=())`, returning `BrowserArtifact`.
+Only selected resources and statically discovered UI imports are copied. Vendor
+compatible browser dependencies into that app resource tree. UI entrypoints and
+BFF classes must be in separate modules. The first generated transport supports
+non-streaming POST methods; await async server methods or generated `*_async`
+methods. Unsupported methods, dynamic imports and unsafe public declarations
+fail the build rather than falling back to copying backend source. Existing
+hand-built browser wheels using `context.callBff` remain supported.
 
 ## Host integration
 
@@ -211,8 +281,8 @@ async def unmount(context):
 ```
 
 `context.callBff(module, class_name, method, args=[], kwargs={})` currently supports
-JSON POST calls to that exact release. Existing generated proxies are not silently
-rewritten; adapt the microapp to this context API for live calls. Streaming and
+JSON POST calls to that exact release. The microapp wheel generator binds its
+proxies to this API; existing whole-app proxies are not silently retargeted. Streaming and
 arbitrary HTTP methods need a later context extension. `context.addCleanup(fn)`
 registers teardown callbacks; normal Pyodide `create_proxy`/destroy rules still
 apply to other callbacks retained by DOM/widget APIs. Unmounting clears the host

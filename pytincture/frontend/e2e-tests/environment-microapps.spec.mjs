@@ -17,6 +17,10 @@ test('startup uses automatic bundled inventory, BFF calls pull additions, and ne
     expect(wasmCount).toBeGreaterThan(0);
     await page.getByRole('button',{name:'Open orders'}).click();
     await expect(page.locator('#microapp')).toHaveText('42');
+    const bundledProxy = await page.evaluate(()=>runtime.runPython("open(__import__('orders_ui.services', fromlist=['__file__']).__file__).read()"));
+    expect(bundledProxy).toContain('read_async');
+    expect(bundledProxy).not.toContain('PRIVATE_BROWSER_FIXTURE_VALUE');
+    expect(bundledProxy).not.toContain('backend_for_frontend');
     expect(wheels).toHaveLength(0);
     await page.evaluate(()=>client.unmount('orders'));
     const response=await request.post('/_microapps/installations',{
@@ -34,6 +38,10 @@ test('startup uses automatic bundled inventory, BFF calls pull additions, and ne
     await expect(page.getByRole('button',{name:'Open reports'})).toBeVisible();
     await page.getByRole('button',{name:'Open reports'}).click();
     await expect(page.locator('#microapp')).toHaveText('99');
+    const pulledProxy = await page.evaluate(()=>runtime.runPython("open(__import__('reports_ui.services', fromlist=['__file__']).__file__).read()"));
+    expect(pulledProxy).toContain('read_async');
+    expect(pulledProxy).not.toContain('PRIVATE_BROWSER_FIXTURE_VALUE');
+    expect(pulledProxy).not.toContain('backend_for_frontend');
     expect(wheels).toHaveLength(1); expect(bundles).toHaveLength(1);
     expect(wasm.length).toBe(wasmCount); expect(navigations).toHaveLength(1);
     expect(await page.evaluate(()=>runtime.runPython("__import__('shell').base_startup_marker"))).toBe('original shell');

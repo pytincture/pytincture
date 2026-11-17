@@ -203,7 +203,7 @@ def imported_modules(name, source, *, server_only_imports=()):
 
 
 def discover_sources(root, entry, files, bff, *, discover=True, import_aliases=None, substitutions=None,
-                     server_only_imports=()):
+                     server_only_imports=(), empty_initializers=()):
     selected = {}
     boundaries = set()
     explicit = set(files)
@@ -216,12 +216,17 @@ def discover_sources(root, entry, files, bff, *, discover=True, import_aliases=N
             raise ValueError(f'{name}: explicit browser input conflicts with server-only-imports')
         if name.split('/')[0].startswith('_pytincture_') or name.startswith('dhxpyt/'):
             raise ValueError(f'Reserved browser source: {name}')
-        source, physical = browser_source(root, name, import_aliases)
+        if name in empty_initializers:
+            source, physical = '', name
+        else:
+            source, physical = browser_source(root, name, import_aliases)
         if physical != name and substitutions is not None:
             substitutions[name] = physical
         selected[name] = source
         if len(selected) > 256:
             raise ValueError('Browser source bundle exceeds 256 files')
+        if name in empty_initializers:
+            continue
         if has_bff_export_class(name, source=source):
             if name in explicit:
                 raise ValueError(f'{name} contains backend code; declare it in bff instead of files')

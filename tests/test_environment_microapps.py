@@ -29,11 +29,23 @@ class CountingStore(DirectoryObjectStore):
         return result
 
 
-async def app_package(tmp_path, objects, app_id='orders', version='0.1.0', value=42):
+async def app_package(tmp_path, objects, app_id='orders', version='0.1.0', value=42, *, generated=False):
     source = tmp_path / (app_id + version); source.mkdir()
     backend, _ = artifacts(source, version, value)
     browser = wheel(source, app_id + '_ui', version, {app_id + '_ui/__init__.py':
         "async def mount(context):\n    value = await context.callBff('services.py', 'Data', 'read')\n    context.root.textContent = str(value)\n"})
+    if generated:
+        from pytincture.microapps.browser_wheel import build_browser_wheel
+        from pytincture.packaged_apps import build_app_manifest
+        private = source / ('source-' + version)
+        (private / 'client.py').write_text('from services import Data\n'
+            'async def mount(context):\n    context.root.textContent = str(await Data().read_async())\n')
+        with (private / 'services.py').open('a') as stream:
+            stream.write('\nSERVER_ONLY_MARKER = "PRIVATE_BROWSER_FIXTURE_VALUE"\n')
+        build_app_manifest(private, 'orders')
+        backend = wheel(source, 'demo_backend', version,
+            {'demo_backend/apps/' + path.name: path.read_text() for path in private.iterdir()})
+        browser = build_browser_wheel(backend, source / 'public', namespace=app_id + '_ui', entrypoint='client:mount').wheel
     result = {'installed': True, 'version': version, 'approval_id': 'review-' + version,
               'backend': {'key': f'wheels/{app_id}/{Path(backend.path).name}', 'sha256': backend.sha256},
               'browser': {'artifact': {'key': f'wheels/{app_id}/{Path(browser.path).name}', 'sha256': browser.sha256},

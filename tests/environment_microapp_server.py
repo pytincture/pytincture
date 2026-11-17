@@ -24,7 +24,7 @@ specs = {}
 async def provision():
     doc = empty_manifest('dev-browser')
     for app_id in ['orders', 'reports', 'dormant']:
-        specs[app_id] = await app_package(root, objects, app_id, value=99 if app_id == 'reports' else 42)
+        specs[app_id] = await app_package(root, objects, app_id, value=99 if app_id == 'reports' else 42, generated=True)
     doc['apps']['orders'] = specs['orders']
     doc['apps']['dormant'] = {**specs['dormant'], 'installed': False}
     base = wheel(root, 'tenzyn_shell', '1.0.0', {'shell.py':

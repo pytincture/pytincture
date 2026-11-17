@@ -12,7 +12,7 @@ import zipfile
 from .environment_manifest import decode, encode, empty_manifest, selection, selection_id, validate_manifest
 from .manager import LiveMicroappManager, WheelArtifact, BrowserArtifact, _stage_release, _remove_tree
 from .object_store import ObjectConflict
-from .snapshot import build_snapshot, verify_wheel, INVENTORY, MAX_BUNDLE
+from .snapshot import build_snapshot, verify_wheel, verify_snapshot_files, MAX_BUNDLE
 
 
 class SupersededBuild(RuntimeError):
@@ -51,6 +51,7 @@ class EnvironmentMicroappManager(LiveMicroappManager):
         self._watcher = None
         self._bundle = None
         self._bundle_file = None
+        self._verified_bundles = set()
         self._document = None
         self._last_error = None
         self._cache = self.store / 'artifacts'; self._cache.mkdir(exist_ok=True)
@@ -207,20 +208,33 @@ class EnvironmentMicroappManager(LiveMicroappManager):
             except ObjectConflict: continue
         raise ObjectConflict('Manifest remains busy')
 
-    async def _verified_bundle(self, active):
+    async def _verified_bundle(self, active, prepared=None):
         path = await self._cached(active, bundle=True)
         if path.stat().st_size != active['bytes']:
             raise ValueError('Active bundle size differs from its manifest')
-        with zipfile.ZipFile(path) as archive:
-            inventory = json.loads(archive.read(INVENTORY))
+        # _cached verifies the bytes on every access. Inspect each immutable
+        # artifact/lock once per process, including aggregates built before this
+        # safety check existed, without adding a wheel scan to every download.
+        verified = (active['sha256'], active['selection'], encode(active['inventory']))
+        if verified in self._verified_bundles:
+            return path
+        lock = active['inventory']['lock']
+        releases, browser_paths, base = prepared or await self._prepare_build(lock)
+        if {key: item['release'] for key, item in releases.items()} != active['inventory']['releases']:
+            raise ValueError('Active bundle release inventory disagrees with wheel contents')
+        data = await asyncio.to_thread(verify_snapshot_files, path, browser_paths, base)
+        inventory = json.loads(data)
         if inventory['selection'] != active['selection'] or {key: item['release'] for key, item in inventory['apps'].items()} != active['inventory']['releases']:
             raise ValueError('Embedded browser inventory does not match active selection')
+        if len(self._verified_bundles) >= 32:
+            self._verified_bundles.clear()
+        self._verified_bundles.add(verified)
         return path
 
     async def _apply(self, active, prepared=None):
         if self._bundle and self._bundle['selection'] == active['selection']:
             return
-        path = await self._verified_bundle(active)
+        path = await self._verified_bundle(active, prepared)
         lock = active['inventory']['lock']
         releases, _, _ = prepared or await self._prepare(lock)
         if {key: item['release'] for key, item in releases.items()} != active['inventory']['releases']:
@@ -284,7 +298,7 @@ class EnvironmentMicroappManager(LiveMicroappManager):
                               'releases': {key: item['release'] for key, item in prepared[0].items()}}}
                     await self._publish(token, active)
                     if build_only:
-                        await self._verified_bundle(active)
+                        await self._verified_bundle(active, prepared)
                     else:
                         await self._apply(active, prepared)
                     return copy.deepcopy(active)
@@ -362,7 +376,7 @@ class EnvironmentMicroappManager(LiveMicroappManager):
                 # immutable bytes while every included app is still installed.
                 if not set(active['inventory']['releases']).issubset(self._active):
                     return None
-                return active, await self._cached(active, bundle=True)
+                return active, await self._verified_bundle(active)
         return None
 
     def _asset_url(self, key):

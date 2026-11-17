@@ -27,6 +27,7 @@ from packaging.version import Version
 
 from pytincture import PytinctureConfig
 from pytincture.packaged_apps import _relative, _digest
+from .browser_safety import validate_browser_archive
 
 
 @dataclass(frozen=True)
@@ -159,6 +160,7 @@ def _stage_release(stage, app_id, backend, browser, dependencies, approval_id):
     # Browser wheels cannot carry the server-side app contract.
     if list(check.rglob("pytincture-app.json")):
         raise ValueError("Browser artifact contains a backend app manifest")
+    validate_browser_archive(browser_path, private_root=packaged.modules_path)
     module = browser.entrypoint.split(":")[0]
     if not ((check / (module.replace(".", "/") + ".py")).is_file()
             or (check / module.replace(".", "/") / "__init__.py").is_file()):
@@ -248,6 +250,15 @@ class LiveMicroappManager:
                     for key, release in self._releases.items():
                         if key != f'{release["id"]}/{release["release"]}' or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}/[a-f0-9]{64}", key):
                             raise ValueError("Invalid stored microapp release")
+                        browser = release['browser']
+                        filename = _relative(browser['wheel'])
+                        if len(filename.parts) != 1:
+                            raise ValueError('Invalid stored browser wheel')
+                        path = self.store / key / 'browser' / str(filename)
+                        if path.stat().st_size != browser['bytes'] or _digest(path) != browser['sha256']:
+                            raise ValueError('Stored browser wheel does not match approved SHA-256')
+                        await asyncio.to_thread(validate_browser_archive, path,
+                            private_root=self.store / key / 'site')
                         await self._start_worker(key, release)
                 self._started = True
             except BaseException:

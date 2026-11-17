@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pytincture"
 
-version = "1.0.3"
+version = "1.0.4"
 
 description = "UI Builder"
 readme = "README.md"
@@ -78,6 +78,7 @@ Issues = "https://github.com/pytincture/pytincture/issues"
 Source = "https://github.com/pytincture/pytincture"
 
 [project.scripts]
+pytincture-build-microapp-browser = "pytincture.microapps.browser_wheel:main"
 pytincture-build-environment = "pytincture.microapps.builder:main"
 pytincture-build-app-manifest = "pytincture.packaged_apps:main"
 pytincture-build-appcode = "pytincture.prebuild:main"
