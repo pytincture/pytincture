@@ -20,9 +20,10 @@ jobs:
   verify-python-release:
     name: Verify attested Python release artifacts
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      (github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.event == 'release' &&
-      github.event.workflow_run.conclusion == 'success')
+      github.event.workflow_run.conclusion == 'success'))
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -180,7 +181,7 @@ jobs:
           fi
 
   publish-python:
-    name: Publish attested Python release artifacts with API token
+    name: Publish verified Python artifacts with PyPI Trusted Publishing
     needs: verify-python-release
     if: needs.verify-python-release.outputs.already_published != 'true'
     runs-on: ubuntu-latest
@@ -189,6 +190,7 @@ jobs:
       actions: read
       attestations: read
       contents: read
+      id-token: write
 
     steps:
       - name: Download exact retained Python artifacts
@@ -208,10 +210,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          artifact_count=0
-          for artifact in python-dist/*.whl python-dist/*.tar.gz; do
+          shopt -s nullglob dotglob
+          files=(python-dist/*)
+          wheels=(python-dist/*.whl)
+          sdists=(python-dist/*.tar.gz)
+          if [[ ${#files[@]} -ne 2 || ${#wheels[@]} -ne 1 || ${#sdists[@]} -ne 1 ]]; then
+            echo "Expected exactly one wheel and one source distribution" >&2
+            exit 1
+          fi
+          for artifact in "${wheels[@]}" "${sdists[@]}"; do
             [[ -f "$artifact" && ! -L "$artifact" ]] || exit 1
-            artifact_count=$((artifact_count + 1))
             gh attestation verify "$artifact" \
               --repo "$REPOSITORY" \
               --signer-workflow "$REPOSITORY/.github/workflows/ci.yml" \
@@ -219,13 +227,10 @@ jobs:
               --source-ref "refs/tags/$RELEASE_TAG" \
               --deny-self-hosted-runners
           done
-          [[ "$artifact_count" -eq 2 ]]
 
-      - name: Publish exact artifacts with the protected PyPI token
+      - name: Publish exact artifacts and attach PyPI attestations
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
-          user: __token__
-          password: ${{ secrets.PYPI_PASSWORD }}
           packages-dir: python-dist
-          attestations: false
+          attestations: true
           print-hash: true
